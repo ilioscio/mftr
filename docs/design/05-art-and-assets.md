@@ -10,7 +10,7 @@ The style serves two goals, in this order:
 
 These rules apply to every asset, including future skins and mods.
 
-1. **Hitbox honesty.** A projectile's or area's visual core matches its gameplay shape (±5%). Trails, sparks and glow may extend *behind* a projectile but never *ahead* of it or *wider* than it. The ability's `width` in data drives the VFX scale. Artists do not set it by eye.
+1. **Hitbox honesty.** A projectile's or area's visual extent matches its gameplay shape (±5%). Per D14 this may be a slim bright core plus a faint, always-visible full-width edge sheath (the reference game's core is only ~half its hitbox, see [R01 §4](reference/R01-video-ezreal-flash-barrier-q.md#4-mystic-shot-reference-line-skillshot)). Trails, sparks and glow may extend *behind* a projectile but never *ahead* of it or *wider* than it. The ability's `width` in data drives the VFX scale. Artists do not set it by eye.
 2. **Value hierarchy.** Ground and environment are lowest contrast and slightly desaturated. Units sit in the middle. **Ability VFX and telegraphs are the highest contrast on screen.**
 3. **Team color language.** Enemy threats carry a consistent **enemy accent** (default: warm red/orange rim or edge), and allied ones the **ally accent** (default: cool blue/teal). It applies to projectile edges, ground indicators and health bars. Ships with colorblind presets (deuteranopia, protanopia, tritanopia) and custom colors.
 4. **Telegraph grammar.**

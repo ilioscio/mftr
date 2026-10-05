@@ -111,24 +111,24 @@ Discrete things that must never be missed: cast started, projectile spawned, dam
 - **Own casts are predicted.** The windup animation and indicator start immediately, and the projectile spawns locally at the predicted tick. If the server rejects the cast, the client rolls back the animation and cooldown, with a short "failed" cue.
 - **Remote cast windups** play on T_input, fast-forwarded by however late the event arrived, so the windup and its projectile line up. The caster's position stays on T_interp (casters are rooted during windup). The windup is a heads-up; the projectile is the truth.
 
-### Reaction budget rule
-Every ability intended to be dodgeable declares a **reaction class**. The design validator (CI) checks this:
+### Reaction budget rule (D10)
+Every ability intended to be dodgeable declares a **reaction class**. The content linter checks it against the ability's own geometry:
 
 ```
-reaction_time(range d) = windup + d / projectile_speed      (for linear skillshots)
-reaction_time          = windup + detonation_delay          (for delayed ground AoEs)
+reaction_time(d) = windup + d / projectile_speed            (linear skillshots)
+reaction_time    = windup + detonation_delay                (delayed ground AoEs)
+T_needed         = 0.25 s (human) + 0.17 s (120 ms RTT net) + (r_proj + 65) / 335   (time to walk out)
+rule: reaction_time(d_class) >= T_needed
 ```
 
-| Class | Example | Minimum reaction time at 75% of max range |
-|---|---|---|
-| Hard CC skillshot (stun/root/hook/charm) | Hooks, long roots | ≥ 0.45 s |
-| Burst skillshot | Large-damage line nukes | ≥ 0.40 s |
-| Poke | Small-damage frequent skillshots | ≥ 0.30 s |
-| Not dodge-intended (point-blank, point-and-click) | | n/a, must be balanced as unavoidable |
+| Class | `d_class` (fraction of max range where the rule must hold) |
+|---|---|
+| Hard CC skillshot (stun/root/hook/charm) | 80% |
+| Burst skillshot | 90% |
+| Poke | 100% |
+| Not dodge-intended (point-blank, point-and-click) | n/a, must be balanced as unavoidable |
 
-A 120 ms RTT player loses ~170 ms of that window to latency (RTT + margin + local input/display latency), and must still have a human-scale reaction window left.
-
-> ⚠ **Under review:** a flat 0.45 s ignores the *movement* time needed to leave the hit corridor (~0.30 s for a 70-width shot). [03a §8](03a-netcode-time-and-prediction.md#8-reaction-budget-what-the-player-actually-gets) proposes a geometry-derived rule (≈ 0.72 s for a 70-width shot at 80% range).
+For a 70-width shot `T_needed ≈ 0.72 s`, and for a 140-width hook ≈ 0.82 s. Derivation and latency table: [03a §8](03a-netcode-time-and-prediction.md#8-reaction-budget-what-the-player-actually-gets). Calibration against a measured reference skillshot: [R01 §4](reference/R01-video-ezreal-flash-barrier-q.md#4-mystic-shot-reference-line-skillshot).
 
 ## 10. Fog-of-war culling
 

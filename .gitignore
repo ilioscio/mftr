@@ -24,3 +24,6 @@ Thumbs.db
 *.local.toml
 /secrets/
 *.key
+
+# Local feedback media (screenshots, videos, extracted frames)
+/fb/

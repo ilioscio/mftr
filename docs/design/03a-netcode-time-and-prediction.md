@@ -181,7 +181,7 @@ Enemy projectiles are drawn on T_input, which is Δtl *ahead* of where the caste
 ### Own projectiles: Option A vs. Option B (decide in M1)
 - **A — stay on T_input.** Always honest about where your projectile really is. But enemies are drawn Δtl in the past. Your projectile visibly passes through an enemy it hit, and the hit flash appears ~Δtl later; it also visibly "hits" enemies who had already dodged on the server.
 - **B — blend from T_input to T_interp over the flight.** At cast, the projectile leaves your hand snappily (T_input). By the time it reaches enemies it's on their timeline, so the moment it touches a drawn enemy is approximately when the server confirmation arrives. The cost: the projectile appears to decelerate by `Δtl / flight_time` (≈ 15% at typical ping for a 0.7 s flight), starting after the first ~300 u.
-- **Lean: B**, settled by a blind A/B test in the Netcode Lab. Option B never affects threats to *you*, only how your own shots look.
+- **Decision (D12): B for now**, to be confirmed by a blind A/B test in the M1 duel sandbox. Option B never affects threats to *you*, only how your own shots look.
 
 ## 8. Reaction budget: what the player actually gets
 
@@ -198,11 +198,11 @@ L = RTT + m + local ≈ RTT + m + 25 ms
 | 120 ms RTT, 20 ms jitter | ~170 ms |
 | 180 ms RTT | ~235 ms |
 
-### ⚠ Review of D10 (0.45 s): dodging also takes *movement* time
+### Why not a flat number: dodging also takes *movement* time
 To dodge a centered linear skillshot, the target must move its center out of the hit corridor:
 `t_move = (r_proj + r_gameplay) / MS`. For a 70-width shot vs. a 65-radius champion at 335 MS, that's `(35 + 65) / 335 ≈ 0.30 s`. **Walking out of a perfectly centered shot needs ~0.30 s of movement even with zero reaction time and zero ping.** A flat 0.45 s total leaves ~0.15 s for human reaction plus latency. That's below human visual reaction time (~0.2–0.25 s for a practiced player watching for a learned cue), even on LAN.
 
-**Proposed replacement (pending your OK):** derive the minimum from the ability's own geometry:
+**The rule (D10, accepted):** derive the minimum from the ability's own geometry:
 
 ```text
 T_needed = t_human + t_net + (r_proj + r_ref) / MS_ref
@@ -219,7 +219,7 @@ rule: reaction_time(d_class) ≥ T_needed
 
 For a 70-width shot, `T_needed ≈ 0.72 s`. A wide (140) hook needs ≈ 0.82 s. The content linter also reports each ability's **guaranteed-dodge range**, the distance beyond which a centered shot is always walkable at reference ping. Inside it, the skillshot is a positioning check, not a reflex check, which is fine as long as it's deliberate.
 
-Sanity check against the genre: common reference-game line skillshots (0.25 s windups, 1,200–2,000 u/s speeds, 1,000–1,300 u range) land around **0.7–1.3 s** at 80–100% range. The derived rule puts us in the same "dodgeable if you're paying attention" band, which is where the familiar feel lives. 0.45 s would make our hard CC noticeably *less* dodgeable than players expect.
+Sanity check against the genre: common reference-game line skillshots (0.25 s windups, 1,200–2,000 u/s speeds, 1,000–1,300 u range) land around **0.7–1.3 s** at 80–100% range. The derived rule puts us in the same "dodgeable if you're paying attention" band, which is where the familiar feel lives. 0.45 s would make our hard CC noticeably *less* dodgeable than players expect. Measured confirmation: [R01 §4](reference/R01-video-ezreal-flash-barrier-q.md#4-mystic-shot-reference-line-skillshot).
 
 ## 9. Ghost-hit error budget
 
@@ -265,7 +265,7 @@ The **dodge rig** (03 §14) measures the actual rate per network profile, and ev
 
 ## 12. Open questions for M1 experiments
 
-1. Own-projectile display: Option A vs. B (§7).
+1. Own-projectile display: confirm Option B over A in a blind test (§7, D12).
 2. Minion bubble blending on vs. off, and the band distances.
 3. Should the minion health bar show a **predicted** value on T_input (including in-flight minion attacks), as a last-hit aid? Risk: mispredicted last hits feel awful.
 4. 30 Hz vs. 60 Hz tick with sub-tick commands: is there any perceptible difference?

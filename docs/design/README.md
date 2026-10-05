@@ -20,6 +20,14 @@ This is a living document. Each file covers one area. Record decisions in [DECIS
 | 09 | [Naming & Legal](09-naming-and-legal.md) | Legally distinct names, licensing, IP hygiene |
 | — | [Decisions & Open Questions](DECISIONS.md) | Decision log and unresolved questions |
 
+### Reference analyses
+
+Measurements taken from captures of the reference game. The captures stay in the git-ignored `fb/` folder; only our numbers are committed.
+
+| # | Doc | What it covers |
+|---|-----|----------------|
+| R01 | [Ezreal: Barrier, Flash, Mystic Shot, minions](reference/R01-video-ezreal-flash-barrier-q.md) | Camera model, movement and minion speed, input latency, skillshot speed and visual width, UI metrics |
+
 ## Conventions
 
 - **Game units (u):** distances use a MOBA-familiar scale. A typical champion moves at ~330 u/s, and the 3-lane map is ~15,000 u across. The client renders 1 u = 1 cm (0.01 Godot meters).
