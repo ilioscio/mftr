@@ -16,7 +16,9 @@ MFTR aims to deliver the thing players love about the best-known lane-based MOBA
 
 ## Build & run
 
-Requirements: Rust (stable, via [rustup](https://rustup.rs)) and [Godot 4.7](https://godotengine.org). On Windows, Rust needs the MSVC C++ build tools.
+Requirements: Rust (stable, via [rustup](https://rustup.rs); `rust-toolchain.toml` pins the channel) and [Godot 4.5 or newer](https://godotengine.org). On Windows, Rust needs the MSVC C++ build tools.
+
+**NixOS / Nix:** `nix develop` (flakes enabled) gives you the pinned Rust toolchain, Godot and the runtime libraries Godot needs. The first run creates `flake.lock`; commit it. Inside the shell, `$MFTR_GODOT` points at the Godot binary.
 
 Start a server:
 
@@ -30,7 +32,7 @@ Build the Godot extension (once, and after Rust changes):
 cargo build -p mftr-gdext
 ```
 
-Then open `client/project.godot` in Godot 4.7 and press Play. Right-click moves, S stops and F1 toggles the net graph. To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
+Then open `client/project.godot` in Godot (4.5+) and press Play. Right-click moves, S stops and F1 toggles the net graph. To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
 
 Headless tools:
 

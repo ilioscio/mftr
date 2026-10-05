@@ -5,13 +5,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 # godot-rust 0.5 needs a newer compiler than the engine-independent crates.
+# The Godot 4.5 API is targeted on purpose: extensions are forward-compatible, so this runs on
+# 4.5, 4.6 and 4.7 (distro packages such as nixpkgs often lag the latest Godot).
 rust-version = "1.94"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-godot = { version = "0.5.5", features = ["api-4-7"] }
+godot = { version = "0.5.5", features = ["api-4-5"] }
 mftr-sim.workspace = true
 mftr-net.workspace = true
 mftr-client.workspace = true
