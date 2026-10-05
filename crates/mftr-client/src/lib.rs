@@ -5,18 +5,81 @@
 //! - the own champion is predicted with the same `mftr-sim` code the server runs,
 //! - authoritative snapshots are compared bit-exactly and mismatches are re-simulated,
 //! - the input margin is steered by the server's arrival-lead reports,
-//! - remote units are interpolated on `T_interp`.
+//! - nearby units become **collision proxies**, extrapolated to the input timeline, so minion
+//!   block is predicted (03a §5),
+//! - remote units are interpolated on `T_interp`; minions near the own champion are drawn
+//!   blended toward `T_input` (the "minion bubble").
 //!
 //! Time is passed in explicitly (`now`, local seconds), so the same code runs under the Godot
 //! client, the UDP bot, and the virtual-time Netcode Lab.
 
 use mftr_net::PROTOCOL_VERSION;
 use mftr_net::clock::ClockSync;
-use mftr_net::msg::{self, ClientMessage, CommandReport, ServerMessage, Snapshot};
+use mftr_net::msg::{self, ClientMessage, CommandReport, RemoteUnit, ServerMessage, Snapshot};
 use mftr_net::packet::{PacketHeader, ReceiveTracker, SendTracker};
 use mftr_sim::time::tick_at;
-use mftr_sim::{Command, CommandKind, PlayerId, QPoint, TICK_DT_F64, Tick, Unit, UnitId, UnitState, Vec2, World};
+use mftr_sim::{
+    Command, CommandKind, PlayerId, QPoint, TICK_DT_F64, Team, Tick, Unit, UnitId, UnitKind, UnitState, Vec2, World,
+};
 use std::collections::{BTreeMap, VecDeque};
+
+/// Units farther than this from the own champion can't matter within a prediction horizon.
+const PROXY_RANGE: f32 = 600.0;
+/// Minion bubble: fully on `T_input` inside the inner radius, fully on `T_interp` outside the outer.
+const BUBBLE_INNER: f32 = 400.0;
+const BUBBLE_OUTER: f32 = 900.0;
+
+/// What we know about another unit: interpolation samples plus its latest replicated state.
+struct RemoteTrack {
+    samples: VecDeque<(Tick, Vec2)>,
+    latest: RemoteUnit,
+    latest_tick: Tick,
+}
+
+impl RemoteTrack {
+    /// Position at `at` (fractional ticks), extrapolated from the latest snapshot along the
+    /// replicated heading at constant speed, stopping at the waypoint. Never before the snapshot.
+    fn extrapolate(&self, at: f64) -> Vec2 {
+        let p = self.latest.pos.to_vec2();
+        let Some(target) = self.latest.target.map(QPoint::to_vec2) else { return p };
+        let elapsed = (at - self.latest_tick.0 as f64).max(0.0);
+        let dist = (self.latest.speed as f64 * elapsed * TICK_DT_F64) as f32;
+        let to = target - p;
+        let len = to.length();
+        if len <= 0.0 || dist >= len { target } else { p + to * (dist / len) }
+    }
+
+    fn proxy(&self, at: f64) -> Unit {
+        let r = self.latest.collision_radius as f32;
+        Unit {
+            id: self.latest.id,
+            kind: self.latest.kind,
+            owner: None,
+            team: self.latest.team,
+            // Static during the predicted tick: the server resolves movers against
+            // start-of-tick positions, which is exactly what this is.
+            state: UnitState::new(self.extrapolate(at), 0.0),
+            collision_radius: r,
+            gameplay_radius: r,
+            brain: None,
+        }
+    }
+}
+
+/// A remote unit as the client should draw it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RemoteRender {
+    pub id: UnitId,
+    pub kind: UnitKind,
+    pub team: Team,
+    pub collision_radius: f32,
+    pub pos: Vec2,
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
 
 const HISTORY_TICKS: usize = 128;
 /// Target for the 1st-percentile arrival lead (03a §10.2).
@@ -87,7 +150,8 @@ pub struct ClientSession {
     last_send: Option<f64>,
     last_command_at: Option<f64>,
     unsent_command: bool,
-    remote: BTreeMap<UnitId, VecDeque<(Tick, Vec2)>>,
+    remote: BTreeMap<UnitId, RemoteTrack>,
+    collision_proxies: bool,
     render_offset: Vec2,
     last_update: Option<f64>,
     send: SendTracker,
@@ -123,6 +187,7 @@ impl ClientSession {
             last_command_at: None,
             unsent_command: false,
             remote: BTreeMap::new(),
+            collision_proxies: true,
             render_offset: Vec2::ZERO,
             last_update: None,
             send: SendTracker::default(),
@@ -274,6 +339,19 @@ impl ClientSession {
     fn step_prediction(&mut self) {
         let k = self.world.tick().next();
         let cmds: Vec<Command> = self.commands.iter().filter(|c| c.tick == k).copied().collect();
+        if self.collision_proxies {
+            // Proxies at the start of tick k, i.e. extrapolated to the end of tick k-1.
+            let at = (k.0 - 1) as f64;
+            let own = self.own_state().pos;
+            let proxies: Vec<Unit> = self
+                .remote
+                .values()
+                .filter(|t| t.latest.collision_radius > 0)
+                .map(|t| t.proxy(at))
+                .filter(|u| u.state.pos.distance(own) <= PROXY_RANGE)
+                .collect();
+            self.world.replace_others(self.unit, proxies);
+        }
         self.world.step(&cmds);
         let st = self.own_state();
         self.history.push_back((k, st));
@@ -353,17 +431,34 @@ impl ClientSession {
         }
         self.acked_seq = self.acked_seq.max(s.last_cmd_seq);
 
-        for (id, pos) in s.others.iter().map(|o| (o.id, o.pos.to_vec2())) {
-            let buf = self.remote.entry(id).or_default();
-            buf.push_back((s.tick, pos));
-            while buf.len() > 32 {
-                buf.pop_front();
+        for o in &s.others {
+            let track = self.remote.entry(o.id).or_insert_with(|| RemoteTrack {
+                samples: VecDeque::new(),
+                latest: *o,
+                latest_tick: s.tick,
+            });
+            track.samples.push_back((s.tick, o.pos.to_vec2()));
+            while track.samples.len() > 32 {
+                track.samples.pop_front();
             }
+            track.latest = *o;
+            track.latest_tick = s.tick;
         }
         let alive: Vec<UnitId> = s.others.iter().map(|o| o.id).collect();
         self.remote.retain(|id, _| alive.contains(id));
 
         let mut resim_from: Option<Tick> = None;
+        // New information about nearby units changes the collision proxies: re-predict
+        // everything after this snapshot so the obstacles we assume are always the freshest.
+        if self.collision_proxies && self.phase == Phase::Playing {
+            let own = self.history_at(s.tick).map(|st| st.pos);
+            let near = own.is_some_and(|p| {
+                self.remote.values().any(|t| t.latest.pos.to_vec2().distance(p) <= PROXY_RANGE + 200.0)
+            });
+            if near {
+                resim_from = Some(s.tick.next());
+            }
+        }
         for rep in &s.reports {
             if let Some(t) = self.apply_report(rep) {
                 resim_from = Some(resim_from.map_or(t, |r: Tick| r.min(t)));
@@ -496,11 +591,13 @@ impl ClientSession {
     fn start_playing(&mut self, tick: Tick, state: UnitState) {
         let unit = Unit {
             id: self.unit,
+            kind: UnitKind::Champion,
             owner: Some(self.player),
-            team: mftr_sim::Team::Blue, // irrelevant for own-movement prediction
+            team: Team::Blue, // irrelevant for own-movement prediction
             state,
             collision_radius: mftr_sim::world::CHAMPION_COLLISION_RADIUS,
             gameplay_radius: mftr_sim::world::CHAMPION_GAMEPLAY_RADIUS,
+            brain: None,
         };
         self.world = World::from_units(tick, vec![unit]);
         self.history.clear();
@@ -535,27 +632,55 @@ impl ClientSession {
         self.history_at(tick).map(|s| s.pos)
     }
 
-    /// Remote units interpolated on `T_interp`.
-    pub fn remote_render_positions(&self, now: f64) -> Vec<(UnitId, Vec2)> {
-        let Some(t) = self.interp_time(now) else { return Vec::new() };
+    pub fn set_collision_proxies(&mut self, enabled: bool) {
+        self.collision_proxies = enabled;
+    }
+
+    /// Remote units for drawing: interpolated on `T_interp`, except minions near the own
+    /// champion, which blend toward their `T_input` extrapolation so the minion you bump
+    /// into is drawn where you bump into it (03a §5, the minion bubble).
+    pub fn remote_render_units(&self, now: f64) -> Vec<RemoteRender> {
+        let (Some(t_interp), Some(t_input)) = (self.interp_time(now), self.input_time(now)) else {
+            return Vec::new();
+        };
+        let own = self.own_render_position(now);
         self.remote
-            .iter()
-            .filter_map(|(id, buf)| {
-                let newest = buf.back()?;
-                if t >= newest.0.0 as f64 {
-                    return Some((*id, newest.1)); // hold at newest, never extrapolate far
+            .values()
+            .filter_map(|track| {
+                let interp = interpolate(&track.samples, t_interp)?;
+                let mut pos = interp;
+                if self.collision_proxies && track.latest.kind == UnitKind::Minion {
+                    let w = own.map_or(0.0, |o| smoothstep(BUBBLE_OUTER, BUBBLE_INNER, interp.distance(o)));
+                    if w > 0.0 {
+                        pos = interp.lerp(track.extrapolate(t_input), w);
+                    }
                 }
-                let i = buf.iter().position(|(k, _)| k.0 as f64 > t)?;
-                if i == 0 {
-                    return Some((*id, buf[0].1));
-                }
-                let (ka, pa) = buf[i - 1];
-                let (kb, pb) = buf[i];
-                let f = ((t - ka.0 as f64) / (kb.0 - ka.0) as f64) as f32;
-                Some((*id, pa.lerp(pb, f)))
+                Some(RemoteRender {
+                    id: track.latest.id,
+                    kind: track.latest.kind,
+                    team: track.latest.team,
+                    collision_radius: track.latest.collision_radius as f32,
+                    pos,
+                })
             })
             .collect()
     }
+}
+
+/// Interpolate between buffered snapshots; hold at the newest, never extrapolate (03a §10.3).
+fn interpolate(buf: &VecDeque<(Tick, Vec2)>, t: f64) -> Option<Vec2> {
+    let newest = buf.back()?;
+    if t >= newest.0.0 as f64 {
+        return Some(newest.1);
+    }
+    let i = buf.iter().position(|(k, _)| k.0 as f64 > t)?;
+    if i == 0 {
+        return Some(buf[0].1);
+    }
+    let (ka, pa) = buf[i - 1];
+    let (kb, pb) = buf[i];
+    let f = ((t - ka.0 as f64) / (kb.0 - ka.0) as f64) as f32;
+    Some(pa.lerp(pb, f))
 }
 
 fn time_us(now: f64) -> u32 {

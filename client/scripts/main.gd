@@ -12,6 +12,8 @@ const ARENA_U := 4000.0
 const CHAMPION_RADIUS_U := 65.0         # gameplay radius
 const OWN_COLOR := Color(0.25, 0.55, 1.0)
 const ENEMY_COLOR := Color(0.95, 0.35, 0.25)
+const MINION_BLUE := Color(0.35, 0.45, 0.75)
+const MINION_RED := Color(0.7, 0.35, 0.35)
 
 var client: MatchClient
 var camera: Camera3D
@@ -21,6 +23,7 @@ var click_marker: MeshInstance3D
 var click_marker_age := 1.0
 var net_label: Label
 var show_net_graph := true
+var proxies_enabled := true
 
 
 func _ready() -> void:
@@ -164,6 +167,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			click_marker_age = 0.0
 	elif event.is_action_pressed("stop"):
 		client.stop()
+	elif event.is_action_pressed("toggle_proxies"):
+		proxies_enabled = not proxies_enabled
+		client.set_collision_proxies(proxies_enabled)
 	elif event.is_action_pressed("toggle_net_graph"):
 		show_net_graph = not show_net_graph
 
@@ -209,17 +215,51 @@ func _place_camera(target: Vector3) -> void:
 
 
 func _update_remotes() -> void:
-	var remotes: Dictionary = client.remote_positions()
-	for id in remotes.keys():
+	var seen := {}
+	for u in client.remote_units():
+		var id: int = u.id
+		seen[id] = true
 		if not remote_bodies.has(id):
-			var b := _make_champion(ENEMY_COLOR)
+			var b: MeshInstance3D
+			if u.minion:
+				b = _make_minion(MINION_RED if u.red else MINION_BLUE, u.radius)
+			else:
+				b = _make_champion(ENEMY_COLOR)
 			add_child(b)
 			remote_bodies[id] = b
-		remote_bodies[id].position = _to_world(remotes[id])
+		var p := _to_world(u.pos)
+		if u.minion:
+			p.y = 0.45
+		remote_bodies[id].position = p
 	for id in remote_bodies.keys():
-		if not remotes.has(id):
+		if not seen.has(id):
 			remote_bodies[id].queue_free()
 			remote_bodies.erase(id)
+
+
+## Minions: short capsules whose ground ring is the *collision* radius, so minion block is
+## visible exactly as the simulation sees it (D11).
+func _make_minion(color: Color, collision_radius_u: float) -> MeshInstance3D:
+	var body := MeshInstance3D.new()
+	var capsule := CapsuleMesh.new()
+	capsule.radius = collision_radius_u * UNITS_TO_METERS * 0.8
+	capsule.height = 0.9
+	body.mesh = capsule
+	var m := StandardMaterial3D.new()
+	m.albedo_color = color
+	body.material_override = m
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.outer_radius = collision_radius_u * UNITS_TO_METERS
+	torus.inner_radius = torus.outer_radius - 0.03
+	ring.mesh = torus
+	ring.position = Vector3(0, -0.44, 0)
+	var rm := StandardMaterial3D.new()
+	rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rm.albedo_color = color.lightened(0.3)
+	ring.material_override = rm
+	body.add_child(ring)
+	return body
 
 
 ## Click indicator: a ring that collapses over ~0.1 s (familiar feel, R01 §6).
@@ -243,8 +283,8 @@ func _update_net_graph() -> void:
 		net_label.text = "MFTR — %s…  %s" % [phase if phase != "" else "disconnected", client.last_error()]
 		return
 	var s: Dictionary = client.net_stats()
-	net_label.text = "FPS %d   RTT %.0f ms   margin %.1f ms   interp %.0f ms\ncommands %d   late %d   corrections %d (last %.1f u)   on-screen correction %.1f u\nup %.1f KB   down %.1f KB      [RMB] move  [S] stop  [F1] net graph" % [
+	net_label.text = "FPS %d   RTT %.0f ms   margin %.1f ms   interp %.0f ms\ncommands %d   late %d   corrections %d (last %.1f u)   on-screen correction %.1f u\nup %.1f KB   down %.1f KB   collision proxies %s      [RMB] move  [S] stop  [F1] net graph  [F2] proxies" % [
 		Engine.get_frames_per_second(), s.rtt_ms, s.margin_ms, s.interp_ms,
 		s.commands, s.late, s.corrections, s.last_correction, s.visible_correction,
-		s.kb_up, s.kb_down,
+		s.kb_up, s.kb_down, "ON" if proxies_enabled else "OFF",
 	]

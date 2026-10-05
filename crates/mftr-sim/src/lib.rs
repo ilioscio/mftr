@@ -4,6 +4,7 @@
 //! no threads and no platform-dependent math. Server and client run this exact code;
 //! see `docs/design/03-netcode.md` §17 for the determinism policy.
 
+pub mod collision;
 pub mod combat;
 pub mod hash;
 pub mod math;
@@ -14,4 +15,6 @@ pub mod world;
 
 pub use math::{QPoint, Vec2};
 pub use time::{SUBTICKS, SubTick, TICK_DT, TICK_DT_F64, TICK_HZ, Tick};
-pub use world::{Command, CommandKind, Order, PlayerId, Team, Unit, UnitId, UnitState, World};
+pub use world::{
+    Brain, Command, CommandKind, MinionKind, Order, PlayerId, Team, Unit, UnitId, UnitKind, UnitState, World,
+};

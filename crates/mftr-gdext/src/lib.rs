@@ -6,7 +6,7 @@
 
 use godot::prelude::*;
 use mftr_client::{ClientSession, Phase};
-use mftr_sim::Vec2;
+use mftr_sim::{Team, UnitKind, Vec2};
 use std::net::UdpSocket;
 use std::time::Instant;
 
@@ -130,14 +130,27 @@ impl MatchClient {
         Vector2::new(p.x, p.y)
     }
 
-    /// Remote units interpolated on `T_interp`: `{ unit_id: Vector2 }`.
+    /// Remote units to draw. Each entry: `{ id, pos: Vector2, minion: bool, red: bool, radius }`.
+    /// Champions are on `T_interp`; minions near us blend toward `T_input` (03a §5).
     #[func]
-    fn remote_positions(&self) -> VarDictionary {
-        let mut d = VarDictionary::new();
-        for (id, p) in self.session.remote_render_positions(self.now()) {
-            d.set(id.0 as i64, Vector2::new(p.x, p.y));
+    fn remote_units(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for u in self.session.remote_render_units(self.now()) {
+            let mut d = VarDictionary::new();
+            d.set("id", u.id.0 as i64);
+            d.set("pos", Vector2::new(u.pos.x, u.pos.y));
+            d.set("minion", u.kind == UnitKind::Minion);
+            d.set("red", u.team == Team::Red);
+            d.set("radius", u.collision_radius);
+            out.push(&d.to_variant());
         }
-        d
+        out
+    }
+
+    /// Turn client collision proxies and the minion bubble on or off (A/B testing, 03a §12).
+    #[func]
+    fn set_collision_proxies(&mut self, enabled: bool) {
+        self.session.set_collision_proxies(enabled);
     }
 
     /// Net graph data (03 §14).

@@ -6,6 +6,7 @@
 //! Profiles: perfect, lan, good, typical, rough, awful.
 
 use mftr_net::conditioner::LinkProfile;
+use mftr_server::Scenario;
 use mftr_tools::report::Summary;
 use mftr_tools::{bot, netlab};
 
@@ -33,6 +34,10 @@ fn main() {
                     seed: num("--seed", 1.0) as u64,
                     fps: num("--fps", 144.0),
                     warmup: num("--warmup", 10.0),
+                    scenario: get("--scenario")
+                        .map(|s| Scenario::by_name(&s).unwrap_or_else(|| panic!("unknown scenario {s}")))
+                        .unwrap_or(Scenario::Empty),
+                    proxies: !args.iter().any(|a| a == "--no-proxies"),
                 };
                 let r = netlab::run(&cfg);
                 println!("{}   ticks {} hash {:#018x}", r.summary.row(), r.server_ticks, r.server_hash);

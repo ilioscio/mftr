@@ -28,10 +28,12 @@ impl LinkProfile {
     pub const LAN: Self = Self::rtt("lan", 2.0, 0.5, 0.0);
     pub const GOOD: Self = Self::rtt("good", 30.0, 2.0, 0.0);
     pub const TYPICAL: Self = Self::rtt("typical", 60.0, 5.0, 0.005);
+    pub const MID: Self = Self::rtt("mid", 80.0, 10.0, 0.01);
     pub const ROUGH: Self = Self::rtt("rough", 120.0, 20.0, 0.02);
     pub const AWFUL: Self = Self::rtt("awful", 200.0, 40.0, 0.05);
 
-    pub const ALL: [Self; 6] = [Self::PERFECT, Self::LAN, Self::GOOD, Self::TYPICAL, Self::ROUGH, Self::AWFUL];
+    pub const ALL: [Self; 7] =
+        [Self::PERFECT, Self::LAN, Self::GOOD, Self::TYPICAL, Self::MID, Self::ROUGH, Self::AWFUL];
 
     pub fn by_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|p| p.name == name)

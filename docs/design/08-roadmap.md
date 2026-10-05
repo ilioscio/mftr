@@ -53,6 +53,35 @@ With no unit collision yet, the only source of corrections is a command that arr
 
 **Exit:** ghost-hit and correction targets from [03 §1](03-netcode.md#1-measurable-targets) met; blind playtest testers rate dodge feel at 80 ms as "fair" ≥ 80% of the time; server < 1 ms per tick for 3v3.
 
+### M1 slices (in order of netcode risk)
+
+| # | Slice | Contents | Done when |
+|---|---|---|---|
+| 1 | **Collision & minion block** | D11 unit collision in `mftr-sim` (order-independent, no shoving, local detours around clumps); server-driven minion dummies (static clumps and patrolling waves); client collision proxies on T_input and the minion bubble (03a §5); Netcode Lab A/B of proxies on/off | Lab: collision-caused corrections > 20 u below 1 per player-minute at 80 ms |
+| 2 | **Skillshots & the dodge rig** | Reliable events channel; cast windups; analytic linear skillshots with swept hits; display policy (enemy projectiles on T_input, own on Option B, predicted self-hits, spawn streak); dodge rig measuring ghost hits | Ghost-hit targets of 03 §1 met in the lab |
+| 3 | **Arena, pathing & vision** | Vector arena (walls, brush), navmesh + funnel pathing, server-side vision grid and fog culling, projectile re-basing on vision entry | No hidden unit ever reaches a client (lab assertion) |
+| 4 | **Champions & combat** | Two placeholder kits, basic attacks with windup, attack-move, delayed AoE, dash, hard-CC skillshot, Blink and Barrier, health and damage pipeline | Duel playable end to end |
+| 5 | **Feel & look** | Telegraph grammar and D14 VFX, noise-shader art pass, blind-test harness (randomized hidden latency profiles, A/B toggles) | Blind playtest run |
+
+### Slice 1 status (2026-10-05): ✅ done
+
+- `mftr-sim`: order-independent unit collision against start-of-tick positions (D18), sliding, no shoving, stuck → detour around clumps, clicking into a clump stops at its edge. Minions (melee/caster/siege radii) with patrol brains.
+- `mftr-client`: collision proxies on the input timeline, re-prediction on every snapshot near units, and the minion bubble render.
+- Server scenario `minions` (the binary's default): 4 static clumps and 2 crossing patrol waves. The Godot client draws minions with their collision rings; **F2** toggles proxies for side-by-side feel.
+- Unit test: with exact proxies, prediction is bit-exact through collisions.
+
+**Netcode Lab, 1 player, 80 ms / 10 ms / 1%, 30 min:**
+
+| | Corrections > 15 u per min | Mean visible correction | Visible jumps/min |
+|---|---|---|---|
+| empty arena (late-command baseline) | 0.60 | 0.01 u | 0 |
+| minions, proxies off (naive) | 1.90 | 0.43 u | 0.80 |
+| **minions, proxies on** | **0.87** (≈0.27 caused by minions) | **0.05 u** | **0** |
+
+**Open issues found:**
+1. **Champion-vs-champion bumps** dominate corrections when many champions crowd together: ~4 per player-minute with 10 click-spamming bots in a 3,000 u arena. Their proxies can't anticipate the other player's next click. Options are recorded as Q12 in DECISIONS.
+2. **Bandwidth** rose to ~23–27 KB/s per player with ~70 units, because every unit's full state is sent every tick. Path-coasting and baseline deltas (03b §6) come next, before the unit count grows.
+
 ## M2 — ARAM ("a real game")
 **Goal:** the smallest complete MOBA match.
 - The Bridge map: minions, turrets, Gatehouse, Base, health relics.

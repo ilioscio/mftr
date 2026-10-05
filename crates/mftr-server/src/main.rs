@@ -1,15 +1,18 @@
 //! `mftr-server`: dedicated UDP match server (M0 prototype, unencrypted).
 //!
-//! Usage: mftr-server [--bind 0.0.0.0:7777] [--seed N] [--max-players N]
+//! Usage: mftr-server [--bind 0.0.0.0:7777] [--seed N] [--max-players N] [--scenario minions|empty]
 
-use mftr_server::{ClientKey, ServerConfig, ServerCore};
+use mftr_server::{ClientKey, Scenario, ServerConfig, ServerCore};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
+const USAGE: &str = "mftr-server [--bind ADDR] [--seed N] [--max-players N] [--scenario minions|empty]";
+
 fn main() -> std::io::Result<()> {
     let mut bind = "0.0.0.0:7777".to_string();
-    let mut cfg = ServerConfig::default();
+    // The M1 sandbox is the default playground.
+    let mut cfg = ServerConfig { scenario: Scenario::MinionSandbox, ..Default::default() };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -18,8 +21,12 @@ fn main() -> std::io::Result<()> {
             "--max-players" => {
                 cfg.max_players = args.next().and_then(|v| v.parse().ok()).expect("--max-players needs a number")
             }
+            "--scenario" => {
+                let name = args.next().expect("--scenario needs a name");
+                cfg.scenario = Scenario::by_name(&name).unwrap_or_else(|| panic!("unknown scenario {name}\n{USAGE}"));
+            }
             "-h" | "--help" => {
-                println!("mftr-server [--bind ADDR] [--seed N] [--max-players N]");
+                println!("{USAGE}");
                 return Ok(());
             }
             other => panic!("unknown argument {other}"),

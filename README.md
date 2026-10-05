@@ -32,7 +32,7 @@ Build the Godot extension (once, and after Rust changes):
 cargo build -p mftr-gdext
 ```
 
-Then open `client/project.godot` in Godot (4.5+) and press Play. Right-click moves, S stops and F1 toggles the net graph. To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
+Then open `client/project.godot` in Godot (4.5+) and press Play. Right-click moves, S stops, F1 toggles the net graph and F2 toggles client collision proxies (to feel the difference). The server starts in the `minions` sandbox by default (`--scenario empty` for champions only). To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
 
 Headless tools:
 

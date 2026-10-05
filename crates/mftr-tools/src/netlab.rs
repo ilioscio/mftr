@@ -4,7 +4,7 @@
 use crate::report::{ClickBot, JumpMeter, Summary};
 use mftr_client::{ClientSession, Phase};
 use mftr_net::conditioner::{LinkProfile, SimLink};
-use mftr_server::{ServerConfig, ServerCore};
+use mftr_server::{Scenario, ServerConfig, ServerCore};
 use mftr_sim::world::CHAMPION_MOVE_SPEED;
 
 #[derive(Clone, Debug)]
@@ -17,6 +17,9 @@ pub struct LabConfig {
     /// Seconds of play before measuring, so control loops settle (a real match starts with
     /// time in the fountain). Measurement then runs for `seconds`.
     pub warmup: f64,
+    pub scenario: Scenario,
+    /// Client collision proxies and the minion bubble (03a §5); off = naive prediction.
+    pub proxies: bool,
 }
 
 struct LabClient {
@@ -39,12 +42,17 @@ pub struct LabResult {
 
 pub fn run(cfg: &LabConfig) -> LabResult {
     const STEP: f64 = 0.0005;
-    let mut server = ServerCore::new(ServerConfig { seed: cfg.seed, ..Default::default() }, 0.0);
+    let mut server =
+        ServerCore::new(ServerConfig { seed: cfg.seed, scenario: cfg.scenario, ..Default::default() }, 0.0);
     let mut clients: Vec<LabClient> = (0..cfg.clients)
         .map(|i| {
             let s = cfg.seed.wrapping_mul(1000) + i as u64;
             LabClient {
-                session: ClientSession::new(),
+                session: {
+                    let mut s = ClientSession::new();
+                    s.set_collision_proxies(cfg.proxies);
+                    s
+                },
                 up: SimLink::new(cfg.profile, s * 2 + 1),
                 down: SimLink::new(cfg.profile, s * 2 + 2),
                 bot: ClickBot::new(s),
@@ -130,14 +138,37 @@ mod tests {
     use super::*;
 
     fn lab(profile: LinkProfile, seconds: f64) -> LabResult {
-        run(&LabConfig { profile, clients: 6, seconds, seed: 42, fps: 144.0, warmup: 10.0 })
+        lab_in(profile, seconds, Scenario::Empty, true)
     }
 
+    fn lab_in(profile: LinkProfile, seconds: f64, scenario: Scenario, proxies: bool) -> LabResult {
+        run(&LabConfig { profile, clients: 6, seconds, seed: 42, fps: 144.0, warmup: 10.0, scenario, proxies })
+    }
+
+    /// Alone on a perfect link, prediction is exact with nothing to collide with. Among minions
+    /// it can't be bit-exact: proxies come from 0.25 u-quantized positions and straight-line
+    /// extrapolation, while minions slide and detour. Corrections must stay tiny, though.
+    /// (With several champions, they can bump each other with a re-click inside the predicted tick.)
     #[test]
-    fn perfect_link_has_no_corrections() {
-        let r = lab(LinkProfile::PERFECT, 20.0);
-        assert!(r.summary.commands > 100);
-        assert_eq!(r.summary.mismatch_pct, 0.0, "{:?}", r.summary);
+    fn perfect_link_predicts_exactly_or_nearly_when_alone() {
+        let solo_perfect = |scenario| {
+            run(&LabConfig {
+                profile: LinkProfile::PERFECT,
+                clients: 1,
+                seconds: 60.0,
+                seed: 42,
+                fps: 144.0,
+                warmup: 10.0,
+                scenario,
+                proxies: true,
+            })
+            .summary
+        };
+        let empty = solo_perfect(Scenario::Empty);
+        assert!(empty.commands > 100);
+        assert_eq!(empty.mismatch_pct, 0.0, "{}", empty.row());
+        let minions = solo_perfect(Scenario::MinionSandbox);
+        assert!(minions.corr_max < 5.0 && minions.visible_mean < 0.05, "{}", minions.row());
     }
 
     #[test]
@@ -163,5 +194,32 @@ mod tests {
         assert!(r.summary.visible_mean < 15.0, "{}", r.summary.row());
         assert!(r.summary.late_pct < 1.5, "{}", r.summary.row());
         assert_eq!(r.summary.hard_resets, 0, "{}", r.summary.row());
+    }
+
+    fn solo(scenario: Scenario, proxies: bool) -> LabResult {
+        run(&LabConfig {
+            profile: LinkProfile::MID,
+            clients: 1,
+            seconds: 900.0,
+            seed: 7,
+            fps: 144.0,
+            warmup: 10.0,
+            scenario,
+            proxies,
+        })
+    }
+
+    /// M1 slice 1 (08 roadmap): with collision proxies, minion block adds well under one
+    /// > 15 u correction per player-minute at 80 ms, and clearly beats naive prediction.
+    #[test]
+    fn minion_block_is_predicted_with_proxies() {
+        let baseline = solo(Scenario::Empty, true).summary;
+        let naive = solo(Scenario::MinionSandbox, false).summary;
+        let proxied = solo(Scenario::MinionSandbox, true).summary;
+        let caused = proxied.corr_per_min_over_15 - baseline.corr_per_min_over_15;
+        assert!(caused < 1.0, "minion-caused corrections {caused:.2}/min\n{}", proxied.row());
+        assert!(proxied.visible_mean < 0.2, "{}", proxied.row());
+        assert!(proxied.visible_mean < naive.visible_mean / 3.0, "proxies {} vs naive {}", proxied.row(), naive.row());
+        assert!(proxied.jumps_per_min < naive.jumps_per_min, "proxies {} vs naive {}", proxied.row(), naive.row());
     }
 }

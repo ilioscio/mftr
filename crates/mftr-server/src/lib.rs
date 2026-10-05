@@ -7,7 +7,9 @@
 use mftr_net::PROTOCOL_VERSION;
 use mftr_net::msg::{self, ClientMessage, CommandReport, RejectReason, RemoteUnit, ServerMessage, Snapshot, TimeEcho};
 use mftr_net::packet::{PacketHeader, ReceiveTracker, SendTracker};
-use mftr_sim::{Command, Order, PlayerId, QPoint, SubTick, TICK_DT_F64, TICK_HZ, Team, Tick, UnitId, Vec2, World};
+use mftr_sim::{
+    Brain, Command, MinionKind, PlayerId, QPoint, SubTick, TICK_DT_F64, TICK_HZ, Team, Tick, UnitId, Vec2, World,
+};
 use std::collections::{BTreeMap, VecDeque};
 
 /// Opaque per-connection address key, assigned by the transport.
@@ -20,6 +22,25 @@ const MAX_LEAD_TICKS: u32 = 90;
 const REPORT_REPEAT_TICKS: u32 = 15;
 const TIMEOUT: f64 = 10.0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scenario {
+    /// Champions only.
+    Empty,
+    /// M1 slice 1: static minion clumps plus two patrolling waves, to exercise minion block
+    /// and client collision proxies (03a §5).
+    MinionSandbox,
+}
+
+impl Scenario {
+    pub fn by_name(name: &str) -> Option<Self> {
+        match name {
+            "empty" => Some(Scenario::Empty),
+            "minions" => Some(Scenario::MinionSandbox),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
     pub seed: u64,
@@ -27,11 +48,53 @@ pub struct ServerConfig {
     /// Spawn area: a square from `arena_min` to `arena_max` on both axes.
     pub arena_min: f32,
     pub arena_max: f32,
+    pub scenario: Scenario,
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
-        Self { seed: 1, max_players: 10, arena_min: 500.0, arena_max: 3500.0 }
+        Self { seed: 1, max_players: 10, arena_min: 500.0, arena_max: 3500.0, scenario: Scenario::Empty }
+    }
+}
+
+/// Populate the M1 minion sandbox (inside the default 0..4000 u arena).
+fn populate(world: &mut World, scenario: Scenario) {
+    if scenario != Scenario::MinionSandbox {
+        return;
+    }
+    // Static clumps: hex-packed, adjacent minions touching, like a wave fighting in lane.
+    for (center, rings, team) in [
+        (Vec2::new(1200.0, 1200.0), 1i32, Team::Red),
+        (Vec2::new(2800.0, 1300.0), 2, Team::Blue),
+        (Vec2::new(1300.0, 2800.0), 2, Team::Red),
+        (Vec2::new(2900.0, 2900.0), 1, Team::Blue),
+    ] {
+        for q in -rings..=rings {
+            for r in -rings..=rings {
+                if (q + r).abs() > rings {
+                    continue;
+                }
+                let x = center.x + 50.0 * (q as f32 + r as f32 * 0.5);
+                let y = center.y + 50.0 * 0.866_025_4 * r as f32;
+                let kind = if (q + r) % 2 == 0 { MinionKind::Melee } else { MinionKind::Caster };
+                world.spawn_minion(kind, team, Vec2::new(x, y), None);
+            }
+        }
+    }
+    // Two patrolling waves (2 rows of 3) crossing the arena through the middle.
+    for (a, b, team) in [
+        (Vec2::new(500.0, 2000.0), Vec2::new(3500.0, 2000.0), Team::Blue),
+        (Vec2::new(2000.0, 500.0), Vec2::new(2000.0, 3500.0), Team::Red),
+    ] {
+        let along = (b - a).normalize_or_zero();
+        let across = Vec2::new(-along.y, along.x);
+        for i in 0..6 {
+            let offset = along * (-60.0 * (i % 3) as f32) + across * (if i < 3 { -30.0 } else { 30.0 });
+            let pa = QPoint::from_vec2(a + offset);
+            let pb = QPoint::from_vec2(b + offset);
+            let kind = if i < 3 { MinionKind::Melee } else { MinionKind::Caster };
+            world.spawn_minion(kind, team, pa.to_vec2(), Some(Brain::Patrol { a: pa, b: pb, toward_b: true }));
+        }
     }
 }
 
@@ -69,7 +132,8 @@ pub struct ServerCore {
 impl ServerCore {
     /// `start`: the server-clock time (seconds) at which tick 0 ends.
     pub fn new(cfg: ServerConfig, start: f64) -> Self {
-        let world = World::new(cfg.seed);
+        let mut world = World::new(cfg.seed);
+        populate(&mut world, cfg.scenario);
         Self { cfg, world, start, conns: BTreeMap::new(), queue: Vec::new(), stats: ServerStats::default() }
     }
 
@@ -191,11 +255,15 @@ impl ServerCore {
         let player = PlayerId((0..=u8::MAX).find(|p| !used.contains(p)).unwrap());
         let team = if player.0 % 2 == 0 { Team::Blue } else { Team::Red };
         let (lo, hi) = (self.cfg.arena_min, self.cfg.arena_max);
-        let pos = {
+        // A random spot with nothing within 150 u (deterministic: the world RNG).
+        let mut pos = Vec2::ZERO;
+        for _ in 0..64 {
             let rng = self.world.rng();
-            Vec2::new(rng.range_f32(lo, hi), rng.range_f32(lo, hi))
-        };
-        let pos = QPoint::from_vec2(pos).to_vec2();
+            pos = QPoint::from_vec2(Vec2::new(rng.range_f32(lo, hi), rng.range_f32(lo, hi))).to_vec2();
+            if self.world.units().iter().all(|u| u.state.pos.distance(pos) > 150.0) {
+                break;
+            }
+        }
         let unit = self.world.spawn_champion(player, team, pos);
         self.conns.insert(
             key,
@@ -234,25 +302,30 @@ impl ServerCore {
         self.stats.ticks += 1;
 
         let since = ((now - self.tick_time(k)).max(0.0) * 1e6) as u32;
-        let units: Vec<(UnitId, mftr_sim::UnitState)> = self.world.units().iter().map(|u| (u.id, u.state)).collect();
+        let units: Vec<(UnitId, mftr_sim::UnitState, RemoteUnit)> = self
+            .world
+            .units()
+            .iter()
+            .map(|u| {
+                let remote = RemoteUnit {
+                    id: u.id,
+                    kind: u.kind,
+                    team: u.team,
+                    pos: QPoint::from_vec2(u.state.pos),
+                    target: u.state.heading().map(QPoint::from_vec2),
+                    speed: u.state.move_speed.round().clamp(0.0, 1023.0) as u16,
+                    collision_radius: u.collision_radius.round().clamp(0.0, 255.0) as u8,
+                };
+                (u.id, u.state, remote)
+            })
+            .collect();
         let mut out = Vec::with_capacity(self.conns.len());
         for (key, conn) in self.conns.iter_mut() {
             while conn.reports.front().is_some_and(|(at, _)| k.0.saturating_sub(at.0) > REPORT_REPEAT_TICKS) {
                 conn.reports.pop_front();
             }
-            let own = units.iter().find(|(id, _)| *id == conn.unit).map(|(id, s)| (*id, *s));
-            let others = units
-                .iter()
-                .filter(|(id, _)| *id != conn.unit)
-                .map(|(id, s)| RemoteUnit {
-                    id: *id,
-                    pos: QPoint::from_vec2(s.pos),
-                    target: match s.order {
-                        Order::MoveTo(q) => Some(q),
-                        Order::Idle => None,
-                    },
-                })
-                .collect();
+            let own = units.iter().find(|(id, _, _)| *id == conn.unit).map(|(id, s, _)| (*id, *s));
+            let others = units.iter().filter(|(id, _, _)| *id != conn.unit).map(|(_, _, r)| *r).collect();
             let reports: Vec<CommandReport> =
                 conn.reports.iter().rev().take(msg::MAX_REPORTS_PER_SNAPSHOT).rev().map(|(_, r)| *r).collect();
             let snap = Snapshot {

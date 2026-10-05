@@ -6,7 +6,7 @@
 
 use crate::bits::{BitReader, BitWriter, DecodeError};
 use crate::packet::PacketHeader;
-use mftr_sim::{Command, CommandKind, Order, PlayerId, QPoint, SubTick, Tick, UnitId, UnitState, Vec2};
+use mftr_sim::{Command, CommandKind, Order, PlayerId, QPoint, SubTick, Team, Tick, UnitId, UnitKind, UnitState, Vec2};
 
 const MAGIC: u8 = 0x4D; // 'M'
 
@@ -46,11 +46,20 @@ pub struct CommandReport {
     pub lead_us: i32,
 }
 
+/// Another unit, quantized. Carries what the client needs to interpolate it and to use it as
+/// a collision proxy on the input timeline (03a §5): where it's heading and how fast.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RemoteUnit {
     pub id: UnitId,
+    pub kind: UnitKind,
+    pub team: Team,
     pub pos: QPoint,
+    /// Current heading (detour waypoint first), if moving.
     pub target: Option<QPoint>,
+    /// Units per second (10 bits on the wire).
+    pub speed: u16,
+    /// Collision radius in whole units (8 bits).
+    pub collision_radius: u8,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -127,16 +136,49 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
             write_qpoint(w, q);
         }
     }
+    w.write_bool(s.detour.is_some());
+    if let Some(d) = s.detour {
+        w.write_f32(d.x);
+        w.write_f32(d.y);
+    }
+    w.write_u8(s.stuck);
 }
 
 fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let pos = Vec2::new(r.read_f32()?, r.read_f32()?);
     let move_speed = r.read_f32()?;
     let order = if r.read_bool()? { Order::MoveTo(read_qpoint(r)?) } else { Order::Idle };
-    if !pos.x.is_finite() || !pos.y.is_finite() || !move_speed.is_finite() {
+    let detour = if r.read_bool()? { Some(Vec2::new(r.read_f32()?, r.read_f32()?)) } else { None };
+    let stuck = r.read_u8()?;
+    let finite = |v: Vec2| v.x.is_finite() && v.y.is_finite();
+    if !finite(pos) || !move_speed.is_finite() || detour.is_some_and(|d| !finite(d)) {
         return Err(DecodeError::Invalid("unit state"));
     }
-    Ok(UnitState { pos, order, move_speed })
+    Ok(UnitState { pos, order, move_speed, detour, stuck })
+}
+
+fn write_remote(w: &mut BitWriter, o: &RemoteUnit) {
+    w.write_u32(o.id.0);
+    w.write_bool(o.kind == UnitKind::Minion);
+    w.write_bool(o.team == Team::Red);
+    write_qpoint(w, o.pos);
+    w.write_bool(o.target.is_some());
+    if let Some(t) = o.target {
+        write_qpoint(w, t);
+    }
+    w.write(o.speed.min(1023) as u64, 10);
+    w.write_u8(o.collision_radius);
+}
+
+fn read_remote(r: &mut BitReader) -> Result<RemoteUnit, DecodeError> {
+    let id = UnitId(r.read_u32()?);
+    let kind = if r.read_bool()? { UnitKind::Minion } else { UnitKind::Champion };
+    let team = if r.read_bool()? { Team::Red } else { Team::Blue };
+    let pos = read_qpoint(r)?;
+    let target = if r.read_bool()? { Some(read_qpoint(r)?) } else { None };
+    let speed = r.read(10)? as u16;
+    let collision_radius = r.read_u8()?;
+    Ok(RemoteUnit { id, kind, team, pos, target, speed, collision_radius })
 }
 
 fn write_echo(w: &mut BitWriter, e: &TimeEcho) {
@@ -248,12 +290,7 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             }
             w.write_u8(s.others.len().min(255) as u8);
             for o in s.others.iter().take(255) {
-                w.write_u32(o.id.0);
-                write_qpoint(&mut w, o.pos);
-                w.write_bool(o.target.is_some());
-                if let Some(t) = o.target {
-                    write_qpoint(&mut w, t);
-                }
+                write_remote(&mut w, o);
             }
             w.finish()
         }
@@ -297,10 +334,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             let count = r.read_u8()? as usize;
             let mut others = Vec::with_capacity(count);
             for _ in 0..count {
-                let id = UnitId(r.read_u32()?);
-                let pos = read_qpoint(&mut r)?;
-                let target = if r.read_bool()? { Some(read_qpoint(&mut r)?) } else { None };
-                others.push(RemoteUnit { id, pos, target });
+                others.push(read_remote(&mut r)?);
             }
             ServerMessage::Snapshot(Snapshot { tick, since_tick_us, time_echo, last_cmd_seq, reports, own, others })
         }
@@ -347,6 +381,8 @@ mod tests {
             pos: Vec2::new(1_234.567_9, 9_876.543),
             order: Order::MoveTo(QPoint { x: 1, y: 2 }),
             move_speed: 325.0,
+            detour: Some(Vec2::new(1_300.125, 9_800.5)),
+            stuck: 2,
         };
         let snap = Snapshot {
             tick: Tick(99),
@@ -361,8 +397,24 @@ mod tests {
             }],
             own: Some((UnitId(3), own_state)),
             others: vec![
-                RemoteUnit { id: UnitId(4), pos: QPoint { x: 10, y: 20 }, target: None },
-                RemoteUnit { id: UnitId(5), pos: QPoint { x: 30, y: 40 }, target: Some(QPoint { x: 50, y: 60 }) },
+                RemoteUnit {
+                    id: UnitId(4),
+                    kind: UnitKind::Champion,
+                    team: Team::Blue,
+                    pos: QPoint { x: 10, y: 20 },
+                    target: None,
+                    speed: 325,
+                    collision_radius: 35,
+                },
+                RemoteUnit {
+                    id: UnitId(5),
+                    kind: UnitKind::Minion,
+                    team: Team::Red,
+                    pos: QPoint { x: 30, y: 40 },
+                    target: Some(QPoint { x: 50, y: 60 }),
+                    speed: 1023,
+                    collision_radius: 25,
+                },
             ],
         };
         let msg = ServerMessage::Snapshot(snap);
