@@ -1,0 +1,9 @@
+# Normalize line endings; keep LF in the repo for cross-platform contributors
+* text=auto eol=lf
+
+*.png binary
+*.glb binary
+*.ogg binary
+*.opus binary
+*.ttf binary
+*.otf binary

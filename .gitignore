@@ -1,0 +1,26 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Godot
+.godot/
+.import/
+*.translation
+export_presets.cfg
+/client/bin/
+
+# Build outputs / exports
+/dist/
+/build/
+
+# Editors & OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local server config & secrets
+*.local.toml
+/secrets/
+*.key
