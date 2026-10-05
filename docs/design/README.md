@@ -27,6 +27,7 @@ Measurements taken from captures of the reference game. The captures stay in the
 | # | Doc | What it covers |
 |---|-----|----------------|
 | R01 | [Ezreal: Barrier, Flash, Mystic Shot, minions](reference/R01-video-ezreal-flash-barrier-q.md) | Camera model, movement and minion speed, input latency, skillshot speed and visual width, UI metrics |
+| R02 | [Allied champion pathing](reference/R02-video-allied-champion-pathing.md) | Allied champions pass through each other (D20) |
 
 ## Conventions
 

@@ -304,18 +304,21 @@ impl World {
         }
 
         // Phase 2: movement against start-of-tick positions (order-independent).
-        let starts: Vec<(UnitId, Obstacle)> = self
+        let starts: Vec<(UnitId, UnitKind, Team, Obstacle)> = self
             .units
             .iter()
             .filter(|u| u.collision_radius > 0.0)
-            .map(|u| (u.id, Obstacle { pos: u.state.pos, radius: u.collision_radius }))
+            .map(|u| (u.id, u.kind, u.team, Obstacle { pos: u.state.pos, radius: u.collision_radius }))
             .collect();
         for unit in &mut self.units {
             let here = unit.state.pos;
+            let (kind, team) = (unit.kind, unit.team);
             let obstacles: Vec<Obstacle> = starts
                 .iter()
-                .filter(|(id, o)| *id != unit.id && (o.pos - here).length_sq() < BROADPHASE * BROADPHASE)
-                .map(|(_, o)| *o)
+                .filter(|(id, k, t, o)| {
+                    *id != unit.id && blocks(kind, team, *k, *t) && (o.pos - here).length_sq() < BROADPHASE * BROADPHASE
+                })
+                .map(|(_, _, _, o)| *o)
                 .collect();
             let radius = unit.collision_radius;
             let (mut desired, mut achieved) = (0.0f32, 0.0f32);
@@ -359,6 +362,13 @@ impl World {
         }
         h.finish()
     }
+}
+
+/// Whether a unit of `other_kind`/`other_team` blocks a mover of `kind`/`team` (D11, D20).
+/// Allied champions pass through each other, as measured in the reference game (R02).
+/// Everything else blocks: enemy champions, and all minions regardless of team.
+pub fn blocks(kind: UnitKind, team: Team, other_kind: UnitKind, other_team: Team) -> bool {
+    !(kind == UnitKind::Champion && other_kind == UnitKind::Champion && team == other_team)
 }
 
 /// Stuck detection and detours (03a §5): poor progress for a few ticks → take a short detour
@@ -497,6 +507,28 @@ mod tests {
         assert!(w.unit(id).unwrap().state.pos.x < 1300.0, "should be heading back");
     }
 
+    #[test]
+    fn allied_champions_pass_through_enemies_block() {
+        for (other_team, should_pass) in [(Team::Blue, true), (Team::Red, false)] {
+            let mut w = World::new(1);
+            let me = w.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(1000.0, 1000.0));
+            w.spawn_champion(PlayerId(1), other_team, Vec2::new(1200.0, 1000.0)); // standing in the way
+            w.step(&[cmd(0, 1, 1, 0, (1400.0, 1000.0))]);
+            let mut max_dev: f32 = 0.0;
+            for _ in 0..60 {
+                w.step(&[]);
+                max_dev = max_dev.max((w.unit(me).unwrap().state.pos.y - 1000.0).abs());
+            }
+            let end = w.unit(me).unwrap().state.pos;
+            if should_pass {
+                assert_eq!(end, Vec2::new(1400.0, 1000.0), "ally should be walked through");
+                assert_eq!(max_dev, 0.0);
+            } else {
+                assert!(max_dev > 10.0, "enemy should force a path around it: {end:?}");
+            }
+        }
+    }
+
     /// Re-simulating the same commands from a snapshot must be bit-identical:
     /// this is what client prediction relies on. Players stay in separate halves of the map so
     /// the partial world (own unit only) sees the same obstacles as the full one.
@@ -599,5 +631,5 @@ mod tests {
     }
 
     /// Recorded on x86_64-pc-windows-msvc. CI checks Linux, macOS (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x6b1b_a529_2846_cc42;
+    const GOLDEN_HASH: u64 = 0x40e1_8ef0_5619_f2df;
 }

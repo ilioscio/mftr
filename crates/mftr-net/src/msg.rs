@@ -78,9 +78,20 @@ pub struct Snapshot {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServerMessage {
-    Welcome { player: PlayerId, unit: UnitId, tick: Tick, tick_hz: u8, since_tick_us: u32, time_echo: TimeEcho },
+    Welcome {
+        player: PlayerId,
+        unit: UnitId,
+        /// Needed for prediction: allied champions don't block each other (D20).
+        team: Team,
+        tick: Tick,
+        tick_hz: u8,
+        since_tick_us: u32,
+        time_echo: TimeEcho,
+    },
     Snapshot(Snapshot),
-    Reject { reason: RejectReason },
+    Reject {
+        reason: RejectReason,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -255,10 +266,11 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
 
 pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
     match msg {
-        ServerMessage::Welcome { player, unit, tick, tick_hz, since_tick_us, time_echo } => {
+        ServerMessage::Welcome { player, unit, team, tick, tick_hz, since_tick_us, time_echo } => {
             let mut w = begin(header, 0);
             w.write_u8(player.0);
             w.write_u32(unit.0);
+            w.write_bool(*team == Team::Red);
             w.write_u32(tick.0);
             w.write_u8(*tick_hz);
             w.write_u32(*since_tick_us);
@@ -308,6 +320,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
         0 => ServerMessage::Welcome {
             player: PlayerId(r.read_u8()?),
             unit: UnitId(r.read_u32()?),
+            team: if r.read_bool()? { Team::Red } else { Team::Blue },
             tick: Tick(r.read_u32()?),
             tick_hz: r.read_u8()?,
             since_tick_us: r.read_u32()?,

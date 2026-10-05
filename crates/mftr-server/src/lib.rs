@@ -182,12 +182,14 @@ impl ServerCore {
                     }
                     let tick = self.world.tick();
                     let since = ((now - self.tick_time(tick)).max(0.0) * 1e6) as u32;
+                    let team = self.world.unit(self.conns[&from].unit).map_or(Team::Blue, |u| u.team);
                     let conn = self.conns.get_mut(&from).unwrap();
                     conn.recv.record(header.seq);
                     conn.last_heard = now;
                     let msg = ServerMessage::Welcome {
                         player: conn.player,
                         unit: conn.unit,
+                        team,
                         tick,
                         tick_hz: TICK_HZ as u8,
                         since_tick_us: since,

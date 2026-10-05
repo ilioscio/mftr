@@ -132,6 +132,7 @@ pub struct ClientSession {
     phase: Phase,
     player: PlayerId,
     unit: UnitId,
+    team: Team,
     /// Predicted world containing only our own unit.
     world: World,
     /// Predicted own state at the end of each tick.
@@ -171,6 +172,7 @@ impl ClientSession {
             phase: Phase::Connecting,
             player: PlayerId(0),
             unit: UnitId(0),
+            team: Team::Blue,
             world: World::from_units(Tick(0), Vec::new()),
             history: VecDeque::new(),
             commands: VecDeque::new(),
@@ -406,10 +408,11 @@ impl ClientSession {
         }
         self.send.on_ack(header.ack, header.ack_bits);
         match message {
-            ServerMessage::Welcome { player, unit, tick, since_tick_us, time_echo, .. } => {
+            ServerMessage::Welcome { player, unit, team, tick, since_tick_us, time_echo, .. } => {
                 if self.phase == Phase::Connecting {
                     self.player = player;
                     self.unit = unit;
+                    self.team = team;
                     self.phase = Phase::Joining;
                     let rtt = rtt_from_echo(now, time_echo.client_time_us, time_echo.hold_us);
                     self.clock.add_sample(now, rtt, tick.end_seconds() + since_tick_us as f64 * 1e-6);
@@ -593,7 +596,7 @@ impl ClientSession {
             id: self.unit,
             kind: UnitKind::Champion,
             owner: Some(self.player),
-            team: Team::Blue, // irrelevant for own-movement prediction
+            team: self.team, // allied champions pass through each other (D20)
             state,
             collision_radius: mftr_sim::world::CHAMPION_COLLISION_RADIUS,
             gameplay_radius: mftr_sim::world::CHAMPION_GAMEPLAY_RADIUS,
