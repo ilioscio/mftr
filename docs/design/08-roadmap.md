@@ -18,6 +18,9 @@ No dates yet: milestones finish when their **exit criteria** pass. The order is 
 - Small arena with walls and brush, navmesh, and vision with fog culling.
 - 2 placeholder champions (a skillshot mage and a marksman) with basic attacks, windups, attack-move, and 4 abilities each: linear skillshot, delayed AoE, dash/blink, and a hard-CC skillshot.
 - Projectile timeline rendering, spawn streak, telegraph grammar, hitbox-honest VFX.
+- Sub-tick commands, margin and interpolation control loops, analytic projectiles with swept hit tests ([03a](03a-netcode-time-and-prediction.md)).
+- Unit collision with **minion-dummy clumps** in the arena to exercise collision proxies and the minion bubble.
+- A/B experiments from [03a §12](03a-netcode-time-and-prediction.md#12-open-questions-for-m1-experiments).
 - Utility spells: Blink, Barrier.
 - Netcode Lab: dodge rig, net graph, blind playtest protocol.
 - First pass of the noise-shader art style on the arena and the two champions.

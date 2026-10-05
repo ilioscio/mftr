@@ -4,6 +4,8 @@ This is the pillar the project lives or dies on. The goal, in one sentence:
 
 > **When you see a skillshot miss you, it missed you — and when you see yourself dodge, the server agrees.**
 
+This is the overview. Detailed specs: [03a — Time, Prediction & Hit Resolution](03a-netcode-time-and-prediction.md) and [03b — Wire Protocol](03b-netcode-wire-protocol.md).
+
 ## 1. Measurable targets
 
 | Metric | Definition | Target @ 60 ms RTT | Target @ 120 ms RTT, 20 ms jitter, 1% loss |
@@ -24,6 +26,7 @@ These are measured continuously by the **Netcode Lab** (§14). A milestone doesn
 - **No lockstep, no rollback of the world.** The server never rewinds time for the attacker (there is no "lag compensation" for skillshots). This MOBA **favors the defender**: dodges are judged against the dodger's real server position.
 - **Clients predict exactly one thing in full: their own champion** (movement, dashes, own casts and own projectiles). Everything else is interpolated or deterministically extrapolated.
 - The client links the **same Rust simulation code** as the server (see [04](04-architecture.md)), so prediction runs identical logic, not an approximation.
+- **Sub-tick commands:** each command carries its exact time inside a tick (1/64 resolution), so a 30 Hz tick adds no input quantization delay ([03a §3](03a-netcode-time-and-prediction.md#3-sub-tick-command-timing)).
 
 ## 3. The three client timelines
 
@@ -56,13 +59,13 @@ This is the key concept. The client shows different kinds of entities at **diffe
 - Client and server exchange timestamped pings piggybacked on regular packets. The client keeps a filtered estimate of **RTT**, **jitter** and **server tick offset**: it uses the lowest-RTT samples in a sliding window (NTP-style) and rejects outliers.
 - From these it derives `T_now`, `T_input = T_now + RTT/2 + input_margin` and `T_interp`.
 - Changes to the estimate are applied with **time dilation**: the local sim speeds up or slows down by at most ~2–3%, rather than jumping. Visible snapping only happens when the error is > 250 ms.
-- The server tells each client how early or late its commands arrive relative to the tick they targeted. The client adjusts `input_margin` to keep a small, stable cushion (target: commands arrive 0.5–1 tick early).
+- The server tells each client how early or late its commands arrive relative to the tick they targeted. The client adjusts `input_margin` so ≥ 99% of commands arrive on time, growing it fast and shrinking it slowly ([03a §10](03a-netcode-time-and-prediction.md#10-control-loops)).
 
 ## 5. Upstream: commands
 
 - Commands are **sent immediately** when the player acts, not batched to the next frame or tick.
-- Each command carries a sequence number and its **target tick**. The server queues it and applies it at that tick if it arrives in time, otherwise at the next tick (and reports the lateness).
-- **Redundancy:** each packet also includes the last N un-acked commands (N≈3–5), so a single lost packet never loses a click.
+- Each command carries a sequence number, its **target tick and sub-tick time**. The server applies it at exactly that time if it arrives in time, otherwise at the earliest unsimulated tick (and reports the lateness).
+- **Redundancy:** each packet also repeats all un-acked commands (up to 8), so a single lost packet never loses a click.
 - Commands are small (≤ 16 bytes typical). Rate limits on the server reject spam (e.g., > 30 move commands/s are coalesced).
 - **The server validates everything**: cooldowns, range, resource, CC state, ability ownership, and so on. Invalid commands are dropped, and the client prediction is corrected.
 
@@ -77,7 +80,7 @@ This is the key concept. The client shows different kinds of entities at **diffe
 ### Events (reliable, ordered)
 Discrete things that must never be missed: cast started, projectile spawned, damage dealt, death, gold/XP, item bought, level up, chat, pings.
 - Sent alongside snapshots and **repeated in every packet until acked**. This gives reliability over UDP with no head-of-line blocking for state.
-- Events carry the **tick they happened on**. The client applies them on the correct timeline (projectile spawns on T_input, remote cast animations on T_interp, and so on).
+- Events carry the **tick they happened on**. The client applies them on the correct timeline (projectile spawns and remote cast windups on T_input, deaths and damage numbers of remote units on T_interp, and so on; see [03a §7](03a-netcode-time-and-prediction.md#7-display-policy-what-is-drawn-when)).
 
 ## 7. Interpolation of remote entities
 
@@ -92,11 +95,11 @@ Discrete things that must never be missed: cast started, projectile spawned, dam
 - Every command is applied locally at once (on T_input) and kept in a **pending buffer** until the server acks the tick it was processed on.
 - When an authoritative snapshot arrives for tick `k`: reset the local champion to the server state at `k`, then **replay** the pending commands from `k+1` to the present.
 - If the replayed position differs from what was being shown:
-  - **< 5 u:** ignore it (absorbed).
-  - **5–100 u:** visually blend the rendered position toward the corrected one over ~100 ms. The simulation state snaps; only the visual is smoothed.
+  - **< 2 u:** ignore it (absorbed).
+  - **2–100 u:** visually blend the rendered position toward the corrected one (half-life ~50 ms). The simulation state snaps; only the visual is smoothed.
   - **> 100 u**, or a server-applied displacement (knock-back, hook, stun): snap, and play the displacement animation.
 - **Known sources of correction**, and how we minimize them:
-  - *Collision with other units:* the predicted sim includes interpolated nearby units as soft obstacles. Remote units are drawn in the past, so how hard unit-vs-unit collision is directly affects how often you get corrected. How much minion-block to keep is an open question (see DECISIONS).
+  - *Collision with other units (minion block, D11):* nearby units become **collision proxies** extrapolated to T_input along their replicated paths, and minions near you are drawn on that same timeline, so the minion you bump into is drawn where you bump into it ([03a §5](03a-netcode-time-and-prediction.md#5-predicting-unit-collision-minion-block)).
   - *CC hitting you:* you'll see a slight rubber-band when stunned mid-move. This can't be avoided with honest dodging, but it's mitigated by the projectile timeline above (you see the stun coming at the true time).
   - *Slows and speed buffs from others:* applied on receipt and replayed through.
 
@@ -106,7 +109,7 @@ Discrete things that must never be missed: cast started, projectile spawned, dam
 `Command received → validated → Windup (cast time) → Fire (spawn projectile / apply effect) → optional Channel → Recovery`
 
 - **Own casts are predicted.** The windup animation and indicator start immediately, and the projectile spawns locally at the predicted tick. If the server rejects the cast, the client rolls back the animation and cooldown, with a short "failed" cue.
-- **Remote casts** show at T_interp, so their windup *begins* late by ~one-way latency + buffer. Their **projectile**, however, is placed exactly on T_input. The windup is a heads-up; the projectile is the truth.
+- **Remote cast windups** play on T_input, fast-forwarded by however late the event arrived, so the windup and its projectile line up. The caster's position stays on T_interp (casters are rooted during windup). The windup is a heads-up; the projectile is the truth.
 
 ### Reaction budget rule
 Every ability intended to be dodgeable declares a **reaction class**. The design validator (CI) checks this:
@@ -123,7 +126,9 @@ reaction_time          = windup + detonation_delay          (for delayed ground 
 | Poke | Small-damage frequent skillshots | ≥ 0.30 s |
 | Not dodge-intended (point-blank, point-and-click) | | n/a, must be balanced as unavoidable |
 
-A 120 ms RTT player loses ~60–120 ms of that window, and must still have a human-scale reaction window left. These numbers are *(start)* values to be validated in the Netcode Lab with real players.
+A 120 ms RTT player loses ~170 ms of that window to latency (RTT + margin + local input/display latency), and must still have a human-scale reaction window left.
+
+> ⚠ **Under review:** a flat 0.45 s ignores the *movement* time needed to leave the hit corridor (~0.30 s for a 70-width shot). [03a §8](03a-netcode-time-and-prediction.md#8-reaction-budget-what-the-player-actually-gets) proposes a geometry-derived rule (≈ 0.72 s for a 70-width shot at 80% range).
 
 ## 10. Fog-of-war culling
 

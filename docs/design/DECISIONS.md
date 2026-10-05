@@ -13,7 +13,7 @@
 | D7 | 2026-10-05 | **AGPL-3.0-or-later code, CC BY-SA 4.0 content, DCO** | Keeps hosted and federated forks open; see [09](09-naming-and-legal.md) | Accepted |
 | D8 | 2026-10-05 | **Abilities, items, augments and modes as data (RON)** with Rust "behaviors" as escape hatch | Moddability; makes augments generic | Proposed |
 | D9 | 2026-10-05 | **Familiar to players of the reference game, with fully original IP.** Shared systems and conventions; original names, characters, kits, art, audio and text; follow copyright law | Lowest learning curve for the target audience, without legal or ethical baggage | Accepted |
-| D10 | 2026-10-05 | **Reaction budget starts at 0.45 s for hard-CC skillshots** (burst 0.40 s, poke 0.30 s), measured at 75% of max range | Starting point to validate in M1 playtests | Accepted |
+| D10 | 2026-10-05 | **Reaction budget starts at 0.45 s for hard-CC skillshots** (burst 0.40 s, poke 0.30 s), measured at 75% of max range | Starting point to validate in M1 playtests | Accepted — **under review**: [03a §8](03a-netcode-time-and-prediction.md#8-reaction-budget-what-the-player-actually-gets) shows a flat 0.45 s ignores movement time; proposes a geometry-derived rule |
 | D11 | 2026-10-05 | **Unit collision like the reference game:** small collision radii separate from gameplay radii, solid (no shoving), so clumped minions block champions. Dashes, blinks and ghosted units ignore it | Minion-block and body-block are familiar skill expression; see [01 §4](01-gameplay.md#4-minions) | Accepted |
 
 ## Open questions

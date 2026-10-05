@@ -10,6 +10,8 @@ This is a living document. Each file covers one area. Record decisions in [DECIS
 | 01 | [Core Gameplay](01-gameplay.md) | Match flow, map, minions, economy, objectives, roles, champions, controls |
 | 02 | [Combat Math](02-combat-math.md) | Stats, damage pipeline, resistances, penetration, haste, CC |
 | 03 | [Netcode](03-netcode.md) | Server authority, prediction, projectile timelines, fog culling, replays |
+| 03a | [Netcode: Time, Prediction & Hit Resolution](03a-netcode-time-and-prediction.md) | Timelines math, sub-tick commands, collision proxies (minion block), swept hits, display policy, reaction budget |
+| 03b | [Netcode: Wire Protocol](03b-netcode-wire-protocol.md) | Packets, channels, commands, snapshots, events, bandwidth |
 | 04 | [Architecture](04-architecture.md) | Rust sim core, Godot client, crates, ability/effect system, tooling |
 | 05 | [Art & Assets](05-art-and-assets.md) | Visual style, readability rules, procedural materials, size budgets |
 | 06 | [Game Modes & Augments](06-modes-and-augments.md) | Normal, ARAM, Mayhem augments, Arena, rotating modes |
