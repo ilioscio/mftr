@@ -1,0 +1,10 @@
+[package]
+name = "mftr-sim"
+description = "Deterministic MFTR game simulation: no I/O, no engine, no platform-dependent math."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true

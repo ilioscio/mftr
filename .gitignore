@@ -27,3 +27,6 @@ Thumbs.db
 
 # Local feedback media (screenshots, videos, extracted frames)
 /fb/
+
+# Godot (client project)
+/client/.godot/

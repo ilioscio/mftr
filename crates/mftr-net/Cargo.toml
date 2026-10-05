@@ -1,0 +1,13 @@
+[package]
+name = "mftr-net"
+description = "MFTR wire protocol: bit-packing, packets, messages, link conditioner, clock sync."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mftr-sim.workspace = true
+
+[lints]
+workspace = true

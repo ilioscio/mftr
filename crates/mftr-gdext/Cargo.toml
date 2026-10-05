@@ -1,0 +1,19 @@
+[package]
+name = "mftr-gdext"
+description = "Godot 4 GDExtension exposing the MFTR client runtime to the Godot client."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+# godot-rust 0.5 needs a newer compiler than the engine-independent crates.
+rust-version = "1.94"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+godot = { version = "0.5.5", features = ["api-4-7"] }
+mftr-sim.workspace = true
+mftr-net.workspace = true
+mftr-client.workspace = true
+
+# No workspace lints here: the GDExtension entry point is necessarily `unsafe`.

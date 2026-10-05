@@ -13,6 +13,32 @@ No dates yet: milestones finish when their **exit criteria** pass. The order is 
 
 **Exit:** two clients on different machines move champions with the link conditioner at 120 ms / 20 ms jitter / 2% loss, own-champion correction < 15 u, and the cross-platform hash check passes.
 
+### M0 status (2026-10-05)
+
+| Item | Status |
+|---|---|
+| Cargo workspace, Godot project, CI (Linux / Windows / macOS-arm64), AGPL license | ✅ |
+| `mftr-sim`: fixed 30 Hz tick, sub-tick commands, constant-speed movement, seeded PCG32, FNV state hash, combat math with golden tests, analytic projectiles with exact swept hits | ✅ |
+| `mftr-net`: bit-packing, packet header/acks, messages, link conditioner, min-RTT clock sync | ✅ |
+| `mftr-client`: input-timeline stamping, bit-exact reconciliation, smoothed corrections, margin loop with time dilation, fast re-send of young commands, remote interpolation | ✅ |
+| `mftr-server`: authoritative core + 270 KB UDP binary, late-command handling and arrival-lead reports | ✅ |
+| Netcode Lab (headless, deterministic) and UDP bot | ✅ |
+| `mftr-gdext` (godot-rust 0.5.5, Godot 4.7) + client: camera per D13, noise-shader ground, right-click move, click indicator, net graph | ✅ |
+| Cross-platform hash check | ⏳ runs on first CI push (golden hash recorded on Windows x86_64; debug and release builds agree) |
+| Two clients on **different machines** | ⏳ verified on one machine over real UDP (server + Godot client + bots); needs a second machine |
+| Secure transport (netcode.io-style tokens, AEAD) and the transport decision | ⏳ deferred to the lobby work (before M2); M0 uses plain UDP |
+
+**Netcode Lab results** (10 clients, 5 min after 10 s warm-up, scripted clicking at ~2.5 commands/s):
+
+| Profile (RTT / jitter / loss) | Late commands | Corrections > 15 u per player-minute | Mean visible correction | Down / up per client |
+|---|---|---|---|---|
+| good (30 ms / 2 / 0%) | 0.00% | 0 | 0.00 u | 5.0 / 0.6 KB/s |
+| typical (60 ms / 5 / 0.5%) | 0.05% | 0.16 | 0.00 u | 5.0 / 0.7 KB/s |
+| **rough (120 ms / 20 / 2%)** | **0.20%** | **0.48** | **0.01 u** | 4.9 / 0.9 KB/s |
+| awful (200 ms / 40 / 5%) | 0.42% | 0.72 | 0.01 u | 4.8 / 1.0 KB/s |
+
+With no unit collision yet, the only source of corrections is a command that arrives late. The server applies it at the next tick, so the turn happens later than predicted (03a §9). Those corrections average ~60 u at 120 ms and are blended over ~50 ms. M1 adds collision, which brings in the proxy work of 03a §5.
+
 ## M1 — Duel Sandbox ("does it feel right?")
 **Goal:** prove Pillar 1.
 - Small arena with walls and brush, navmesh, and vision with fog culling.

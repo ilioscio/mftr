@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mftr-sim",
+    "crates/mftr-net",
+    "crates/mftr-client",
+    "crates/mftr-server",
+    "crates/mftr-tools",
+    "crates/mftr-gdext",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+rust-version = "1.85"
+
+[workspace.dependencies]
+mftr-sim = { path = "crates/mftr-sim" }
+mftr-net = { path = "crates/mftr-net" }
+mftr-client = { path = "crates/mftr-client" }
+mftr-server = { path = "crates/mftr-server" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+debug = "line-tables-only"

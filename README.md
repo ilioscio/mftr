@@ -12,7 +12,52 @@ MFTR aims to deliver the thing players love about the best-known lane-based MOBA
 
 ## Status
 
-Pre-production: design documents only. Start with the [design index](docs/design/README.md).
+**M0 (foundations)** is in place: a deterministic Rust simulation, the netcode core (sub-tick commands, own-champion prediction, reconciliation, clock and margin control loops), a dedicated UDP server, a headless Netcode Lab, and a Godot 4.7 client you can move around in. Design docs: start with the [design index](docs/design/README.md). M0 results: [roadmap](docs/design/08-roadmap.md#m0--foundations).
+
+## Build & run
+
+Requirements: Rust (stable, via [rustup](https://rustup.rs)) and [Godot 4.7](https://godotengine.org). On Windows, Rust needs the MSVC C++ build tools.
+
+Start a server:
+
+```bash
+cargo run --release -p mftr-server -- --bind 127.0.0.1:7777
+```
+
+Build the Godot extension (once, and after Rust changes):
+
+```bash
+cargo build -p mftr-gdext
+```
+
+Then open `client/project.godot` in Godot 4.7 and press Play. Right-click moves, S stops and F1 toggles the net graph. To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
+
+Headless tools:
+
+```bash
+cargo test --workspace --release
+```
+
+```bash
+cargo run --release -p mftr-tools -- netlab --profile all
+```
+
+```bash
+cargo run --release -p mftr-tools -- bot --server 127.0.0.1:7777 --profile rough
+```
+
+## Repository layout
+
+| Path | What |
+|---|---|
+| `crates/mftr-sim` | Deterministic simulation: ticks, movement, combat math, analytic projectiles |
+| `crates/mftr-net` | Wire protocol: bit-packing, packets, messages, link conditioner, clock sync |
+| `crates/mftr-client` | Engine-independent client runtime: prediction, reconciliation, interpolation |
+| `crates/mftr-server` | Authoritative server core and the `mftr-server` UDP binary |
+| `crates/mftr-tools` | Netcode Lab (headless, link-conditioned) and UDP bot |
+| `crates/mftr-gdext` | Godot GDExtension (`MatchClient` node) |
+| `client/` | Godot project: scenes, shaders, GDScript |
+| `docs/design/` | Design documents and decision log |
 
 ## License
 

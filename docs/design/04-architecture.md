@@ -39,6 +39,8 @@ mftr/
 │  ├─ mftr-nav/       # Navmesh generation from vector map data, pathfinding, LoS grid
 │  ├─ mftr-net/       # Protocol, bit-packing, snapshot deltas, events, clock sync,
 │  │                  # link conditioner, transport wrapper
+│  ├─ mftr-client/    # Engine-independent client runtime: prediction, reconciliation,
+│  │                  # margin loop, interpolation (used by gdext, bots and the Netcode Lab)
 │  ├─ mftr-bots/      # Bot AI (uses the same command interface as players)
 │  ├─ mftr-server/    # Dedicated match server binary
 │  ├─ mftr-lobby/     # Lobby / custom games / token service binary

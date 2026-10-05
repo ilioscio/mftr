@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is Apple Silicon: together with x86_64 Linux/Windows this makes the
+        # golden state hash a cross-architecture determinism check (03 §17).
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --release -- -D warnings
+
+      - name: Tests (incl. golden state hash and Netcode Lab targets)
+        run: cargo test --workspace --release
+
+      - name: Netcode Lab report
+        shell: bash
+        run: |
+          {
+            echo '### Netcode Lab (${{ matrix.os }})'
+            echo '```'
+            cargo run -q --release -p mftr-tools -- netlab --profile all --clients 10 --seconds 120
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

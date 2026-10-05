@@ -1,0 +1,16 @@
+[package]
+name = "mftr-tools"
+description = "MFTR developer tools: headless Netcode Lab, UDP bot client."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mftr-sim.workspace = true
+mftr-net.workspace = true
+mftr-client.workspace = true
+mftr-server.workspace = true
+
+[lints]
+workspace = true
