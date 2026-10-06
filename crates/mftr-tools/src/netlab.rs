@@ -122,13 +122,16 @@ pub fn run(cfg: &LabConfig) -> LabResult {
             }
             let mut allowed: [Option<std::collections::BTreeSet<mftr_sim::UnitId>>; 2] = [None, None];
             for (to, bytes) in &packets {
-                let (Some(team), Ok((_, ServerMessage::Snapshot(s)))) = (server.team_of(*to), decode_server(bytes))
+                let (Some(team), Ok((_, ServerMessage::Snapshot(_)))) = (server.team_of(*to), decode_server(bytes))
                 else {
                     continue;
                 };
+                // Everything the client now knows about (deltas and coasting included) must be
+                // visible to its team.
                 let set = allowed[(team == Team::Red) as usize].get_or_insert_with(|| server.visible_to(team));
-                fog_violations += s.others.iter().filter(|o| !set.contains(&o.id)).count() as u64;
-                fog_hidden += (server.world().units().len() - 1 - s.others.len()) as u64;
+                let known = server.last_sent(*to);
+                fog_violations += known.iter().filter(|id| !set.contains(id)).count() as u64;
+                fog_hidden += (server.world().units().len() - 1).saturating_sub(known.len()) as u64;
             }
             for (to, bytes) in packets {
                 clients[to as usize].down.send(bytes, t);
@@ -400,5 +403,53 @@ mod tests {
         assert_eq!(r.fog_violations, 0);
         assert!(s.deaths.iter().all(|d| *d >= 1), "{}", s.duel_row());
         assert!(s.ghost_rate() < 0.02, "{}", s.dodge_row());
+    }
+
+    /// Q13: over a lossy, jittery link with moving minions, every snapshot the client
+    /// reconstructs from deltas equals, bit for bit, what the server recorded for it.
+    #[test]
+    fn delta_snapshots_reconstruct_exactly() {
+        let mut server = ServerCore::new(ServerConfig { scenario: Scenario::MinionSandbox, ..Default::default() }, 0.0);
+        let mut session = ClientSession::new();
+        let (mut up, mut down) = (SimLink::new(LinkProfile::ROUGH, 1), SimLink::new(LinkProfile::ROUGH, 2));
+        let mut bot = ClickBot::new(9);
+        let (mut t, mut next_hello, mut checked) = (0.0, 0.0, 0u32);
+        while t < 40.0 {
+            while let Some(p) = up.recv(t) {
+                for (_, bytes) in server.handle_packet(1, &p, t) {
+                    down.send(bytes, t);
+                }
+            }
+            if t >= server.next_tick_due() {
+                for (_, bytes) in server.step(t) {
+                    down.send(bytes, t);
+                }
+            }
+            while let Some(p) = down.recv(t) {
+                session.handle_packet(&p, t);
+                if let Some((tick, units)) = session.reconstructed()
+                    && let Some(sent) = server.sent_records(1, tick)
+                {
+                    assert_eq!(units, &sent, "tick {}", tick.0);
+                    checked += 1;
+                }
+            }
+            session.update(t);
+            match session.phase() {
+                Phase::Connecting if t >= next_hello => {
+                    up.send(session.hello_packet(t), t);
+                    next_hello = t + 0.25;
+                }
+                Phase::Playing => {
+                    bot.act(&mut session, t, t);
+                    if session.should_send(t) {
+                        up.send(session.input_packet(t), t);
+                    }
+                }
+                _ => {}
+            }
+            t += 0.001;
+        }
+        assert!(checked > 800, "only {checked} snapshots checked");
     }
 }

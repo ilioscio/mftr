@@ -172,7 +172,20 @@ Fog audit: 0 leaks. Downstream ~12–14 KB/s per player. The larger corrections 
 
 **Tests:** a pushing champion takes every red structure strictly in tier order and the match ends; turrets answer an attack on an allied champion and ramp up; relics and the fountain heal; waves meet and fight for 2.5 minutes with every structure standing. A third golden hash covers the lane match loop.
 
-**Netcode Lab, ARAM 3v3 at 80 ms, 10 min:** 0 hard resets, 0 fog leaks, 0 ghost hits of 388 near-misses, mean visible correction 0.22 u, server tick 0.15 ms. **Downstream is 27 KB/s per player**, so 5v5 would exceed the 32 KB/s budget. Snapshot deltas and path coasting (Q13) come next, before slice 2. Bot matches don't end yet: the bots walk into turrets, and they have no levels or items until slices 2–3 and smarter bots until slice 5.
+**Netcode Lab, ARAM 3v3 at 80 ms, 10 min:** 0 hard resets, 0 fog leaks, 0 ghost hits of 388 near-misses, mean visible correction 0.22 u, server tick 0.15 ms. Downstream was 27 KB/s per player, which would have put 5v5 over the 32 KB/s budget. Snapshot deltas (below) brought it to 8.7 KB/s. Bot matches don't end yet: the bots walk into turrets, and they have no levels or items until slices 2–3 and smarter bots until slice 5.
+
+### Snapshot deltas (Q13, between M2 slices 1 and 2): ✅ done
+
+Other units are now sent as deltas against the newest snapshot the client reconstructed, with **path coasting**: a unit walking its replicated path costs nothing until it turns, stops or changes (D33, protocol v8). Prediction quality is unchanged; this is pure bandwidth.
+
+| Netcode Lab, 80 ms, 5 min | Before (KB/s down per player) | After |
+|---|---|---|
+| Duel 1v1 | ~11.6 | **4.7** |
+| 10 players in the minion arena (~70 units) | ~25 | **6.4** |
+| Dodge rig, 6 players | — | **6.5** |
+| ARAM 3v3 on The Bridge | 24.6 | **8.7** |
+
+A lossy-link lab test (120 ms, 2% loss) checks every reconstructed snapshot against what the server recorded for that client: bit-exact. The fog audit now checks everything each client can reconstruct, not just what one packet carries: still 0 leaks.
 
 ## M3 — ARAM: Mayhem
 - Augment draft system with ~60 augments across tiers and archetypes (rule breakers, size, ability transformers, quests, spell replacements).

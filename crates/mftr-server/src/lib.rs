@@ -5,6 +5,7 @@
 //! binary (`main.rs`) and the virtual-time Netcode Lab both drive this same core.
 
 use mftr_net::PROTOCOL_VERSION;
+use mftr_net::delta::{self, UnitUpdate};
 use mftr_net::msg::{self, ClientMessage, CommandReport, RejectReason, RemoteUnit, ServerMessage, Snapshot, TimeEcho};
 use mftr_net::packet::{PacketHeader, ReceiveTracker, SendTracker};
 use mftr_sim::ability::LineSkillshot;
@@ -25,6 +26,8 @@ const MAX_LATENESS: f64 = 0.250;
 const MAX_LEAD_TICKS: u32 = 90;
 const REPORT_REPEAT_TICKS: u32 = 15;
 const TIMEOUT: f64 = 10.0;
+/// Snapshots remembered per client as possible delta baselines (~2 s).
+const SENT_RING: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scenario {
@@ -179,6 +182,11 @@ struct Conn {
     /// Missiles, areas and bolts this client has been told about (03 §10: enemy ones only
     /// once they enter vision), so it also gets their ends.
     revealed: BTreeSet<u32>,
+    /// What this client reconstructed for other units at each recent tick (delta baselines,
+    /// 03b §6), oldest first.
+    sent: VecDeque<(Tick, BTreeMap<UnitId, RemoteUnit>)>,
+    /// Newest snapshot tick the client reports having reconstructed.
+    snapshot_ack: Tick,
     last_heard: f64,
 }
 
@@ -282,7 +290,7 @@ impl ServerCore {
                     out.push((from, bytes));
                 }
             }
-            ClientMessage::Input { client_time_us, event_ack, commands } => {
+            ClientMessage::Input { client_time_us, event_ack, snapshot_ack, commands } => {
                 let world_tick = self.world.tick();
                 let start = self.start;
                 let Some(conn) = self.conns.get_mut(&from) else { return out };
@@ -295,6 +303,7 @@ impl ServerCore {
                 while conn.events.front().is_some_and(|(seq, _)| *seq <= event_ack) {
                     conn.events.pop_front();
                 }
+                conn.snapshot_ack = conn.snapshot_ack.max(Tick(snapshot_ack));
                 let mut fresh: Vec<Command> = commands.into_iter().filter(|c| c.seq > conn.highest_seq).collect();
                 fresh.sort_by_key(|c| c.seq);
                 for mut c in fresh {
@@ -379,6 +388,8 @@ impl ServerCore {
                 next_event_seq: 1,
                 team,
                 revealed: BTreeSet::new(),
+                sent: VecDeque::new(),
+                snapshot_ack: Tick(0),
                 last_heard: now,
             },
         );
@@ -578,11 +589,32 @@ impl ServerCore {
                     push(conn, *e);
                 }
             }
-            let others: Vec<RemoteUnit> = units
+            // Other units as deltas against what the client last reconstructed (03b §6).
+            while conn.sent.front().is_some_and(|(t, _)| *t < conn.snapshot_ack) || conn.sent.len() > SENT_RING {
+                conn.sent.pop_front();
+            }
+            let baseline = conn.sent.front().filter(|(t, _)| *t == conn.snapshot_ack).cloned();
+            let base_map = baseline.as_ref().map(|(_, m)| m.clone()).unwrap_or_default();
+            let ticks = baseline.as_ref().map_or(0, |(t, _)| k.0 - t.0);
+            let own_pos = own.map_or(Vec2::ZERO, |(_, st)| st.pos);
+            let mut visible: Vec<&RemoteUnit> = units
                 .iter()
                 .filter(|(id, _, _)| *id != conn.unit && seen[ti].contains(id))
-                .map(|(_, _, r)| *r)
+                .map(|(_, _, r)| r)
                 .collect();
+            // Most important first (champions, then nearest), so a size cut drops the least useful.
+            visible.sort_by(|a, b| {
+                let key = |r: &RemoteUnit| (r.kind != mftr_sim::UnitKind::Champion, r.pos.to_vec2().distance(own_pos));
+                key(a).partial_cmp(&key(b)).unwrap()
+            });
+            let mut updates: Vec<UnitUpdate> = Vec::new();
+            let mut records: BTreeMap<UnitId, RemoteUnit> = BTreeMap::new();
+            for r in visible {
+                let (u, rec) = delta::diff(base_map.get(&r.id), r, ticks);
+                updates.extend(u);
+                records.insert(r.id, rec);
+            }
+            let removed: Vec<UnitId> = base_map.keys().filter(|id| !records.contains_key(id)).copied().collect();
             let reports: Vec<CommandReport> =
                 conn.reports.iter().rev().take(msg::MAX_REPORTS_PER_SNAPSHOT).rev().map(|(_, r)| *r).collect();
             let mut snap = Snapshot {
@@ -596,22 +628,49 @@ impl ServerCore {
                 reports,
                 own,
                 events: conn.events.iter().take(msg::MAX_EVENTS_PER_SNAPSHOT).copied().collect(),
-                others,
+                baseline: baseline.as_ref().map(|(t, _)| *t),
+                others: updates,
+                removed,
             };
             let h = Self::header(conn);
-            // Stay under the packet limit (03b §1): a backlog of reliable events waits for the
-            // next snapshots instead of growing this one.
+            // Stay under the packet limit (03b §1): the least important unit updates wait for a
+            // later snapshot (those units coast, or appear later), then a backlog of reliable
+            // events does.
             let mut bytes = msg::encode_server(&h, &ServerMessage::Snapshot(Box::new(snap.clone())));
+            while bytes.len() > mftr_net::MAX_PACKET_BYTES && !snap.others.is_empty() {
+                let keep = snap.others.len() * 3 / 4;
+                for dropped in snap.others.drain(keep..) {
+                    let id = dropped.unit.id;
+                    match delta::apply(base_map.get(&id), None, ticks) {
+                        Some(coasted) => records.insert(id, coasted),
+                        None => records.remove(&id),
+                    };
+                }
+                bytes = msg::encode_server(&h, &ServerMessage::Snapshot(Box::new(snap.clone())));
+            }
             while bytes.len() > mftr_net::MAX_PACKET_BYTES && !snap.events.is_empty() {
                 snap.events.truncate(snap.events.len() / 2);
                 bytes = msg::encode_server(&h, &ServerMessage::Snapshot(Box::new(snap.clone())));
             }
+            conn.sent.push_back((k, records));
             self.stats.bytes_out += bytes.len() as u64;
             out.push((*key, bytes));
         }
         self.missiles.retain(|id, _| !ended.contains_key(id));
         self.areas.retain(|id, _| !ended.contains_key(id));
         out
+    }
+
+    /// Units the client was told about in its latest snapshot (fog audit, tests): what it
+    /// reconstructs, deltas and coasting included.
+    pub fn last_sent(&self, key: ClientKey) -> Vec<UnitId> {
+        self.conns.get(&key).and_then(|c| c.sent.back()).map(|(_, m)| m.keys().copied().collect()).unwrap_or_default()
+    }
+
+    /// What the client was sent to reconstruct for other units at `tick`, if still remembered
+    /// (delta consistency tests).
+    pub fn sent_records(&self, key: ClientKey, tick: Tick) -> Option<BTreeMap<UnitId, RemoteUnit>> {
+        self.conns.get(&key)?.sent.iter().find(|(t, _)| *t == tick).map(|(_, m)| m.clone())
     }
 
     /// The team a connection plays on (tests, the Netcode Lab's fog audit).
@@ -666,7 +725,7 @@ mod tests {
             if to == key
                 && let Ok((_, ServerMessage::Snapshot(s))) = decode_server(&bytes)
             {
-                seen = s.others.iter().map(|o| o.id).collect();
+                seen = s.others.iter().map(|o| o.unit.id).collect();
             }
         }
         seen
@@ -745,6 +804,7 @@ mod tests {
         let cast = ClientMessage::Input {
             client_time_us: 0,
             event_ack: 0,
+            snapshot_ack: 0,
             commands: vec![Command {
                 player: PlayerId(0),
                 seq: 1,
@@ -762,7 +822,7 @@ mod tests {
                     s.events.iter().any(|(_, e)| matches!(e, SimEvent::Damage { target, .. } if *target == red));
                 if to == 1 {
                     blue_heard |= about_red;
-                    blue_saw_red |= s.others.iter().any(|o| o.id == red);
+                    blue_saw_red |= s.others.iter().any(|o| o.unit.id == red);
                 } else {
                     red_heard |= about_red;
                 }

@@ -17,6 +17,7 @@
 
 use mftr_net::PROTOCOL_VERSION;
 use mftr_net::clock::ClockSync;
+use mftr_net::delta;
 use mftr_net::msg::{self, ClientMessage, CommandReport, RemoteUnit, ServerMessage, Snapshot};
 use mftr_net::packet::{PacketHeader, ReceiveTracker, SendTracker};
 use mftr_sim::ability::DamageKind;
@@ -40,6 +41,8 @@ const PROXY_RANGE: f32 = 600.0;
 /// Attack targets and attack-move candidates: every visible unit this close is a proxy, so
 /// chasing and target acquisition are predicted too.
 const TARGET_PROXY_RANGE: f32 = 1500.0;
+/// Reconstructed snapshots kept as possible delta baselines (~2 s).
+const RECONSTRUCTED_RING: usize = 64;
 /// Interpolation never smears a jump this large in one snapshot interval (a blink): it steps.
 const TELEPORT_DISTANCE: f32 = 150.0;
 /// Minion bubble: fully on `T_input` inside the inner radius, fully on `T_interp` outside the outer.
@@ -262,6 +265,10 @@ pub struct ClientSession {
     pub stats: ClientStats,
     book: MissileBook,
     last_event_seq: u32,
+    /// Other units as reconstructed at recent snapshot ticks (delta baselines, 03b §6).
+    reconstructed: VecDeque<(Tick, BTreeMap<UnitId, RemoteUnit>)>,
+    /// Newest of those, reported to the server in every input packet.
+    snapshot_ack: Tick,
     /// Remote cast windups from `CastStarted` events: `(start, fire, aim)`.
     remote_casts: BTreeMap<UnitId, (SimTime, SimTime, Vec2)>,
     effects: EffectBook,
@@ -315,6 +322,8 @@ impl ClientSession {
             book: MissileBook::default(),
             last_event_seq: 0,
             remote_casts: BTreeMap::new(),
+            reconstructed: VecDeque::new(),
+            snapshot_ack: Tick(0),
             effects: EffectBook::default(),
             combat_text: Vec::new(),
             notices: Vec::new(),
@@ -408,8 +417,12 @@ impl ClientSession {
         self.unsent_command = false;
         let unacked: Vec<Command> = self.commands.iter().filter(|c| c.seq > self.acked_seq).copied().collect();
         let h = self.header();
-        let input =
-            ClientMessage::Input { client_time_us: time_us(now), event_ack: self.last_event_seq, commands: unacked };
+        let input = ClientMessage::Input {
+            client_time_us: time_us(now),
+            event_ack: self.last_event_seq,
+            snapshot_ack: self.snapshot_ack.0,
+            commands: unacked,
+        };
         let bytes = msg::encode_client(&h, &input);
         self.finish_packet(bytes)
     }
@@ -710,7 +723,28 @@ impl ClientSession {
             self.notices.drain(..32);
         }
 
-        for o in &s.others {
+        // Other units arrive as deltas against a snapshot we reconstructed earlier (03b §6).
+        let base = match s.baseline {
+            None => Some(BTreeMap::new()),
+            Some(b) => self.reconstructed.iter().find(|(t, _)| *t == b).map(|(_, m)| m.clone()),
+        };
+        let (others, fresh): (Vec<RemoteUnit>, bool) = match base {
+            Some(base) => {
+                let ticks = s.baseline.map_or(0, |b| s.tick.0 - b.0);
+                let units = delta::reconstruct(&base, &s.others, &s.removed, ticks);
+                let list = units.values().copied().collect();
+                self.reconstructed.push_back((s.tick, units));
+                while self.reconstructed.len() > RECONSTRUCTED_RING {
+                    self.reconstructed.pop_front();
+                }
+                self.snapshot_ack = s.tick;
+                (list, true)
+            }
+            // We no longer have that baseline: keep the units we have; the server falls back
+            // to a full snapshot once our ack is older than its ring.
+            None => (self.remote.values().map(|t| t.latest).collect(), false),
+        };
+        for o in others.iter().filter(|_| fresh) {
             let track = self.remote.entry(o.id).or_insert_with(|| RemoteTrack {
                 samples: VecDeque::new(),
                 latest: *o,
@@ -723,7 +757,7 @@ impl ClientSession {
             track.latest = *o;
             track.latest_tick = s.tick;
         }
-        let alive: Vec<UnitId> = s.others.iter().map(|o| o.id).collect();
+        let alive: Vec<UnitId> = others.iter().map(|o| o.id).collect();
         self.remote.retain(|id, _| alive.contains(id));
 
         let mut resim_from: Option<Tick> = None;
@@ -1009,6 +1043,11 @@ impl ClientSession {
             if id == self.unit { own } else { remotes.iter().find(|r| r.id == id).map(|r| r.pos) }
         };
         self.effects.bolts(t_input, t_interp, &drawn)
+    }
+
+    /// Other units as last reconstructed from a snapshot: `(tick, units)` (tests, debugging).
+    pub fn reconstructed(&self) -> Option<(Tick, &BTreeMap<UnitId, RemoteUnit>)> {
+        self.reconstructed.back().map(|(t, m)| (*t, m))
     }
 
     /// Confirmed damage since the last call (floating numbers).

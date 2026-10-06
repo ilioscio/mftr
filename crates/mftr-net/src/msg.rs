@@ -5,6 +5,7 @@
 //! formats settle.
 
 use crate::bits::{BitReader, BitWriter, DecodeError};
+use crate::delta::{self, UnitUpdate};
 use crate::packet::PacketHeader;
 use mftr_sim::ability::{Cc, Damage, DamageKind, LineSkillshot, SLOTS};
 use mftr_sim::map::MapId;
@@ -22,6 +23,8 @@ pub const MAX_COMMANDS_PER_PACKET: usize = 8;
 pub const MAX_REPORTS_PER_SNAPSHOT: usize = 8;
 /// Max reliable events carried per snapshot; the rest wait for the next one (03b §7).
 pub const MAX_EVENTS_PER_SNAPSHOT: usize = 32;
+/// Bound on units (updates or removals) per snapshot (strict decoding, 03b §11).
+pub const MAX_UNITS_PER_SNAPSHOT: usize = 1024;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClientMessage {
@@ -36,6 +39,9 @@ pub enum ClientMessage {
         client_time_us: u32,
         /// Highest event sequence received in order (cumulative ack for the events channel).
         event_ack: u32,
+        /// Tick of the newest snapshot the client fully reconstructed (its delta baseline,
+        /// 03b §6); 0 = none yet.
+        snapshot_ack: u32,
         commands: Vec<Command>,
     },
     Bye,
@@ -100,7 +106,12 @@ pub struct Snapshot {
     pub reports: Vec<CommandReport>,
     /// The receiving client's own unit, lossless (03b §6).
     pub own: Option<(UnitId, UnitState)>,
-    pub others: Vec<RemoteUnit>,
+    /// The snapshot `others` is relative to (a tick the client reported); `None` = full.
+    pub baseline: Option<Tick>,
+    /// Other units that changed since the baseline (all of them without one).
+    pub others: Vec<UnitUpdate>,
+    /// Units in the baseline that are no longer visible (or gone).
+    pub removed: Vec<UnitId>,
     /// Reliable ordered events `(seq, event)`, repeated until acknowledged (03b §7).
     pub events: Vec<(u32, SimEvent)>,
 }
@@ -659,65 +670,89 @@ fn read_champion(r: &mut BitReader) -> Result<Option<ChampionId>, DecodeError> {
     }
 }
 
-fn write_remote(w: &mut BitWriter, o: &RemoteUnit) {
+fn write_update(w: &mut BitWriter, u: &UnitUpdate) {
+    let o = &u.unit;
     w.write_u32(o.id.0);
-    w.write(o.kind.wire() as u64, 3);
-    write_team(w, o.team);
-    write_qpoint(w, o.pos);
-    w.write_bool(o.target.is_some());
-    if let Some(t) = o.target {
-        write_qpoint(w, t);
+    w.write(u.mask as u64, 5);
+    if u.mask & delta::STATIC != 0 {
+        w.write(o.kind.wire() as u64, 3);
+        write_team(w, o.team);
+        w.write_u8(o.collision_radius);
+        w.write_u8(o.gameplay_radius);
+        write_champion(w, o.champion);
     }
-    w.write(o.speed.min(1023) as u64, 10);
-    w.write_u8(o.collision_radius);
-    w.write_u8(o.gameplay_radius);
-    w.write_bool(o.protected);
-    write_champion(w, o.champion);
-    w.write_u16(o.health);
-    w.write_u16(o.max_health);
-    w.write_u16(o.shield);
-    for f in [o.casting, o.attacking, o.stunned, o.rooted, o.dashing] {
-        w.write_bool(f);
+    if u.mask & delta::POS != 0 {
+        write_qpoint(w, o.pos);
+    }
+    if u.mask & delta::MOTION != 0 {
+        w.write_bool(o.target.is_some());
+        if let Some(t) = o.target {
+            write_qpoint(w, t);
+        }
+        w.write(o.speed.min(1023) as u64, 10);
+    }
+    if u.mask & delta::VITALS != 0 {
+        w.write_u16(o.health);
+        w.write_u16(o.max_health);
+        w.write_u16(o.shield);
+    }
+    if u.mask & delta::FLAGS != 0 {
+        for f in [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected] {
+            w.write_bool(f);
+        }
     }
 }
 
-fn read_remote(r: &mut BitReader) -> Result<RemoteUnit, DecodeError> {
+/// An update; groups not in the mask are left at defaults (the client takes them from its
+/// baseline, `delta::apply`).
+fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
     let id = UnitId(r.read_u32()?);
-    let kind = UnitKind::from_wire(r.read(3)? as u8).ok_or(DecodeError::Invalid("unit kind"))?;
-    let team = read_team(r)?;
-    let pos = read_qpoint(r)?;
-    let target = if r.read_bool()? { Some(read_qpoint(r)?) } else { None };
-    let speed = r.read(10)? as u16;
-    let collision_radius = r.read_u8()?;
-    let gameplay_radius = r.read_u8()?;
-    let protected = r.read_bool()?;
-    let champion = read_champion(r)?;
-    let (health, max_health, shield) = (r.read_u16()?, r.read_u16()?, r.read_u16()?);
-    let mut flags = [false; 5];
-    for f in flags.iter_mut() {
-        *f = r.read_bool()?;
-    }
-    let [casting, attacking, stunned, rooted, dashing] = flags;
-    Ok(RemoteUnit {
+    let mask = r.read(5)? as u8;
+    let mut o = RemoteUnit {
         id,
-        kind,
-        team,
-        pos,
-        target,
-        speed,
-        collision_radius,
-        gameplay_radius,
-        protected,
-        champion,
-        health,
-        max_health,
-        shield,
-        casting,
-        attacking,
-        stunned,
-        rooted,
-        dashing,
-    })
+        kind: UnitKind::Minion,
+        team: Team::Blue,
+        pos: QPoint::default(),
+        target: None,
+        speed: 0,
+        collision_radius: 0,
+        gameplay_radius: 0,
+        protected: false,
+        champion: None,
+        health: 0,
+        max_health: 0,
+        shield: 0,
+        casting: false,
+        attacking: false,
+        stunned: false,
+        rooted: false,
+        dashing: false,
+    };
+    if mask & delta::STATIC != 0 {
+        o.kind = UnitKind::from_wire(r.read(3)? as u8).ok_or(DecodeError::Invalid("unit kind"))?;
+        o.team = read_team(r)?;
+        o.collision_radius = r.read_u8()?;
+        o.gameplay_radius = r.read_u8()?;
+        o.champion = read_champion(r)?;
+    }
+    if mask & delta::POS != 0 {
+        o.pos = read_qpoint(r)?;
+    }
+    if mask & delta::MOTION != 0 {
+        o.target = if r.read_bool()? { Some(read_qpoint(r)?) } else { None };
+        o.speed = r.read(10)? as u16;
+    }
+    if mask & delta::VITALS != 0 {
+        (o.health, o.max_health, o.shield) = (r.read_u16()?, r.read_u16()?, r.read_u16()?);
+    }
+    if mask & delta::FLAGS != 0 {
+        let mut f = [false; 6];
+        for b in f.iter_mut() {
+            *b = r.read_bool()?;
+        }
+        [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected] = f;
+    }
+    Ok(UnitUpdate { mask, unit: o })
 }
 
 fn write_echo(w: &mut BitWriter, e: &TimeEcho) {
@@ -758,10 +793,11 @@ pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
             write_champion(&mut w, *champion);
             w.finish()
         }
-        ClientMessage::Input { client_time_us, event_ack, commands } => {
+        ClientMessage::Input { client_time_us, event_ack, snapshot_ack, commands } => {
             let mut w = begin(header, 1);
             w.write_u32(*client_time_us);
             w.write_u32(*event_ack);
+            w.write_u32(*snapshot_ack);
             let n = commands.len().min(MAX_COMMANDS_PER_PACKET);
             w.write(n as u64, 4);
             for c in &commands[commands.len() - n..] {
@@ -786,12 +822,13 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
         1 => {
             let client_time_us = r.read_u32()?;
             let event_ack = r.read_u32()?;
+            let snapshot_ack = r.read_u32()?;
             let n = r.read(4)? as usize;
             if n > MAX_COMMANDS_PER_PACKET {
                 return Err(DecodeError::Invalid("command count"));
             }
             let commands = (0..n).map(|_| read_command(&mut r)).collect::<Result<_, _>>()?;
-            ClientMessage::Input { client_time_us, event_ack, commands }
+            ClientMessage::Input { client_time_us, event_ack, snapshot_ack, commands }
         }
         2 => ClientMessage::Bye,
         _ => return Err(DecodeError::Invalid("client message kind")),
@@ -840,9 +877,19 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
                 w.write_u32(id.0);
                 write_unit_state(&mut w, st);
             }
-            w.write_u8(s.others.len().min(255) as u8);
-            for o in s.others.iter().take(255) {
-                write_remote(&mut w, o);
+            w.write_bool(s.baseline.is_some());
+            if let Some(b) = s.baseline {
+                w.write_u32(b.0);
+            }
+            let n = s.others.len().min(MAX_UNITS_PER_SNAPSHOT);
+            w.write_u16(n as u16);
+            for o in &s.others[..n] {
+                write_update(&mut w, o);
+            }
+            let n = s.removed.len().min(MAX_UNITS_PER_SNAPSHOT);
+            w.write_u16(n as u16);
+            for id in &s.removed[..n] {
+                w.write_u32(id.0);
             }
             let n = s.events.len().min(MAX_EVENTS_PER_SNAPSHOT);
             w.write(n as u64, 6);
@@ -893,10 +940,22 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 reports.push(CommandReport { seq, applied_tick, applied_sub, lead_us });
             }
             let own = if r.read_bool()? { Some((UnitId(r.read_u32()?), read_unit_state(&mut r)?)) } else { None };
-            let count = r.read_u8()? as usize;
+            let baseline = if r.read_bool()? { Some(Tick(r.read_u32()?)) } else { None };
+            let count = r.read_u16()? as usize;
+            if count > MAX_UNITS_PER_SNAPSHOT {
+                return Err(DecodeError::Invalid("unit count"));
+            }
             let mut others = Vec::with_capacity(count);
             for _ in 0..count {
-                others.push(read_remote(&mut r)?);
+                others.push(read_update(&mut r)?);
+            }
+            let count = r.read_u16()? as usize;
+            if count > MAX_UNITS_PER_SNAPSHOT {
+                return Err(DecodeError::Invalid("removed count"));
+            }
+            let mut removed = Vec::with_capacity(count);
+            for _ in 0..count {
+                removed.push(UnitId(r.read_u32()?));
             }
             let n = r.read(6)? as usize;
             if n > MAX_EVENTS_PER_SNAPSHOT {
@@ -914,7 +973,9 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 last_cmd_seq,
                 reports,
                 own,
+                baseline,
                 others,
+                removed,
                 events,
             }))
         }
@@ -949,7 +1010,7 @@ mod tests {
             c(44, CommandKind::Attack(UnitId(812))),
             c(45, CommandKind::AttackMove(QPoint { x: 1, y: 65535 })),
         ];
-        let msg = ClientMessage::Input { client_time_us: 0xABCD_1234, event_ack: 99, commands };
+        let msg = ClientMessage::Input { client_time_us: 0xABCD_1234, event_ack: 99, snapshot_ack: 1230, commands };
         let bytes = encode_client(&hdr(), &msg);
         assert_eq!(decode_client(&bytes).unwrap(), (hdr(), msg));
         let hello = ClientMessage::Hello {
@@ -1113,11 +1174,16 @@ mod tests {
                 lead_us: -2500,
             }],
             own: Some((UnitId(3), own_state)),
+            baseline: Some(Tick(96)),
             others: vec![
-                remote(4, UnitKind::Champion, Team::Blue, Some(ChampionId::Vesper)),
-                remote(5, UnitKind::Minion, Team::Red, None),
-                remote(6, UnitKind::Relic, Team::Blue, None),
+                UnitUpdate {
+                    mask: delta::ALL,
+                    unit: remote(4, UnitKind::Champion, Team::Blue, Some(ChampionId::Vesper)),
+                },
+                UnitUpdate { mask: delta::ALL, unit: remote(5, UnitKind::Minion, Team::Red, None) },
+                UnitUpdate { mask: delta::ALL, unit: remote(6, UnitKind::Relic, Team::Blue, None) },
             ],
+            removed: vec![UnitId(11), UnitId(12)],
             events: events.into_iter().enumerate().map(|(i, e)| (i as u32 + 1, e)).collect(),
         };
         let msg = ServerMessage::Snapshot(Box::new(snap));
