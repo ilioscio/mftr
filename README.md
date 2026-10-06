@@ -51,6 +51,8 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The server star
 
 **Hosting:** see the [hosting guide](docs/hosting.md). The short version: `docker compose -f deploy/compose.yaml up -d` runs an ARAM server (champion select, bots filling empty slots) on UDP 7777 and a duel server on 7778. On NixOS, import the flake's module and set `services.mftr.enable = true` (see the guide).
 
+**Releasing:** run `scripts/bump-version.sh X.Y.Z` (it updates `Cargo.toml`, `Cargo.lock` and the macOS export preset together; CI builds with `--locked`, so a hand-edited version fails), merge that to `main`, then tag the merge commit on `main`: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag builds and publishes the release from exactly that commit.
+
 **Champion select, spectating, reconnect:** add `--lobby` to an ARAM server (`--scenario aram --bots 10 --lobby`) for all-random champion select with rerolls and a team bench (humans replace bots). Start the client with `-- --spectate` to watch (Tab cycles champions). If the client crashes or the connection drops, restart it within a minute and you get your champion back.
 
 **Bots and replays:** `--bots N` fills N slots with server bots (e.g. `--scenario aram --bots 9` for a full match against bots), and `--replay match.replay` records the session. `mftr-tools replay match.replay` re-simulates a recording and checks it, and `mftr-tools botmatch --seed 3` plays a 10-bot ARAM match headless in a couple of seconds.
