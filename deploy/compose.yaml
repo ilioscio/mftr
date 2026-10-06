@@ -2,7 +2,9 @@
 # One ARAM server with champion select and bots filling empty slots, recording a replay of the
 # session into the `replays` volume (copy it out with
 # `docker compose -f deploy/compose.yaml cp aram:/data/session.replay .`, then check it with
-# `mftr-tools replay session.replay`).
+# `mftr-tools replay session.replay`). Each server keeps its key (`server.key`, created on first
+# start) in its volume: players' clients pin it, so keep the volumes. `docker compose logs`
+# shows each key's fingerprint.
 services:
   aram:
     build: ..
@@ -21,7 +23,10 @@ services:
     restart: unless-stopped
     ports:
       - "7778:7777/udp"
+    volumes:
+      - duel:/data
     command: ["--scenario", "duel", "--max-players", "4"]
 
 volumes:
   replays:
+  duel:

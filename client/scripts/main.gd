@@ -2,7 +2,8 @@ extends Node3D
 ## M1 Duel Sandbox client. Builds the scene in code, forwards input to the Rust MatchClient,
 ## and draws what it reports. No gameplay decisions are made here (04 §1).
 ##
-## User args (after `--`): a server address (default 127.0.0.1:7777), `--champion NAME`,
+## User args (after `--`): a server address (default 127.0.0.1:7777; `host:port#fingerprint` pins
+## the server's key, otherwise it is trusted on first use), `--champion NAME`,
 ## `--spectate` to watch (Tab cycles champions), `--shot-lobby` for a champion-select capture,
 ## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots, and the blind playtest
 ## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`.
@@ -415,7 +416,7 @@ var _last_phase := ""
 func _process(delta: float) -> void:
 	var phase := client.phase()
 	if phase != _last_phase:
-		print("MFTR phase: %s -> %s (unit %d)" % [_last_phase, phase, client.own_unit_id()])
+		print("MFTR phase: %s -> %s (unit %d, server key %s)" % [_last_phase, phase, client.own_unit_id(), client.server_fingerprint()])
 		_last_phase = phase
 	var playing := phase == "playing"
 	if playing and not _map_built:

@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # MFTR dedicated server (M2 slice 6). Build: `docker build -t mftr-server .`
 # Run:   `docker run --rm -p 7777:7777/udp mftr-server` (an ARAM server with 10 bots and
-# champion select; see docs/hosting.md for every option).
+# champion select; see docs/hosting.md for every option). The server key is created in /data:
+# mount a volume there to keep it.
 
 FROM rust:1-slim-bookworm AS build
 # The image's own toolchain (rust-toolchain.toml would make rustup download another).
@@ -13,7 +14,7 @@ COPY . .
 RUN --mount=type=secret,id=ca_bundle,required=false \
     if [ -f /run/secrets/ca_bundle ]; then export CARGO_HTTP_CAINFO=/run/secrets/ca_bundle; fi; \
     cargo build --locked --profile dist -p mftr-server -p mftr-tools
-# An empty /data the unprivileged runtime user can write replays to.
+# An empty /data the unprivileged runtime user can write replays and the server key to.
 RUN mkdir /data-empty
 
 # A minimal runtime: glibc and nothing else, running as an unprivileged user.

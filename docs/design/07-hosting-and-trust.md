@@ -28,7 +28,7 @@ Or the bare binaries plus a `mftr.toml` config. The config sets: region label, m
 
 ## 3. Identity
 
-- On first launch the client generates an **Ed25519 keypair**. The public key is your identity. A display name and profile are signed by that key.
+- On first launch the client generates a **keypair**. The public key is your identity. A display name and profile are signed by that key. *(Implemented, D40: an X25519 key in the client's user folder, `identity.key`, used as the Noise static key, so every server learns which key connected. Signing for profiles and results comes with federation.)*
 - Optional **recovery and multi-device:** export or import the key, or encrypt it with a passphrase for backup.
 - Lobbies may require **account binding** (e.g. email or invite) for ranked, as their own policy.
 - Match results are **signed by the server's key**. This is the foundation for federation.

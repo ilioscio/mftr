@@ -1539,7 +1539,7 @@ mod tests {
         };
         let msg = ServerMessage::Snapshot(Box::new(snap));
         let bytes = encode_server(&hdr(), &msg);
-        assert!(bytes.len() <= crate::MAX_PACKET_BYTES, "{} bytes", bytes.len());
+        assert!(bytes.len() <= crate::MAX_PAYLOAD_BYTES, "{} bytes", bytes.len());
         let (_, back) = decode_server(&bytes).unwrap();
         assert_eq!(back, msg);
         if let ServerMessage::Snapshot(s) = back {

@@ -168,7 +168,7 @@ For a 70-width shot `T_needed ≈ 0.72 s`, and for a 140-width hook ≈ 0.82 s. 
 ## 15. Transport & security
 
 - **UDP**, using the netcode.io connection model: the lobby issues a **signed, encrypted connect token** for a specific server and match, and packets are encrypted and authenticated after the handshake. This stops spoofing and session hijacking with no central auth on the hot path.
-- Candidate libraries (decide in M0 by prototype): `renet` + `renet_netcode` (game-oriented, channels built in), or `quinn` (QUIC datagrams + streams). Both are Rust, both run in-process on the client through gdext.
+- **Decided (D40):** our own thin layer on the UDP packet code: a Noise XX handshake (`snow`), then ChaCha20-Poly1305 on every packet, with pinned server keys and a stateless cookie against spoofed floods (03b §2). `renet` and `quinn` were the candidates; both assume a token-issuing web backend or TLS certificates that community servers on a bare IP don't have.
 - The serialization format is our own: hand-written bit-packing (bitcode-style) with a protocol version in the handshake.
 
 ## 16. Bandwidth & CPU budget
