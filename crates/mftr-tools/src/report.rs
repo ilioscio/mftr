@@ -411,7 +411,7 @@ impl DuelBot {
             }
             // Otherwise go looking for the enemy champion, through the middle of the arena.
             let p = Vec2::new(self.rng.range_f32(1300.0, 2700.0), self.rng.range_f32(1300.0, 2700.0));
-            return if self.rng.next_u32() % 4 == 0 {
+            return if self.rng.next_u32().is_multiple_of(4) {
                 session.attack_move(p, now).is_some()
             } else {
                 session.move_to(p, now).is_some()
@@ -421,7 +421,7 @@ impl DuelBot {
         let ready = |slot: u8| st.cooldowns[slot as usize] <= t && st.cast.is_none();
         let d = e.pos.distance(own);
         let to = (e.pos - own).normalize_or_zero();
-        let perp = Vec2::new(-to.y, to.x) * if self.rng.next_u32() % 2 == 0 { 1.0 } else { -1.0 };
+        let perp = Vec2::new(-to.y, to.x) * if self.rng.next_u32().is_multiple_of(2) { 1.0 } else { -1.0 };
         let max_hp = mftr_sim::items::champion_stats(champ.def(), st.progress.level, &st.progress.items).0.max_health;
         if st.health < 0.35 * max_hp && ready(5) {
             return session.cast(5, own, now).is_some();

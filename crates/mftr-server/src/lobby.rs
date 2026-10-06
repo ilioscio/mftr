@@ -33,7 +33,7 @@ impl Slot {
 
 /// Teams alternate by player id, as in the match itself.
 pub fn team_of(player: PlayerId) -> Team {
-    if player.0 % 2 == 0 { Team::Blue } else { Team::Red }
+    if player.0.is_multiple_of(2) { Team::Blue } else { Team::Red }
 }
 
 pub struct Lobby {

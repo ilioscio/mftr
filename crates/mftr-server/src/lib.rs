@@ -553,7 +553,7 @@ impl ServerCore {
                 return self.start_from_lobby(now);
             }
             self.lobby_steps += 1;
-            if self.lobby_steps % 10 != 0 {
+            if !self.lobby_steps.is_multiple_of(10) {
                 return Vec::new();
             }
             let pending: Vec<(ClientKey, PlayerId)> = self.pending.iter().map(|(k, p)| (*k, p.player)).collect();

@@ -50,7 +50,7 @@ impl Bot {
 
     /// Commands for tick `k` (the tick about to be simulated).
     pub fn think(&mut self, world: &World, k: Tick) -> Vec<Command> {
-        if (k.0 + self.player.0 as u32) % THINK_EVERY != 0 {
+        if !(k.0 + self.player.0 as u32).is_multiple_of(THINK_EVERY) {
             return Vec::new();
         }
         let Some(me) = world.units().iter().find(|u| u.owner == Some(self.player) && u.kind == UnitKind::Champion)

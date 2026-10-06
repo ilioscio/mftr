@@ -2132,11 +2132,12 @@ fn resolve_effects(
         events.push(SimEvent::AreaDetonated { id: a.id, at: a.detonate_at });
         for &(id, team, r, q0, q1) in &motion {
             let reach = a.radius + r;
-            if team != a.team && (q0.lerp(q1, frac) - a.center).length_sq() <= reach * reach {
-                if let Some(u) = units.iter_mut().find(|u| u.id == id) {
-                    apply_cc(u, a.cc, a.detonate_at, a.center, s1, events);
-                    deal_damage(u, a.owner, a.power, a.kind, a.detonate_at, events);
-                }
+            if team != a.team
+                && (q0.lerp(q1, frac) - a.center).length_sq() <= reach * reach
+                && let Some(u) = units.iter_mut().find(|u| u.id == id)
+            {
+                apply_cc(u, a.cc, a.detonate_at, a.center, s1, events);
+                deal_damage(u, a.owner, a.power, a.kind, a.detonate_at, events);
             }
         }
         false
@@ -2679,7 +2680,7 @@ mod tests {
         let mut rng = Pcg32::new(99, 1);
         let mut cmds = Vec::new();
         for i in 0..300u32 {
-            if rng.next_u32() % 5 == 0 {
+            if rng.next_u32().is_multiple_of(5) {
                 let p = (rng.next_u32() % 2) as u8;
                 let sub = (rng.next_u32() % SUBTICKS as u32) as u8;
                 let base = if p == 0 { 0.0 } else { 6000.0 };
@@ -2711,7 +2712,7 @@ mod tests {
         let me = full.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, Vec2::new(1000.0, 1000.0));
         let mut rng = Pcg32::new(5, 5);
         for k in 1..=600u32 {
-            let tick_cmds: Vec<Command> = if rng.next_u32() % 9 == 0 {
+            let tick_cmds: Vec<Command> = if rng.next_u32().is_multiple_of(9) {
                 let t = (rng.range_f32(900.0, 2100.0), rng.range_f32(600.0, 1400.0));
                 vec![cmd(0, k, k, (rng.next_u32() % 64) as u8, t)]
             } else {
@@ -3026,10 +3027,10 @@ mod tests {
         let mut rng = Pcg32::new(3, 3);
         for k in 1..=900u32 {
             let mut c = Vec::new();
-            if rng.next_u32() % 7 == 0 {
+            if rng.next_u32().is_multiple_of(7) {
                 let t = (rng.range_f32(500.0, 2500.0), rng.range_f32(500.0, 2500.0));
                 let sub = (rng.next_u32() % 64) as u8;
-                c.push(if rng.next_u32() % 3 == 0 {
+                c.push(if rng.next_u32().is_multiple_of(3) {
                     cast_slot(0, k, k, sub, (rng.next_u32() % 6) as u8, t)
                 } else {
                     cmd(0, k, k, sub, t)
@@ -3245,7 +3246,7 @@ mod tests {
             let mut rng = Pcg32::new(4, 4);
             for k in 1..=2400u32 {
                 let mut c = Vec::new();
-                if rng.next_u32() % 9 == 0 {
+                if rng.next_u32().is_multiple_of(9) {
                     let t = (rng.range_f32(600.0, 2600.0), rng.range_f32(2800.0, 3700.0));
                     let sub = (rng.next_u32() % 64) as u8;
                     let r = rng.next_u32() % 10;
@@ -3696,11 +3697,11 @@ mod tests {
         let mut rng = Pcg32::new(8, 8);
         for k in 1..=1500u32 {
             let mut c = Vec::new();
-            if rng.next_u32() % 11 == 0 {
+            if rng.next_u32().is_multiple_of(11) {
                 let t = (rng.range_f32(300.0, 3700.0), rng.range_f32(300.0, 3700.0));
                 c.push(cmd(0, k, k, (rng.next_u32() % 64) as u8, t));
             }
-            if rng.next_u32() % 13 == 0 {
+            if rng.next_u32().is_multiple_of(13) {
                 let t = (rng.range_f32(300.0, 3700.0), rng.range_f32(300.0, 3700.0));
                 c.push(cmd(1, k, k, 0, t));
             }
@@ -3733,7 +3734,7 @@ mod tests {
         for k in 1..=6000u32 {
             let mut cmds = Vec::new();
             for p in 0..6u8 {
-                if rng.next_u32() % 23 == 0 {
+                if rng.next_u32().is_multiple_of(23) {
                     seq += 1;
                     let t = (rng.range_f32(0.0, 4000.0), rng.range_f32(0.0, 4000.0));
                     cmds.push(cmd(p, seq, k, (rng.next_u32() % SUBTICKS as u32) as u8, t));
@@ -3770,7 +3771,7 @@ mod tests {
         for k in 1..=9000u32 {
             let mut cmds = Vec::new();
             for p in 0..6u8 {
-                if rng.next_u32() % 29 == 0 {
+                if rng.next_u32().is_multiple_of(29) {
                     seq += 1;
                     let t = (rng.range_f32(3000.0, 9000.0), rng.range_f32(900.0, 2100.0));
                     let sub = (rng.next_u32() % SUBTICKS as u32) as u8;
@@ -3837,7 +3838,7 @@ mod tests {
                 cmds.push(attack(11, seq, k, duel_a));
             }
             for p in 0..10u8 {
-                if rng.next_u32() % 17 == 0 {
+                if rng.next_u32().is_multiple_of(17) {
                     seq += 1;
                     let sub = (rng.next_u32() % SUBTICKS as u32) as u8;
                     let t = (rng.range_f32(0.0, 14_800.0), rng.range_f32(0.0, 14_800.0));
