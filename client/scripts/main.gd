@@ -3,7 +3,8 @@ extends Node3D
 ## and draws what it reports. No gameplay decisions are made here (04 §1).
 ##
 ## User args (after `--`): a server address (default 127.0.0.1:7777), `--champion ember|vesper`,
-## and `--shot <file.png>` / `--shot-at <seconds>` for scripted screenshots.
+## `--shot <file.png>` / `--shot-at <seconds>` for scripted screenshots, and the blind playtest
+## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`.
 
 const UNITS_TO_METERS := 0.01           # 1 game unit = 1 cm
 const CAMERA_PITCH_DEG := 56.0          # D13 / R01 §1
@@ -51,6 +52,19 @@ func _ready() -> void:
 		elif args[i] == "--shot" and i + 1 < args.size():
 			_shot_path = args[i + 1]
 			i += 1
+		elif args[i] == "--blind":
+			blind_enabled = true
+			if i + 1 < args.size() and args[i + 1].is_valid_int():
+				blind_seed = int(args[i + 1])
+				i += 1
+		elif args[i] == "--blind-rounds" and i + 1 < args.size():
+			blind_rounds = int(args[i + 1])
+			i += 1
+		elif args[i] == "--blind-seconds" and i + 1 < args.size():
+			blind_seconds = float(args[i + 1])
+			i += 1
+		elif args[i] == "--blind-auto":
+			blind_auto = true
 		elif args[i] == "--champion" and i + 1 < args.size():
 			if not client.set_champion(args[i + 1]):
 				push_error("MFTR: unknown champion %s" % args[i + 1])
@@ -85,6 +99,8 @@ func _update_shot(delta: float) -> void:
 		client.cast(0, own + inward * 800.0 - side * 250.0)
 		client.move_to(own + inward * 600.0 - side * 500.0)
 		_show_click_marker(_to_world(own + inward * 600.0 - side * 500.0), OWN_COLOR)
+	elif _shot_moved and _shot_timer > 1.7 and _shot_timer - delta <= 1.7:
+		client.cast(4, own + side * 400.0)
 	elif _shot_moved and _shot_timer > _shot_at:
 		get_viewport().get_texture().get_image().save_png(_shot_path)
 		print("MFTR: saved screenshot to ", _shot_path)
@@ -162,10 +178,11 @@ func _unshaded(color: Color, alpha := 1.0) -> StandardMaterial3D:
 ## the honest hitbox.
 func _make_champion(color: Color, champion: String) -> Node3D:
 	var body := MeshInstance3D.new()
-	var m := StandardMaterial3D.new()
-	m.albedo_color = color
-	m.rim_enabled = true
-	m.rim = 0.6
+	# Identity color per champion; the team accent is a band at the feet plus the ring.
+	var m := ShaderMaterial.new()
+	m.shader = load("res://shaders/champion.gdshader")
+	m.set_shader_parameter("base_color", Color(0.34, 0.42, 0.36) if champion == "Vesper" else Color(0.62, 0.36, 0.22))
+	m.set_shader_parameter("team_accent", color)
 	if champion == "Vesper":
 		var cyl := CylinderMesh.new()
 		cyl.top_radius = 0.22
@@ -192,7 +209,7 @@ func _make_champion(color: Color, champion: String) -> Node3D:
 		sphere.height = 0.28
 		orb.mesh = sphere
 		orb.position = Vector3(0.45, 0.55, 0)
-		orb.material_override = _unshaded(color.lightened(0.6))
+		orb.material_override = _unshaded(Color(1.0, 0.7, 0.3))
 		body.add_child(orb)
 	body.material_override = m
 	var ring := MeshInstance3D.new()
@@ -240,6 +257,8 @@ func _cursor_ground():
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if blind_panel != null and blind_panel.visible:
+		return  # rating between rounds: the game ignores input
 	if event.is_action_pressed("move"):
 		attack_move_armed = false
 		var p = _cursor_ground()
@@ -274,7 +293,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("toggle_proxies"):
 		proxies_enabled = not proxies_enabled
 		client.set_collision_proxies(proxies_enabled)
-	elif event.is_action_pressed("toggle_net_graph"):
+	elif event.is_action_pressed("toggle_net_graph") and not blind_enabled:
 		show_net_graph = not show_net_graph
 
 
@@ -301,6 +320,8 @@ func _process(delta: float) -> void:
 	var playing := phase == "playing"
 	if playing and not _map_built:
 		_build_map()
+	if playing:
+		_update_blind()
 	own_status = client.own_status() if playing else {}
 	if playing and own_body == null:
 		own_champion = own_status.get("champion", "")
@@ -318,6 +339,7 @@ func _process(delta: float) -> void:
 	_update_areas()
 	_update_bolts()
 	_update_combat_text(delta)
+	_update_fx(delta)
 	_update_click_marker(delta)
 	_update_net_graph()
 	_update_shot(delta)
@@ -408,11 +430,10 @@ var _map_built := false
 func _build_map() -> void:
 	_map_built = true
 	var geo: Dictionary = client.map_geometry()
-	var wall_mat := StandardMaterial3D.new()
-	wall_mat.albedo_color = Color(0.32, 0.30, 0.33)
-	var brush_mat := StandardMaterial3D.new()
-	brush_mat.albedo_color = Color(0.16, 0.42, 0.18, 0.75)
-	brush_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var wall_mat := ShaderMaterial.new()
+	wall_mat.shader = load("res://shaders/wall.gdshader")
+	var brush_mat := ShaderMaterial.new()
+	brush_mat.shader = load("res://shaders/brush.gdshader")
 	for poly in geo.walls:
 		add_child(_extrude(poly, 1.4, wall_mat))
 	for poly in geo.brush:
@@ -514,40 +535,28 @@ var missile_nodes := {}                 # key -> Node3D
 func _make_missile(side: String, radius_u: float, hard_cc: bool) -> Node3D:
 	var root := Node3D.new()
 	var color := _side_color(side)
-	var width := radius_u * 2.0 * UNITS_TO_METERS
-	var sheath := MeshInstance3D.new()
-	sheath.name = "Sheath"
-	var plate := BoxMesh.new()
-	plate.size = Vector3(width * 2.2, 0.02, width)
-	sheath.mesh = plate
-	sheath.position = Vector3(-width * 0.6, 0.06, 0)
-	sheath.material_override = _unshaded(color, 0.35)
-	root.add_child(sheath)
-	var core := MeshInstance3D.new()
-	core.name = "Core"
-	var capsule := CapsuleMesh.new()
-	capsule.radius = width * 0.2
-	capsule.height = width * 1.6
-	core.mesh = capsule
-	core.rotation = Vector3(0, 0, PI / 2.0)
-	core.position = Vector3(0, 0.25, 0)
-	core.material_override = _unshaded(color.lightened(0.5))
-	root.add_child(core)
-	if hard_cc:
-		var accent := MeshInstance3D.new()
-		accent.name = "Accent"
-		var ring := TorusMesh.new()
-		ring.inner_radius = width * 0.42
-		ring.outer_radius = width * 0.5
-		accent.mesh = ring
-		accent.position = Vector3(0, 0.07, 0)
-		accent.material_override = _unshaded(HARD_CC_COLOR, 0.9)
-		root.add_child(accent)
+	var trail_u := clampf(radius_u * 4.0, 100.0, 260.0)
+	var body := MeshInstance3D.new()
+	body.name = "Body"
+	var plane := PlaneMesh.new()
+	plane.size = Vector2((radius_u + trail_u) * UNITS_TO_METERS, radius_u * 2.0 * UNITS_TO_METERS)
+	plane.center_offset = Vector3((radius_u - trail_u) * 0.5 * UNITS_TO_METERS, 0, 0)
+	body.mesh = plane
+	var m := ShaderMaterial.new()
+	m.shader = load("res://shaders/missile.gdshader")
+	m.set_shader_parameter("color", color)
+	m.set_shader_parameter("accent", HARD_CC_COLOR)
+	m.set_shader_parameter("radius", radius_u)
+	m.set_shader_parameter("trail", trail_u)
+	m.set_shader_parameter("hard_cc", 1.0 if hard_cc else 0.0)
+	body.material_override = m
+	body.position = Vector3(0, 0.08, 0)
+	root.add_child(body)
 	var impact := MeshInstance3D.new()
 	impact.name = "Impact"
 	var sphere := SphereMesh.new()
-	sphere.radius = width * 1.2
-	sphere.height = width * 2.4
+	sphere.radius = radius_u * 2.4 * UNITS_TO_METERS
+	sphere.height = radius_u * 4.8 * UNITS_TO_METERS
 	impact.mesh = sphere
 	impact.position = Vector3(0, 0.25, 0)
 	impact.material_override = _unshaded(Color(1.0, 0.95, 0.7), 0.8)
@@ -561,23 +570,24 @@ func _update_missiles() -> void:
 	for m in client.missiles():
 		var key: int = m.key
 		seen[key] = true
+		var world := Vector3(m.pos.x * UNITS_TO_METERS, 0.0, m.pos.y * UNITS_TO_METERS)
 		if not missile_nodes.has(key):
 			var node := _make_missile(m.side, m.radius, m.hard_cc)
 			add_child(node)
 			missile_nodes[key] = node
+			# Spawn streak (03a §7): enemy missiles are on T_input, their caster on T_interp; a
+			# brief smear from the caster's drawn hand to the missile ties the two together.
+			if m.side == "enemy" and remote_bodies.has(m.owner):
+				_spawn_streak(remote_bodies[m.owner].position, world + Vector3(0, 0.3, 0), ENEMY_COLOR)
 		var node: Node3D = missile_nodes[key]
 		var dir: Vector2 = m.dir
-		node.position = Vector3(m.pos.x * UNITS_TO_METERS, 0.0, m.pos.y * UNITS_TO_METERS)
+		node.position = world
 		node.rotation = Vector3(0, -atan2(dir.y, dir.x), 0)
-		node.get_node("Core").visible = not m.impact
-		node.get_node("Sheath").visible = not m.impact
+		node.get_node("Body").visible = not m.impact
 		node.get_node("Impact").visible = m.impact
-		if node.has_node("Accent"):
-			node.get_node("Accent").visible = not m.impact
 		# Predicted to hit someone else first (03a §7): keep it visible, dimmed, until confirmed.
-		var sheath_mat: StandardMaterial3D = node.get_node("Sheath").material_override
-		sheath_mat.albedo_color.a = 0.12 if m.unconfirmed else 0.35
-		node.get_node("Core").transparency = 0.6 if m.unconfirmed else 0.0
+		var mat: ShaderMaterial = node.get_node("Body").material_override
+		mat.set_shader_parameter("dim", 0.35 if m.unconfirmed else 1.0)
 	for key in missile_nodes.keys():
 		if not seen.has(key):
 			missile_nodes[key].queue_free()
@@ -590,26 +600,17 @@ var area_nodes := {}                    # key -> Node3D
 
 
 func _make_area(side: String, radius_u: float) -> Node3D:
-	var root := Node3D.new()
-	var color := _side_color(side)
-	var r := radius_u * UNITS_TO_METERS
-	var edge := MeshInstance3D.new()
-	var torus := TorusMesh.new()
-	torus.outer_radius = r
-	torus.inner_radius = r - 0.06
-	edge.mesh = torus
-	edge.material_override = _unshaded(color, 0.9)
-	root.add_child(edge)
-	var fill := MeshInstance3D.new()
-	fill.name = "Fill"
-	var disk := CylinderMesh.new()
-	disk.top_radius = r
-	disk.bottom_radius = r
-	disk.height = 0.01
-	fill.mesh = disk
-	fill.material_override = _unshaded(color, 0.3)
-	root.add_child(fill)
-	return root
+	var node := MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	var d := radius_u * 2.0 * UNITS_TO_METERS
+	plane.size = Vector2(d, d)
+	node.mesh = plane
+	var m := ShaderMaterial.new()
+	m.shader = load("res://shaders/area.gdshader")
+	m.set_shader_parameter("color", _side_color(side))
+	m.set_shader_parameter("radius", radius_u)
+	node.material_override = m
+	return node
 
 
 func _update_areas() -> void:
@@ -621,12 +622,11 @@ func _update_areas() -> void:
 			var node := _make_area(a.side, a.radius)
 			add_child(node)
 			area_nodes[key] = node
-		var node: Node3D = area_nodes[key]
+		var node: MeshInstance3D = area_nodes[key]
 		node.position = Vector3(a.center.x * UNITS_TO_METERS, 0.03, a.center.y * UNITS_TO_METERS)
-		var fill: MeshInstance3D = node.get_node("Fill")
-		var s: float = 1.0 if a.detonated else maxf(a.progress, 0.02)
-		fill.scale = Vector3(s, 1.0, s)
-		(fill.material_override as StandardMaterial3D).albedo_color.a = 0.75 if a.detonated else 0.3
+		var mat: ShaderMaterial = node.material_override
+		mat.set_shader_parameter("progress", a.progress)
+		mat.set_shader_parameter("detonated", 1.0 if a.detonated else 0.0)
 	for key in area_nodes.keys():
 		if not seen.has(key):
 			area_nodes[key].queue_free()
@@ -696,6 +696,9 @@ func _update_combat_text(delta: float) -> void:
 			if remote_info.has(n.unit) and remote_info[n.unit].minion:
 				continue
 			text = "%s killed %s" % [_name_of(n.killer), victim]
+		elif n.kind == "blinked":
+			_blink_marks(_to_world(n.from), _to_world(n.to))
+			continue
 		elif n.unit == client.own_unit_id():
 			text = "You respawned"
 		if text != "":
@@ -802,6 +805,10 @@ func _draw_ability_bar(font: Font) -> void:
 		overlay.draw_string(font, Vector2(0, overlay.size.y * 0.4), msg, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 36, Color.WHITE)
 	if attack_move_armed:
 		overlay.draw_string(font, Vector2(x0, y0 + 80), "Attack-move: left-click a point", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ENEMY_COLOR)
+	if blind_state == "playing":
+		var left := maxf(blind_seconds - client.blind_elapsed(), 0.0)
+		var txt := "Blind round %d / %d   %d:%02d" % [client.blind_round() + 1, client.blind_rounds(), int(left) / 60, int(left) % 60]
+		overlay.draw_string(font, Vector2(16, 34), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
 
 
 func _update_net_graph() -> void:
@@ -819,3 +826,206 @@ func _update_net_graph() -> void:
 		s.kb_up, s.kb_down, "ON" if proxies_enabled else "OFF",
 		s.enemy_missiles, s.near_misses, s.ghost_hits, s.phantom_hits, s.kills, s.deaths,
 	]
+
+
+## ---- Blind playtest (03 §14) ----------------------------------------------------------------
+## Rounds under hidden network conditions and A/B switches, rated by the tester. The net graph
+## stays hidden; the condition is only written to the results file (`mftr-tools blind-report`).
+
+var blind_enabled := false
+var blind_seed := -1
+var blind_rounds := 10
+var blind_seconds := 60.0
+var blind_auto := false
+var blind_state := ""                   # "intro", "playing", "rating", "done"
+var blind_panel: PanelContainer
+var blind_title: Label
+var blind_body: VBoxContainer
+var blind_fair := -1
+var blind_resp := 0
+var blind_notes: LineEdit
+
+
+func _blind_path() -> String:
+	return OS.get_user_data_dir().path_join("blind_results.tsv")
+
+
+func _update_blind() -> void:
+	if not blind_enabled:
+		return
+	if blind_state == "":
+		show_net_graph = false
+		if blind_seed < 0:
+			blind_seed = int(Time.get_unix_time_from_system()) % 1000000
+		client.blind_begin(blind_seed, blind_rounds)
+		_build_blind_panel()
+		_blind_show("intro")
+	elif blind_state == "playing" and client.blind_elapsed() >= blind_seconds:
+		_blind_show("rating")
+	if blind_auto and blind_state == "intro":
+		_blind_start()
+	elif blind_auto and blind_state == "rating":
+		blind_fair = randi() % 2
+		blind_resp = 1 + randi() % 5
+		blind_notes.text = "auto"
+		_blind_submit()
+
+
+func _build_blind_panel() -> void:
+	blind_panel = PanelContainer.new()
+	blind_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	blind_panel.custom_minimum_size = Vector2(560, 0)
+	var margin := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 20)
+	blind_panel.add_child(margin)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 12)
+	margin.add_child(v)
+	blind_title = Label.new()
+	blind_title.add_theme_font_size_override("font_size", 24)
+	v.add_child(blind_title)
+	blind_body = VBoxContainer.new()
+	blind_body.add_theme_constant_override("separation", 10)
+	v.add_child(blind_body)
+	overlay.get_parent().add_child(blind_panel)
+
+
+func _clear_blind_body() -> void:
+	for c in blind_body.get_children():
+		c.queue_free()
+
+
+func _label(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(520, 0)
+	return l
+
+
+func _choice_row(options: Array, on_pick: Callable) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	var group := ButtonGroup.new()
+	for i in options.size():
+		var b := Button.new()
+		b.text = options[i]
+		b.toggle_mode = true
+		b.button_group = group
+		b.custom_minimum_size = Vector2(80, 36)
+		b.pressed.connect(on_pick.bind(i))
+		row.add_child(b)
+	return row
+
+
+func _blind_show(state: String) -> void:
+	blind_state = state
+	var round: int = client.blind_round()
+	var total: int = client.blind_rounds()
+	_clear_blind_body()
+	blind_panel.visible = state != "playing"
+	if state == "intro":
+		blind_title.text = "Blind playtest — %d rounds of %d s" % [total, int(blind_seconds)]
+		blind_body.add_child(_label("Each round plays under a hidden network condition. Play normally: fight, and dodge every skillshot you can. After each round, say whether dodging felt fair and how responsive your champion felt. There are no right answers."))
+		var start := Button.new()
+		start.text = "Start round 1"
+		start.pressed.connect(_blind_start)
+		blind_body.add_child(start)
+	elif state == "rating":
+		blind_fair = -1
+		blind_resp = 0
+		blind_title.text = "Round %d of %d" % [round + 1, total]
+		blind_body.add_child(_label("When you dodged (or failed to dodge), did the outcome feel fair?"))
+		blind_body.add_child(_choice_row(["Fair", "Unfair"], func(i): blind_fair = 1 - i))
+		blind_body.add_child(_label("How responsive did your champion feel? (1 = sluggish, 5 = instant)"))
+		blind_body.add_child(_choice_row(["1", "2", "3", "4", "5"], func(i): blind_resp = i + 1))
+		blind_notes = LineEdit.new()
+		blind_notes.placeholder_text = "Anything you noticed (optional)"
+		blind_body.add_child(blind_notes)
+		var submit := Button.new()
+		submit.text = "Submit"
+		submit.pressed.connect(_blind_submit)
+		blind_body.add_child(submit)
+	elif state == "done":
+		blind_title.text = "Thank you!"
+		blind_body.add_child(_label("All rounds rated. Results were appended to:\n%s\nSend that file to the developers (it records the hidden conditions)." % _blind_path()))
+		print("MFTR: blind playtest finished, results in ", _blind_path())
+
+
+func _blind_start() -> void:
+	client.blind_start_round()
+	_blind_show("playing")
+
+
+func _blind_submit() -> void:
+	if blind_fair < 0 or blind_resp == 0:
+		return  # both answers are required
+	if not client.blind_rate(blind_fair == 1, blind_resp, blind_notes.text, _blind_path()):
+		push_error("MFTR: %s" % client.last_error())
+	if client.blind_round() < 0:
+		_blind_show("done")
+		if blind_auto:
+			get_tree().quit()
+	else:
+		_blind_start()
+
+
+## ---- Short-lived effects ----------------------------------------------------------------------
+## Spawn streaks and Blink marks. Blink leaves a golden mark at its origin for ~1.5 s, so "where
+## did they blink from" stays readable (R01 §5), and a brief burst where it lands.
+
+var fx := []                            # { node: Node3D, age, life, grow }
+
+
+func _add_fx(node: Node3D, life: float, grow: float) -> void:
+	add_child(node)
+	fx.append({ "node": node, "age": 0.0, "life": life, "grow": grow })
+
+
+func _spawn_streak(from: Vector3, to: Vector3, color: Color) -> void:
+	var v := to - from
+	var length := Vector2(v.x, v.z).length()
+	if length < 0.05:
+		return
+	var streak := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(length, 0.04, 0.12)
+	streak.mesh = box
+	streak.material_override = _unshaded(color.lightened(0.4), 0.7)
+	streak.position = (from + to) * 0.5
+	streak.rotation = Vector3(0, -atan2(v.z, v.x), 0)
+	_add_fx(streak, 0.1, 0.0)
+
+
+func _blink_marks(from: Vector3, to: Vector3) -> void:
+	var origin := MeshInstance3D.new()
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.35
+	ring.outer_radius = 0.5
+	origin.mesh = ring
+	origin.material_override = _unshaded(Color(1.0, 0.85, 0.35), 0.9)
+	origin.position = Vector3(from.x, 0.05, from.z)
+	_add_fx(origin, 1.5, 0.0)
+	var burst := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.4
+	sphere.height = 0.8
+	burst.mesh = sphere
+	burst.material_override = _unshaded(Color(1.0, 0.95, 0.75), 0.8)
+	burst.position = Vector3(to.x, 0.6, to.z)
+	_add_fx(burst, 0.3, 2.5)
+
+
+func _update_fx(delta: float) -> void:
+	for f in fx:
+		f.age += delta
+		var t: float = f.age / f.life
+		var node: MeshInstance3D = f.node
+		var mat: StandardMaterial3D = node.material_override
+		mat.albedo_color.a = clampf(1.0 - t, 0.0, 1.0) * 0.9
+		if f.grow > 0.0:
+			var s: float = 1.0 + f.grow * t
+			node.scale = Vector3(s, s, s)
+		if f.age >= f.life:
+			node.queue_free()
+	fx = fx.filter(func(f): return f.age < f.life)

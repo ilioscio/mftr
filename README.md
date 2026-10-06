@@ -43,6 +43,8 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The server star
 | S | Stop |
 | F1 / F2 | Net graph / client collision proxies (to feel the difference) |
 
+**Blind playtest** (helps us tune netcode against how it *feels*): start the client with `godot --path client -- --blind` (add a server address if it isn't local). You'll play 10 one-minute rounds under hidden network conditions and rate each one. Your answers go to `blind_results.tsv` in Godot's user data folder (the path is shown at the end). Send us that file; `mftr-tools blind-report blind_results.tsv` summarizes it.
+
 No one to duel? Start a sparring bot: `cargo run --release -p mftr-tools -- bot --server 127.0.0.1:7777 --duel --seconds 600`. Other scenarios: `--scenario minions` (minion-block sandbox), `--scenario dodge` (turrets that fire skillshots at you) and `--scenario empty`. To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
 
 Headless tools:
@@ -54,6 +56,7 @@ cargo test --workspace --release
 ```bash
 cargo run --release -p mftr-tools -- netlab --profile all --scenario dodge
 cargo run --release -p mftr-tools -- netlab --profile mid --clients 2 --scenario duel
+cargo run --release -p mftr-tools -- blind-report blind_results.tsv
 ```
 
 ```bash

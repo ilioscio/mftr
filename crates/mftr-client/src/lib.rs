@@ -27,12 +27,13 @@ use mftr_sim::{
 };
 use std::collections::{BTreeMap, VecDeque};
 
+pub mod blind;
 pub mod effects;
 pub mod missiles;
 use effects::EffectBook;
 pub use effects::{AreaRender, BoltRender};
 use missiles::MissileBook;
-pub use missiles::{DodgeStats, MissileRender, Side, Threat};
+pub use missiles::{DodgeStats, MissileRender, OwnMissileDisplay, Side, Threat};
 
 /// Units farther than this from the own champion can't block it within a prediction horizon.
 const PROXY_RANGE: f32 = 600.0;
@@ -141,8 +142,19 @@ pub struct CombatText {
 /// Kills and respawns of units this client knows about.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Notice {
-    Died { unit: UnitId, killer: UnitId },
-    Respawned { unit: UnitId },
+    Died {
+        unit: UnitId,
+        killer: UnitId,
+    },
+    Respawned {
+        unit: UnitId,
+    },
+    /// A blink: own ones from prediction (at once), others' when the server reports them.
+    Blinked {
+        unit: UnitId,
+        from: Vec2,
+        to: Vec2,
+    },
 }
 
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
@@ -237,6 +249,8 @@ pub struct ClientSession {
     unsent_command: bool,
     remote: BTreeMap<UnitId, RemoteTrack>,
     collision_proxies: bool,
+    /// Minions near the own champion drawn blended toward `T_input` (03a §5; A/B in M1).
+    minion_bubble: bool,
     render_offset: Vec2,
     last_update: Option<f64>,
     send: SendTracker,
@@ -249,6 +263,8 @@ pub struct ClientSession {
     effects: EffectBook,
     combat_text: Vec<CombatText>,
     notices: Vec<Notice>,
+    /// Latest own blink already announced (re-simulation replays it).
+    last_own_blink: SimTime,
 }
 
 impl Default for ClientSession {
@@ -286,6 +302,7 @@ impl ClientSession {
             unsent_command: false,
             remote: BTreeMap::new(),
             collision_proxies: true,
+            minion_bubble: true,
             render_offset: Vec2::ZERO,
             last_update: None,
             send: SendTracker::default(),
@@ -297,6 +314,7 @@ impl ClientSession {
             effects: EffectBook::default(),
             combat_text: Vec::new(),
             notices: Vec::new(),
+            last_own_blink: SimTime(0),
         }
     }
 
@@ -530,6 +548,10 @@ impl ClientSession {
                 }
                 SimEvent::AreaSpawned(a) if a.owner == self.unit => self.effects.predict_area(a),
                 SimEvent::AttackLaunched(b) if b.owner == self.unit => self.effects.predict_bolt(b),
+                SimEvent::Blinked { unit, from, to, at } if unit == self.unit && at > self.last_own_blink => {
+                    self.last_own_blink = at;
+                    self.notices.push(Notice::Blinked { unit, from, to });
+                }
                 _ => {}
             }
         }
@@ -657,6 +679,9 @@ impl ClientSession {
                     self.notices.push(Notice::Died { unit, killer });
                 }
                 SimEvent::Respawned { unit, .. } => self.notices.push(Notice::Respawned { unit }),
+                SimEvent::Blinked { unit, from, to, .. } if unit != self.unit => {
+                    self.notices.push(Notice::Blinked { unit, from, to })
+                }
                 _ => {}
             }
         }
@@ -877,6 +902,17 @@ impl ClientSession {
         self.margin_override = margin;
     }
 
+    /// Draw minions near the own champion blended toward `T_input` (only with collision
+    /// proxies on: the blend shows where the proxies are).
+    pub fn set_minion_bubble(&mut self, enabled: bool) {
+        self.minion_bubble = enabled;
+    }
+
+    /// Option A or B for own missiles (D12).
+    pub fn set_own_missile_display(&mut self, display: OwnMissileDisplay) {
+        self.book.own_display = display;
+    }
+
     pub fn set_collision_proxies(&mut self, enabled: bool) {
         self.collision_proxies = enabled;
     }
@@ -894,7 +930,7 @@ impl ClientSession {
             .filter_map(|track| {
                 let interp = interpolate(&track.samples, t_interp)?;
                 let mut pos = interp;
-                if self.collision_proxies && track.latest.kind == UnitKind::Minion {
+                if self.collision_proxies && self.minion_bubble && track.latest.kind == UnitKind::Minion {
                     let w = own.map_or(0.0, |o| smoothstep(BUBBLE_OUTER, BUBBLE_INNER, interp.distance(o)));
                     if w > 0.0 {
                         pos = interp.lerp(track.extrapolate(t_input), w);

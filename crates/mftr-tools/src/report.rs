@@ -373,3 +373,56 @@ impl DuelBot {
         session.move_to(Self::clamp(own + perp * 250.0), now).is_some()
     }
 }
+
+/// Summary of blind playtest rounds (03 §14): ratings per hidden latency profile and per A/B
+/// switch, objective numbers alongside, and the M1 exit verdict (dodging rated fair in ≥ 80%
+/// of rounds at 80 ms).
+pub fn blind_report(records: &[mftr_client::blind::BlindRecord]) -> String {
+    use mftr_client::blind::{EXIT_FAIR_SHARE, EXIT_PROFILE, Tally, exit_verdict, summarize};
+    use std::fmt::Write;
+    let mut out = String::new();
+    let testers: std::collections::BTreeSet<u64> = records.iter().map(|r| r.seed).collect();
+    let _ = writeln!(out, "{} rated rounds from {} session(s)\n", records.len(), testers.len());
+    let (by_profile, by_option, by_bubble) = summarize(records);
+    let row = |out: &mut String, t: &Tally, extra: &str| {
+        let line = format!(
+            "{:<12} {:>6} {:>9.0}% {:>14.2}  {}",
+            t.key,
+            t.rounds,
+            t.fair_share * 100.0,
+            t.responsiveness,
+            extra
+        );
+        let _ = writeln!(out, "{}", line.trim_end());
+    };
+    let _ = writeln!(out, "{:<12} {:>6} {:>10} {:>14}  measured", "condition", "rounds", "fair", "responsive 1-5");
+    for t in &by_profile {
+        let rs: Vec<_> = records.iter().filter(|r| r.profile == t.key).collect();
+        let n = rs.len().max(1) as f64;
+        let rtt = rs.iter().map(|r| r.stats.rtt_ms).sum::<f64>() / n;
+        let near: u64 = rs.iter().map(|r| r.stats.near_misses).sum();
+        let ghost: u64 = rs.iter().map(|r| r.stats.ghost_hits).sum();
+        row(&mut out, t, &format!("rtt {rtt:.0} ms, ghost hits {ghost} of {near} near-misses"));
+    }
+    let _ = writeln!(out);
+    for t in by_option.iter().chain(&by_bubble) {
+        row(&mut out, t, "");
+    }
+    let _ = writeln!(out);
+    match exit_verdict(records) {
+        Some((passed, t)) => {
+            let _ = writeln!(
+                out,
+                "M1 exit (dodging fair in >= {:.0}% of rounds at {EXIT_PROFILE}): {} ({:.0}% of {} rounds)",
+                EXIT_FAIR_SHARE * 100.0,
+                if passed { "PASS" } else { "FAIL" },
+                t.fair_share * 100.0,
+                t.rounds
+            );
+        }
+        None => {
+            let _ = writeln!(out, "M1 exit: no rounds at {EXIT_PROFILE} yet");
+        }
+    }
+    out
+}

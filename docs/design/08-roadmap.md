@@ -131,6 +131,14 @@ Fog audit: 0 leaks. Downstream ~12–14 KB/s per player. The larger corrections 
 
 **Exit check:** the duel is playable end to end in the lab (test `duel_is_playable_end_to_end`: both sides kill, die and respawn, corrections and ghost hits within the 03 §1 targets) and in the Godot client against a second client or `mftr-tools bot --duel`.
 
+### Slice 5 status (2026-10-06): harness built, playtest pending
+
+- **Blind-test harness** (03 §14, D30): `godot --path client -- --blind` runs a session of rounds (default 10 × 60 s) under hidden conditions: extra latency, jitter and loss added on top of the real link (none, 30, 60, 80 or 120 ms profiles), crossed with the A/B switches of 03a §12: own missiles **Option A vs. B** (D12) and the **minion bubble** on/off. Every profile appears with both missile options, in a seeded random order. The net graph is hidden; after each round the tester answers "did dodging feel fair?" and "how responsive (1–5)?". Each answer is appended to `blind_results.tsv` (in Godot's user data folder) with the condition and the client's own measurements for that round (RTT estimate, near-misses, ghost and phantom hits, corrections). `mftr-tools blind-report FILE...` summarizes any number of sessions per profile and per switch, and gives the M1 exit verdict (fair in ≥ 80% of rounds at 80 ms).
+- **Telegraph grammar and D14 VFX** as shaders (all Compatibility-safe): linear skillshots have a rounded leading edge at the true hitbox front, a constant-width body with an always-visible edge sheath, a slim noisy core and a trail that fades *behind* the hitbox only. Hard-CC missiles carry moving chevrons in the shared accent color. Area telegraphs show a crisp outline from cast and a fill that reaches the edge exactly at detonation, then flash. Enemy missiles get a spawn streak from the caster's drawn hand (03a §7). Blink leaves a golden mark at its origin for 1.5 s and a burst where it lands (R01 §5).
+- **Noise-shader art pass**: rock walls (world-space noise, strata, mossy tops), swaying brush, and champions with toon-banded light, rim light, object-space noise detail, a per-champion identity color and a team-accent band at the feet (05 §1, §4). Still no textures.
+
+**Exit (blind playtest run):** needs human testers. Run it with `-- --blind`, collect the `blind_results.tsv` files and summarize them with `mftr-tools blind-report`. The harness itself is verified end to end with `--blind-auto` (automatic answers) against a real server.
+
 ## M2 — ARAM ("a real game")
 **Goal:** the smallest complete MOBA match.
 - The Bridge map: minions, turrets, Gatehouse, Base, health relics.

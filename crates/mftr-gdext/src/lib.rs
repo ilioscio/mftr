@@ -5,7 +5,9 @@
 //! command entry points to GDScript.
 
 use godot::prelude::*;
-use mftr_client::{ClientSession, Notice, Phase, Side};
+use mftr_client::blind::{BlindPlan, BlindRating, BlindRecord, RoundStats, TSV_HEADER};
+use mftr_client::{ClientSession, Notice, OwnMissileDisplay, Phase, Side};
+use mftr_net::conditioner::{LinkProfile, SimLink};
 use mftr_sim::ability::{DamageKind, SLOTS};
 use mftr_sim::{ChampionId, Team, UnitId, UnitKind, Vec2};
 use std::net::UdpSocket;
@@ -28,6 +30,18 @@ pub struct MatchClient {
     next_hello: f64,
     last_error: GString,
     champion_request: Option<ChampionId>,
+    /// Added latency on top of the real network (blind playtests): (up, down) links.
+    links: Option<(SimLink, SimLink)>,
+    blind: Option<BlindSession>,
+}
+
+/// The blind playtest in progress (03 §14): the plan, the current round, and the stats at
+/// the round's start (each round records only its own deltas).
+struct BlindSession {
+    plan: BlindPlan,
+    round: usize,
+    started_at: f64,
+    base: RoundStats,
 }
 
 fn side_name(side: Side) -> &'static str {
@@ -49,6 +63,8 @@ impl INode for MatchClient {
             next_hello: 0.0,
             last_error: GString::new(),
             champion_request: None,
+            links: None,
+            blind: None,
         }
     }
 
@@ -106,6 +122,78 @@ impl MatchClient {
             Phase::Joining => "joining",
             Phase::Playing => "playing",
         })
+    }
+
+    // ---- blind playtests (03 §14) --------------------------------------------------------
+
+    /// Start a blind session of `rounds` hidden conditions from `seed` and apply round 1.
+    #[func]
+    fn blind_begin(&mut self, seed: i64, rounds: i64) {
+        let plan = BlindPlan::new(seed as u64, rounds.clamp(1, 100) as usize);
+        self.blind = Some(BlindSession { plan, round: 0, started_at: 0.0, base: RoundStats::default() });
+        self.blind_apply();
+    }
+
+    /// Current round (0-based), or -1 when no blind session is running or it is finished.
+    #[func]
+    fn blind_round(&self) -> i64 {
+        self.blind.as_ref().filter(|b| b.round < b.plan.conditions.len()).map_or(-1, |b| b.round as i64)
+    }
+
+    #[func]
+    fn blind_rounds(&self) -> i64 {
+        self.blind.as_ref().map_or(0, |b| b.plan.conditions.len() as i64)
+    }
+
+    /// Restart the current round's clock and stats (call when the tester starts playing it).
+    #[func]
+    fn blind_start_round(&mut self) {
+        let (now, base) = (self.now(), self.round_stats());
+        if let Some(b) = self.blind.as_mut() {
+            b.started_at = now;
+            b.base = base;
+        }
+    }
+
+    /// Seconds into the current round.
+    #[func]
+    fn blind_elapsed(&self) -> f64 {
+        self.blind.as_ref().map_or(0.0, |b| self.now() - b.started_at)
+    }
+
+    /// Record the tester's rating of the current round (appending one line to the TSV file at
+    /// `path`, header first if it's new), then apply the next round's hidden condition.
+    /// Returns false if the file couldn't be written.
+    #[func]
+    fn blind_rate(&mut self, fair: bool, responsiveness: i64, notes: GString, path: GString) -> bool {
+        let now = self.now();
+        let stats = self.round_stats();
+        let Some(b) = self.blind.as_mut() else { return false };
+        if b.round >= b.plan.conditions.len() {
+            return false;
+        }
+        let delta = RoundStats {
+            seconds: now - b.started_at,
+            rtt_ms: stats.rtt_ms,
+            near_misses: stats.near_misses - b.base.near_misses,
+            ghost_hits: stats.ghost_hits - b.base.ghost_hits,
+            phantom_hits: stats.phantom_hits - b.base.phantom_hits,
+            corrections_over_15: stats.corrections_over_15 - b.base.corrections_over_15,
+        };
+        let rating = BlindRating {
+            dodge_fair: fair,
+            responsiveness: responsiveness.clamp(1, 5) as u8,
+            notes: notes.to_string(),
+        };
+        let line = BlindRecord::new(&b.plan, b.round, rating, delta).to_tsv();
+        b.round += 1;
+        let path = path.to_string();
+        let ok = append_line(&path, &line).is_ok();
+        if !ok {
+            self.last_error = GString::from(&format!("could not write {path}"));
+        }
+        self.blind_apply();
+        ok
     }
 
     #[func]
@@ -223,7 +311,8 @@ impl MatchClient {
         out
     }
 
-    /// Kills and respawns since the last call: `{ kind: "died"|"respawned", unit, killer }`.
+    /// Kills, respawns and blinks since the last call: `{ kind: "died"|"respawned"|"blinked",
+    /// unit, killer?, from?, to? }`.
     #[func]
     fn take_notices(&mut self) -> VarArray {
         let mut out = VarArray::new();
@@ -239,6 +328,12 @@ impl MatchClient {
                     d.set("kind", "respawned");
                     d.set("unit", unit.0 as i64);
                 }
+                Notice::Blinked { unit, from, to } => {
+                    d.set("kind", "blinked");
+                    d.set("unit", unit.0 as i64);
+                    d.set("from", Vector2::new(from.x, from.y));
+                    d.set("to", Vector2::new(to.x, to.y));
+                }
             }
             out.push(&d.to_variant());
         }
@@ -246,7 +341,7 @@ impl MatchClient {
     }
 
     /// Missiles to draw: `{ key, pos, dir, radius, side: "own"|"ally"|"enemy", impact,
-    /// unconfirmed, hard_cc }`.
+    /// unconfirmed, hard_cc, owner }`.
     #[func]
     fn missiles(&self) -> VarArray {
         let mut out = VarArray::new();
@@ -260,6 +355,7 @@ impl MatchClient {
             d.set("impact", m.impact);
             d.set("unconfirmed", m.unconfirmed);
             d.set("hard_cc", m.hard_cc);
+            d.set("owner", m.owner.0 as i64);
             out.push(&d.to_variant());
         }
         out
@@ -406,16 +502,67 @@ impl MatchClient {
     }
 }
 
+fn append_line(path: &str, line: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let new = std::fs::metadata(path).map_or(true, |m| m.len() == 0);
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+    if new {
+        writeln!(f, "{TSV_HEADER}")?;
+    }
+    writeln!(f, "{line}")
+}
+
 impl MatchClient {
     fn now(&self) -> f64 {
         self.clock.elapsed().as_secs_f64()
     }
 
+    /// Apply the current blind round's hidden condition (or clear it when the session is over).
+    fn blind_apply(&mut self) {
+        let condition = self.blind.as_ref().and_then(|b| b.plan.conditions.get(b.round).copied());
+        let (profile, own, bubble) = match condition {
+            Some(c) => (c.profile, c.own_missiles, c.minion_bubble),
+            None => (LinkProfile::PERFECT, OwnMissileDisplay::default(), true),
+        };
+        self.set_link_profile(profile);
+        self.session.set_own_missile_display(own);
+        self.session.set_minion_bubble(bubble);
+    }
+
+    /// Route packets through simulated links with this profile (none for `perfect`). Packets
+    /// in flight on the old links are dropped, like a short loss burst.
+    fn set_link_profile(&mut self, profile: LinkProfile) {
+        let seed = (self.now() * 1e6) as u64;
+        self.links = (profile != LinkProfile::PERFECT)
+            .then(|| (SimLink::new(profile, seed * 2 + 1), SimLink::new(profile, seed * 2 + 2)));
+    }
+
+    fn round_stats(&self) -> RoundStats {
+        let d = self.session.dodge_stats();
+        RoundStats {
+            seconds: 0.0,
+            rtt_ms: self.session.rtt() * 1e3,
+            near_misses: d.near_misses,
+            ghost_hits: d.ghost_hits,
+            phantom_hits: d.phantom_hits,
+            corrections_over_15: self.session.stats.corrections.iter().filter(|c| **c > 15.0).count() as u64,
+        }
+    }
+
+    /// Send a packet now, or into the simulated uplink.
+    fn transmit(&mut self, packet: Vec<u8>, now: f64) {
+        match (&mut self.links, &self.socket) {
+            (Some((up, _)), _) => up.send(packet, now),
+            (None, Some(s)) => {
+                let _ = s.send(&packet);
+            }
+            _ => {}
+        }
+    }
+
     fn send_input(&mut self, now: f64) {
         let packet = self.session.input_packet(now);
-        if let Some(s) = &self.socket {
-            let _ = s.send(&packet);
-        }
+        self.transmit(packet, now);
     }
 
     /// Drain the socket, advance the session, and send whatever is due.
@@ -436,6 +583,19 @@ impl MatchClient {
             }
         }
         let now = self.now();
+        if let Some((up, down)) = self.links.as_mut() {
+            // Added latency (blind playtests): deliver what is due in both directions. Timing
+            // granularity is one frame.
+            for p in packets.drain(..) {
+                down.send(p, now);
+            }
+            while let Some(p) = down.recv(now) {
+                packets.push(p);
+            }
+            while let Some(p) = up.recv(now) {
+                let _ = socket.send(&p);
+            }
+        }
         for p in packets {
             self.session.handle_packet(&p, now);
         }
@@ -443,9 +603,7 @@ impl MatchClient {
         match self.session.phase() {
             Phase::Connecting if now >= self.next_hello => {
                 let hello = self.session.hello_packet(now);
-                if let Some(s) = &self.socket {
-                    let _ = s.send(&hello);
-                }
+                self.transmit(hello, now);
                 self.next_hello = now + 0.25;
             }
             Phase::Playing if self.session.should_send(now) => self.send_input(now),

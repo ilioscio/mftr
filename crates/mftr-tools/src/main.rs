@@ -4,7 +4,9 @@
 //!                     [--scenario empty|minions|dodge|duel] [--no-proxies] [--reaction S]
 //!   mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]
 //!
-//! Profiles: perfect, lan, good, typical, rough, awful.
+//!   mftr-tools blind-report FILE.tsv...
+//!
+//! Profiles: perfect, lan, good, typical, mid, rough, awful.
 
 use mftr_net::conditioner::LinkProfile;
 use mftr_server::Scenario;
@@ -83,11 +85,20 @@ fn main() {
                 }
             }
         }
+        Some("blind-report") => {
+            let mut records = Vec::new();
+            for path in &args[1..] {
+                let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+                records.extend(text.lines().filter_map(mftr_client::blind::BlindRecord::from_tsv));
+            }
+            print!("{}", mftr_tools::report::blind_report(&records));
+        }
         _ => {
             eprintln!("usage: mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--seed N]");
             eprintln!(
                 "       mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]"
             );
+            eprintln!("       mftr-tools blind-report FILE.tsv...");
             std::process::exit(2);
         }
     }
