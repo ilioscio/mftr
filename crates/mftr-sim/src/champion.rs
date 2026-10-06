@@ -1,14 +1,14 @@
-//! The two placeholder champions of the M1 Duel Sandbox (08 roadmap, slice 4): a skillshot
-//! mage and a marksman. Original working names and kits (09 §1). Each kit has a linear
-//! skillshot, a delayed ground AoE, a dash or blink, and a hard-CC skillshot, plus a ranged
-//! basic attack. All numbers are *(start)* values.
+//! Placeholder champions (original working names and kits, 09 §1): the M1 Duel Sandbox's
+//! skillshot mage and marksman, and M2 slice 4's tank, bruiser, enchanter and assassin, which
+//! bring melee attacks, slows, knock-ups, a pull, ally heals and shields, and targeted dashes.
+//! All numbers are *(start)* values.
 //!
 //! Stats are level-1 values that grow with level (02 §1); ability numbers are rank-1 values that
 //! grow with rank (M2 slice 2). Sandboxes play everything at level 1, rank 1.
 
 use crate::ability::{
-    Ability, BARRIER, BLINK, Blink, Cc, Damage, DamageKind, Dash, DelayedArea, Effect, LineSkillshot, RankScaling,
-    ReactionClass,
+    Ability, BARRIER, BLINK, Blink, Cc, Damage, DamageKind, Dash, DelayedArea, Effect, LineSkillshot, Lunge,
+    RankScaling, ReactionClass, Support,
 };
 use crate::combat::stat_at_level;
 use crate::time::SimDuration;
@@ -19,10 +19,25 @@ pub enum ChampionId {
     Ember = 0,
     /// Marksman.
     Vesper = 1,
+    /// Tank / engage (melee).
+    Bastion = 2,
+    /// Bruiser (melee).
+    Rook = 3,
+    /// Enchanter.
+    Lumen = 4,
+    /// Assassin (melee).
+    Shade = 5,
 }
 
 impl ChampionId {
-    pub const ALL: [ChampionId; 2] = [ChampionId::Ember, ChampionId::Vesper];
+    pub const ALL: [ChampionId; 6] = [
+        ChampionId::Ember,
+        ChampionId::Vesper,
+        ChampionId::Bastion,
+        ChampionId::Rook,
+        ChampionId::Lumen,
+        ChampionId::Shade,
+    ];
 
     pub fn from_u8(v: u8) -> Option<Self> {
         Self::ALL.get(v as usize).copied()
@@ -36,6 +51,10 @@ impl ChampionId {
         match self {
             ChampionId::Ember => &EMBER,
             ChampionId::Vesper => &VESPER,
+            ChampionId::Bastion => &BASTION,
+            ChampionId::Rook => &ROOK,
+            ChampionId::Lumen => &LUMEN,
+            ChampionId::Shade => &SHADE,
         }
     }
 
@@ -202,6 +221,7 @@ pub const EMBER: ChampionDef = ChampionDef {
                 radius: 160.0,
                 delay: ms(850),
                 damage: Damage { kind: DamageKind::Magic, base: 90.0, ad_ratio: 0.0, ap_ratio: 0.7 },
+                cc: Cc::None,
             }),
             reaction: ReactionClass::Burst,
             per_rank: ranks(40.0, 500),
@@ -269,6 +289,7 @@ pub const VESPER: ChampionDef = ChampionDef {
                 radius: 200.0,
                 delay: ms(1000),
                 damage: Damage { kind: DamageKind::Physical, base: 50.0, ad_ratio: 0.8, ap_ratio: 0.0 },
+                cc: Cc::None,
             }),
             reaction: ReactionClass::Burst,
             per_rank: ranks(30.0, 600),
@@ -293,6 +314,244 @@ pub const VESPER: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::HardCc,
             per_rank: ranks(60.0, 3000),
+        },
+    ],
+};
+
+const fn magic(base: f32, ap_ratio: f32) -> Damage {
+    Damage { kind: DamageKind::Magic, base, ad_ratio: 0.0, ap_ratio }
+}
+
+const fn physical(base: f32, ad_ratio: f32) -> Damage {
+    Damage { kind: DamageKind::Physical, base, ad_ratio, ap_ratio: 0.0 }
+}
+
+const fn slow(pct: u8, duration_ms: u64) -> Cc {
+    Cc::Slow { pct, duration: ms(duration_ms) }
+}
+
+const fn stats(health: f32, regen: f32, armor: f32, magic_resist: f32, ad: f32, ap: f32, speed: f32) -> Stats {
+    Stats {
+        max_health: health,
+        health_regen: regen,
+        armor,
+        magic_resist,
+        attack_damage: ad,
+        ability_power: ap,
+        move_speed: speed,
+        ability_haste: 0.0,
+        life_steal: 0.0,
+    }
+}
+
+/// A melee basic attack: lands at the end of the windup.
+const fn melee(range: f32, attack_speed: f32, windup_fraction: f32) -> AttackSpec {
+    AttackSpec { range, attack_speed, windup_fraction, bolt_speed: 0.0 }
+}
+
+/// A self-centered area: `range` 0, no delay after the windup.
+const fn nova(windup_ms: u64, radius: f32, damage: Damage, cc: Cc) -> Effect {
+    Effect::Area(DelayedArea { windup: ms(windup_ms), range: 0.0, radius, delay: ms(0), damage, cc })
+}
+
+const NO_SUPPORT: Support =
+    Support { range: 0.0, heal: 0.0, heal_ap: 0.0, heal_missing: 0.0, shield: 0.0, shield_ap: 0.0, duration: ms(0) };
+
+/// Tank / engage: a pull to start fights, a slowing stomp, a self shield, and a big delayed
+/// knock-up to lock a group down.
+pub const BASTION: ChampionDef = ChampionDef {
+    name: "Bastion",
+    stats: stats(680.0, 1.8, 36.0, 32.0, 62.0, 0.0, 335.0),
+    growth: growth(110.0, 4.8, 1.8, 3.5),
+    attack: melee(150.0, 0.65, 0.3),
+    abilities: [
+        Ability {
+            name: "Grapple",
+            cooldown: ms(14_000),
+            effect: Effect::Line(LineSkillshot {
+                windup: ms(350),
+                speed: 1500.0,
+                radius: 60.0,
+                range: 900.0,
+                damage: magic(80.0, 0.5),
+                cc: Cc::Pull(150),
+            }),
+            reaction: ReactionClass::HardCc,
+            per_rank: ranks(40.0, 1000),
+        },
+        Ability {
+            name: "Bulwark",
+            cooldown: ms(12_000),
+            effect: Effect::Support(Support { shield: 140.0, duration: ms(3000), ..NO_SUPPORT }),
+            reaction: ReactionClass::None,
+            per_rank: ranks(30.0, 1000),
+        },
+        Ability {
+            name: "Tremor",
+            cooldown: ms(8000),
+            effect: nova(250, 300.0, magic(60.0, 0.4), slow(40, 1500)),
+            reaction: ReactionClass::None,
+            per_rank: ranks(30.0, 500),
+        },
+        Ability {
+            name: "Upheaval",
+            cooldown: ms(80_000),
+            effect: Effect::Area(DelayedArea {
+                windup: ms(250),
+                range: 650.0,
+                radius: 250.0,
+                delay: ms(1150),
+                damage: magic(150.0, 0.6),
+                cc: Cc::Knockup(ms(1000)),
+            }),
+            reaction: ReactionClass::HardCc,
+            per_rank: ranks(100.0, 15_000),
+        },
+    ],
+};
+
+/// Bruiser: a cleave, a missing-health heal, a slowing lunge, and a slowing shockwave.
+pub const ROOK: ChampionDef = ChampionDef {
+    name: "Rook",
+    stats: stats(650.0, 1.7, 33.0, 32.0, 68.0, 0.0, 340.0),
+    growth: growth(102.0, 4.5, 1.6, 3.8),
+    attack: melee(175.0, 0.7, 0.28),
+    abilities: [
+        Ability {
+            name: "Cleave",
+            cooldown: ms(6000),
+            effect: nova(200, 275.0, physical(40.0, 1.0), Cc::None),
+            reaction: ReactionClass::None,
+            per_rank: ranks(25.0, 500),
+        },
+        Ability {
+            name: "Second Wind",
+            cooldown: ms(14_000),
+            effect: Effect::Support(Support { heal: 40.0, heal_missing: 0.12, ..NO_SUPPORT }),
+            reaction: ReactionClass::None,
+            per_rank: ranks(20.0, 1000),
+        },
+        Ability {
+            name: "Lunge",
+            cooldown: ms(10_000),
+            effect: Effect::Lunge(Lunge {
+                range: 550.0,
+                speed: 1500.0,
+                damage: physical(50.0, 0.6),
+                cc: slow(30, 1000),
+            }),
+            reaction: ReactionClass::None,
+            per_rank: ranks(30.0, 800),
+        },
+        Ability {
+            name: "Shockwave",
+            cooldown: ms(60_000),
+            effect: Effect::Line(LineSkillshot {
+                windup: ms(450),
+                speed: 1400.0,
+                radius: 90.0,
+                range: 700.0,
+                damage: physical(150.0, 0.8),
+                cc: slow(50, 1500),
+            }),
+            reaction: ReactionClass::Burst,
+            per_rank: ranks(100.0, 10_000),
+        },
+    ],
+};
+
+/// Enchanter: heals and shields allies, a slowing poke, and a delayed rooting halo.
+pub const LUMEN: ChampionDef = ChampionDef {
+    name: "Lumen",
+    stats: stats(560.0, 1.3, 22.0, 30.0, 48.0, 60.0, 330.0),
+    growth: growth(88.0, 4.0, 1.3, 2.6),
+    attack: AttackSpec { range: 550.0, attack_speed: 0.65, windup_fraction: 0.2, bolt_speed: 1500.0 },
+    abilities: [
+        Ability {
+            name: "Mending Light",
+            cooldown: ms(10_000),
+            effect: Effect::Support(Support { range: 700.0, heal: 70.0, heal_ap: 0.35, ..NO_SUPPORT }),
+            reaction: ReactionClass::None,
+            per_rank: ranks(25.0, 800),
+        },
+        Ability {
+            name: "Aegis",
+            cooldown: ms(12_000),
+            effect: Effect::Support(Support {
+                range: 700.0,
+                shield: 80.0,
+                shield_ap: 0.4,
+                duration: ms(2500),
+                ..NO_SUPPORT
+            }),
+            reaction: ReactionClass::None,
+            per_rank: ranks(30.0, 800),
+        },
+        Ability {
+            name: "Lull",
+            cooldown: ms(8000),
+            effect: Effect::Line(LineSkillshot {
+                windup: ms(250),
+                speed: 1600.0,
+                radius: 55.0,
+                range: 900.0,
+                damage: magic(50.0, 0.4),
+                cc: slow(40, 2000),
+            }),
+            reaction: ReactionClass::Poke,
+            per_rank: ranks(30.0, 500),
+        },
+        Ability {
+            name: "Binding Halo",
+            cooldown: ms(70_000),
+            effect: Effect::Area(DelayedArea {
+                windup: ms(250),
+                range: 800.0,
+                radius: 200.0,
+                delay: ms(1000),
+                damage: magic(120.0, 0.5),
+                cc: Cc::Root(ms(1250)),
+            }),
+            reaction: ReactionClass::HardCc,
+            per_rank: ranks(80.0, 10_000),
+        },
+    ],
+};
+
+/// Assassin: a lunge in, a slowing fan of blades, a quick dash out, and a lunging execution.
+pub const SHADE: ChampionDef = ChampionDef {
+    name: "Shade",
+    stats: stats(590.0, 1.5, 28.0, 32.0, 70.0, 0.0, 345.0),
+    growth: growth(95.0, 4.3, 1.5, 3.9),
+    attack: melee(125.0, 0.72, 0.25),
+    abilities: [
+        Ability {
+            name: "Shadow Step",
+            cooldown: ms(9000),
+            effect: Effect::Lunge(Lunge { range: 600.0, speed: 1800.0, damage: physical(60.0, 0.8), cc: Cc::None }),
+            reaction: ReactionClass::None,
+            per_rank: ranks(30.0, 800),
+        },
+        Ability {
+            name: "Fan of Blades",
+            cooldown: ms(7000),
+            effect: nova(150, 275.0, physical(50.0, 0.6), slow(25, 1000)),
+            reaction: ReactionClass::None,
+            per_rank: ranks(25.0, 500),
+        },
+        Ability {
+            name: "Veil Step",
+            cooldown: ms(12_000),
+            effect: Effect::Dash(Dash { range: 400.0, speed: 1400.0 }),
+            reaction: ReactionClass::None,
+            per_rank: ranks(0.0, 1000),
+        },
+        Ability {
+            name: "Execution",
+            cooldown: ms(60_000),
+            effect: Effect::Lunge(Lunge { range: 500.0, speed: 2000.0, damage: physical(150.0, 1.2), cc: Cc::None }),
+            reaction: ReactionClass::None,
+            per_rank: ranks(100.0, 10_000),
         },
     ],
 };
@@ -322,10 +581,30 @@ mod tests {
     fn hard_cc_abilities_are_classed_hard_cc() {
         for c in ChampionId::ALL {
             for a in c.def().abilities {
-                if let Effect::Line(s) = a.effect {
-                    assert_eq!(s.cc.is_hard(), a.reaction == ReactionClass::HardCc, "{}", a.name);
-                }
+                let cc = match a.effect {
+                    Effect::Line(s) => s.cc,
+                    // Self-centered novas are melee-range tools, not skillshots.
+                    Effect::Area(s) if s.range > 0.0 => s.cc,
+                    Effect::Lunge(l) => {
+                        assert!(!l.cc.is_hard(), "{}: point-and-click hard CC isn't dodgeable", a.name);
+                        continue;
+                    }
+                    _ => continue,
+                };
+                assert_eq!(cc.is_hard(), a.reaction == ReactionClass::HardCc, "{}", a.name);
             }
+        }
+    }
+
+    /// M2's six archetypes, each with a distinct kit shape.
+    #[test]
+    fn six_champions_with_unique_names() {
+        let names: std::collections::BTreeSet<&str> =
+            ChampionId::ALL.iter().flat_map(|c| c.def().abilities.map(|a| a.name)).collect();
+        assert_eq!(names.len(), 24);
+        for (i, c) in ChampionId::ALL.into_iter().enumerate() {
+            assert_eq!(ChampionId::from_u8(i as u8), Some(c));
+            assert_eq!(ChampionId::by_name(c.def().name), Some(c));
         }
     }
 

@@ -97,6 +97,11 @@ impl JumpMeter {
         self.offset_sum += visible_correction as f64;
         self.frames += 1;
     }
+
+    /// A frame where fast movement is expected (a dash): the next frame starts fresh.
+    pub fn skip(&mut self) {
+        self.last = None;
+    }
 }
 
 fn percentile(sorted: &[f32], p: f64) -> f32 {
@@ -340,6 +345,61 @@ fn build_path(champion: mftr_sim::ChampionId) -> &'static [u8] {
             HEAVY_PICK,
             LIFELINE_TALISMAN,
         ],
+        mftr_sim::ChampionId::Bastion => &[
+            BOOTS,
+            VITAL_CRYSTAL,
+            PADDED_VEST,
+            CHAIN_COAT,
+            BRAMBLE_PLATE,
+            SWIFT_BOOTS,
+            VITAL_CRYSTAL,
+            TITAN_BELT,
+            VITAL_CRYSTAL,
+            HEARTSTONE,
+            WARDING_CLOAK,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            WARDSTONE_MANTLE,
+        ],
+        mftr_sim::ChampionId::Rook => &[
+            BOOTS,
+            LONG_KNIFE,
+            LEECH_FANG,
+            VITAL_CRYSTAL,
+            TITAN_BELT,
+            HEAVY_PICK,
+            LIFELINE_TALISMAN,
+            QUICK_DAGGER,
+            BATTLE_BOOTS,
+            PADDED_VEST,
+            CHAIN_COAT,
+            VITAL_CRYSTAL,
+            BRAMBLE_PLATE,
+        ],
+        mftr_sim::ChampionId::Lumen => &[
+            BOOTS,
+            CHARGED_WAND,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            INFERNO_DIADEM,
+            SAGE_BOOTS,
+            WARDING_CLOAK,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            WARDSTONE_MANTLE,
+        ],
+        mftr_sim::ChampionId::Shade => &[
+            BOOTS,
+            LONG_KNIFE,
+            LEECH_FANG,
+            HEAVY_PICK,
+            CRIMSON_FANG,
+            SWIFT_BOOTS,
+            HEAVY_PICK,
+            QUICK_DAGGER,
+            ARC_BOW,
+            GALE_SABER,
+        ],
     }
 }
 
@@ -368,6 +428,12 @@ impl DuelBot {
         self.next_shop = elapsed + 0.25;
         let affordable = mftr_sim::items::price(next, &p.items).is_some_and(|(cost, _)| cost <= p.gold);
         affordable && session.buy(next, now).is_some()
+    }
+
+    /// The kit's dash or blink (Q W E R), used to dodge and kite.
+    fn escape_slot(champ: mftr_sim::ChampionId) -> Option<u8> {
+        use mftr_sim::ability::Effect;
+        (0..4u8).find(|s| matches!(champ.ability(*s).map(|a| a.effect), Some(Effect::Dash(_) | Effect::Blink(_))))
     }
 
     fn clamp(session: &ClientSession, p: mftr_sim::Vec2) -> mftr_sim::Vec2 {
@@ -411,10 +477,12 @@ impl DuelBot {
             let perp = Vec2::new(-th.dir.y, th.dir.x);
             let side = if (own - th.pos).dot(perp) >= 0.0 { 1.0 } else { -1.0 };
             let target = Self::clamp(session, own + perp * (300.0 * side));
-            let ready = |slot: usize| st.cooldowns[slot] <= t;
+            let escape = Self::escape_slot(session.champion()).filter(|s| st.cooldowns[*s as usize] <= t);
             self.next_think = elapsed + 0.5;
-            return if ready(2) && self.rng.next_f32() < 0.3 {
-                session.cast(2, target, now).is_some() // dash or blink out of the way
+            return if let Some(slot) = escape
+                && self.rng.next_f32() < 0.3
+            {
+                session.cast(slot, target, now).is_some() // dash or blink out of the way
             } else {
                 session.move_to(target, now).is_some()
             };
@@ -448,24 +516,44 @@ impl DuelBot {
         let d = e.pos.distance(own);
         let to = (e.pos - own).normalize_or_zero();
         let perp = Vec2::new(-to.y, to.x) * if self.rng.next_u32() % 2 == 0 { 1.0 } else { -1.0 };
-        let max_hp = champ.def().stats.max_health;
+        let max_hp = mftr_sim::items::champion_stats(champ.def(), st.progress.level, &st.progress.items).0.max_health;
         if st.health < 0.35 * max_hp && ready(5) {
             return session.cast(5, own, now).is_some();
         }
+        // Heals and shields: on the most hurt ally champion in range, else on itself when hurt.
+        for slot in (0..4u8).filter(|s| ready(*s)) {
+            let Some(Effect::Support(sup)) = champ.ability(slot).map(|a| a.effect) else { continue };
+            let ally = session
+                .remote_render_units(now)
+                .into_iter()
+                .filter(|a| a.team == team && a.kind == mftr_sim::UnitKind::Champion && a.max_health > 0.0)
+                .filter(|a| sup.range > 0.0 && a.pos.distance(own) <= sup.range && a.health < 0.7 * a.max_health)
+                .min_by(|a, b| (a.health / a.max_health).total_cmp(&(b.health / b.max_health)));
+            if let Some(a) = ally {
+                return session.cast(slot, a.pos, now).is_some();
+            }
+            if st.health < 0.6 * max_hp {
+                return session.cast(slot, own, now).is_some();
+            }
+        }
         let r = self.rng.next_f32();
-        // Skillshots and areas the enemy is in range of.
+        // Skillshots, areas, novas and lunges the enemy is in range of.
         let in_range = |slot: u8| match champ.ability(slot).map(|a| a.effect) {
             Some(Effect::Line(s)) => d <= s.range * 0.9,
+            Some(Effect::Area(a)) if a.range == 0.0 => d <= a.radius * 0.8,
             Some(Effect::Area(a)) => d <= a.range,
+            Some(Effect::Lunge(l)) => d <= l.range,
             _ => false,
         };
-        let shots: Vec<u8> = [0u8, 1, 3].into_iter().filter(|s| ready(*s) && in_range(*s)).collect();
+        let shots: Vec<u8> = (0..4u8).filter(|s| ready(*s) && in_range(*s)).collect();
         if !shots.is_empty() && r < 0.45 {
             let slot = shots[self.rng.next_u32() as usize % shots.len()];
             return session.cast(slot, e.pos, now).is_some();
         }
-        if r < 0.52 && ready(2) {
-            return session.cast(2, Self::clamp(session, own + perp * 300.0 - to * 100.0), now).is_some();
+        if r < 0.52
+            && let Some(slot) = Self::escape_slot(champ).filter(|s| ready(*s))
+        {
+            return session.cast(slot, Self::clamp(session, own + perp * 300.0 - to * 100.0), now).is_some();
         }
         if r < 0.53 && ready(4) {
             return session.cast(4, Self::clamp(session, own + to * 400.0), now).is_some();

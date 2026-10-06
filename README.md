@@ -12,7 +12,7 @@ MFTR aims to deliver the thing players love about the best-known lane-based MOBA
 
 ## Status
 
-**M0 (foundations)** is in place: a deterministic Rust simulation, the netcode core (sub-tick commands, own-champion prediction, reconciliation, clock and margin control loops), a dedicated UDP server, a headless Netcode Lab, and a Godot client. **M1 (Duel Sandbox)** is in progress: unit collision, skillshots and the dodge rig, an arena with walls, brush and fog of war, and two placeholder champions you can duel with (slices 1–4). Design docs: start with the [design index](docs/design/README.md). Results so far: [roadmap](docs/design/08-roadmap.md).
+**M0 (foundations)** is in place: a deterministic Rust simulation, the netcode core (sub-tick commands, own-champion prediction, reconciliation, clock and margin control loops), a dedicated UDP server, a headless Netcode Lab, and a Godot client. **M1 (Duel Sandbox)** is in progress: unit collision, skillshots and the dodge rig, an arena with walls, brush and fog of war, and placeholder champions you can duel with (slices 1–4; six since M2). Design docs: start with the [design index](docs/design/README.md). Results so far: [roadmap](docs/design/08-roadmap.md).
 
 ## Build & run
 
@@ -32,7 +32,7 @@ Build the Godot extension (once, and after Rust changes):
 cargo build -p mftr-gdext
 ```
 
-Then open `client/project.godot` in Godot (4.5+) and press Play. The server starts the **Duel Sandbox** by default: blue spawns west, red east, with minion clumps in between. Two placeholder champions: **Ember** (skillshot mage) and **Vesper** (marksman); by default players alternate, or pick one with a user argument: `godot --path client -- --champion vesper`.
+Then open `client/project.godot` in Godot (4.5+) and press Play. The server starts the **Duel Sandbox** by default: blue spawns west, red east, with minion clumps in between. Six placeholder champions: **Ember** (skillshot mage), **Vesper** (marksman), **Bastion** (tank: pull, knock-up), **Rook** (bruiser: cleave, heal, lunge), **Lumen** (enchanter: heals and shields allies) and **Shade** (assassin: lunges). Duels alternate Ember and Vesper and ARAM hands them out in turn; or pick one with a user argument: `godot --path client -- --champion shade`.
 
 | Input | Action |
 |---|---|

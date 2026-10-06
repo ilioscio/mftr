@@ -1,5 +1,5 @@
-//! Abilities (M1 slice 4): the effect shapes the two sandbox kits need, as plain data. The full
-//! data-driven effect system of 04 §4 (RON, D8) grows from these once more shapes exist.
+//! Abilities (M1 slice 4, M2 slice 4): the effect shapes the six kits need, as plain data. The
+//! full data-driven effect system of 04 §4 (RON, D8) grows from these.
 //!
 //! Every dodge-intended ability declares a [`ReactionClass`] and is checked against the D10
 //! reaction budget (03a §8) in tests.
@@ -38,11 +38,20 @@ pub enum Cc {
     Stun(SimDuration),
     /// No moving or dashing; casting, attacking and blinking still work.
     Root(SimDuration),
+    /// Airborne: like a stun (tenacity will not shorten it, 02 §9).
+    Knockup(SimDuration),
+    /// Pulled toward the caster until `0` units from it (center to center), stunned on the way.
+    Pull(u16),
+    /// Slower movement by `pct` percent (the strongest slow applies, 02 §9). Not hard CC.
+    Slow {
+        pct: u8,
+        duration: SimDuration,
+    },
 }
 
 impl Cc {
     pub fn is_hard(self) -> bool {
-        self != Cc::None
+        matches!(self, Cc::Stun(_) | Cc::Root(_) | Cc::Knockup(_) | Cc::Pull(_))
     }
 }
 
@@ -113,6 +122,7 @@ pub struct DelayedArea {
     pub radius: f32,
     pub delay: SimDuration,
     pub damage: Damage,
+    pub cc: Cc,
 }
 
 impl DelayedArea {
@@ -146,13 +156,44 @@ pub struct Shield {
     pub duration: SimDuration,
 }
 
+/// Heal and/or shield the allied champion closest to the cursor (within `range` of the caster and
+/// [`SUPPORT_PICK`] of the cursor), else the caster. `range` 0 = always the caster.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Support {
+    pub range: f32,
+    pub heal: f32,
+    pub heal_ap: f32,
+    /// Share of the target's missing health healed on top.
+    pub heal_missing: f32,
+    pub shield: f32,
+    pub shield_ap: f32,
+    pub duration: SimDuration,
+}
+
+/// How close to the cursor an ally (support effects) or enemy (lunges) must be to be picked.
+pub const SUPPORT_PICK: f32 = 250.0;
+pub const LUNGE_PICK: f32 = 150.0;
+
+/// A dash onto the enemy champion or minion closest to the cursor (within [`LUNGE_PICK`] of it,
+/// in range), ending at its edge with a strike: damage and CC. No valid enemy: no cast.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lunge {
+    pub range: f32,
+    pub speed: f32,
+    pub damage: Damage,
+    pub cc: Cc,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Effect {
     Line(LineSkillshot),
+    /// A delayed ground area; `range` 0 centers it on the caster.
     Area(DelayedArea),
     Dash(Dash),
     Blink(Blink),
     Shield(Shield),
+    Support(Support),
+    Lunge(Lunge),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

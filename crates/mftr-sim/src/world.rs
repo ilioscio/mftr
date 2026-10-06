@@ -17,7 +17,7 @@
 //! hits on others are never predicted (03a §7). Own missiles, areas and bolts are still
 //! announced (id 0) so the client can draw them at once.
 
-use crate::ability::{Ability, Cc, DamageKind, Effect, LineSkillshot, SLOTS, TURRET_SHOT};
+use crate::ability::{Ability, Cc, DamageKind, Effect, LUNGE_PICK, LineSkillshot, SLOTS, SUPPORT_PICK, TURRET_SHOT};
 use crate::champion::{AttackSpec, ChampionId, Stats};
 use crate::collision::{Obstacle, choose_detour, constrained_move};
 use crate::combat::resist_multiplier;
@@ -138,6 +138,8 @@ pub struct DashMove {
     pub to: Vec2,
     pub speed: f32,
     pub end_at: SimTime,
+    /// Lunges: the enemy struck on arrival, and the ability slot that strikes.
+    pub strike: Option<(UnitId, u8)>,
 }
 
 /// A champion's progression (M2): survives death and respawn.
@@ -313,6 +315,9 @@ pub struct UnitState {
     pub dash: Option<DashMove>,
     pub stunned_until: SimTime,
     pub rooted_until: SimTime,
+    /// Movement slow in percent, active until `slowed_until`.
+    pub slow: u8,
+    pub slowed_until: SimTime,
     /// When each slot (Q W E R D F) is off cooldown.
     pub cooldowns: [SimTime; SLOTS],
     pub health: f32,
@@ -339,6 +344,8 @@ impl UnitState {
             dash: None,
             stunned_until: SimTime(0),
             rooted_until: SimTime(0),
+            slow: 0,
+            slowed_until: SimTime(0),
             cooldowns: [SimTime(0); SLOTS],
             health: 0.0,
             shield: 0.0,
@@ -383,6 +390,24 @@ impl UnitState {
         }
     }
 
+    /// Movement speed at `at`, after any slow (then the soft caps and floor, 02 §9).
+    pub fn speed_at(&self, at: SimTime) -> f32 {
+        if self.slow > 0 && self.slowed_until > at {
+            crate::combat::soft_capped_move_speed(self.move_speed * (1.0 - self.slow as f32 / 100.0))
+        } else {
+            self.move_speed
+        }
+    }
+
+    /// Apply a slow: the strongest one applies; an equal one extends it (02 §9).
+    pub fn apply_slow(&mut self, pct: u8, until: SimTime, at: SimTime) {
+        if self.slowed_until <= at || pct > self.slow {
+            (self.slow, self.slowed_until) = (pct, until);
+        } else if pct == self.slow {
+            self.slowed_until = self.slowed_until.max(until);
+        }
+    }
+
     pub fn can_move(&self, at: SimTime) -> bool {
         self.alive()
             && self.cast.is_none()
@@ -421,6 +446,7 @@ impl UnitState {
         obstacles: &[Obstacle],
         map: &Map,
         halt: Option<(Vec2, f32)>,
+        at: SimTime,
     ) -> (f32, f32, f32) {
         if dt <= 0.0 {
             return (0.0, 0.0, 1.0);
@@ -433,7 +459,7 @@ impl UnitState {
         }
         let to = target - self.pos;
         let dist = to.length();
-        let step = self.move_speed * dt;
+        let step = self.speed_at(at) * dt;
         let (mut delta, mut arrives) = if step >= dist { (to, true) } else { (to * (step / dist), false) };
         let mut used = 1.0;
         if let Some((c, reach)) = halt
@@ -558,10 +584,20 @@ impl UnitState {
                 h.write_f32(d.to.y);
                 h.write_f32(d.speed);
                 h.write_u64(d.end_at.0);
+                match d.strike {
+                    None => h.write_u8(0),
+                    Some((id, slot)) => {
+                        h.write_u8(1);
+                        h.write_u32(id.0);
+                        h.write_u8(slot);
+                    }
+                }
             }
         }
         h.write_u64(self.stunned_until.0);
         h.write_u64(self.rooted_until.0);
+        h.write_u8(self.slow);
+        h.write_u64(self.slowed_until.0);
         for c in self.cooldowns {
             h.write_u64(c.0);
         }
@@ -782,6 +818,7 @@ pub struct Area {
     pub kind: DamageKind,
     pub power: f32,
     pub cast_seq: u32,
+    pub cc: Cc,
 }
 
 /// A homing basic-attack bolt: not dodgeable, flies at the target until it lands.
@@ -967,6 +1004,25 @@ enum Fired {
         owner: UnitId,
         target: UnitId,
         power: f32,
+        at: SimTime,
+    },
+    /// A lunge arriving at its target.
+    Strike {
+        owner: UnitId,
+        target: UnitId,
+        power: f32,
+        kind: DamageKind,
+        cc: Cc,
+        at: SimTime,
+    },
+    /// A heal and/or shield on an ally (on the caster itself it applies at once, predicted).
+    Support {
+        owner: UnitId,
+        target: UnitId,
+        heal: f32,
+        heal_missing: f32,
+        shield: f32,
+        until: SimTime,
         at: SimTime,
     },
 }
@@ -1302,7 +1358,8 @@ impl World {
                             aim = pos + to * (travel / len);
                         }
                     }
-                    try_cast(unit, 0, aim, s0, 0, map, events);
+                    let ctx = CastContext { roster: &[], hidden: &[], fired: &mut Vec::new() };
+                    try_cast(unit, 0, aim, s0, 0, map, ctx, events);
                 }
                 _ => {}
             }
@@ -1379,7 +1436,8 @@ impl World {
                 while let Some(c) = mine.get(next_cmd)
                     && SimTime::at(k, c.sub) == t
                 {
-                    apply_command(unit, c, t, map, &rules, events);
+                    let ctx = CastContext { roster: &roster, hidden: &hidden[unit.team as usize], fired: &mut fired };
+                    apply_command(unit, c, t, map, &rules, ctx, events);
                     next_cmd += 1;
                 }
                 if t >= s1 {
@@ -1395,6 +1453,7 @@ impl World {
                     st.dash.map(|d| d.end_at),
                     Some(st.stunned_until),
                     Some(st.rooted_until),
+                    Some(st.slowed_until),
                     halt.map(|_| st.attack_ready_at),
                 ];
                 let mut next = waits.into_iter().flatten().filter(|w| *w > t && *w <= s1).min().unwrap_or(s1);
@@ -1403,7 +1462,7 @@ impl World {
                 if unit.state.dash.is_some() {
                     unit.state.dash_advance(dt, radius, map);
                 } else if unit.state.can_move(t) {
-                    let (d, a, used) = unit.state.advance(dt, radius, &obstacles, map, halt);
+                    let (d, a, used) = unit.state.advance(dt, radius, &obstacles, map, halt, t);
                     desired += d;
                     achieved += a;
                     if used < 1.0 {
@@ -1419,9 +1478,14 @@ impl World {
 
         // Phase 3: effects.
         let mut melee: Vec<(UnitId, UnitId, f32, SimTime)> = Vec::new();
+        let mut direct: Vec<Fired> = Vec::new();
         for f in fired {
             if let Fired::Melee { owner, target, power, at } = f {
                 melee.push((owner, target, power, at));
+                continue;
+            }
+            if matches!(f, Fired::Strike { .. } | Fired::Support { .. }) {
+                direct.push(f);
                 continue;
             }
             let id = if prediction {
@@ -1452,17 +1516,21 @@ impl World {
                         bolts.push(b);
                     }
                 }
-                Fired::Melee { .. } => {}
+                Fired::Melee { .. } | Fired::Strike { .. } | Fired::Support { .. } => {}
             }
         }
         if !prediction {
             let first_event = events.len();
             melee.sort_by_key(|m| (m.3, m.0));
+            let mut landed = Vec::new();
             for (owner, target, power, at) in melee {
                 if let Some(u) = units.iter_mut().find(|u| u.id == target) {
-                    deal_damage(u, owner, power, DamageKind::Physical, at, events);
+                    let dealt = deal_damage(u, owner, power, DamageKind::Physical, at, events);
+                    landed.push((owner, target, dealt, at));
                 }
             }
+            on_hit(units, &landed, events);
+            resolve_direct(units, &mut direct, s1, events);
             resolve_effects(units, missiles, areas, bolts, &start_pos, s0, s1, events);
             let had_winner = game.winner.is_some();
             note_outcomes(units, game, &events[first_event..], s1);
@@ -1659,6 +1727,7 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
                 kind: a.damage.kind,
                 power: a.damage.raw(stats.attack_damage, stats.ability_power) + bonus,
                 cast_seq: c.seq,
+                cc: a.cc,
             })),
             _ => {}
         }
@@ -1699,13 +1768,37 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
     if let Some(d) = unit.state.dash
         && d.end_at == t
     {
+        if let Some((target, slot)) = d.strike
+            && let Some(a) = unit.ability(slot)
+            && let Effect::Lunge(l) = a.effect
+        {
+            let rank = unit.state.progress.ranks.get(slot as usize).copied().unwrap_or(1);
+            let power = l.damage.raw(stats.attack_damage, stats.ability_power) + a.bonus_damage_at(rank);
+            fired.push(Fired::Strike { owner: id, target, power, kind: l.damage.kind, cc: l.cc, at: t });
+        }
         unit.state.dash = None;
         unit.state.detour = None;
         unit.state.route(map);
     }
 }
 
-fn apply_command(unit: &mut Unit, c: &Command, t: SimTime, map: &Map, rules: &Rules, events: &mut Vec<SimEvent>) {
+/// What a cast may look at and create besides the caster: start-of-tick units (targets of
+/// lunges and ally effects), what the caster's team can't see, and effects on others.
+struct CastContext<'a> {
+    roster: &'a [Target],
+    hidden: &'a [UnitId],
+    fired: &'a mut Vec<Fired>,
+}
+
+fn apply_command(
+    unit: &mut Unit,
+    c: &Command,
+    t: SimTime,
+    map: &Map,
+    rules: &Rules,
+    ctx: CastContext,
+    events: &mut Vec<SimEvent>,
+) {
     let st = &mut unit.state;
     match c.kind {
         CommandKind::MoveTo(q) => {
@@ -1731,7 +1824,7 @@ fn apply_command(unit: &mut Unit, c: &Command, t: SimTime, map: &Map, rules: &Ru
             st.cancel_attack(t);
             st.set_order(Order::Idle, map);
         }
-        CommandKind::Cast { slot, target } => try_cast(unit, slot, target.to_vec2(), t, c.seq, map, events),
+        CommandKind::Cast { slot, target } => try_cast(unit, slot, target.to_vec2(), t, c.seq, map, ctx, events),
         CommandKind::LevelUp(slot) => {
             let p = &mut st.progress;
             if p.points > 0
@@ -1802,9 +1895,20 @@ fn shop(unit: &mut Unit, kind: CommandKind, map: &Map, rules: &Rules) {
 
 /// Validate and start a cast at `t` (03 §5: the sim validates everything). Skillshots and
 /// areas wind up (rooted); dashes, blinks and shields take effect at once.
-fn try_cast(unit: &mut Unit, slot: u8, target: Vec2, t: SimTime, seq: u32, map: &Map, events: &mut Vec<SimEvent>) {
+#[allow(clippy::too_many_arguments)]
+fn try_cast(
+    unit: &mut Unit,
+    slot: u8,
+    target: Vec2,
+    t: SimTime,
+    seq: u32,
+    map: &Map,
+    ctx: CastContext,
+    events: &mut Vec<SimEvent>,
+) {
     let Some(ability) = unit.ability(slot) else { return };
-    let (id, radius, haste) = (unit.id, unit.collision_radius, unit.stats.ability_haste);
+    let (id, team, radius, haste) = (unit.id, unit.team, unit.collision_radius, unit.stats.ability_haste);
+    let (stats, gameplay_radius) = (unit.stats, unit.gameplay_radius);
     let st = &mut unit.state;
     if !st.can_cast(t, slot) {
         return;
@@ -1837,9 +1941,90 @@ fn try_cast(unit: &mut Unit, slot: u8, target: Vec2, t: SimTime, seq: u32, map: 
             let dist = len.min(d.range);
             let to = st.pos + dir * dist;
             let end_at = SimTime(t.0 + ((dist / d.speed * SUBTICKS_PER_SECOND as f32).ceil() as u64).max(1));
-            st.dash = Some(DashMove { dir, to, speed: d.speed, end_at });
+            st.dash = Some(DashMove { dir, to, speed: d.speed, end_at, strike: None });
             st.detour = None;
             events.push(SimEvent::Dashed { unit: id, from: st.pos, to, at: t, end_at });
+        }
+        Effect::Lunge(l) => {
+            if st.rooted_until > t {
+                return;
+            }
+            // The visible enemy champion or minion closest to the cursor, in range.
+            let pick = ctx
+                .roster
+                .iter()
+                .filter(|r| {
+                    r.team != team
+                        && matches!(r.kind, UnitKind::Champion | UnitKind::Minion)
+                        && !ctx.hidden.contains(&r.id)
+                        && (r.pos - st.pos).length() <= l.range + r.radius
+                        && (r.pos - target).length() <= LUNGE_PICK + r.radius
+                })
+                .min_by(|a, b| {
+                    (a.pos - target).length_sq().total_cmp(&(b.pos - target).length_sq()).then(a.id.cmp(&b.id))
+                });
+            let Some(victim) = pick else { return };
+            st.cancel_attack(t);
+            let to_victim = victim.pos - st.pos;
+            let dir = to_victim.normalize_or_zero();
+            let dist = (to_victim.length() - victim.radius - gameplay_radius * 0.5).max(0.0);
+            let to = st.pos + dir * dist;
+            let end_at = SimTime(t.0 + ((dist / l.speed * SUBTICKS_PER_SECOND as f32).ceil() as u64).max(1));
+            st.dash = Some(DashMove { dir, to, speed: l.speed, end_at, strike: Some((victim.id, slot)) });
+            st.detour = None;
+            events.push(SimEvent::Dashed { unit: id, from: st.pos, to, at: t, end_at });
+        }
+        Effect::Support(sup) => {
+            let rank = st.progress.ranks.get(slot as usize).copied().unwrap_or(1);
+            let bonus = ability.bonus_damage_at(rank);
+            let ally = if sup.range > 0.0 {
+                ctx.roster
+                    .iter()
+                    .filter(|r| {
+                        r.team == team
+                            && r.id != id
+                            && r.kind == UnitKind::Champion
+                            && (r.pos - st.pos).length() <= sup.range + r.radius
+                            && (r.pos - target).length() <= SUPPORT_PICK + r.radius
+                    })
+                    .min_by(|a, b| {
+                        (a.pos - target).length_sq().total_cmp(&(b.pos - target).length_sq()).then(a.id.cmp(&b.id))
+                    })
+            } else {
+                None
+            };
+            let heal = if sup.heal > 0.0 || sup.heal_missing > 0.0 {
+                sup.heal + sup.heal_ap * stats.ability_power + if sup.shield > 0.0 { 0.0 } else { bonus }
+            } else {
+                0.0
+            };
+            let shield = if sup.shield > 0.0 { sup.shield + sup.shield_ap * stats.ability_power + bonus } else { 0.0 };
+            let until = t.plus(sup.duration);
+            match ally {
+                Some(a) => ctx.fired.push(Fired::Support {
+                    owner: id,
+                    target: a.id,
+                    heal,
+                    heal_missing: sup.heal_missing,
+                    shield,
+                    until,
+                    at: t,
+                }),
+                None => {
+                    // On the caster itself: at once, so prediction shows it.
+                    let max = stats.max_health;
+                    let amount = (heal + sup.heal_missing * (max - st.health)).min(max - st.health);
+                    if amount > 0.0 {
+                        st.health += amount;
+                        events.push(SimEvent::Healed { unit: id, amount, at: t });
+                    }
+                    if shield > 0.0 {
+                        st.shield = if st.shield_until > t { st.shield + shield } else { shield };
+                        st.shield_until = st.shield_until.max(until);
+                        events.push(SimEvent::Shielded { unit: id, amount: shield, at: t, until: st.shield_until });
+                    }
+                }
+            }
         }
         Effect::Blink(b) => {
             if dir == Vec2::ZERO {
@@ -1905,6 +2090,8 @@ fn resolve_effects(
             (u.id, u.team, u.gameplay_radius, start, u.state.pos)
         })
         .collect();
+    let positions: Vec<(UnitId, Vec2)> = units.iter().map(|u| (u.id, u.state.pos)).collect();
+    let pos_of = |id: UnitId| positions.iter().find(|(i, _)| *i == id).map(|(_, p)| *p);
     missiles.retain(|m| {
         let a = m.spawn_at.max(s0);
         let b = m.end_at().min(s1);
@@ -1919,16 +2106,9 @@ fn resolve_effects(
         let hit = hits.into_iter().find(|(_, id)| units.iter().any(|u| u.id == *id && u.targetable()));
         if let Some((at, target)) = hit {
             events.push(SimEvent::MissileHit { id: m.id, target, at });
+            let from = pos_of(m.owner).unwrap_or(m.origin);
             if let Some(u) = units.iter_mut().find(|u| u.id == target) {
-                match m.spec.cc {
-                    Cc::None => {}
-                    Cc::Stun(d) => {
-                        u.state.stunned_until = u.state.stunned_until.max(at.plus(d));
-                        u.state.cast = None; // hard CC interrupts casts and attacks
-                        u.state.attack = None;
-                    }
-                    Cc::Root(d) => u.state.rooted_until = u.state.rooted_until.max(at.plus(d)),
-                }
+                apply_cc(u, m.spec.cc, at, from, s1, events);
                 deal_damage(u, m.owner, m.power, m.spec.damage.kind, at, events);
             }
             return false;
@@ -1949,6 +2129,7 @@ fn resolve_effects(
             let reach = a.radius + r;
             if team != a.team && (q0.lerp(q1, frac) - a.center).length_sq() <= reach * reach {
                 if let Some(u) = units.iter_mut().find(|u| u.id == id) {
+                    apply_cc(u, a.cc, a.detonate_at, a.center, s1, events);
                     deal_damage(u, a.owner, a.power, a.kind, a.detonate_at, events);
                 }
             }
@@ -2002,6 +2183,87 @@ fn on_hit(units: &mut [Unit], landed: &[(UnitId, UnitId, f32, SimTime)], events:
         }
     }
 }
+
+/// Crowd control on `u` at `at` (`from`: where a pull drags it toward). Forced movement starts
+/// with the next tick (`s1`): units only move during phase 2.
+fn apply_cc(u: &mut Unit, cc: Cc, at: SimTime, from: Vec2, s1: SimTime, events: &mut Vec<SimEvent>) {
+    if !u.targetable() {
+        return;
+    }
+    let st = &mut u.state;
+    let hard_stop = |st: &mut UnitState, until: SimTime| {
+        st.stunned_until = st.stunned_until.max(until);
+        st.cast = None; // hard CC interrupts casts and attacks
+        st.attack = None;
+    };
+    match cc {
+        Cc::None => {}
+        Cc::Stun(d) | Cc::Knockup(d) => hard_stop(st, at.plus(d)),
+        Cc::Root(d) => st.rooted_until = st.rooted_until.max(at.plus(d)),
+        Cc::Slow { pct, duration } => st.apply_slow(pct, at.plus(duration), at),
+        Cc::Pull(stop) => {
+            // Dragged (a forced dash, ignoring units) to `stop` units from the puller.
+            let away = st.pos - from;
+            let len = away.length();
+            if len <= stop as f32 || u.kind.is_structure() {
+                return;
+            }
+            let dir = away * (1.0 / len);
+            let to = from + dir * stop as f32;
+            let dist = len - stop as f32;
+            let end_at = SimTime(s1.0 + ((dist / PULL_SPEED * SUBTICKS_PER_SECOND as f32).ceil() as u64).max(1));
+            st.dash = Some(DashMove { dir: -dir, to, speed: PULL_SPEED, end_at, strike: None });
+            st.detour = None;
+            hard_stop(st, end_at);
+            events.push(SimEvent::Dashed { unit: u.id, from: st.pos, to, at, end_at });
+        }
+    }
+}
+
+/// How fast a pull drags its target.
+pub const PULL_SPEED: f32 = 1800.0;
+
+/// Lunge strikes and ally heals/shields, in time order (server only).
+fn resolve_direct(units: &mut [Unit], direct: &mut [Fired], s1: SimTime, events: &mut Vec<SimEvent>) {
+    let at_of = |f: &Fired| match f {
+        Fired::Strike { at, owner, .. } | Fired::Support { at, owner, .. } => (*at, *owner),
+        _ => (SimTime(0), UnitId(0)),
+    };
+    direct.sort_by_key(at_of);
+    for f in direct.iter() {
+        match *f {
+            Fired::Strike { owner, target, power, kind, cc, at } => {
+                let from = units.iter().find(|u| u.id == owner).map(|u| (u.state.pos, u.gameplay_radius));
+                if let (Some((p, r)), Some(u)) = (from, units.iter_mut().find(|u| u.id == target)) {
+                    // Still within reach on arrival (it may have dashed or blinked away).
+                    if (u.state.pos - p).length() <= r + u.gameplay_radius + STRIKE_SLACK {
+                        apply_cc(u, cc, at, p, s1, events);
+                        deal_damage(u, owner, power, kind, at, events);
+                    }
+                }
+            }
+            Fired::Support { target, heal, heal_missing, shield, until, at, .. } => {
+                let Some(u) = units.iter_mut().find(|u| u.id == target && u.state.alive()) else { continue };
+                let max = u.stats.max_health;
+                let st = &mut u.state;
+                let amount = (heal + heal_missing * (max - st.health)).min(max - st.health);
+                if amount > 0.0 {
+                    st.health += amount;
+                    events.push(SimEvent::Healed { unit: target, amount, at });
+                }
+                if shield > 0.0 {
+                    st.shield = if st.shield_until > at { st.shield + shield } else { shield };
+                    st.shield_until = st.shield_until.max(until);
+                    events.push(SimEvent::Shielded { unit: target, amount: shield, at, until: st.shield_until });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A lunge still connects if its target moved up to this far away during the dash.
+pub const STRIKE_SLACK: f32 = 100.0;
 
 /// The damage pipeline (02 §5), M1 subset: resistance mitigation, shields, health, death.
 /// Returns the damage dealt (shields included).
@@ -2545,6 +2807,143 @@ mod tests {
         assert!((e.health - (600.0 - 140.0 * 100.0 / 130.0)).abs() < 1.5, "{} (plus regen)", e.health);
     }
 
+    /// M2 slice 4: a pull drags its target to the puller, stunned until it arrives.
+    #[test]
+    fn grapple_pulls_its_target_in() {
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Bastion, Vec2::new(1000.0, 1000.0));
+        let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Vesper, Vec2::new(1700.0, 1000.0));
+        w.step(&[cast_slot(0, 1, 1, 0, 0, (1700.0, 1000.0))]);
+        let ev = run_until_quiet(&mut w, 60);
+        assert!(ev.iter().any(|e| matches!(e, SimEvent::MissileHit { target, .. } if *target == enemy)));
+        let (e, b) = (w.unit(enemy).unwrap().state, w.unit(me).unwrap().state);
+        assert!((e.pos.distance(b.pos) - 150.0).abs() < 1.0, "pulled to 150 u: {:?} {:?}", e.pos, b.pos);
+        let dashed = ev.iter().find_map(|e| match e {
+            SimEvent::Dashed { unit, end_at, .. } if *unit == enemy => Some(*end_at),
+            _ => None,
+        });
+        assert_eq!(e.stunned_until, dashed.expect("a forced dash"), "stunned for the trip");
+    }
+
+    /// Delayed knock-up area: everyone inside at detonation is airborne (stunned) for 1 s.
+    #[test]
+    fn upheaval_knocks_up_everyone_inside() {
+        let mut w = World::new(1);
+        w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Bastion, Vec2::new(1000.0, 1000.0));
+        let a = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, Vec2::new(1500.0, 1000.0));
+        let b = w.spawn_champion(PlayerId(2), Team::Red, ChampionId::Ember, Vec2::new(1500.0, 1200.0));
+        let out = w.spawn_champion(PlayerId(3), Team::Red, ChampionId::Ember, Vec2::new(1500.0, 1700.0));
+        w.step(&[cast_slot(0, 1, 1, 0, 3, (1500.0, 1100.0))]);
+        let ev = run_until_quiet(&mut w, 50);
+        let at = ev
+            .iter()
+            .find_map(|e| match e {
+                SimEvent::AreaDetonated { at, .. } => Some(*at),
+                _ => None,
+            })
+            .unwrap();
+        for id in [a, b] {
+            assert_eq!(w.unit(id).unwrap().state.stunned_until, at.plus(SimDuration::from_millis(1000)));
+        }
+        assert_eq!(w.unit(out).unwrap().state.stunned_until, SimTime(0));
+    }
+
+    /// Slows: the target walks 40% slower until the slow ends, then at full speed again.
+    #[test]
+    fn lull_slows_its_target() {
+        let mut w = World::new(1);
+        w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Lumen, Vec2::new(1000.0, 1000.0));
+        let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, Vec2::new(1600.0, 1000.0));
+        w.step(&[cast_slot(0, 1, 1, 0, 2, (1600.0, 1000.0))]);
+        run_until_quiet(&mut w, 20);
+        let st = w.unit(enemy).unwrap().state;
+        assert_eq!(st.slow, 40);
+        let now = SimTime::end_of(w.tick());
+        assert!(st.slowed_until > now);
+        // 325 × 0.6 = 195, under the 220 soft cap: 195 × 0.5 + 110 (02 §9).
+        assert_eq!(st.speed_at(now), 207.5);
+        // Walk while slowed, then after it ends.
+        let x0 = st.pos.x;
+        w.step(&[cmd(1, 1, w.tick().0 + 1, 0, (1600.0, 3000.0))]);
+        run_until_quiet(&mut w, 29);
+        let moved = w.unit(enemy).unwrap().state.pos.y - 1000.0;
+        assert!((moved - 207.5).abs() < 2.0, "one second at 207.5 u/s: {moved}");
+        assert_eq!(w.unit(enemy).unwrap().state.pos.x, x0);
+        assert_eq!(w.unit(enemy).unwrap().state.speed_at(st.slowed_until), 325.0);
+    }
+
+    /// Ally effects pick the allied champion closest to the cursor, else the caster.
+    #[test]
+    fn support_heals_and_shields_the_ally_near_the_cursor() {
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Lumen, Vec2::new(1000.0, 1000.0));
+        let ally = w.spawn_champion(PlayerId(1), Team::Blue, ChampionId::Vesper, Vec2::new(1500.0, 1000.0));
+        w.unit_mut(ally).unwrap().state.health = 300.0;
+        w.unit_mut(me).unwrap().state.health = 300.0;
+        w.step(&[cast_slot(0, 1, 1, 0, 0, (1520.0, 1050.0)), cast_slot(0, 2, 1, 1, 1, (1500.0, 1000.0))]);
+        let ev = w.take_events();
+        // 70 + 0.35 × 60 AP = 91 heal; 80 + 0.4 × 60 = 104 shield.
+        assert!(ev.iter().any(
+            |e| matches!(e, SimEvent::Healed { unit, amount, .. } if *unit == ally && (*amount - 91.0).abs() < 1e-3)
+        ));
+        assert!(ev.iter().any(
+            |e| matches!(e, SimEvent::Shielded { unit, amount, .. } if *unit == ally && (*amount - 104.0).abs() < 1e-3)
+        ));
+        // Cursor far from any ally: the caster.
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Rook, Vec2::new(1000.0, 1000.0));
+        w.unit_mut(me).unwrap().state.health = 250.0;
+        w.step(&[cast_slot(0, 1, 1, 0, 1, (3000.0, 3000.0))]);
+        // Second Wind: 40 + 12% of the 400 missing.
+        let healed = w.take_events().iter().find_map(|e| match e {
+            SimEvent::Healed { unit, amount, .. } if *unit == me => Some(*amount),
+            _ => None,
+        });
+        assert!((healed.unwrap() - 88.0).abs() < 1e-3, "{healed:?}");
+    }
+
+    /// Lunges dash to the enemy nearest the cursor and strike on arrival; with no enemy there
+    /// the cast does nothing (no cooldown).
+    #[test]
+    fn lunges_strike_on_arrival_and_need_a_target() {
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Shade, Vec2::new(1000.0, 1000.0));
+        let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, Vec2::new(1500.0, 1000.0));
+        w.step(&[cast_slot(0, 1, 1, 0, 0, (1200.0, 1500.0))]);
+        assert_eq!(w.unit(me).unwrap().state.cooldowns[0], SimTime(0), "no enemy near the cursor");
+        w.step(&[cast_slot(0, 2, 2, 0, 0, (1550.0, 1050.0))]);
+        assert!(w.unit(me).unwrap().state.dash.is_some_and(|d| d.strike == Some((enemy, 0))));
+        let ev = run_until_quiet(&mut w, 15);
+        // 60 + 0.8 × 70 AD = 116 physical into 22 armor.
+        let hit = damage_to(&ev, enemy);
+        assert_eq!(hit.len(), 1, "{hit:?}");
+        assert!((hit[0].1 - 116.0 * 100.0 / 122.0).abs() < 1e-3, "{hit:?}");
+        let gap = w.unit(me).unwrap().state.pos.distance(Vec2::new(1500.0, 1000.0));
+        assert!(gap < 65.0 + 65.0, "ends at the target's edge: {gap}");
+    }
+
+    /// Melee champions hit at the end of their windup; novas hit everything around them.
+    #[test]
+    fn melee_attacks_and_novas() {
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Rook, Vec2::new(1000.0, 1000.0));
+        let a = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, Vec2::new(1200.0, 1000.0));
+        let b = w.spawn_champion(PlayerId(2), Team::Red, ChampionId::Ember, Vec2::new(1000.0, 1250.0));
+        w.step(&[attack(0, 1, 1, a)]);
+        let ev = run_until_quiet(&mut w, 30);
+        let hits = damage_to(&ev, a);
+        assert!(!hits.is_empty() && hits.iter().all(|(_, d)| (d - 68.0 * 100.0 / 122.0).abs() < 1e-3), "{hits:?}");
+        assert!(w.bolts.is_empty(), "melee: no bolts");
+        let k = w.tick().0 + 1;
+        w.step(&[cast_slot(0, 2, k, 0, 0, (1000.0, 1000.0))]);
+        let ev = run_until_quiet(&mut w, 10);
+        // Cleave: 40 + 1.0 × 68 AD = 108 to both, around Rook.
+        for id in [a, b] {
+            assert!(damage_to(&ev, id).iter().any(|(_, d)| (d - 108.0 * 100.0 / 122.0).abs() < 1e-3), "{id:?}");
+        }
+        assert!(w.unit(me).unwrap().state.alive());
+    }
+
     #[test]
     fn walking_out_in_time_dodges_and_too_late_is_hit() {
         for (react_tick, expect_hit) in [(6u32, false), (20u32, true)] {
@@ -2825,8 +3224,9 @@ mod tests {
         assert!(SimTime::end_of(w.tick()) >= respawn_at);
     }
 
-    /// Prediction stays bit-exact for a champion using its whole kit (skillshots, areas, dash,
-    /// blink, shield) and attacking units it only knows as proxies.
+    /// Prediction stays bit-exact for every champion using its whole kit (skillshots, areas,
+    /// novas, dashes, lunges, blinks, heals and shields on itself or an ally) and attacking units
+    /// it only knows as proxies.
     #[test]
     fn prediction_matches_through_the_whole_kit_and_attacks() {
         for champ in ChampionId::ALL {
@@ -2835,6 +3235,8 @@ mod tests {
             for i in 0..4 {
                 full.spawn_minion(MinionKind::Siege, Team::Red, Vec2::new(1300.0 + 350.0 * i as f32, 3100.0), None);
             }
+            // An ally for heals and shields to pick (M2 slice 4).
+            full.spawn_champion(PlayerId(1), Team::Blue, ChampionId::Vesper, Vec2::new(1500.0, 3450.0));
             let mut rng = Pcg32::new(4, 4);
             for k in 1..=2400u32 {
                 let mut c = Vec::new();
@@ -2845,8 +3247,12 @@ mod tests {
                     c.push(match r {
                         0..=3 => cmd(0, k, k, sub, t),
                         4 | 5 => {
-                            let targets: Vec<UnitId> =
-                                full.units().iter().filter(|u| u.team == Team::Red).map(|u| u.id).collect();
+                            let targets: Vec<UnitId> = full
+                                .units()
+                                .iter()
+                                .filter(|u| u.team == Team::Red && u.state.alive())
+                                .map(|u| u.id)
+                                .collect();
                             let mut a = attack(0, k, k, targets[(rng.next_u32() as usize) % targets.len()]);
                             a.sub = SubTick::new(sub);
                             a
@@ -3334,7 +3740,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0x5bab_9cc6_febc_de8b;
+    const GOLDEN_HASH_ARENA: u64 = 0x24df_bc72_e447_8dab;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -3342,14 +3748,15 @@ mod tests {
     fn golden_state_hash_bridge() {
         let mut w = bridge_world();
         w.set_rules(Rules::ARAM);
-        for p in 0..4u8 {
+        // 3v3 with all six champions: every effect shape is part of the canary.
+        for p in 0..6u8 {
             let team = if p % 2 == 0 { Team::Blue } else { Team::Red };
             let home = w.map().layout.champion_spawn[team as usize];
             w.spawn_champion(
                 PlayerId(p),
                 team,
-                ChampionId::ALL[p as usize % 2],
-                home + Vec2::new(0.0, 80.0 * p as f32),
+                ChampionId::ALL[p as usize],
+                home + Vec2::new(0.0, 60.0 * p as f32 - 150.0),
             );
         }
         let mut rng = Pcg32::new(31, 3);
@@ -3357,7 +3764,7 @@ mod tests {
         let mut died = 0;
         for k in 1..=9000u32 {
             let mut cmds = Vec::new();
-            for p in 0..4u8 {
+            for p in 0..6u8 {
                 if rng.next_u32() % 29 == 0 {
                     seq += 1;
                     let t = (rng.range_f32(3000.0, 9000.0), rng.range_f32(900.0, 2100.0));
@@ -3389,7 +3796,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0xd1ec_f29e_23bd_88c6;
+    const GOLDEN_HASH_BRIDGE: u64 = 0xc45b_2247_8a7a_b03c;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -3460,5 +3867,5 @@ mod tests {
 
     /// Recorded on x86_64-unknown-linux-gnu (debug and release agree). CI checks Linux, macOS
     /// (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x8ca6_19c3_d4eb_3d77;
+    const GOLDEN_HASH: u64 = 0x40a9_70ea_3885_e507;
 }

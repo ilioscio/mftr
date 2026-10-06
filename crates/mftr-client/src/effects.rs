@@ -33,6 +33,8 @@ pub struct AreaRender {
     pub progress: f32,
     /// Showing the detonation flash.
     pub detonated: bool,
+    /// Stuns, roots, knocks up or pulls (drawn with the hard-CC accent).
+    pub hard_cc: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -127,7 +129,15 @@ impl EffectBook {
                 return;
             }
             let progress = ((at - s) / (d - s).max(1.0)).min(1.0) as f32;
-            out.push(AreaRender { key, side, center: a.center, radius: a.radius, progress, detonated: at >= d });
+            out.push(AreaRender {
+                key,
+                side,
+                center: a.center,
+                radius: a.radius,
+                progress,
+                detonated: at >= d,
+                hard_cc: a.cc.is_hard(),
+            });
         };
         for (seq, a) in &self.predicted_areas {
             push(u32::MAX - seq, a, Side::Own);

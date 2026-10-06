@@ -26,7 +26,7 @@ pub const STATIC: u8 = 1; // kind, team, radii, champion: only when a unit is ne
 pub const POS: u8 = 2;
 pub const MOTION: u8 = 4; // heading target and speed
 pub const VITALS: u8 = 8; // health, max health, shield, level
-pub const FLAGS: u8 = 16; // casting, attacking, stunned, rooted, dashing, protected
+pub const FLAGS: u8 = 16; // casting, attacking, stunned, rooted, dashing, protected, slowed
 pub const ALL: u8 = STATIC | POS | MOTION | VITALS | FLAGS;
 
 /// One unit in a delta snapshot: `mask` says which groups of `unit` are meaningful.
@@ -53,8 +53,8 @@ pub fn coast(base: &RemoteUnit, ticks: u32) -> QPoint {
     QPoint::from_vec2(p + to * (step / len))
 }
 
-fn flags(u: &RemoteUnit) -> [bool; 6] {
-    [u.casting, u.attacking, u.stunned, u.rooted, u.dashing, u.protected]
+fn flags(u: &RemoteUnit) -> [bool; 7] {
+    [u.casting, u.attacking, u.stunned, u.rooted, u.dashing, u.protected, u.slowed]
 }
 
 /// The update to send for `current`, given the client's `base` record `ticks` ago, and the
@@ -114,7 +114,7 @@ pub fn apply(base: Option<&RemoteUnit>, update: Option<&UnitUpdate>, ticks: u32)
         (r.health, r.max_health, r.shield, r.level) = (n.health, n.max_health, n.shield, n.level);
     }
     if u.mask & FLAGS != 0 {
-        [r.casting, r.attacking, r.stunned, r.rooted, r.dashing, r.protected] = flags(n);
+        [r.casting, r.attacking, r.stunned, r.rooted, r.dashing, r.protected, r.slowed] = flags(n);
     }
     r.id = n.id;
     Some(r)
@@ -171,6 +171,7 @@ mod tests {
             stunned: false,
             rooted: false,
             dashing: false,
+            slowed: false,
         }
     }
 

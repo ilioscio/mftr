@@ -346,6 +346,7 @@ impl MatchClient {
             d.set("side", side_name(a.side));
             d.set("progress", a.progress);
             d.set("detonated", a.detonated);
+            d.set("hard_cc", a.hard_cc);
             out.push(&d.to_variant());
         }
         out
@@ -538,6 +539,7 @@ impl MatchClient {
             d.set("casting", s.cast.is_some());
             d.set("attacking", s.attack.is_some());
             d.set("dashing", s.dash.is_some());
+            d.set("slowed", s.slow > 0 && s.slowed_until > t);
             let mut cds = VarArray::new();
             for c in s.cooldowns {
                 cds.push(&c.secs_since(t).to_variant());
@@ -601,6 +603,7 @@ impl MatchClient {
             d.set("attacking", u.attacking);
             d.set("rooted", u.rooted);
             d.set("dashing", u.dashing);
+            d.set("slowed", u.slowed);
             d.set("stunned", u.stunned);
             if let Some((p, dir)) = u.windup {
                 d.set("windup", p);

@@ -185,41 +185,103 @@ func _unshaded(color: Color, alpha := 1.0) -> StandardMaterial3D:
 ## Placeholder champions with distinct silhouettes (05 §1): Ember is a capsule with a floating
 ## orb, Vesper a slimmer column with a pointed hood. The ground ring is the gameplay radius,
 ## the honest hitbox.
+## Placeholder silhouettes: each champion gets an identity color and a shape that reads at
+## gameplay zoom (05 §2: silhouette first). Real models come later.
+const CHAMPION_COLORS := {
+	"Ember": Color(0.62, 0.36, 0.22),
+	"Vesper": Color(0.34, 0.42, 0.36),
+	"Bastion": Color(0.45, 0.5, 0.58),
+	"Rook": Color(0.55, 0.3, 0.27),
+	"Lumen": Color(0.86, 0.82, 0.62),
+	"Shade": Color(0.32, 0.24, 0.42),
+}
+
+
+func _part(parent: Node3D, mesh: Mesh, pos: Vector3, mat: Material, rot := Vector3.ZERO) -> MeshInstance3D:
+	var n := MeshInstance3D.new()
+	n.mesh = mesh
+	n.position = pos
+	n.rotation_degrees = rot
+	n.material_override = mat
+	parent.add_child(n)
+	return n
+
+
 func _make_champion(color: Color, champion: String) -> Node3D:
 	var body := MeshInstance3D.new()
 	# Identity color per champion; the team accent is a band at the feet plus the ring.
 	var m := ShaderMaterial.new()
 	m.shader = load("res://shaders/champion.gdshader")
-	m.set_shader_parameter("base_color", Color(0.34, 0.42, 0.36) if champion == "Vesper" else Color(0.62, 0.36, 0.22))
+	m.set_shader_parameter("base_color", CHAMPION_COLORS.get(champion, Color(0.5, 0.5, 0.5)))
 	m.set_shader_parameter("team_accent", color)
-	if champion == "Vesper":
-		var cyl := CylinderMesh.new()
-		cyl.top_radius = 0.22
-		cyl.bottom_radius = 0.3
-		cyl.height = 1.5
-		body.mesh = cyl
-		var hood := MeshInstance3D.new()
-		var cone := CylinderMesh.new()
-		cone.top_radius = 0.0
-		cone.bottom_radius = 0.28
-		cone.height = 0.45
-		hood.mesh = cone
-		hood.position = Vector3(0, 0.95, 0)
-		hood.material_override = m
-		body.add_child(hood)
-	else:
-		var capsule := CapsuleMesh.new()
-		capsule.radius = CHAMPION_RADIUS_U * UNITS_TO_METERS * 0.6
-		capsule.height = 1.7
-		body.mesh = capsule
-		var orb := MeshInstance3D.new()
-		var sphere := SphereMesh.new()
-		sphere.radius = 0.14
-		sphere.height = 0.28
-		orb.mesh = sphere
-		orb.position = Vector3(0.45, 0.55, 0)
-		orb.material_override = _unshaded(Color(1.0, 0.7, 0.3))
-		body.add_child(orb)
+	match champion:
+		"Vesper":
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 0.22
+			cyl.bottom_radius = 0.3
+			cyl.height = 1.5
+			body.mesh = cyl
+			var cone := CylinderMesh.new()
+			cone.top_radius = 0.0
+			cone.bottom_radius = 0.28
+			cone.height = 0.45
+			_part(body, cone, Vector3(0, 0.95, 0), m)
+		"Bastion":
+			# Broad and blocky, with shoulder slabs: the tank reads as a wall.
+			var box := BoxMesh.new()
+			box.size = Vector3(0.95, 1.45, 0.7)
+			body.mesh = box
+			var slab := BoxMesh.new()
+			slab.size = Vector3(0.4, 0.22, 0.8)
+			_part(body, slab, Vector3(-0.62, 0.62, 0), m)
+			_part(body, slab, Vector3(0.62, 0.62, 0), m)
+		"Rook":
+			# Stocky capsule with a big hammer head over the shoulder.
+			var cap := CapsuleMesh.new()
+			cap.radius = 0.46
+			cap.height = 1.55
+			body.mesh = cap
+			var haft := CylinderMesh.new()
+			haft.top_radius = 0.04
+			haft.bottom_radius = 0.04
+			haft.height = 1.3
+			_part(body, haft, Vector3(0.5, 0.35, 0), _unshaded(Color(0.35, 0.25, 0.18)), Vector3(0, 0, -25))
+			var head := BoxMesh.new()
+			head.size = Vector3(0.42, 0.28, 0.28)
+			_part(body, head, Vector3(0.78, 0.92, 0), m, Vector3(0, 0, -25))
+		"Lumen":
+			# Slender, with a glowing halo.
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 0.16
+			cyl.bottom_radius = 0.34
+			cyl.height = 1.55
+			body.mesh = cyl
+			var halo := TorusMesh.new()
+			halo.inner_radius = 0.22
+			halo.outer_radius = 0.28
+			_part(body, halo, Vector3(0, 1.0, 0), _unshaded(Color(1.0, 0.95, 0.65)))
+		"Shade":
+			# A sharp three-sided blade of a body with two forward blades.
+			var prism := CylinderMesh.new()
+			prism.top_radius = 0.05
+			prism.bottom_radius = 0.38
+			prism.height = 1.65
+			prism.radial_segments = 3
+			body.mesh = prism
+			var blade := BoxMesh.new()
+			blade.size = Vector3(0.06, 0.06, 0.6)
+			var steel := _unshaded(Color(0.8, 0.82, 0.9))
+			_part(body, blade, Vector3(0.32, 0.0, 0.25), steel, Vector3(0, -15, 0))
+			_part(body, blade, Vector3(-0.32, 0.0, 0.25), steel, Vector3(0, 15, 0))
+		_:
+			var capsule := CapsuleMesh.new()
+			capsule.radius = CHAMPION_RADIUS_U * UNITS_TO_METERS * 0.6
+			capsule.height = 1.7
+			body.mesh = capsule
+			var sphere := SphereMesh.new()
+			sphere.radius = 0.14
+			sphere.height = 0.28
+			_part(body, sphere, Vector3(0.45, 0.55, 0), _unshaded(Color(1.0, 0.7, 0.3)))
 	body.material_override = m
 	var ring := MeshInstance3D.new()
 	var torus := TorusMesh.new()
@@ -232,6 +294,7 @@ func _make_champion(color: Color, champion: String) -> Node3D:
 	body.add_child(_make_shield_bubble())
 	body.add_child(_make_stun_indicator())
 	body.add_child(_make_root_indicator())
+	body.add_child(_make_slow_indicator())
 	return body
 
 
@@ -349,7 +412,7 @@ func _process(delta: float) -> void:
 		var own := _to_world(client.own_position())
 		own_body.position = own
 		_place_camera(own)
-		_show_statuses(own_body, own_status.get("stunned", false), own_status.get("rooted", false), own_status.get("shield", 0.0))
+		_show_statuses(own_body, own_status.get("stunned", false), own_status.get("rooted", false), own_status.get("shield", 0.0), own_status.get("slowed", false))
 	_update_remotes()
 	_update_missiles()
 	_update_areas()
@@ -370,10 +433,11 @@ func _place_camera(target: Vector3) -> void:
 	camera.look_at(look, Vector3.UP)
 
 
-func _show_statuses(body: Node3D, stunned: bool, rooted: bool, shield: float) -> void:
+func _show_statuses(body: Node3D, stunned: bool, rooted: bool, shield: float, slowed := false) -> void:
 	body.get_node("Stun").visible = stunned
 	body.get_node("Root").visible = rooted
 	body.get_node("Shield").visible = shield > 0.0
+	body.get_node("Slow").visible = slowed
 
 
 var remote_info := {}                   # unit_id -> latest dictionary (for bars and numbers)
@@ -406,6 +470,8 @@ func _update_remotes() -> void:
 				b.add_child(_make_stun_indicator())
 				b.add_child(_make_root_indicator())
 				b.add_child(_make_shield_bubble())
+			if not b.has_node("Slow"):
+				b.add_child(_make_slow_indicator())
 			add_child(b)
 			remote_bodies[id] = b
 		var body: Node3D = remote_bodies[id]
@@ -420,7 +486,7 @@ func _update_remotes() -> void:
 		if body.has_node("Protected"):
 			body.get_node("Protected").visible = u.protected
 		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO))
-		_show_statuses(body, u.stunned, u.rooted, u.shield)
+		_show_statuses(body, u.stunned, u.rooted, u.shield, u.get("slowed", false))
 	for id in remote_bodies.keys():
 		if not seen.has(id):
 			remote_bodies[id].queue_free()
@@ -665,6 +731,22 @@ func _make_stun_indicator() -> MeshInstance3D:
 
 
 ## Root: a tight ring at the feet in the hard-CC accent color.
+## Slowed: a cold blue ring of chevrons at the feet (not hard CC, so not gold).
+func _make_slow_indicator() -> MeshInstance3D:
+	var ring := MeshInstance3D.new()
+	ring.name = "Slow"
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.5
+	torus.outer_radius = 0.56
+	torus.rings = 6
+	torus.ring_segments = 6
+	ring.mesh = torus
+	ring.position = Vector3(0, -0.78, 0)
+	ring.material_override = _unshaded(Color(0.45, 0.75, 1.0), 0.8)
+	ring.visible = false
+	return ring
+
+
 func _make_root_indicator() -> MeshInstance3D:
 	var ring := MeshInstance3D.new()
 	ring.name = "Root"
@@ -756,7 +838,7 @@ func _update_missiles() -> void:
 var area_nodes := {}                    # key -> Node3D
 
 
-func _make_area(side: String, radius_u: float) -> Node3D:
+func _make_area(side: String, radius_u: float, hard_cc: bool) -> Node3D:
 	var node := MeshInstance3D.new()
 	var plane := PlaneMesh.new()
 	var d := radius_u * 2.0 * UNITS_TO_METERS
@@ -766,6 +848,8 @@ func _make_area(side: String, radius_u: float) -> Node3D:
 	m.shader = load("res://shaders/area.gdshader")
 	m.set_shader_parameter("color", _side_color(side))
 	m.set_shader_parameter("radius", radius_u)
+	m.set_shader_parameter("rim_color", HARD_CC_COLOR)
+	m.set_shader_parameter("hard_cc", 1.0 if hard_cc else 0.0)
 	node.material_override = m
 	return node
 
@@ -776,7 +860,7 @@ func _update_areas() -> void:
 		var key: int = a.key
 		seen[key] = true
 		if not area_nodes.has(key):
-			var node := _make_area(a.side, a.radius)
+			var node := _make_area(a.side, a.radius, a.get("hard_cc", false))
 			add_child(node)
 			area_nodes[key] = node
 		var node: MeshInstance3D = area_nodes[key]

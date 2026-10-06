@@ -353,9 +353,13 @@ impl ServerCore {
         let used: Vec<u8> = self.conns.values().map(|c| c.player.0).collect();
         let player = PlayerId((0..=u8::MAX).find(|p| !used.contains(p)).unwrap());
         let team = if player.0 % 2 == 0 || self.cfg.scenario == Scenario::DodgeRig { Team::Blue } else { Team::Red };
-        // Without a preference, alternate: the first duel is mage vs. marksman.
-        let champion =
-            champion.unwrap_or(ChampionId::ALL[((player.0 / 2) as usize % 2) ^ (team == Team::Red) as usize]);
+        // Without a preference: in ARAM, each of the six in turn (all-random comes with the
+        // lobby); elsewhere alternate, so the first duel is mage vs. marksman.
+        let champion = champion.unwrap_or(if self.cfg.scenario == Scenario::Aram {
+            ChampionId::ALL[player.0 as usize % ChampionId::ALL.len()]
+        } else {
+            ChampionId::ALL[((player.0 / 2) as usize % 2) ^ (team == Team::Red) as usize]
+        });
         let (lo, hi) = (self.cfg.arena_min, self.cfg.arena_max);
         // A random spot with nothing within 150 u (deterministic: the world RNG).
         let mut pos = Vec2::ZERO;
@@ -442,7 +446,7 @@ impl ServerCore {
                     team: u.team,
                     pos: QPoint::from_vec2(st.pos),
                     target: st.heading().map(QPoint::from_vec2),
-                    speed: st.move_speed.round().clamp(0.0, 1023.0) as u16,
+                    speed: st.speed_at(s1).round().clamp(0.0, 1023.0) as u16,
                     collision_radius: u.collision_radius.round().clamp(0.0, 255.0) as u8,
                     gameplay_radius: u.gameplay_radius.round().clamp(0.0, 255.0) as u8,
                     protected: u.protected,
@@ -456,6 +460,7 @@ impl ServerCore {
                     stunned: st.stunned_until > s1,
                     rooted: st.rooted_until > s1,
                     dashing: st.dash.is_some(),
+                    slowed: st.slow > 0 && st.slowed_until > s1,
                 };
                 (u.id, u.state, remote)
             })

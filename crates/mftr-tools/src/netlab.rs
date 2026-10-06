@@ -167,8 +167,13 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                         let p = c.session.input_packet(local);
                         c.up.send(p, t);
                     }
-                    if let Some(pos) = c.session.own_render_position(local) {
-                        c.jumps.observe(pos, c.session.visible_correction(), frame_dt, CHAMPION_MOVE_SPEED);
+                    // Dashes, lunges, pulls and death legitimately move faster than walking.
+                    let walking = c.session.own_state_now().is_some_and(|s| s.alive() && s.dash.is_none());
+                    match c.session.own_render_position(local) {
+                        Some(pos) if walking => {
+                            c.jumps.observe(pos, c.session.visible_correction(), frame_dt, CHAMPION_MOVE_SPEED)
+                        }
+                        _ => c.jumps.skip(),
                     }
                 }
             }

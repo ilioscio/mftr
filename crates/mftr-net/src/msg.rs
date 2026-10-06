@@ -96,6 +96,7 @@ pub struct RemoteUnit {
     pub stunned: bool,
     pub rooted: bool,
     pub dashing: bool,
+    pub slowed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -292,6 +293,45 @@ fn read_damage_kind(r: &mut BitReader) -> Result<DamageKind, DecodeError> {
     })
 }
 
+fn write_cc(w: &mut BitWriter, cc: Cc) {
+    match cc {
+        Cc::None => w.write(0, 3),
+        Cc::Stun(d) => {
+            w.write(1, 3);
+            write_duration(w, d);
+        }
+        Cc::Root(d) => {
+            w.write(2, 3);
+            write_duration(w, d);
+        }
+        Cc::Knockup(d) => {
+            w.write(3, 3);
+            write_duration(w, d);
+        }
+        Cc::Pull(stop) => {
+            w.write(4, 3);
+            w.write_u16(stop);
+        }
+        Cc::Slow { pct, duration } => {
+            w.write(5, 3);
+            w.write(pct as u64, 7);
+            write_duration(w, duration);
+        }
+    }
+}
+
+fn read_cc(r: &mut BitReader) -> Result<Cc, DecodeError> {
+    Ok(match r.read(3)? {
+        0 => Cc::None,
+        1 => Cc::Stun(read_duration(r)?),
+        2 => Cc::Root(read_duration(r)?),
+        3 => Cc::Knockup(read_duration(r)?),
+        4 => Cc::Pull(r.read_u16()?),
+        5 => Cc::Slow { pct: r.read(7)? as u8, duration: read_duration(r)? },
+        _ => return Err(DecodeError::Invalid("cc kind")),
+    })
+}
+
 fn write_line_spec(w: &mut BitWriter, s: &LineSkillshot) {
     write_duration(w, s.windup);
     w.write_f32(s.speed);
@@ -301,17 +341,7 @@ fn write_line_spec(w: &mut BitWriter, s: &LineSkillshot) {
     w.write_f32(s.damage.base);
     w.write_f32(s.damage.ad_ratio);
     w.write_f32(s.damage.ap_ratio);
-    match s.cc {
-        Cc::None => w.write(0, 2),
-        Cc::Stun(d) => {
-            w.write(1, 2);
-            write_duration(w, d);
-        }
-        Cc::Root(d) => {
-            w.write(2, 2);
-            write_duration(w, d);
-        }
-    }
+    write_cc(w, s.cc);
 }
 
 fn read_line_spec(r: &mut BitReader) -> Result<LineSkillshot, DecodeError> {
@@ -322,12 +352,7 @@ fn read_line_spec(r: &mut BitReader) -> Result<LineSkillshot, DecodeError> {
     }
     let kind = read_damage_kind(r)?;
     let damage = Damage { kind, base: read_finite(r)?, ad_ratio: read_finite(r)?, ap_ratio: read_finite(r)? };
-    let cc = match r.read(2)? {
-        0 => Cc::None,
-        1 => Cc::Stun(read_duration(r)?),
-        2 => Cc::Root(read_duration(r)?),
-        _ => return Err(DecodeError::Invalid("cc kind")),
-    };
+    let cc = read_cc(r)?;
     Ok(LineSkillshot { windup, speed, radius, range, damage, cc })
 }
 
@@ -378,6 +403,7 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             write_damage_kind(w, a.kind);
             w.write_f32(a.power);
             w.write_u32(a.cast_seq);
+            write_cc(w, a.cc);
         }
         SimEvent::AreaDetonated { id, at } => {
             w.write(5, 5);
@@ -505,6 +531,7 @@ fn read_event(r: &mut BitReader) -> Result<SimEvent, DecodeError> {
             kind: read_damage_kind(r)?,
             power: read_finite(r)?,
             cast_seq: r.read_u32()?,
+            cc: read_cc(r)?,
         }),
         5 => SimEvent::AreaDetonated { id: r.read_u32()?, at: read_time(r)? },
         6 => SimEvent::AttackLaunched(Bolt {
@@ -608,9 +635,16 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
         write_vec2(w, d.to);
         w.write_f32(d.speed);
         write_time(w, d.end_at);
+        w.write_bool(d.strike.is_some());
+        if let Some((id, slot)) = d.strike {
+            w.write_u32(id.0);
+            w.write(slot as u64, 3);
+        }
     }
     write_time(w, s.stunned_until);
     write_time(w, s.rooted_until);
+    w.write(s.slow as u64, 7);
+    write_time(w, s.slowed_until);
     for c in s.cooldowns {
         write_time(w, c);
     }
@@ -674,12 +708,16 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     };
     let attack_ready_at = read_time(r)?;
     let dash = if r.read_bool()? {
-        Some(DashMove { dir: read_vec2(r)?, to: read_vec2(r)?, speed: read_finite(r)?, end_at: read_time(r)? })
+        let (dir, to, speed, end_at) = (read_vec2(r)?, read_vec2(r)?, read_finite(r)?, read_time(r)?);
+        let strike = if r.read_bool()? { Some((UnitId(r.read_u32()?), r.read(3)? as u8)) } else { None };
+        Some(DashMove { dir, to, speed, end_at, strike })
     } else {
         None
     };
     let stunned_until = read_time(r)?;
     let rooted_until = read_time(r)?;
+    let slow = r.read(7)? as u8;
+    let slowed_until = read_time(r)?;
     let mut cooldowns = [SimTime(0); SLOTS];
     for c in cooldowns.iter_mut() {
         *c = read_time(r)?;
@@ -727,6 +765,8 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         dash,
         stunned_until,
         rooted_until,
+        slow,
+        slowed_until,
         cooldowns,
         health,
         shield,
@@ -775,7 +815,7 @@ fn write_update(w: &mut BitWriter, u: &UnitUpdate) {
         w.write(o.level as u64, 5);
     }
     if u.mask & delta::FLAGS != 0 {
-        for f in [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected] {
+        for f in [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected, o.slowed] {
             w.write_bool(f);
         }
     }
@@ -806,6 +846,7 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         stunned: false,
         rooted: false,
         dashing: false,
+        slowed: false,
     };
     if mask & delta::STATIC != 0 {
         o.kind = UnitKind::from_wire(r.read(3)? as u8).ok_or(DecodeError::Invalid("unit kind"))?;
@@ -826,11 +867,11 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         o.level = r.read(5)? as u8;
     }
     if mask & delta::FLAGS != 0 {
-        let mut f = [false; 6];
+        let mut f = [false; 7];
         for b in f.iter_mut() {
             *b = r.read_bool()?;
         }
-        [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected] = f;
+        [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected, o.slowed] = f;
     }
     Ok(UnitUpdate { mask, unit: o })
 }
@@ -1159,9 +1200,12 @@ mod tests {
                 to: Vec2::new(5.0, 330.0),
                 speed: 1000.0,
                 end_at: SimTime(124_100),
+                strike: Some((UnitId(23), 2)),
             }),
             stunned_until: SimTime(99_999),
             rooted_until: SimTime(99_998),
+            slow: 40,
+            slowed_until: SimTime(99_997),
             cooldowns: [1, 2, 3, 4, 5, 600_000].map(SimTime),
             health: 412.333_3,
             shield: 77.7,
@@ -1185,6 +1229,40 @@ mod tests {
                 undo_len: 2,
             },
         }
+    }
+
+    /// Every skillshot spec and CC kind of the six kits survives the wire exactly.
+    #[test]
+    fn every_kit_spec_and_cc_round_trips() {
+        use mftr_sim::ability::Effect;
+        let mut ccs = vec![Cc::None, Cc::Pull(150), Cc::Slow { pct: 100, duration: SimDuration::from_millis(1) }];
+        let mut w = BitWriter::new();
+        let mut specs = Vec::new();
+        for c in ChampionId::ALL {
+            for a in c.def().abilities {
+                match a.effect {
+                    Effect::Line(s) => {
+                        write_line_spec(&mut w, &s);
+                        specs.push(s);
+                    }
+                    Effect::Area(s) => ccs.push(s.cc),
+                    Effect::Lunge(l) => ccs.push(l.cc),
+                    _ => {}
+                }
+            }
+        }
+        for cc in &ccs {
+            write_cc(&mut w, *cc);
+        }
+        let bytes = w.finish();
+        let mut r = BitReader::new(&bytes);
+        for s in &specs {
+            assert_eq!(read_line_spec(&mut r).unwrap(), *s);
+        }
+        for cc in &ccs {
+            assert_eq!(read_cc(&mut r).unwrap(), *cc);
+        }
+        assert!(specs.len() >= 7 && ccs.len() >= 10);
     }
 
     #[test]
@@ -1216,6 +1294,7 @@ mod tests {
             kind: DamageKind::Magic,
             power: 146.0,
             cast_seq: 42,
+            cc: Cc::Knockup(SimDuration::from_millis(1000)),
         };
         let bolt = Bolt {
             id: 12,
@@ -1249,6 +1328,7 @@ mod tests {
             stunned: true,
             rooted: false,
             dashing: true,
+            slowed: true,
         };
         let events = vec![
             SimEvent::CastStarted {

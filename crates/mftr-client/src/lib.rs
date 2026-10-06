@@ -124,6 +124,7 @@ pub struct RemoteRender {
     pub stunned: bool,
     pub rooted: bool,
     pub dashing: bool,
+    pub slowed: bool,
     /// A structure that can't be hurt yet.
     pub protected: bool,
 }
@@ -1066,6 +1067,7 @@ impl ClientSession {
                     stunned: l.stunned,
                     rooted: l.rooted,
                     dashing: l.dashing,
+                    slowed: l.slowed,
                     protected: l.protected,
                 })
             })

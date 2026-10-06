@@ -224,6 +224,31 @@ A lossy-link lab test (120 ms, 2% loss) checks every reconstructed snapshot agai
 
 **Netcode Lab, ARAM 3v3, 5 min:** bots hold 2–4 items each, with 0 ghost hits, 0 fog leaks and 0 hard resets on every profile. Corrections are in line with the previous build.
 
+### M2 slice 4 status (2026-10-06): ✅ done
+
+Four more placeholder champions (original kits, D36), so all six M2 archetypes exist:
+
+| Champion | Role | Q | W | E | R |
+|---|---|---|---|---|---|
+| **Bastion** | Tank / engage (melee) | Grapple: pulling skillshot | Bulwark: self shield | Tremor: slowing nova | Upheaval: delayed knock-up area |
+| **Rook** | Bruiser (melee) | Cleave: nova | Second Wind: missing-health heal | Lunge: slowing targeted dash | Shockwave: slowing skillshot |
+| **Lumen** | Enchanter | Mending Light: ally heal | Aegis: ally shield | Lull: slowing skillshot | Binding Halo: delayed root area |
+| **Shade** | Assassin (melee) | Shadow Step: lunge | Fan of Blades: slowing nova | Veil Step: dash | Execution: lunge |
+
+- **New shapes:** slows, knock-ups, pulls (forced movement), self-centered novas, area CC, ally heals and shields, and lunges (targeted dashes that strike on arrival). Melee champions reuse the minions' melee hits, now with on-hit items and life steal.
+- **Rules:** point-and-click effects never carry hard CC (test-enforced), so every stun, root, knock-up and pull can be dodged. All hard-CC skillshots and areas pass the D10 reaction budget.
+- Protocol v11: every CC kind on the wire, area CC, lunge strikes in the own state, slows in the own state and as a flag on others, and others' speed sent after slows (so coasting stays exact).
+- Godot client: distinct silhouettes for all six, a cold-blue slow ring, gold rims on hard-CC areas. ARAM hands out the six in turn; bots use heals, shields, novas and lunges and have a build path each.
+
+**Tests:**
+- One test per new shape: pull distance and stun, knock-up area, slow speed and expiry, ally and self support targeting, lunge strike and no-target refusal, melee hits and novas.
+- The D10 linter and the hard-CC classification check cover all six kits.
+- Prediction stays bit-exact through every kit, including heals and shields on an ally.
+- Every spec and CC kind round-trips the wire.
+- The Bridge golden hash now runs a 3v3 with all six.
+
+**Netcode Lab, ARAM 3v3 with all six, 5 min:** 0 ghost hits, 0 fog leaks and 0 hard resets on every profile. Being pulled, or lunging at a target known only from interpolated positions, adds corrections: largest correction 23 u with no added latency (it was 3.5 u). The lab's jump meter now ignores dashes, which it used to count as pops.
+
 ## M3 — ARAM: Mayhem
 - Augment draft system with ~60 augments across tiers and archetypes (rule breakers, size, ability transformers, quests, spell replacements).
 - Delivery transformers, batched projectile spawns, size scaling with honest hitboxes.

@@ -8,6 +8,8 @@ uniform vec3 color : source_color = vec3(0.95, 0.35, 0.25);
 uniform float radius = 160.0;
 uniform float progress = 0.0;     // 0 at cast, 1 at detonation
 uniform float detonated = 0.0;    // 0..1 flash fade after detonation
+uniform vec3 rim_color : source_color = vec3(1.0);  // hard CC: a gold outline (05 §1)
+uniform float hard_cc = 0.0;
 
 float hash(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
@@ -32,6 +34,6 @@ void fragment() {
 		c = mix(c, vec3(1.0, 0.95, 0.8), 0.6);
 		a = max(a, 0.85 * detonated);
 	}
-	ALBEDO = mix(c, vec3(1.0), 0.35 * outline);
+	ALBEDO = mix(c, mix(vec3(1.0), rim_color, hard_cc), (0.35 + 0.55 * hard_cc) * outline);
 	ALPHA = clamp(a, 0.0, 1.0);
 }
