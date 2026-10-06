@@ -960,18 +960,16 @@ impl ClientSession {
                     self.resimulate_from(r);
                     changed = true;
                 }
-                if changed {
-                    if let (Some(b), Some(a)) = (before, self.own_render_position_raw(now)) {
-                        let delta = b - a;
-                        let len = delta.length();
-                        if len > 0.01 {
-                            self.stats.corrections.push(len);
-                        }
-                        if len >= CORRECTION_SNAP {
-                            self.render_offset = Vec2::ZERO;
-                        } else if len >= CORRECTION_ABSORB {
-                            self.render_offset += delta;
-                        }
+                if changed && let (Some(b), Some(a)) = (before, self.own_render_position_raw(now)) {
+                    let delta = b - a;
+                    let len = delta.length();
+                    if len > 0.01 {
+                        self.stats.corrections.push(len);
+                    }
+                    if len >= CORRECTION_SNAP {
+                        self.render_offset = Vec2::ZERO;
+                    } else if len >= CORRECTION_ABSORB {
+                        self.render_offset += delta;
                     }
                 }
             }

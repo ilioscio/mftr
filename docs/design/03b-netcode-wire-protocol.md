@@ -12,7 +12,7 @@ Wire-level spec behind [03 — Netcode](03-netcode.md) and [03a](03a-netcode-tim
 ├──────────────────────────────────────────────┤
 │ Packet layer: sequence, ack, ack bitfield     │
 ├──────────────────────────────────────────────┤
-│ Secure transport: netcode.io-style AEAD, UDP  │
+│ Secure transport: Noise + ChaCha20-Poly1305    │
 └──────────────────────────────────────────────┘
 ```
 
@@ -26,6 +26,19 @@ Wire-level spec behind [03 — Netcode](03-netcode.md) and [03a](03a-netcode-tim
    - private part (sealed for the match server): player public key, match ID, team/slot, session keys, **build hash**, **content hash**.
 2. Handshake: `ConnectionRequest(token) → Challenge → ChallengeResponse → Accepted(client_index, server_tick)`.
 3. After the handshake, the server sends the initial full state over the bulk channel. Then normal snapshots begin.
+
+> **Implemented (D40, protocol 13):** today there is no lobby service, so the client connects to the match server directly and the handshake is a Noise XX exchange (`Noise_XX_25519_ChaChaPoly_BLAKE2s`) inside our own packets:
+>
+> | Packet | Direction | Contents |
+> |---|---|---|
+> | `HELLO` | C → S | magic `MFTR`, protocol version, cookie (empty at first), Noise message 1; padded to 160 bytes |
+> | `COOKIE` | S → C | time stamp + 128-bit MAC of the client address (keyed by a per-run server secret); valid ~10–20 s |
+> | `REPLY` | S → C | Noise message 2 (carries the server's static key) |
+> | `CONFIRM` | C → S | Noise message 3 (carries the client's static key, its identity); repeated with every data packet until the server answers |
+> | `DATA` | both | sequence u16, ChaCha20-Poly1305 ciphertext and tag |
+> | `VERSION` | S → C | the server's protocol version, when the hello had another |
+>
+> The server keeps no state and does no public-key work for an address until it has echoed a cookie, and a hello is always larger than any answer to it, so spoofed hellos can't amplify. The handshake prologue holds the protocol version. **Key pinning:** the client remembers each server's key fingerprint (128 bits of BLAKE2s, 32 hex digits) the first time it connects and refuses a changed key; `host:port#fingerprint` pins it up front. The server's key lives in a file (`--key`, default `server.key`), the player's in the client's user folder (`identity.key`). Lobby-signed connect tokens, the build and content hashes will ride in the handshake payloads once the lobby exists.
 
 **Exact-match requirement:** client and server must have the identical **build hash** (sim code) and **content hash** (game data). Prediction is bit-exact re-simulation, so "close enough" versions are not allowed. On a mismatch the client gets a clear "update required (server runs X)" error.
 
@@ -44,7 +57,7 @@ ack_bits     : u32     receipt of the 32 sequences before `ack`
 aead_tag     : 16 bytes
 ```
 
-Overhead: ~25 bytes per packet. At 30 Hz that's ~0.75 KB/s per direction.
+Overhead: ~25 bytes per packet. At 30 Hz that's ~0.75 KB/s per direction. *(Implemented: 8 bytes of packet header plus 19 for the secure transport (kind, its own u16 sequence, 16-byte tag), so game packets are capped at 1,181 bytes.)*
 
 **Acks drive everything:** when packet N is acked, every message carried in N counts as delivered. That's how events get reliability and how snapshots get baselines, with no per-message ack traffic.
 
@@ -192,7 +205,7 @@ That's well under the 32 KB/s target. The headroom covers Mayhem chaos (Hyper mo
 
 ## 11. Robustness & security
 
-- **AEAD on every packet** (ChaCha20-Poly1305), with a replay window on the sequence number.
+- **AEAD on every packet** (ChaCha20-Poly1305), with a replay window on the sequence number. *(Implemented, D40: 64-packet window; handshakes and sessions are capped per server and time out after 10 s and 30 s of silence.)*
 - **Rate limits:** packets per second, commands per second, events per second (chat, pings). Excess is dropped and counted; sustained abuse disconnects.
 - **Strict decoding:** bounded lengths, no allocations sized from untrusted input, unknown kinds rejected.
 - **Fuzz targets** in CI: packet decode, command decode, event decode, snapshot apply.

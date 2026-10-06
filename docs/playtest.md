@@ -12,10 +12,11 @@ And which own-missile display (A or B) and minion setting feels better? (Decisio
 
 1. Get the client: download `mftr-client-<version>-<os>` from the releases page and unpack it
    (or run from source: `godot --path client -- ...` instead of `./mftr.x86_64 -- ...`).
-2. Start it with the address the organizer gave you:
+2. Start it with the address the organizer gave you (the part after `#` is the server's key
+   fingerprint: with it, the client only talks to that server):
 
    ```sh
-   ./mftr.x86_64 -- --blind playtest.example.org:7777      # mftr.exe on Windows
+   ./mftr.x86_64 -- --blind playtest.example.org:7777#8a0bb4a2aa55a37cf673e459749c6705   # mftr.exe on Windows
    ```
 
 3. Play 10 rounds of one minute. Dodge the skillshots and fight back. Right-click moves, Q W E R
@@ -41,6 +42,8 @@ your real connection, and it measures that real connection too.
   # or: mftr-server --scenario duel  +  mftr-tools bot --server 127.0.0.1:7777 --duel --seconds 3600
   ```
 
+- Give testers the address with the key fingerprint, `host:7777#…`: the server prints it at
+  start (`mftr-server --fingerprint` prints it too).
 - Pick testers close to the server (a real round trip under ~30 ms keeps the added profiles
   meaningful).
 - Collect the files and summarize them all at once:

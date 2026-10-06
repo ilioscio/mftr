@@ -1299,7 +1299,7 @@ mod tests {
     fn lobby_round_trip() {
         let slot = |p: u8, c: ChampionId| LobbySlot {
             player: PlayerId(p),
-            team: if p % 2 == 0 { Team::Blue } else { Team::Red },
+            team: if p.is_multiple_of(2) { Team::Blue } else { Team::Red },
             champion: c,
             rerolls: p % 3,
             ready: p % 2 == 1,
@@ -1539,7 +1539,7 @@ mod tests {
         };
         let msg = ServerMessage::Snapshot(Box::new(snap));
         let bytes = encode_server(&hdr(), &msg);
-        assert!(bytes.len() <= crate::MAX_PACKET_BYTES, "{} bytes", bytes.len());
+        assert!(bytes.len() <= crate::MAX_PAYLOAD_BYTES, "{} bytes", bytes.len());
         let (_, back) = decode_server(&bytes).unwrap();
         assert_eq!(back, msg);
         if let ServerMessage::Snapshot(s) = back {

@@ -1,13 +1,19 @@
 //! `mftr-gdext`: the Godot side of the MFTR client.
 //!
-//! Godot never decides gameplay outcomes (04 §1). This extension owns the UDP socket and the
-//! [`ClientSession`] (clock sync, prediction, interpolation) and exposes render state plus
-//! command entry points to GDScript.
+//! Godot never decides gameplay outcomes (04 §1). This extension owns the UDP socket, the
+//! secure transport (D40) and the [`ClientSession`] (clock sync, prediction, interpolation) and
+//! exposes render state plus command entry points to GDScript.
+//!
+//! The player's identity key lives in `user://identity.key`, and the servers it trusts in
+//! `user://known_servers.txt`: a server's key is pinned the first time the client meets it (or
+//! up front with `host:port#fingerprint`), and a server whose key changed is refused.
 
+use godot::classes::ProjectSettings;
 use godot::prelude::*;
 use mftr_client::blind::{BlindPlan, BlindRating, BlindRecord, RoundStats, TSV_HEADER};
 use mftr_client::{ClientSession, Notice, OwnMissileDisplay, Phase, Side};
 use mftr_net::conditioner::{LinkProfile, SimLink};
+use mftr_net::secure::{Identity, KnownServers, SecureClient, SecureError, parse_address};
 use mftr_sim::ability::{DamageKind, SLOTS};
 use mftr_sim::items::{self, INVENTORY};
 use mftr_sim::{ChampionId, Team, UnitId, UnitKind, Vec2};
@@ -27,6 +33,12 @@ pub struct MatchClient {
     base: Base<Node>,
     session: ClientSession,
     socket: Option<UdpSocket>,
+    /// The encrypted session on that socket.
+    secure: Option<SecureClient>,
+    identity: Option<Identity>,
+    /// The server's address ("host:port"), and whether its key is saved as trusted.
+    server: String,
+    trusted: bool,
     clock: Instant,
     next_hello: f64,
     last_error: GString,
@@ -63,6 +75,10 @@ impl INode for MatchClient {
             base,
             session: ClientSession::new(),
             socket: None,
+            secure: None,
+            identity: None,
+            server: String::new(),
+            trusted: false,
             clock: Instant::now(),
             next_hello: 0.0,
             last_error: GString::new(),
@@ -85,18 +101,38 @@ impl INode for MatchClient {
 
 #[godot_api]
 impl MatchClient {
-    /// Open a UDP socket to `address` ("host:port") and start the handshake.
+    /// Open a UDP socket to `address` ("host:port", or "host:port#fingerprint" to pin the
+    /// server's key) and start the handshake.
     #[func]
     fn connect_to_server(&mut self, address: GString) -> bool {
         self.disconnect_from_server();
+        let address = address.to_string();
+        let (host, pin) = match parse_address(&address) {
+            Ok(v) => v,
+            Err(e) => {
+                self.last_error = GString::from(&e);
+                return false;
+            }
+        };
+        let pin = pin.or_else(|| known_servers().get(host));
+        let identity = match self.identity() {
+            Ok(i) => i,
+            Err(e) => {
+                self.last_error = GString::from(&format!("could not read or create the identity key: {e}"));
+                return false;
+            }
+        };
         let result = UdpSocket::bind("0.0.0.0:0").and_then(|s| {
-            s.connect(address.to_string())?;
+            s.connect(host)?;
             s.set_nonblocking(true)?;
             Ok(s)
         });
         match result {
             Ok(s) => {
                 self.socket = Some(s);
+                self.secure = Some(SecureClient::new(&identity, pin));
+                self.server = host.to_string();
+                self.trusted = false;
                 self.session = ClientSession::new();
                 self.session.set_champion_request(self.champion_request);
                 self.session.set_resume(self.resume);
@@ -114,9 +150,20 @@ impl MatchClient {
 
     #[func]
     fn disconnect_from_server(&mut self) {
-        if let Some(s) = self.socket.take() {
-            let _ = s.send(&self.session.bye_packet());
+        let bye = self.session.bye_packet();
+        if let (Some(s), Some(secure)) = (self.socket.take(), self.secure.as_mut()) {
+            for d in secure.seal(&bye) {
+                let _ = s.send(&d);
+            }
         }
+        self.secure = None;
+    }
+
+    /// The server's key fingerprint (empty until its handshake reply arrives).
+    #[func]
+    fn server_fingerprint(&self) -> GString {
+        let fp = self.secure.as_ref().and_then(|s| s.server_fingerprint());
+        fp.map_or_else(GString::new, |f| GString::from(&f.to_string()))
     }
 
     /// "connecting", "joining" or "playing" (empty when disconnected).
@@ -789,13 +836,56 @@ impl MatchClient {
         self.transmit(p, now);
     }
 
+    /// Seal a game packet and send it.
     fn transmit(&mut self, packet: Vec<u8>, now: f64) {
+        let datagrams = self.secure.as_mut().map(|s| s.seal(&packet)).unwrap_or_default();
+        for d in datagrams {
+            self.send_datagram(d, now);
+        }
+    }
+
+    /// Send a datagram now, or into the simulated uplink.
+    fn send_datagram(&mut self, datagram: Vec<u8>, now: f64) {
         match (&mut self.links, &self.socket) {
-            (Some((up, _)), _) => up.send(packet, now),
+            (Some((up, _)), _) => up.send(datagram, now),
             (None, Some(s)) => {
-                let _ = s.send(&packet);
+                let _ = s.send(&datagram);
             }
             _ => {}
+        }
+    }
+
+    /// The player's identity key, created on first use.
+    fn identity(&mut self) -> std::io::Result<Identity> {
+        if self.identity.is_none() {
+            let path = user_path(IDENTITY_FILE);
+            self.identity = Some(Identity::load_or_create(path.as_ref(), "player identity key")?.0);
+        }
+        Ok(self.identity.clone().expect("loaded"))
+    }
+
+    /// Transport state after receiving: report a refused connection, and trust a server's key
+    /// once the handshake with it is done.
+    fn check_transport(&mut self) {
+        let Some(secure) = &self.secure else { return };
+        if let Some(e) = secure.error() {
+            let mut text = e.to_string();
+            if matches!(e, SecureError::KeyChanged { .. }) {
+                text += &format!(", or delete its line in {}", user_path(KNOWN_FILE));
+            }
+            self.last_error = GString::from(&text);
+        } else if !self.trusted
+            && secure.is_open()
+            && let Some(fp) = secure.server_fingerprint()
+        {
+            let mut known = known_servers();
+            if known.get(&self.server) != Some(fp) {
+                known.set(&self.server, fp);
+                if std::fs::write(user_path(KNOWN_FILE), known.to_text()).is_err() {
+                    self.last_error = GString::from(&format!("could not write {}", user_path(KNOWN_FILE)));
+                }
+            }
+            self.trusted = true;
         }
     }
 
@@ -836,8 +926,17 @@ impl MatchClient {
             }
         }
         for p in packets {
-            self.session.handle_packet(&p, now);
+            let Some(secure) = self.secure.as_mut() else { break };
+            let packet = secure.receive(&p);
+            let replies = secure.take_outgoing();
+            if let Some(packet) = packet {
+                self.session.handle_packet(&packet, now);
+            }
+            for d in replies {
+                self.send_datagram(d, now);
+            }
         }
+        self.check_transport();
         self.session.update(now);
         match self.session.phase() {
             Phase::Connecting | Phase::Lobby if now >= self.next_hello => {
@@ -849,6 +948,18 @@ impl MatchClient {
             _ => {}
         }
     }
+}
+
+const IDENTITY_FILE: &str = "identity.key";
+const KNOWN_FILE: &str = "known_servers.txt";
+
+/// The OS path of a file in Godot's user data folder.
+fn user_path(name: &str) -> String {
+    ProjectSettings::singleton().globalize_path(&format!("user://{name}")).to_string()
+}
+
+fn known_servers() -> KnownServers {
+    KnownServers::from_text(&std::fs::read_to_string(user_path(KNOWN_FILE)).unwrap_or_default())
 }
 
 /// One line describing an item's bonuses and passive.

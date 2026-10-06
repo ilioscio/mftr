@@ -26,7 +26,7 @@ No dates yet: milestones finish when their **exit criteria** pass. The order is 
 | `mftr-gdext` (godot-rust 0.5.5, Godot 4.7) + client: camera per D13, noise-shader ground, right-click move, click indicator, net graph | ✅ |
 | Cross-platform hash check | ⏳ runs on first CI push (golden hash recorded on Windows x86_64; debug and release builds agree) |
 | Two clients on **different machines** | ⏳ verified on one machine over real UDP (server + Godot client + bots); needs a second machine |
-| Secure transport (netcode.io-style tokens, AEAD) and the transport decision | ⏳ deferred to the lobby work (before M2); M0 uses plain UDP |
+| Secure transport and the transport decision | ✅ D40: Noise XX handshake and ChaCha20-Poly1305 on every packet, pinned server keys (protocol 13). Lobby-signed connect tokens come with the lobby |
 
 **Netcode Lab results** (10 clients, 5 min after 10 s warm-up, scripted clicking at ~2.5 commands/s):
 
@@ -80,7 +80,7 @@ With no unit collision yet, the only source of corrections is a command that arr
 
 ### Slice 2 status (2026-10-05): ✅ done
 
-- `mftr-sim`: an exact integer timeline (`SimTime`, 1/1920 s, D21). Line skillshots have rooted windups at exact sub-tick instants and cooldowns. Analytic missiles use exact swept hits against units' motion, so the first enemy unit in the path takes it: minions body-block skillshots. Hard CC stun interrupts casts. Dodge-rig turrets aim directly or with lead.
+- `mftr-sim`: an exact integer timeline (`SimTime`, 1/1920 s, D21). Line skillshots have rooted windups at exact sub-tick instants and cooldowns. Analytic missiles use exact swept hits against units' motion, so the first enemy unit in the path takes it: minions body-block skillshots. Hard CC stun interrupts casts. Dodge-rig turrets aim directly or with lead. Their shots stun nobody (a hit shows the impact flash and counts in the playtest stats), since chained stuns made the next shots undodgeable during the first playtest.
 - Protocol v4: a reliable, ordered events channel (cumulative ack, resend until acked); lossless cast, stun and cooldown own state; remote casting and stunned flags.
 - `mftr-client`: own casts predicted (windup plus missile at once, Option B display). Enemy missiles are on `T_input` with predicted self-hits, enemy windups on `T_input`. Predicted interceptions by allies or minions are shown **unconfirmed** (dimmed, never hidden). The ghost/phantom measurement freezes what was shown and compares it with the server.
 - Server scenario `dodge`: 4 turrets firing at the players. The Godot client draws missiles per D14 (slim core plus full-width sheath), windup aim lines and stun rings; **Q** casts.
@@ -137,7 +137,7 @@ Fog audit: 0 leaks. Downstream ~12–14 KB/s per player. The larger corrections 
 - **Telegraph grammar and D14 VFX** as shaders (all Compatibility-safe): linear skillshots have a rounded leading edge at the true hitbox front, a constant-width body with an always-visible edge sheath, a slim noisy core and a trail that fades *behind* the hitbox only. Hard-CC missiles carry moving chevrons in the shared accent color. Area telegraphs show a crisp outline from cast and a fill that reaches the edge exactly at detonation, then flash. Enemy missiles get a spawn streak from the caster's drawn hand (03a §7). Blink leaves a golden mark at its origin for 1.5 s and a burst where it lands (R01 §5).
 - **Noise-shader art pass**: rock walls (world-space noise, strata, mossy tops), swaying brush, and champions with toon-banded light, rim light, object-space noise detail, a per-champion identity color and a team-accent band at the feet (05 §1, §4). Still no textures.
 
-**Exit (blind playtest run):** needs human testers. The [playtest guide](../playtest.md) has the steps for testers and organizers: run it with `-- --blind`, collect the `blind_results.tsv` files and summarize them with `mftr-tools blind-report`. The transport decision left from M0 is proposed as D40 and waits for the owner's OK. The harness itself is verified end to end with `--blind-auto` (automatic answers) against a real server.
+**Exit (blind playtest run):** needs human testers. The [playtest guide](../playtest.md) has the steps for testers and organizers: run it with `-- --blind`, collect the `blind_results.tsv` files and summarize them with `mftr-tools blind-report`. The transport decision left from M0 is D40, now implemented. The harness itself is verified end to end with `--blind-auto` (automatic answers) against a real server.
 
 ## M2 — ARAM ("a real game")
 **Goal:** the smallest complete MOBA match.

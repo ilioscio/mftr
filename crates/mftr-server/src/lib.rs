@@ -553,7 +553,7 @@ impl ServerCore {
                 return self.start_from_lobby(now);
             }
             self.lobby_steps += 1;
-            if self.lobby_steps % 10 != 0 {
+            if !self.lobby_steps.is_multiple_of(10) {
                 return Vec::new();
             }
             let pending: Vec<(ClientKey, PlayerId)> = self.pending.iter().map(|(k, p)| (*k, p.player)).collect();
@@ -785,7 +785,7 @@ impl ServerCore {
             // later snapshot (those units coast, or appear later), then a backlog of reliable
             // events does.
             let mut bytes = msg::encode_server(&h, &ServerMessage::Snapshot(Box::new(snap.clone())));
-            while bytes.len() > mftr_net::MAX_PACKET_BYTES && !snap.others.is_empty() {
+            while bytes.len() > mftr_net::MAX_PAYLOAD_BYTES && !snap.others.is_empty() {
                 let keep = snap.others.len() * 3 / 4;
                 for dropped in snap.others.drain(keep..) {
                     let id = dropped.unit.id;
@@ -796,7 +796,7 @@ impl ServerCore {
                 }
                 bytes = msg::encode_server(&h, &ServerMessage::Snapshot(Box::new(snap.clone())));
             }
-            while bytes.len() > mftr_net::MAX_PACKET_BYTES && !snap.events.is_empty() {
+            while bytes.len() > mftr_net::MAX_PAYLOAD_BYTES && !snap.events.is_empty() {
                 snap.events.truncate(snap.events.len() / 2);
                 bytes = msg::encode_server(&h, &ServerMessage::Snapshot(Box::new(snap.clone())));
             }

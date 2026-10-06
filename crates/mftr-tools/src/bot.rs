@@ -1,11 +1,13 @@
 //! UDP bot client: connects to a real `mftr-server`, clicks around (or, with `--duel`, fights
 //! like the Netcode Lab's duel bot: a sparring partner for the Duel Sandbox), and reports
 //! netcode stats. A local link conditioner can add latency, jitter and loss on top of the real
-//! network.
+//! network. Each run connects with a fresh identity key; `--server HOST:PORT#FINGERPRINT` pins
+//! the server's key.
 
 use crate::report::{ClickBot, DuelBot, JumpMeter, Summary};
 use mftr_client::{ClientSession, Phase};
 use mftr_net::conditioner::{LinkProfile, SimLink};
+use mftr_net::secure::{Identity, SecureClient, parse_address};
 use mftr_sim::world::CHAMPION_MOVE_SPEED;
 use std::net::UdpSocket;
 use std::time::{Duration, Instant};
@@ -22,9 +24,12 @@ pub struct BotConfig {
 }
 
 pub fn run(cfg: &BotConfig) -> std::io::Result<Summary> {
+    let invalid = |e: String| std::io::Error::new(std::io::ErrorKind::InvalidInput, e);
+    let (address, pin) = parse_address(&cfg.server).map_err(invalid)?;
     let socket = UdpSocket::bind("0.0.0.0:0")?;
-    socket.connect(&cfg.server)?;
+    socket.connect(address)?;
     socket.set_nonblocking(true)?;
+    let mut secure = SecureClient::new(&Identity::generate(), pin);
 
     let clock = Instant::now();
     let now = || clock.elapsed().as_secs_f64();
@@ -44,9 +49,24 @@ pub fn run(cfg: &BotConfig) -> std::io::Result<Summary> {
     while now() < cfg.seconds + played_from.unwrap_or(0.0) {
         loop {
             match socket.recv(&mut buf) {
-                Ok(n) => down.send(buf[..n].to_vec(), now()),
+                Ok(n) => {
+                    if let Some(packet) = secure.receive(&buf[..n]) {
+                        down.send(packet, now());
+                    }
+                    for d in secure.take_outgoing() {
+                        let _ = socket.send(&d);
+                    }
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => break,
+                // ICMP "port unreachable": the server may just not be listening yet.
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    break;
+                }
                 Err(e) => return Err(e),
             }
         }
@@ -54,8 +74,14 @@ pub fn run(cfg: &BotConfig) -> std::io::Result<Summary> {
         while let Some(p) = down.recv(t) {
             session.handle_packet(&p, t);
         }
+        if let Some(e) = secure.error() {
+            return Err(std::io::Error::other(e.to_string()));
+        }
+        // The conditioner works on game packets; the transport seals them on the way out.
         while let Some(p) = up.recv(t) {
-            let _ = socket.send(&p);
+            for d in secure.seal(&p) {
+                let _ = socket.send(&d);
+            }
         }
         if t >= next_frame {
             next_frame = t + frame_dt;
@@ -94,7 +120,9 @@ pub fn run(cfg: &BotConfig) -> std::io::Result<Summary> {
         }
         std::thread::sleep(Duration::from_micros(250));
     }
-    let _ = socket.send(&session.bye_packet());
+    for d in secure.seal(&session.bye_packet()) {
+        let _ = socket.send(&d);
+    }
     let label = format!("udp+{}", cfg.profile.name);
     Ok(Summary::from_sessions(&label, f64::NAN, cfg.seconds, &[(&session, &jumps)]))
 }

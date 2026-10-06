@@ -95,7 +95,7 @@ impl Match {
         self.record(ReplayEntry::Join { tick: self.world.tick(), player, champion });
         self.players.insert(player);
         let scenario = self.cfg.scenario;
-        let team = if player.0 % 2 == 0 || scenario == Scenario::DodgeRig { Team::Blue } else { Team::Red };
+        let team = if player.0.is_multiple_of(2) || scenario == Scenario::DodgeRig { Team::Blue } else { Team::Red };
         // Without a preference: in ARAM, each of the six in turn; elsewhere alternate, so the
         // first duel is mage vs. marksman.
         let champion = champion.unwrap_or(if scenario == Scenario::Aram {
@@ -162,7 +162,7 @@ impl Match {
             let hidden = self.world.units().iter().filter(|u| u.team != team && !seen[i].contains(&u.id)).map(|u| u.id);
             self.world.set_hidden(team, hidden.collect());
         }
-        if self.cfg.record && k.0 % HASH_EVERY == 0 {
+        if self.cfg.record && k.0.is_multiple_of(HASH_EVERY) {
             self.record(ReplayEntry::Hash { tick: k, hash: self.world.state_hash() });
         }
         (events, Fog { visions, seen })
