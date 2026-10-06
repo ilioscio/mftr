@@ -687,7 +687,7 @@ impl ClientSession {
             id: self.unit,
             kind: UnitKind::Champion,
             owner: Some(self.player),
-            team: self.team, // allied champions pass through each other (D20)
+            team: self.team,
             state,
             collision_radius: mftr_sim::world::CHAMPION_COLLISION_RADIUS,
             gameplay_radius: mftr_sim::world::CHAMPION_GAMEPLAY_RADIUS,

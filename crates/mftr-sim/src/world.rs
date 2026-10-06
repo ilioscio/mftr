@@ -686,11 +686,12 @@ fn start_cast(
     events.push(SimEvent::CastStarted { unit, at, dir, fire_at, seq });
 }
 
-/// Whether a unit of `other_kind`/`other_team` blocks a mover of `kind`/`team` (D11, D20).
-/// Allied champions pass through each other, as measured in the reference game (R02).
-/// Everything else blocks: enemy champions, all minions regardless of team, turrets.
-pub fn blocks(kind: UnitKind, team: Team, other_kind: UnitKind, other_team: Team) -> bool {
-    !(kind == UnitKind::Champion && other_kind == UnitKind::Champion && team == other_team)
+/// Whether a unit of `other_kind`/`other_team` blocks a mover of `kind`/`team` (D11, D23).
+/// Every unit with a collision radius blocks every other: allied and enemy champions, all
+/// minions, turrets. Measured in the reference game (R03: a champion stops at contact with a
+/// standing ally and paths around it). Kept as a function so ghosting effects can opt out.
+pub fn blocks(_kind: UnitKind, _team: Team, _other_kind: UnitKind, _other_team: Team) -> bool {
+    true
 }
 
 /// Stuck detection and detours (03a §5): poor progress for a few ticks → take a short detour
@@ -829,25 +830,26 @@ mod tests {
         assert!(w.unit(id).unwrap().state.pos.x < 1300.0, "should be heading back");
     }
 
+    /// R03: walking at a standing champion, ally or enemy, stops at contact and then paths
+    /// around it to the far side.
     #[test]
-    fn allied_champions_pass_through_enemies_block() {
-        for (other_team, should_pass) in [(Team::Blue, true), (Team::Red, false)] {
+    fn champions_path_around_allied_and_enemy_champions() {
+        for other_team in [Team::Blue, Team::Red] {
             let mut w = World::new(1);
             let me = w.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(1000.0, 1000.0));
-            w.spawn_champion(PlayerId(1), other_team, Vec2::new(1200.0, 1000.0)); // standing in the way
+            let other = w.spawn_champion(PlayerId(1), other_team, Vec2::new(1200.0, 1000.0)); // in the way
             w.step(&[cmd(0, 1, 1, 0, (1400.0, 1000.0))]);
-            let mut max_dev: f32 = 0.0;
-            for _ in 0..60 {
+            let (mut max_dev, mut min_gap) = (0.0f32, f32::INFINITY);
+            for _ in 0..90 {
                 w.step(&[]);
-                max_dev = max_dev.max((w.unit(me).unwrap().state.pos.y - 1000.0).abs());
+                let p = w.unit(me).unwrap().state.pos;
+                max_dev = max_dev.max((p.y - 1000.0).abs());
+                min_gap = min_gap.min(p.distance(w.unit(other).unwrap().state.pos));
             }
             let end = w.unit(me).unwrap().state.pos;
-            if should_pass {
-                assert_eq!(end, Vec2::new(1400.0, 1000.0), "ally should be walked through");
-                assert_eq!(max_dev, 0.0);
-            } else {
-                assert!(max_dev > 10.0, "enemy should force a path around it: {end:?}");
-            }
+            assert!(min_gap >= 70.0 - 0.05, "{other_team:?}: walked through (gap {min_gap})");
+            assert!(max_dev > 30.0, "{other_team:?}: should path around: {end:?}");
+            assert!(end.distance(Vec2::new(1400.0, 1000.0)) < 1.0, "{other_team:?}: should arrive: {end:?}");
         }
     }
 
@@ -1111,5 +1113,5 @@ mod tests {
     }
 
     /// Recorded on x86_64-pc-windows-msvc. CI checks Linux, macOS (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x1a6e_4255_939c_b914;
+    const GOLDEN_HASH: u64 = 0xc5d9_6154_da5f_8de6;
 }

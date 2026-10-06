@@ -64,7 +64,7 @@ Every unit has **two radii**:
 - Collision radii are **small**: a single minion is easy to walk around, and units slide past each other when there's a gap.
 - But they are **solid**. When minions clump (fighting in a wave, or bunched in a narrow spot), the gaps close and they **block** champions. Minion-block and body-blocking are intended skill expression.
 - **No shoving.** A moving unit never pushes another unit. It slides along the blocker, waits, or re-paths around it.
-- **Allied champions pass through each other** (D20, measured in [R02](reference/R02-video-allied-champion-pathing.md)). Enemy champions and all minions, of either team, block.
+- **Every unit blocks every unit:** allied and enemy champions, and minions of either team (D23, measured in [R03](reference/R03-video-allied-champion-collision.md)). A champion walking into a standing ally stops at contact and paths around it.
 - **Ignoring collision:** dashes, blinks, ghosted units (Ghost spell, some abilities) and dead units ignore unit collision. Terrain and structures **always** block.
 - Minions look for free attack positions around their target. That is what naturally forms the clumps.
 - Netcode consequences (predicting your champion when minions block it) are covered in [03a §5](03a-netcode-time-and-prediction.md#5-predicting-unit-collision-minion-block).

@@ -1,5 +1,7 @@
 # R02 — Reference capture analysis: allied champion pathing
 
+> **⚠ Superseded by [R03](R03-video-allied-champion-collision.md).** A clearer capture shows allied champions *do* block each other; the conclusion below (D20) was reversed by D23. Kept for the record of how the evidence was misread.
+
 **Source:** a local 11.1 s clip (practice tool, 1920×1080 at 60 fps, ~63 ms ping) of the own champion (Ezreal) moving around and through an **allied** Xin Zhao bot while both fight a jungle camp. The media stays in the git-ignored `fb/` folder; only measurements are recorded here.
 
 **Question:** do champions block allied champions (DECISIONS Q12)?

@@ -94,7 +94,7 @@ pub enum ServerMessage {
     Welcome {
         player: PlayerId,
         unit: UnitId,
-        /// Needed for prediction: allied champions don't block each other (D20).
+        /// Own team: missile sides (own/ally/enemy) and ally/enemy display.
         team: Team,
         tick: Tick,
         tick_hz: u8,
