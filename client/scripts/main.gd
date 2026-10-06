@@ -205,6 +205,8 @@ func _process(delta: float) -> void:
 		print("MFTR phase: %s -> %s (unit %d)" % [_last_phase, phase, client.own_unit_id()])
 		_last_phase = phase
 	var playing := phase == "playing"
+	if playing and not _map_built:
+		_build_map()
 	own_body.visible = playing
 	if playing:
 		var own := _to_world(client.own_position())
@@ -281,6 +283,40 @@ func _make_minion(color: Color, collision_radius_u: float) -> MeshInstance3D:
 	ring.material_override = rm
 	body.add_child(ring)
 	return body
+
+
+## Walls (extruded, vision-blocking) and brush (low translucent tufts) from the map the server
+## announced. The same polygons drive collision, pathing and vision in the simulation.
+var _map_built := false
+
+
+func _build_map() -> void:
+	_map_built = true
+	var geo: Dictionary = client.map_geometry()
+	var wall_mat := StandardMaterial3D.new()
+	wall_mat.albedo_color = Color(0.32, 0.30, 0.33)
+	var brush_mat := StandardMaterial3D.new()
+	brush_mat.albedo_color = Color(0.16, 0.42, 0.18, 0.75)
+	brush_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	for poly in geo.walls:
+		add_child(_extrude(poly, 1.4, wall_mat))
+	for poly in geo.brush:
+		add_child(_extrude(poly, 0.55, brush_mat))
+
+
+## CSGPolygon3D extrudes along local -Z; rotating +90° about X lays the polygon on the ground
+## (x, y) -> world (x, 0, y) and extrudes upward.
+func _extrude(poly: PackedVector2Array, height: float, mat: Material) -> CSGPolygon3D:
+	var pts := PackedVector2Array()
+	for p in poly:
+		pts.append(p * UNITS_TO_METERS)
+	var csg := CSGPolygon3D.new()
+	csg.polygon = pts
+	csg.mode = CSGPolygon3D.MODE_DEPTH
+	csg.depth = height
+	csg.rotation_degrees = Vector3(90, 0, 0)
+	csg.material = mat
+	return csg
 
 
 func _make_turret(color: Color, collision_radius_u: float) -> MeshInstance3D:

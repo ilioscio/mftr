@@ -144,6 +144,25 @@ impl MatchClient {
         out
     }
 
+    /// The match map for drawing: `{ walls: [PackedVector2Array], brush: [PackedVector2Array] }`
+    /// in game units. Valid once the phase is "playing".
+    #[func]
+    fn map_geometry(&self) -> VarDictionary {
+        let to_arrays = |polys: &[Vec<Vec2>]| {
+            let mut arr = VarArray::new();
+            for p in polys {
+                let pts: PackedVector2Array = p.iter().map(|v| Vector2::new(v.x, v.y)).collect();
+                arr.push(&pts.to_variant());
+            }
+            arr
+        };
+        let map = self.session.map();
+        let mut d = VarDictionary::new();
+        d.set("walls", &to_arrays(&map.walls).to_variant());
+        d.set("brush", &to_arrays(&map.brush).to_variant());
+        d
+    }
+
     /// Own champion status on the input timeline: `{ stunned, casting, q_cooldown }` (seconds).
     #[func]
     fn own_status(&self) -> VarDictionary {

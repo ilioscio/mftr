@@ -7,11 +7,14 @@
 use mftr_net::PROTOCOL_VERSION;
 use mftr_net::msg::{self, ClientMessage, CommandReport, RejectReason, RemoteUnit, ServerMessage, Snapshot, TimeEcho};
 use mftr_net::packet::{PacketHeader, ReceiveTracker, SendTracker};
+use mftr_sim::ability::LineSkillshot;
+use mftr_sim::map::MapId;
+use mftr_sim::vision::Vision;
 use mftr_sim::{
-    Brain, Command, MinionKind, PlayerId, QPoint, SimEvent, SimTime, SubTick, TICK_DT_F64, TICK_HZ, Team, Tick, UnitId,
-    Vec2, World,
+    Brain, Command, MinionKind, Missile, PlayerId, QPoint, SimEvent, SimTime, SubTick, TICK_DT_F64, TICK_HZ, Team,
+    Tick, UnitId, Vec2, World,
 };
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// Opaque per-connection address key, assigned by the transport.
 pub type ClientKey = u64;
@@ -36,6 +39,14 @@ pub enum Scenario {
 }
 
 impl Scenario {
+    /// The map each scenario is played on: the open plane for `empty`, the arena otherwise.
+    pub fn map(self) -> MapId {
+        match self {
+            Scenario::Empty => MapId::Open,
+            Scenario::MinionSandbox | Scenario::DodgeRig => MapId::Arena,
+        }
+    }
+
     pub fn by_name(name: &str) -> Option<Self> {
         match name {
             "empty" => Some(Scenario::Empty),
@@ -134,6 +145,9 @@ struct Conn {
     /// Reliable events not yet acknowledged, with their sequence numbers (03b §7).
     events: VecDeque<(u32, SimEvent)>,
     next_event_seq: u32,
+    team: Team,
+    /// Enemy missiles this client has been told about (03 §10: only once they enter vision).
+    revealed: BTreeSet<u32>,
     last_heard: f64,
 }
 
@@ -143,6 +157,8 @@ pub struct ServerCore {
     start: f64,
     conns: BTreeMap<ClientKey, Conn>,
     queue: Vec<Command>,
+    /// Live missiles (for fog-of-war reveal), by id.
+    missiles: BTreeMap<u32, Missile>,
     pub stats: ServerStats,
 }
 
@@ -150,8 +166,17 @@ impl ServerCore {
     /// `start`: the server-clock time (seconds) at which tick 0 ends.
     pub fn new(cfg: ServerConfig, start: f64) -> Self {
         let mut world = World::new(cfg.seed);
+        world.set_map(cfg.scenario.map().shared());
         populate(&mut world, cfg.scenario);
-        Self { cfg, world, start, conns: BTreeMap::new(), queue: Vec::new(), stats: ServerStats::default() }
+        Self {
+            cfg,
+            world,
+            start,
+            conns: BTreeMap::new(),
+            queue: Vec::new(),
+            missiles: BTreeMap::new(),
+            stats: ServerStats::default(),
+        }
     }
 
     pub fn world(&self) -> &World {
@@ -207,6 +232,7 @@ impl ServerCore {
                         player: conn.player,
                         unit: conn.unit,
                         team,
+                        map: self.world.map().id,
                         tick,
                         tick_hz: TICK_HZ as u8,
                         since_tick_us: since,
@@ -282,7 +308,9 @@ impl ServerCore {
         for _ in 0..64 {
             let rng = self.world.rng();
             pos = QPoint::from_vec2(Vec2::new(rng.range_f32(lo, hi), rng.range_f32(lo, hi))).to_vec2();
-            if self.world.units().iter().all(|u| u.state.pos.distance(pos) > 150.0) {
+            if self.world.map().walkable(pos, 60.0)
+                && self.world.units().iter().all(|u| u.state.pos.distance(pos) > 150.0)
+            {
                 break;
             }
         }
@@ -299,6 +327,8 @@ impl ServerCore {
                 echo: None,
                 events: VecDeque::new(),
                 next_event_seq: 1,
+                team,
+                revealed: BTreeSet::new(),
                 last_heard: now,
             },
         );
@@ -346,18 +376,74 @@ impl ServerCore {
                 (u.id, u.state, remote)
             })
             .collect();
+        // Fog of war (03 §10): what each team sees this tick.
+        let (s0, s1) = (SimTime::end_of(Tick(k.0 - 1)), SimTime::end_of(k));
+        let map = self.world.map().clone();
+        let visions = [Vision::of(&self.world, Team::Blue), Vision::of(&self.world, Team::Red)];
+        let seen: [BTreeSet<UnitId>; 2] =
+            [0, 1].map(|i| self.world.units().iter().filter(|u| visions[i].sees_unit(&map, u)).map(|u| u.id).collect());
+        let mut ended: BTreeMap<u32, SimTime> = BTreeMap::new();
+        for e in &events {
+            match *e {
+                SimEvent::MissileSpawned(m) => {
+                    self.missiles.insert(m.id, m);
+                }
+                SimEvent::MissileHit { id, at, .. } | SimEvent::MissileExpired { id, at } => {
+                    ended.insert(id, at);
+                }
+                _ => {}
+            }
+        }
+
         let mut out = Vec::with_capacity(self.conns.len());
         for (key, conn) in self.conns.iter_mut() {
             while conn.reports.front().is_some_and(|(at, _)| k.0.saturating_sub(at.0) > REPORT_REPEAT_TICKS) {
                 conn.reports.pop_front();
             }
             let own = units.iter().find(|(id, _, _)| *id == conn.unit).map(|(id, s, _)| (*id, *s));
-            // No fog of war yet (slice 3): every client gets every event.
-            for e in &events {
-                conn.events.push_back((conn.next_event_seq, *e));
+            let ti = (conn.team == Team::Red) as usize;
+            let push = |conn: &mut Conn, e: SimEvent| {
+                conn.events.push_back((conn.next_event_seq, e));
                 conn.next_event_seq += 1;
+            };
+            // Casts: only if the caster is visible. Own-team missiles: at spawn, unmodified.
+            for e in &events {
+                match *e {
+                    SimEvent::CastStarted { unit, .. } if seen[ti].contains(&unit) => push(conn, *e),
+                    SimEvent::MissileSpawned(m) if m.team == conn.team => {
+                        conn.revealed.insert(m.id);
+                        push(conn, *e);
+                    }
+                    _ => {}
+                }
             }
-            let others = units.iter().filter(|(id, _, _)| *id != conn.unit).map(|(_, _, r)| *r).collect();
+            // Enemy missiles: revealed when they enter vision, re-based to that point so the
+            // caster's position isn't leaked (03 §10).
+            for m in self.missiles.values() {
+                if m.team == conn.team || conn.revealed.contains(&m.id) {
+                    continue;
+                }
+                let a = m.spawn_at.max(s0);
+                let b = ended.get(&m.id).copied().unwrap_or(m.end_at()).min(s1);
+                let at = [a, b].into_iter().find(|&t| visions[ti].sees(&map, m.position_at(t)));
+                if let Some(t) = at {
+                    conn.revealed.insert(m.id);
+                    push(conn, SimEvent::MissileSpawned(rebase(m, t)));
+                }
+            }
+            // Ends: only for missiles this client knows about.
+            for e in &events {
+                if let SimEvent::MissileHit { id, .. } | SimEvent::MissileExpired { id, .. } = *e
+                    && conn.revealed.remove(&id)
+                {
+                    push(conn, *e);
+                }
+            }
+            let others = units
+                .iter()
+                .filter(|(id, _, _)| *id != conn.unit && seen[ti].contains(id))
+                .map(|(_, _, r)| *r)
+                .collect();
             let reports: Vec<CommandReport> =
                 conn.reports.iter().rev().take(msg::MAX_REPORTS_PER_SNAPSHOT).rev().map(|(_, r)| *r).collect();
             let snap = Snapshot {
@@ -374,10 +460,102 @@ impl ServerCore {
                 others,
             };
             let h = Self::header(conn);
-            let bytes = msg::encode_server(&h, &ServerMessage::Snapshot(snap));
+            let bytes = msg::encode_server(&h, &ServerMessage::Snapshot(Box::new(snap)));
             self.stats.bytes_out += bytes.len() as u64;
             out.push((*key, bytes));
         }
+        self.missiles.retain(|id, _| !ended.contains_key(id));
         out
+    }
+
+    /// The team a connection plays on (tests, the Netcode Lab's fog audit).
+    pub fn team_of(&self, key: ClientKey) -> Option<Team> {
+        self.conns.get(&key).map(|c| c.team)
+    }
+
+    /// Direct world access for tests and scripted scenarios.
+    pub fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
+    /// Unit ids a client on `team` may currently know about (tests, debugging).
+    pub fn visible_to(&self, team: Team) -> BTreeSet<UnitId> {
+        let map = self.world.map().clone();
+        let v = Vision::of(&self.world, team);
+        self.world.units().iter().filter(|u| v.sees_unit(&map, u)).map(|u| u.id).collect()
+    }
+}
+
+/// The same missile, as first seen at `t`: identical path from there on, but starting at its
+/// position at `t`, so where it was fired from stays hidden.
+fn rebase(m: &Missile, t: SimTime) -> Missile {
+    if t <= m.spawn_at {
+        return *m;
+    }
+    let traveled = m.spec.speed * t.secs_since(m.spawn_at);
+    Missile {
+        origin: m.position_at(t),
+        spawn_at: t,
+        spec: LineSkillshot { range: (m.spec.range - traveled).max(0.0), ..m.spec },
+        ..*m
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mftr_net::msg::{decode_server, encode_client};
+
+    fn hello(core: &mut ServerCore, key: ClientKey) {
+        let bytes = encode_client(
+            &PacketHeader::default(),
+            &ClientMessage::Hello { protocol: PROTOCOL_VERSION, client_time_us: 0 },
+        );
+        core.handle_packet(key, &bytes, 0.0);
+    }
+
+    fn others_seen_by(core: &mut ServerCore, key: ClientKey, now: f64) -> Vec<UnitId> {
+        let mut seen = Vec::new();
+        for (to, bytes) in core.step(now) {
+            if to == key
+                && let Ok((_, ServerMessage::Snapshot(s))) = decode_server(&bytes)
+            {
+                seen = s.others.iter().map(|o| o.id).collect();
+            }
+        }
+        seen
+    }
+
+    /// Slice 3 exit: hidden units never reach a client. Behind a wall, in a bush, or out of
+    /// range: absent from the snapshot. Visible: present.
+    #[test]
+    fn fog_of_war_culls_hidden_units() {
+        let mut core = ServerCore::new(ServerConfig { scenario: Scenario::MinionSandbox, ..Default::default() }, 0.0);
+        hello(&mut core, 1); // player 0, blue
+        hello(&mut core, 2); // player 1, red
+        let (me, enemy) = (core.conns[&1].unit, core.conns[&2].unit);
+        // Only the two champions provide vision in this test.
+        let minions: Vec<UnitId> = core.world.units().iter().filter(|u| u.owner.is_none()).map(|u| u.id).collect();
+        for id in minions {
+            core.world_mut().despawn(id);
+        }
+        let place = |core: &mut ServerCore, id: UnitId, x: f32, y: f32| {
+            core.world_mut().unit_mut(id).unwrap().state = mftr_sim::UnitState::new(Vec2::new(x, y), 325.0);
+        };
+        place(&mut core, me, 2200.0, 1200.0);
+        let mut t = 0.0;
+        let mut check = |core: &mut ServerCore, ex: f32, ey: f32, visible: bool| {
+            place(core, enemy, ex, ey);
+            t += 1.0 / 30.0;
+            let seen = others_seen_by(core, 1, t);
+            assert_eq!(seen.contains(&enemy), visible, "enemy at ({ex}, {ey}) visible={visible}");
+            // Nothing sent may be hidden from the team, ever.
+            let allowed = core.visible_to(Team::Blue);
+            assert!(seen.iter().all(|id| allowed.contains(id)));
+        };
+        check(&mut core, 2700.0, 1200.0, false); // behind the long wall
+        check(&mut core, 2200.0, 1900.0, true); // in plain view
+        check(&mut core, 2775.0, 1765.0, false); // inside brush 1, observer outside
+        check(&mut core, 3900.0, 100.0, false); // out of range
     }
 }

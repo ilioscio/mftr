@@ -7,6 +7,8 @@
 use crate::bits::{BitReader, BitWriter, DecodeError};
 use crate::packet::PacketHeader;
 use mftr_sim::ability::LineSkillshot;
+use mftr_sim::map::MapId;
+use mftr_sim::world::{MAX_PATH, Path};
 use mftr_sim::{
     Cast, Command, CommandKind, Missile, Order, PlayerId, QPoint, SimDuration, SimEvent, SimTime, SubTick, Team, Tick,
     UnitId, UnitKind, UnitState, Vec2,
@@ -96,12 +98,14 @@ pub enum ServerMessage {
         unit: UnitId,
         /// Own team: missile sides (own/ally/enemy) and ally/enemy display.
         team: Team,
+        /// The map both sides simulate on (walls, brush, pathing).
+        map: MapId,
         tick: Tick,
         tick_hz: u8,
         since_tick_us: u32,
         time_echo: TimeEcho,
     },
-    Snapshot(Snapshot),
+    Snapshot(Box<Snapshot>),
     Reject {
         reason: RejectReason,
     },
@@ -258,6 +262,12 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
             write_qpoint(w, q);
         }
     }
+    w.write(s.path.len as u64, 4);
+    w.write(s.path.next as u64, 4);
+    w.write_bool(s.path.complete);
+    for p in &s.path.points[..s.path.len as usize] {
+        write_vec2(w, *p);
+    }
     w.write_bool(s.detour.is_some());
     if let Some(d) = s.detour {
         w.write_f32(d.x);
@@ -278,6 +288,16 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let pos = read_vec2(r)?;
     let move_speed = r.read_f32()?;
     let order = if r.read_bool()? { Order::MoveTo(read_qpoint(r)?) } else { Order::Idle };
+    let mut path = Path::EMPTY;
+    path.len = r.read(4)? as u8;
+    path.next = r.read(4)? as u8;
+    path.complete = r.read_bool()?;
+    if path.len as usize > MAX_PATH || path.next > path.len {
+        return Err(DecodeError::Invalid("path"));
+    }
+    for i in 0..path.len as usize {
+        path.points[i] = read_vec2(r)?;
+    }
     let detour = if r.read_bool()? { Some(read_vec2(r)?) } else { None };
     let stuck = r.read_u8()?;
     let cast = if r.read_bool()? {
@@ -290,7 +310,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     if !move_speed.is_finite() {
         return Err(DecodeError::Invalid("unit state"));
     }
-    Ok(UnitState { pos, order, move_speed, detour, stuck, cast, stunned_until, q_ready_at })
+    Ok(UnitState { pos, order, move_speed, path, detour, stuck, cast, stunned_until, q_ready_at })
 }
 
 fn write_remote(w: &mut BitWriter, o: &RemoteUnit) {
@@ -409,11 +429,12 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
 
 pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
     match msg {
-        ServerMessage::Welcome { player, unit, team, tick, tick_hz, since_tick_us, time_echo } => {
+        ServerMessage::Welcome { player, unit, team, map, tick, tick_hz, since_tick_us, time_echo } => {
             let mut w = begin(header, 0);
             w.write_u8(player.0);
             w.write_u32(unit.0);
             w.write_bool(*team == Team::Red);
+            w.write_u8(*map as u8);
             w.write_u32(tick.0);
             w.write_u8(*tick_hz);
             w.write_u32(*since_tick_us);
@@ -470,6 +491,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             player: PlayerId(r.read_u8()?),
             unit: UnitId(r.read_u32()?),
             team: if r.read_bool()? { Team::Red } else { Team::Blue },
+            map: MapId::from_u8(r.read_u8()?).ok_or(DecodeError::Invalid("map id"))?,
             tick: Tick(r.read_u32()?),
             tick_hz: r.read_u8()?,
             since_tick_us: r.read_u32()?,
@@ -507,7 +529,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 let seq = r.read_u32()?;
                 events.push((seq, read_event(&mut r)?));
             }
-            ServerMessage::Snapshot(Snapshot {
+            ServerMessage::Snapshot(Box::new(Snapshot {
                 tick,
                 since_tick_us,
                 time_echo,
@@ -516,7 +538,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 own,
                 others,
                 events,
-            })
+            }))
         }
         2 => ServerMessage::Reject {
             reason: match r.read_u8()? {
@@ -570,6 +592,14 @@ mod tests {
             move_speed: 325.0,
             detour: Some(Vec2::new(1_300.125, 9_800.5)),
             stuck: 2,
+            path: {
+                let mut p = Path::EMPTY;
+                p.points[..3].copy_from_slice(&[Vec2::new(5.5, 6.25), Vec2::new(7.0, 8.0), Vec2::new(9.5, 1.0)]);
+                p.len = 3;
+                p.next = 1;
+                p.complete = false;
+                p
+            },
             cast: Some(Cast { dir: Vec2::new(0.6, -0.8), fire_at: SimTime(123_457), seq: 41 }),
             stunned_until: SimTime(99_999),
             q_ready_at: SimTime(124_000),
@@ -636,7 +666,7 @@ mod tests {
                 (4, SimEvent::MissileExpired { id: 10, at: SimTime(6_000) }),
             ],
         };
-        let msg = ServerMessage::Snapshot(snap);
+        let msg = ServerMessage::Snapshot(Box::new(snap));
         let bytes = encode_server(&hdr(), &msg);
         let (_, back) = decode_server(&bytes).unwrap();
         assert_eq!(back, msg);

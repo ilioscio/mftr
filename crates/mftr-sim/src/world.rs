@@ -13,10 +13,12 @@
 use crate::ability::{LineSkillshot, SANDBOX_LANCE, TURRET_SHOT};
 use crate::collision::{Obstacle, choose_detour, constrained_move};
 use crate::hash::StateHasher;
+use crate::map::{Map, MapId};
 use crate::math::{QPoint, Vec2};
 use crate::projectile::first_contact;
 use crate::rng::Pcg32;
 use crate::time::{SUBTICKS, SUBTICKS_PER_SECOND, SimTime, SubTick, Tick};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PlayerId(pub u8);
@@ -68,13 +70,53 @@ pub struct Cast {
     pub seq: u32,
 }
 
+/// Most waypoints a path keeps; longer paths are re-planned when they run out.
+pub const MAX_PATH: usize = 12;
+
+/// An any-angle path toward the current move goal (from [`Map::find_path`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Path {
+    pub points: [Vec2; MAX_PATH],
+    pub len: u8,
+    pub next: u8,
+    /// The last point is the final destination (else the path was truncated).
+    pub complete: bool,
+}
+
+impl Path {
+    pub const EMPTY: Path = Path { points: [Vec2::ZERO; MAX_PATH], len: 0, next: 0, complete: true };
+
+    fn from_points(points: &[Vec2]) -> Path {
+        let mut p = Path::EMPTY;
+        let n = points.len().min(MAX_PATH);
+        p.points[..n].copy_from_slice(&points[..n]);
+        p.len = n as u8;
+        p.complete = points.len() <= MAX_PATH;
+        p
+    }
+
+    pub fn waypoints(&self) -> &[Vec2] {
+        &self.points[self.next as usize..self.len as usize]
+    }
+
+    fn bits(&self) -> ([[u32; 2]; MAX_PATH], u8, u8, bool) {
+        let mut b = [[0u32; 2]; MAX_PATH];
+        for (i, p) in self.points[..self.len as usize].iter().enumerate() {
+            b[i] = p.to_bits();
+        }
+        (b, self.len, self.next, self.complete)
+    }
+}
+
 /// Everything client prediction needs to reproduce a unit bit-exactly.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UnitState {
     pub pos: Vec2,
     pub order: Order,
     pub move_speed: f32,
-    /// Temporary waypoint around blocking units, taken before resuming `order`.
+    /// Waypoints toward the `MoveTo` goal, around walls.
+    pub path: Path,
+    /// Temporary waypoint around blocking units, taken before resuming the path.
     pub detour: Option<Vec2>,
     /// Consecutive ticks of poor progress while moving.
     pub stuck: u8,
@@ -89,6 +131,7 @@ impl UnitState {
             pos,
             order: Order::Idle,
             move_speed,
+            path: Path::EMPTY,
             detour: None,
             stuck: 0,
             cast: None,
@@ -97,20 +140,34 @@ impl UnitState {
         }
     }
 
-    /// Where the unit is currently heading (detour first), if anywhere.
+    /// Where the unit is currently heading (detour first, then the path), if anywhere.
     pub fn heading(&self) -> Option<Vec2> {
-        match (self.detour, self.order) {
-            (Some(d), _) => Some(d),
-            (None, Order::MoveTo(q)) => Some(q.to_vec2()),
-            (None, Order::Idle) => None,
+        if let Some(d) = self.detour {
+            return Some(d);
+        }
+        match self.order {
+            Order::MoveTo(_) => self.path.waypoints().first().copied(),
+            Order::Idle => None,
         }
     }
 
-    /// Replace the order (a player command): detours and stuck state reset.
-    pub fn set_order(&mut self, order: Order) {
+    /// Replace the order (a command or AI decision) and plan the route on `map`.
+    pub fn set_order(&mut self, order: Order, map: &Map) {
         self.order = order;
         self.detour = None;
         self.stuck = 0;
+        self.route(map);
+    }
+
+    /// (Re)plan the path from the current position toward the order's goal.
+    fn route(&mut self, map: &Map) {
+        self.path = match self.order {
+            Order::MoveTo(q) => Path::from_points(&map.find_path(self.pos, q.to_vec2())),
+            Order::Idle => Path::EMPTY,
+        };
+        if self.order != Order::Idle && self.path.len == 0 {
+            self.order = Order::Idle; // unreachable
+        }
     }
 
     pub fn can_move(&self, at: SimTime) -> bool {
@@ -122,8 +179,8 @@ impl UnitState {
     }
 
     /// Advance by `dt` seconds toward the current heading at constant speed (instant turns,
-    /// R01 §2), blocked by `obstacles`. Returns `(desired, achieved)` distance.
-    pub fn advance(&mut self, dt: f32, radius: f32, obstacles: &[Obstacle]) -> (f32, f32) {
+    /// R01 §2), blocked by `obstacles` and the map's walls. Returns `(desired, achieved)`.
+    pub fn advance(&mut self, dt: f32, radius: f32, obstacles: &[Obstacle], map: &Map) -> (f32, f32) {
         if dt <= 0.0 {
             return (0.0, 0.0);
         }
@@ -132,16 +189,26 @@ impl UnitState {
         let dist = to.length();
         let step = self.move_speed * dt;
         let (delta, arrives) = if step >= dist { (to, true) } else { (to * (step / dist), false) };
-        let new_pos = constrained_move(self.pos, delta, radius, obstacles);
+        let new_pos = constrained_move(self.pos, delta, radius, obstacles, map.edges());
         let achieved = (new_pos - self.pos).length();
         self.pos = new_pos;
         if arrives && new_pos == target {
-            if self.detour.is_some() {
-                self.detour = None;
-            } else {
-                self.order = Order::Idle;
-            }
             self.stuck = 0;
+            if self.detour.is_some() {
+                // Off the planned path now: re-plan from here.
+                self.detour = None;
+                self.route(map);
+            } else {
+                self.path.next += 1;
+                if self.path.next >= self.path.len {
+                    if self.path.complete {
+                        self.order = Order::Idle;
+                        self.path = Path::EMPTY;
+                    } else {
+                        self.route(map);
+                    }
+                }
+            }
         }
         (delta.length(), achieved)
     }
@@ -152,6 +219,7 @@ impl UnitState {
         self.pos.to_bits() == other.pos.to_bits()
             && self.order == other.order
             && self.move_speed.to_bits() == other.move_speed.to_bits()
+            && self.path.bits() == other.path.bits()
             && self.detour.map(Vec2::to_bits) == other.detour.map(Vec2::to_bits)
             && self.stuck == other.stuck
             && cast_bits(&self.cast) == cast_bits(&other.cast)
@@ -170,6 +238,13 @@ impl UnitState {
                 h.write_u16(q.x);
                 h.write_u16(q.y);
             }
+        }
+        h.write_u8(self.path.len);
+        h.write_u8(self.path.next);
+        h.write_u8(self.path.complete as u8);
+        for p in &self.path.points[..self.path.len as usize] {
+            h.write_f32(p.x);
+            h.write_f32(p.y);
         }
         match self.detour {
             None => h.write_u8(0),
@@ -332,6 +407,7 @@ pub struct World {
     next_unit: u32,
     rng: Pcg32,
     missiles: Vec<Missile>,
+    map: Arc<Map>,
     next_missile: u32,
     missiles_enabled: bool,
     events: Vec<SimEvent>,
@@ -348,6 +424,7 @@ impl World {
             next_missile: 1,
             missiles_enabled: true,
             events: Vec::new(),
+            map: MapId::Open.shared(),
         }
     }
 
@@ -460,6 +537,16 @@ impl World {
     }
 
     /// Rewind or fast-forward the tick counter (prediction reconciliation only).
+    pub fn map(&self) -> &Arc<Map> {
+        &self.map
+    }
+
+    /// Use a map (server: at match start; client: from the welcome). Walls and paths then
+    /// apply to every unit.
+    pub fn set_map(&mut self, map: Arc<Map>) {
+        self.map = map;
+    }
+
     pub fn set_tick(&mut self, tick: Tick) {
         self.tick = tick;
     }
@@ -472,7 +559,8 @@ impl World {
         let s1 = SimTime::end_of(k);
         let mut cmds: Vec<&Command> = commands.iter().filter(|c| c.tick == k).collect();
         cmds.sort_by_key(|c| (c.sub, c.player, c.seq));
-        let World { units, rng, missiles, next_missile, missiles_enabled, events, .. } = self;
+        let World { units, rng, missiles, next_missile, missiles_enabled, events, map, .. } = self;
+        let map: &Map = map;
 
         // Phase 1: AI.
         let champions: Vec<(Team, Vec2, Option<Vec2>, f32)> = units
@@ -483,7 +571,7 @@ impl World {
         for unit in units.iter_mut() {
             match unit.brain {
                 Some(Brain::Patrol { a, b, toward_b }) if unit.state.order == Order::Idle => {
-                    unit.state.set_order(Order::MoveTo(if toward_b { b } else { a }));
+                    unit.state.set_order(Order::MoveTo(if toward_b { b } else { a }), map);
                     unit.brain = Some(Brain::Patrol { a, b, toward_b: !toward_b });
                 }
                 Some(Brain::Turret { range }) if unit.state.can_cast(s0) => {
@@ -549,7 +637,7 @@ impl World {
                 let next = [cmd_at, fire_at, unstun, Some(s1)].into_iter().flatten().min().unwrap_or(s1);
                 if next > t && unit.state.can_move(t) {
                     let dt = (next.0 - t.0) as f32 / SUBTICKS_PER_SECOND as f32;
-                    let (d, a) = unit.state.advance(dt, radius, &obstacles);
+                    let (d, a) = unit.state.advance(dt, radius, &obstacles, map);
                     desired += d;
                     achieved += a;
                 }
@@ -564,8 +652,8 @@ impl World {
                     && SimTime::at(k, c.sub) == t
                 {
                     match c.kind {
-                        CommandKind::MoveTo(q) => unit.state.set_order(Order::MoveTo(q)),
-                        CommandKind::Stop => unit.state.set_order(Order::Idle),
+                        CommandKind::MoveTo(q) => unit.state.set_order(Order::MoveTo(q), map),
+                        CommandKind::Stop => unit.state.set_order(Order::Idle, map),
                         CommandKind::CastQ(q) => {
                             if unit.state.can_cast(t) {
                                 start_cast(&mut unit.state, unit.id, spec, q.to_vec2(), t, c.seq, events);
@@ -578,7 +666,7 @@ impl World {
                     break;
                 }
             }
-            update_stuck(&mut unit.state, desired, achieved, radius, &obstacles);
+            update_stuck(&mut unit.state, desired, achieved, radius, &obstacles, map);
         }
 
         // Phase 3: missiles.
@@ -697,7 +785,7 @@ pub fn blocks(_kind: UnitKind, _team: Team, _other_kind: UnitKind, _other_team: 
 /// Stuck detection and detours (03a §5): poor progress for a few ticks → take a short detour
 /// around the blockers. If the goal itself is occupied (clicked into a clump) or already
 /// within reach, stop where we are, like the reference game does.
-fn update_stuck(state: &mut UnitState, desired: f32, achieved: f32, radius: f32, obstacles: &[Obstacle]) {
+fn update_stuck(state: &mut UnitState, desired: f32, achieved: f32, radius: f32, obstacles: &[Obstacle], map: &Map) {
     if desired <= 0.5 || achieved >= desired * STUCK_PROGRESS {
         state.stuck = 0;
         return;
@@ -711,11 +799,11 @@ fn update_stuck(state: &mut UnitState, desired: f32, achieved: f32, radius: f32,
     let goal = goal.to_vec2();
     let occupied = obstacles.iter().any(|o| (goal - o.pos).length_sq() < (radius + o.radius) * (radius + o.radius));
     if occupied || (goal - state.pos).length() < GIVE_UP_DISTANCE {
-        state.set_order(Order::Idle);
+        state.set_order(Order::Idle, map);
         return;
     }
     let reach = 2.0 * (radius + 35.0);
-    state.detour = choose_detour(state.pos, goal, radius, reach, obstacles);
+    state.detour = choose_detour(state.pos, goal, radius, reach, obstacles, map.edges());
 }
 
 #[cfg(test)]
@@ -1072,6 +1160,90 @@ mod tests {
         }
     }
 
+    fn arena_world(seed: u64) -> World {
+        let mut w = World::new(seed);
+        w.set_map(MapId::Arena.shared());
+        w
+    }
+
+    #[test]
+    fn champion_paths_around_a_wall_and_never_enters_one() {
+        let mut w = arena_world(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(2200.0, 1200.0));
+        w.step(&[cmd(0, 1, 1, 0, (2700.0, 1200.0))]); // straight line crosses the long wall
+        let map = w.map().clone();
+        for _ in 0..600 {
+            w.step(&[]);
+            let p = w.unit(me).unwrap().state.pos;
+            assert!(map.walkable(p, CHAMPION_COLLISION_RADIUS - 0.05), "inside a wall at {p:?}");
+        }
+        let s = w.unit(me).unwrap().state;
+        assert_eq!(s.order, Order::Idle);
+        assert!(s.pos.distance(Vec2::new(2700.0, 1200.0)) < 1.0, "{s:?}");
+    }
+
+    /// Prediction with the shared map and exact proxies stays bit-exact through walls, paths,
+    /// re-plans and unit collision.
+    #[test]
+    fn prediction_with_map_matches_the_server() {
+        let mut full = arena_world(4);
+        clump(&mut full, Vec2::new(1200.0, 1200.0), 1);
+        let me = full.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(2000.0, 2000.0));
+        full.spawn_champion(PlayerId(1), Team::Red, Vec2::new(2200.0, 2100.0));
+        let mut rng = Pcg32::new(8, 8);
+        for k in 1..=1500u32 {
+            let mut c = Vec::new();
+            if rng.next_u32() % 11 == 0 {
+                let t = (rng.range_f32(300.0, 3700.0), rng.range_f32(300.0, 3700.0));
+                c.push(cmd(0, k, k, (rng.next_u32() % 64) as u8, t));
+            }
+            if rng.next_u32() % 13 == 0 {
+                let t = (rng.range_f32(300.0, 3700.0), rng.range_f32(300.0, 3700.0));
+                c.push(cmd(1, k, k, 0, t));
+            }
+            let own = full.unit(me).unwrap().clone();
+            let proxies = full.units().iter().filter(|u| u.id != me).map(|u| Unit {
+                state: UnitState::new(u.state.pos, 0.0),
+                brain: None,
+                ..u.clone()
+            });
+            let mut predicted = World::from_units(full.tick(), vec![own]);
+            predicted.set_map(MapId::Arena.shared());
+            predicted.replace_others(me, proxies);
+            predicted.step(&c);
+            full.step(&c);
+            assert!(predicted.unit(me).unwrap().state.bits_eq(&full.unit(me).unwrap().state), "tick {k}");
+        }
+    }
+
+    /// Determinism canary for pathfinding and wall collision (arena map).
+    #[test]
+    fn golden_state_hash_arena() {
+        let mut w = arena_world(0xA4E7A);
+        for p in 0..6u8 {
+            let team = if p % 2 == 0 { Team::Blue } else { Team::Red };
+            w.spawn_champion(PlayerId(p), team, Vec2::new(600.0 + p as f32 * 500.0, 3300.0));
+        }
+        clump(&mut w, Vec2::new(1200.0, 1200.0), 1);
+        let mut rng = Pcg32::new(77, 7);
+        let mut seq = 0;
+        for k in 1..=6000u32 {
+            let mut cmds = Vec::new();
+            for p in 0..6u8 {
+                if rng.next_u32() % 23 == 0 {
+                    seq += 1;
+                    let t = (rng.range_f32(0.0, 4000.0), rng.range_f32(0.0, 4000.0));
+                    cmds.push(cmd(p, seq, k, (rng.next_u32() % SUBTICKS as u32) as u8, t));
+                }
+            }
+            w.step(&cmds);
+            w.take_events();
+        }
+        assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
+    }
+
+    const GOLDEN_HASH_ARENA: u64 = 0xe294_54c2_61b9_7f5d;
+
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
     #[test]
@@ -1113,5 +1285,5 @@ mod tests {
     }
 
     /// Recorded on x86_64-pc-windows-msvc. CI checks Linux, macOS (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0xc5d9_6154_da5f_8de6;
+    const GOLDEN_HASH: u64 = 0x194c_0375_f359_2afd;
 }

@@ -4,7 +4,9 @@
 use crate::report::{ClickBot, DodgeBot, JumpMeter, Summary};
 use mftr_client::{ClientSession, Phase};
 use mftr_net::conditioner::{LinkProfile, SimLink};
+use mftr_net::msg::{ServerMessage, decode_server};
 use mftr_server::{Scenario, ServerConfig, ServerCore};
+use mftr_sim::Team;
 use mftr_sim::world::CHAMPION_MOVE_SPEED;
 
 #[derive(Clone, Debug)]
@@ -47,6 +49,10 @@ pub struct LabResult {
     pub summary: Summary,
     pub server_hash: u64,
     pub server_ticks: u64,
+    /// Fog audit (03 §10, slice 3 exit): units sent to a client its team could not see.
+    pub fog_violations: u64,
+    /// Unit-snapshots withheld by fog (sanity check that culling actually happens).
+    pub fog_hidden: u64,
 }
 
 pub fn run(cfg: &LabConfig) -> LabResult {
@@ -80,6 +86,7 @@ pub fn run(cfg: &LabConfig) -> LabResult {
 
     let frame_dt = 1.0 / cfg.fps;
     let mut t = 0.0;
+    let (mut fog_violations, mut fog_hidden) = (0u64, 0u64);
     let mut measuring = cfg.warmup <= 0.0;
     while t < cfg.warmup + cfg.seconds {
         if !measuring && t >= cfg.warmup {
@@ -100,7 +107,18 @@ pub fn run(cfg: &LabConfig) -> LabResult {
         }
         // Server tick.
         if t >= server.next_tick_due() {
-            for (to, bytes) in server.step(t) {
+            let packets = server.step(t);
+            let mut allowed: [Option<std::collections::BTreeSet<mftr_sim::UnitId>>; 2] = [None, None];
+            for (to, bytes) in &packets {
+                let (Some(team), Ok((_, ServerMessage::Snapshot(s)))) = (server.team_of(*to), decode_server(bytes))
+                else {
+                    continue;
+                };
+                let set = allowed[(team == Team::Red) as usize].get_or_insert_with(|| server.visible_to(team));
+                fog_violations += s.others.iter().filter(|o| !set.contains(&o.id)).count() as u64;
+                fog_hidden += (server.world().units().len() - 1 - s.others.len()) as u64;
+            }
+            for (to, bytes) in packets {
                 clients[to as usize].down.send(bytes, t);
             }
         }
@@ -147,6 +165,8 @@ pub fn run(cfg: &LabConfig) -> LabResult {
         summary: Summary::from_sessions(cfg.profile.name, cfg.profile.latency * 2.0, cfg.seconds, &refs),
         server_hash: server.world().state_hash(),
         server_ticks: server.stats.ticks,
+        fog_violations,
+        fog_hidden,
     }
 }
 
@@ -283,6 +303,26 @@ mod tests {
             // predicted and drawn as unconfirmed (03a §7).
             assert!((s.dodge.phantom_hits as f64) < 0.02 * s.dodge.near_misses as f64, "{}", s.dodge_row());
         }
+    }
+
+    /// M1 slice 3 exit: over a long run with walls, brush, minions and 10 wandering players,
+    /// no client is ever sent a unit its team can't see, while plenty are withheld.
+    #[test]
+    fn fog_audit_never_leaks_hidden_units() {
+        let r = run(&LabConfig {
+            profile: LinkProfile::TYPICAL,
+            clients: 10,
+            seconds: 300.0,
+            seed: 5,
+            fps: 60.0,
+            warmup: 5.0,
+            scenario: Scenario::MinionSandbox,
+            proxies: true,
+            reaction: 0.25,
+            margin_override: None,
+        });
+        assert_eq!(r.fog_violations, 0);
+        assert!(r.fog_hidden > 10_000, "fog should be hiding things: {}", r.fog_hidden);
     }
 
     /// The detector itself must work: with the input margin forced negative (nearly every

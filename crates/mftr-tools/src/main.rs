@@ -42,7 +42,14 @@ fn main() {
                     margin_override: get("--margin-override").map(|v| v.parse::<f64>().expect("seconds")),
                 };
                 let r = netlab::run(&cfg);
-                println!("{}   ticks {} hash {:#018x}", r.summary.row(), r.server_ticks, r.server_hash);
+                println!(
+                    "{}   ticks {} hash {:#018x}  fog: {} withheld, {} leaked",
+                    r.summary.row(),
+                    r.server_ticks,
+                    r.server_hash,
+                    r.fog_hidden,
+                    r.fog_violations
+                );
                 if cfg.scenario == Scenario::DodgeRig {
                     println!("{}", r.summary.dodge_row());
                 }

@@ -162,6 +162,8 @@ pub struct ClientSession {
     player: PlayerId,
     unit: UnitId,
     team: Team,
+    /// The map from the welcome: prediction runs with the same walls and pathing as the server.
+    map: std::sync::Arc<mftr_sim::map::Map>,
     /// Predicted world containing only our own unit.
     world: World,
     /// Predicted own state at the end of each tick.
@@ -208,6 +210,7 @@ impl ClientSession {
             player: PlayerId(0),
             unit: UnitId(0),
             team: Team::Blue,
+            map: mftr_sim::map::MapId::Open.shared(),
             world: World::from_units(Tick(0), Vec::new()),
             history: VecDeque::new(),
             commands: VecDeque::new(),
@@ -243,6 +246,11 @@ impl ClientSession {
 
     pub fn player(&self) -> PlayerId {
         self.player
+    }
+
+    /// The match map (walls, brush) for rendering.
+    pub fn map(&self) -> &mftr_sim::map::Map {
+        &self.map
     }
 
     pub fn team(&self) -> Team {
@@ -479,17 +487,18 @@ impl ClientSession {
         }
         self.send.on_ack(header.ack, header.ack_bits);
         match message {
-            ServerMessage::Welcome { player, unit, team, tick, since_tick_us, time_echo, .. } => {
+            ServerMessage::Welcome { player, unit, team, map, tick, since_tick_us, time_echo, .. } => {
                 if self.phase == Phase::Connecting {
                     self.player = player;
                     self.unit = unit;
                     self.team = team;
+                    self.map = map.shared();
                     self.phase = Phase::Joining;
                     let rtt = rtt_from_echo(now, time_echo.client_time_us, time_echo.hold_us);
                     self.clock.add_sample(now, rtt, tick.end_seconds() + since_tick_us as f64 * 1e-6);
                 }
             }
-            ServerMessage::Snapshot(s) => self.on_snapshot(s, now),
+            ServerMessage::Snapshot(s) => self.on_snapshot(*s, now),
             ServerMessage::Reject { .. } => {}
         }
     }
@@ -695,6 +704,7 @@ impl ClientSession {
         };
         self.world = World::from_units(tick, vec![unit]);
         self.world.set_missiles_enabled(false);
+        self.world.set_map(self.map.clone());
         self.history.clear();
         self.history.push_back((tick, state));
         self.render_offset = Vec2::ZERO;

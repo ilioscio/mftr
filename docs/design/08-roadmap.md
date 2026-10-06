@@ -95,6 +95,17 @@ With no unit collision yet, the only source of corrections is a command that arr
 
 Alone (no allies to intercept), 1 player, 1 hour: 0.05% ghost hits at 60 ms, 0.10% at 120 ms.
 
+### Slice 3 status (2026-10-06): ✅ done
+
+- `mftr-sim/map`: walls and brush as vector polygons, with the **arena** map (rock, long wall, L-wall, block, four brush patches, bounded edges) and the unbounded **open** plane. Deterministic grid A* (25 u cells, integer costs, fixed tie-breaks) plus string pulling gives any-angle waypoint paths with 35 u wall clearance, and goals inside walls snap to the nearest reachable point (D24).
+- Movement: circle-vs-segment sweeps with sliding and rounded corners, in the same order-independent pass as unit collision. Units carry their path (lossless own state) and re-plan after detours or truncated paths. Unit tests: paths around walls never enter them, and prediction with the shared map stays bit-exact through walls, paths and collisions. A second golden hash covers the arena.
+- `mftr-sim/vision` + server: per-team vision every tick (champions 1,200 u, minions 900 u; walls block; brush hides unless you share it; structures always visible, D25). Snapshots contain only visible units. Casts are sent only if the caster is visible. Enemy missiles are revealed when they enter vision, **re-based** to that point so the caster isn't leaked, and their end events go only to clients that saw them.
+- Protocol v5: the welcome carries the map id; own state carries the path. The Godot client draws walls and brush from the same polygons.
+
+**Fog audit** (Netcode Lab decodes every snapshot and checks it against the server's vision at that tick): minion arena, 10 players, 5 min at 80 ms: **530,920 unit-snapshots withheld, 0 leaked.** Also a server unit test for hiding behind a wall, in brush and out of range.
+
+**Prediction unaffected by walls:** one player in the minion arena at 80 ms has 0.83 corrections > 15 u per minute (0.87 before walls). With 10 players it rises to ~6.9/min: champions bumping each other in the funnels the walls create, and enemies hidden in brush that can't be proxied (Q12).
+
 **Open issues found:**
 1. **Champion-vs-champion bumps** dominate corrections when many champions crowd together: ~4 per player-minute with 10 click-spamming bots in a 3,000 u arena. Their proxies can't anticipate the other player's next click. Options are recorded as Q12 in DECISIONS.
 2. **Bandwidth** rose to ~23–27 KB/s per player with ~70 units, because every unit's full state is sent every tick. Path-coasting and baseline deltas (03b §6) come next, before the unit count grows.

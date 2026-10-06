@@ -8,10 +8,12 @@ pub mod ability;
 pub mod collision;
 pub mod combat;
 pub mod hash;
+pub mod map;
 pub mod math;
 pub mod projectile;
 pub mod rng;
 pub mod time;
+pub mod vision;
 pub mod world;
 
 pub use math::{QPoint, Vec2};
