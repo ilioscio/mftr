@@ -59,6 +59,11 @@ impl BitWriter {
         self.write(v as u64, 32);
     }
 
+    pub fn write_u64(&mut self, v: u64) {
+        self.write(v & 0xffff_ffff, 32);
+        self.write(v >> 32, 32);
+    }
+
     pub fn write_i16(&mut self, v: i16) {
         self.write(v as u16 as u64, 16);
     }
@@ -120,6 +125,11 @@ impl<'a> BitReader<'a> {
 
     pub fn read_u32(&mut self) -> Result<u32, DecodeError> {
         Ok(self.read(32)? as u32)
+    }
+
+    pub fn read_u64(&mut self) -> Result<u64, DecodeError> {
+        let lo = self.read(32)?;
+        Ok(lo | (self.read(32)? << 32))
     }
 
     pub fn read_i16(&mut self) -> Result<i16, DecodeError> {

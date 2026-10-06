@@ -1,9 +1,12 @@
 //! mftr-tools: developer CLI.
 //!
 //!   mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--warmup S] [--seed N] [--fps F]
-//!   mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N]
+//!                     [--scenario empty|minions|dodge|duel] [--no-proxies] [--reaction S]
+//!   mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]
 //!
-//! Profiles: perfect, lan, good, typical, rough, awful.
+//!   mftr-tools blind-report FILE.tsv...
+//!
+//! Profiles: perfect, lan, good, typical, mid, rough, awful.
 
 use mftr_net::conditioner::LinkProfile;
 use mftr_server::Scenario;
@@ -43,17 +46,88 @@ fn main() {
                 };
                 let r = netlab::run(&cfg);
                 println!(
-                    "{}   ticks {} hash {:#018x}  fog: {} withheld, {} leaked",
+                    "{}   ticks {} hash {:#018x}  fog: {} withheld, {} leaked  tick {:.3} ms (max {:.3})",
                     r.summary.row(),
                     r.server_ticks,
                     r.server_hash,
                     r.fog_hidden,
-                    r.fog_violations
+                    r.fog_violations,
+                    r.tick_ms_mean,
+                    r.tick_ms_max
                 );
-                if cfg.scenario == Scenario::DodgeRig {
+                if matches!(cfg.scenario, Scenario::DodgeRig | Scenario::Duel | Scenario::Aram) {
                     println!("{}", r.summary.dodge_row());
                 }
+                if matches!(cfg.scenario, Scenario::Duel | Scenario::Aram) {
+                    println!("{}", r.summary.duel_row());
+                }
             }
+        }
+        Some("botmatch") => {
+            // M2 slice 5: server bots play ARAM to the end; the replay must re-simulate exactly.
+            let cfg = mftr_server::ServerConfig {
+                seed: num("--seed", 1.0) as u64,
+                bots: num("--bots", 10.0) as u8,
+                scenario: Scenario::Aram,
+                ..Default::default()
+            };
+            let minutes = num("--minutes", 40.0);
+            let started = std::time::Instant::now();
+            let m = mftr_server::run_bot_match(cfg, (minutes * 60.0 * 30.0) as u32);
+            let secs = m.ticks as f64 / 30.0;
+            match m.winner {
+                Some((team, _)) => println!("{team:?} won after {}:{:02}", secs as u32 / 60, secs as u32 % 60),
+                None => println!("no winner after {} minutes", minutes),
+            }
+            println!(
+                "champion deaths {}  structures destroyed {}  simulated in {:.1} s",
+                m.champion_kills,
+                m.structures_destroyed,
+                started.elapsed().as_secs_f64()
+            );
+            for (t, team, kind, tier) in &m.falls {
+                let s = t.0 / 30;
+                println!("  {:>2}:{:02}  {team:?} {kind:?} (tier {tier})", s / 60, s % 60);
+            }
+            if let Some(path) = get("--replay") {
+                std::fs::write(&path, m.replay.to_text()).expect("write replay");
+                println!("replay written to {path}");
+            }
+            let check = m.replay.verify();
+            println!(
+                "replay: {} ticks, {} hashes checked, {}",
+                check.ticks,
+                check.hashes_checked,
+                match check.mismatch {
+                    None => "all match".to_string(),
+                    Some((t, a, b)) => format!("MISMATCH at tick {}: {a:016x} vs {b:016x}", t.0),
+                }
+            );
+        }
+        Some("size-report") => {
+            // M2 slice 6: sizes of what we ship against their budgets (exit 1 when over).
+            let package = get("--client-package").map(std::path::PathBuf::from);
+            let items = mftr_tools::size::report(std::path::Path::new("."), package.as_deref());
+            print!("{}", mftr_tools::size::table(&items));
+            if items.iter().any(|i| i.over()) {
+                std::process::exit(1);
+            }
+        }
+        Some("replay") => {
+            // Re-simulate a replay file and check its hashes.
+            let path = args.get(1).expect("replay FILE");
+            let text = std::fs::read_to_string(path).expect("read replay");
+            let replay = mftr_server::Replay::from_text(&text).unwrap_or_else(|e| panic!("{path}: {e}"));
+            let check = replay.verify();
+            println!(
+                "{} ticks, {} hashes checked, final hash {:016x}",
+                check.ticks, check.hashes_checked, check.final_hash
+            );
+            if let Some((t, a, b)) = check.mismatch {
+                println!("MISMATCH at tick {}: recorded {a:016x}, re-simulated {b:016x}", t.0);
+                std::process::exit(1);
+            }
+            println!("all hashes match");
         }
         Some("bot") => {
             let cfg = bot::BotConfig {
@@ -62,6 +136,9 @@ fn main() {
                 seconds: num("--seconds", 30.0),
                 seed: num("--seed", 1.0) as u64,
                 fps: num("--fps", 144.0),
+                duel: args.iter().any(|a| a == "--duel"),
+                champion: get("--champion")
+                    .map(|c| mftr_sim::ChampionId::by_name(&c).unwrap_or_else(|| panic!("unknown champion {c}"))),
             };
             match bot::run(&cfg) {
                 Ok(s) => {
@@ -74,9 +151,20 @@ fn main() {
                 }
             }
         }
+        Some("blind-report") => {
+            let mut records = Vec::new();
+            for path in &args[1..] {
+                let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+                records.extend(text.lines().filter_map(mftr_client::blind::BlindRecord::from_tsv));
+            }
+            print!("{}", mftr_tools::report::blind_report(&records));
+        }
         _ => {
             eprintln!("usage: mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--seed N]");
-            eprintln!("       mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N]");
+            eprintln!(
+                "       mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]"
+            );
+            eprintln!("       mftr-tools blind-report FILE.tsv...");
             std::process::exit(2);
         }
     }

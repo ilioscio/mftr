@@ -64,6 +64,10 @@ pub struct MissileRender {
     pub impact: bool,
     /// Predicted to be intercepted by another unit: draw dimmed until the server confirms.
     pub unconfirmed: bool,
+    /// Stuns or roots on hit: drawn with the shared hard-CC accent (05 §1).
+    pub hard_cc: bool,
+    /// The caster (for the spawn streak from its drawn hand, 03a §7).
+    pub owner: UnitId,
 }
 
 /// An enemy missile as the player sees it, for scripted dodgers (dodge rig bot).
@@ -89,6 +93,20 @@ pub struct DodgeStats {
     pub phantom_hits: u64,
     /// Resolved while shown as unconfirmed (predicted interception); not judged either way.
     pub uncertain: u64,
+    /// Resolved after the server had already killed us with something else (the missile
+    /// passed a corpse); not judged either way.
+    pub died_first: u64,
+}
+
+/// How own missiles are drawn (03a §7, D12; blind A/B test in M1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OwnMissileDisplay {
+    /// Option A: always on `T_input`, honest about where the missile really is.
+    InputTimeline,
+    /// Option B (default): leaves the hand on `T_input`, blends toward `T_interp` over the
+    /// flight so impacts line up with enemies as drawn.
+    #[default]
+    Blend,
 }
 
 #[derive(Default)]
@@ -97,6 +115,7 @@ pub struct MissileBook {
     /// Own casts predicted locally, keyed by cast command sequence.
     pub predicted_own: BTreeMap<u32, Missile>,
     pub stats: DodgeStats,
+    pub own_display: OwnMissileDisplay,
 }
 
 /// Fractional sub-tick instant on a display timeline given in fractional ticks.
@@ -208,6 +227,12 @@ impl MissileBook {
                     s.uncertain += 1;
                     continue;
                 }
+                // Our history is authoritative up to the latest snapshot: were we already dead?
+                let end_tick = Tick((t.end.map_or(t.m.end_at(), |(e, _)| e).0 / SUBTICKS as u64) as u32 + 1);
+                if !server_hit && history(end_tick).is_some_and(|h| !h.alive()) {
+                    s.died_first += 1;
+                    continue;
+                }
                 s.near_misses += t.near_miss as u64;
                 s.shown_hits += (shown == Outcome::Hit) as u64;
                 match (shown, server_hit) {
@@ -252,14 +277,22 @@ impl MissileBook {
                         radius: m.spec.radius,
                         impact: true,
                         unconfirmed: false,
+                        hard_cc: m.spec.cc.is_hard(),
+                        owner: m.owner,
                     });
                 }
                 return;
             }
             let (pos, dir, radius) = (pos_at(m, at), m.dir, m.spec.radius);
-            out.push(MissileRender { key, side, pos, dir, radius, impact: false, unconfirmed });
+            let hard_cc = m.spec.cc.is_hard();
+            let owner = m.owner;
+            out.push(MissileRender { key, side, pos, dir, radius, impact: false, unconfirmed, hard_cc, owner });
         };
+        let option = self.own_display;
         let own_display = |m: &Missile| {
+            if option == OwnMissileDisplay::InputTimeline {
+                return st(t_input);
+            }
             let traveled =
                 ((st(t_input) - m.spawn_at.0 as f64) / (SUBTICKS as f64 * 30.0)).max(0.0) as f32 * m.spec.speed;
             let w = ((traveled - OWN_BLEND_START) / (m.spec.range - OWN_BLEND_START).max(1.0)).clamp(0.0, 1.0) as f64;

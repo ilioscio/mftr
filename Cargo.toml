@@ -26,3 +26,11 @@ unsafe_code = "forbid"
 
 [profile.release]
 debug = "line-tables-only"
+
+# What we ship (M2 slice 6): no debug info, symbols stripped, whole-program optimization.
+[profile.dist]
+inherits = "release"
+debug = false
+strip = true
+lto = "thin"
+codegen-units = 1

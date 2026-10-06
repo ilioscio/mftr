@@ -1,18 +1,25 @@
 //! `mftr-server`: dedicated UDP match server (M0 prototype, unencrypted).
 //!
-//! Usage: mftr-server [--bind 0.0.0.0:7777] [--seed N] [--max-players N] [--scenario minions|dodge|empty]
+//! Usage: mftr-server [--bind 0.0.0.0:7777] [--seed N] [--max-players N] [--bots N] [--lobby]
+//!                    [--replay FILE] [--scenario duel|aram|minions|dodge|empty]
+//!
+//! `--bots N` adds N server bots at start (they count toward the player limit). `--lobby` starts
+//! with champion select (ARAM all-random with rerolls and a bench; humans replace bots). `--replay FILE`
+//! records the session and rewrites FILE every minute and whenever a match ends; check it with
+//! `mftr-tools replay FILE`.
 
 use mftr_server::{ClientKey, Scenario, ServerConfig, ServerCore};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--seed N] [--max-players N] [--scenario minions|dodge|empty]";
+const USAGE: &str = "mftr-server [--bind ADDR] [--seed N] [--max-players N] [--bots N] [--lobby] [--replay FILE] [--scenario duel|aram|minions|dodge|empty]";
 
 fn main() -> std::io::Result<()> {
     let mut bind = "0.0.0.0:7777".to_string();
-    // The M1 sandbox is the default playground.
-    let mut cfg = ServerConfig { scenario: Scenario::MinionSandbox, ..Default::default() };
+    let mut replay_path: Option<String> = None;
+    // The M1 Duel Sandbox is the default playground.
+    let mut cfg = ServerConfig { scenario: Scenario::Duel, ..Default::default() };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -20,6 +27,12 @@ fn main() -> std::io::Result<()> {
             "--seed" => cfg.seed = args.next().and_then(|v| v.parse().ok()).expect("--seed needs a number"),
             "--max-players" => {
                 cfg.max_players = args.next().and_then(|v| v.parse().ok()).expect("--max-players needs a number")
+            }
+            "--bots" => cfg.bots = args.next().and_then(|v| v.parse().ok()).expect("--bots needs a number"),
+            "--lobby" => cfg.lobby = true,
+            "--replay" => {
+                replay_path = Some(args.next().expect("--replay needs a file"));
+                cfg.record = true;
             }
             "--scenario" => {
                 let name = args.next().expect("--scenario needs a name");
@@ -46,6 +59,8 @@ fn main() -> std::io::Result<()> {
     let mut last_report = now();
     let mut tick_cost = 0.0f64;
     let mut tick_cost_max = 0.0f64;
+    let mut last_save = now();
+    let mut had_winner = false;
 
     loop {
         loop {
@@ -77,14 +92,25 @@ fn main() -> std::io::Result<()> {
             let cost = started.elapsed().as_secs_f64();
             tick_cost += cost;
             tick_cost_max = tick_cost_max.max(cost);
+            let winner = core.world().game().winner.is_some();
+            if let Some(path) = &replay_path
+                && ((winner && !had_winner) || t - last_save >= 60.0)
+            {
+                if let Err(e) = std::fs::write(path, core.game().replay().to_text()) {
+                    eprintln!("could not write replay {path}: {e}");
+                }
+                last_save = t;
+            }
+            had_winner = winner;
         }
 
         if t - last_report >= 5.0 {
             let s = &core.stats;
             println!(
-                "tick {:>6}  players {}  cmds {} (late {}, dropped {})  in {:.1} KB/s  out {:.1} KB/s  tick avg {:.3} ms max {:.3} ms",
+                "tick {:>6}  players {} (+{} bots)  cmds {} (late {}, dropped {})  in {:.1} KB/s  out {:.1} KB/s  tick avg {:.3} ms max {:.3} ms",
                 core.world().tick().0,
                 core.player_count(),
+                core.bot_count(),
                 s.commands,
                 s.commands_late,
                 s.commands_dropped,

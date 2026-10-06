@@ -123,6 +123,8 @@ Each `(client, entity)` pair accumulates priority every tick. The snapshot is fi
 
 Dirty groups that miss one packet just accumulate and go next tick. Nothing is ever lost, only delayed.
 
+> **Implemented (M2, D33):** the baseline is the newest snapshot the client reports having reconstructed (`snapshot_ack`), rather than a packet-level ack, so a snapshot the client couldn't decode is never used as a baseline. Field groups: static, position, motion (heading + speed), vitals, flags. The coasting tolerance is 0.5 u. The priority accumulator is still to come: today an oversized snapshot simply defers its farthest updates.
+
 ### Baselines
 - The server keeps the last 32 snapshots per client (~1 s). A delta encodes against the newest snapshot the client has acked.
 - If the client's last ack is older than the ring (heavy loss), the server sends a keyframe for the affected entities.

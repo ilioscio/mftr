@@ -6,7 +6,6 @@
 .godot/
 .import/
 *.translation
-export_presets.cfg
 /client/bin/
 
 # Build outputs / exports

@@ -3,3 +3,4 @@
 pub mod bot;
 pub mod netlab;
 pub mod report;
+pub mod size;

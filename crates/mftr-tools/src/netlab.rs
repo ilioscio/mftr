@@ -1,7 +1,7 @@
 //! Headless Netcode Lab (03 §14): one server and N scripted clients over link-conditioned
 //! links, in deterministic virtual time. Same seed → same result, so it's usable in CI.
 
-use crate::report::{ClickBot, DodgeBot, JumpMeter, Summary};
+use crate::report::{ClickBot, DodgeBot, DuelBot, JumpMeter, Summary};
 use mftr_client::{ClientSession, Phase};
 use mftr_net::conditioner::{LinkProfile, SimLink};
 use mftr_net::msg::{ServerMessage, decode_server};
@@ -31,6 +31,7 @@ pub struct LabConfig {
 enum Bot {
     Click(ClickBot),
     Dodge(DodgeBot),
+    Duel(DuelBot),
 }
 
 struct LabClient {
@@ -53,12 +54,19 @@ pub struct LabResult {
     pub fog_violations: u64,
     /// Unit-snapshots withheld by fog (sanity check that culling actually happens).
     pub fog_hidden: u64,
+    /// Wall-clock cost of one server tick (simulation + snapshots), mean and max, in ms.
+    pub tick_ms_mean: f64,
+    pub tick_ms_max: f64,
+    /// The server's recording of the session (M2 slice 5).
+    pub replay: mftr_server::Replay,
 }
 
 pub fn run(cfg: &LabConfig) -> LabResult {
     const STEP: f64 = 0.0005;
-    let mut server =
-        ServerCore::new(ServerConfig { seed: cfg.seed, scenario: cfg.scenario, ..Default::default() }, 0.0);
+    let mut server = ServerCore::new(
+        ServerConfig { seed: cfg.seed, scenario: cfg.scenario, record: true, ..Default::default() },
+        0.0,
+    );
     let mut clients: Vec<LabClient> = (0..cfg.clients)
         .map(|i| {
             let s = cfg.seed.wrapping_mul(1000) + i as u64;
@@ -71,10 +79,10 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                 },
                 up: SimLink::new(cfg.profile, s * 2 + 1),
                 down: SimLink::new(cfg.profile, s * 2 + 2),
-                bot: if cfg.scenario == Scenario::DodgeRig {
-                    Bot::Dodge(DodgeBot::new(s, cfg.reaction))
-                } else {
-                    Bot::Click(ClickBot::new(s))
+                bot: match cfg.scenario {
+                    Scenario::DodgeRig => Bot::Dodge(DodgeBot::new(s, cfg.reaction)),
+                    Scenario::Duel | Scenario::Aram => Bot::Duel(DuelBot::new(s, cfg.reaction)),
+                    _ => Bot::Click(ClickBot::new(s)),
                 },
                 jumps: JumpMeter::default(),
                 clock_offset: 1000.0 + 37.0 * i as f64,
@@ -87,6 +95,7 @@ pub fn run(cfg: &LabConfig) -> LabResult {
     let frame_dt = 1.0 / cfg.fps;
     let mut t = 0.0;
     let (mut fog_violations, mut fog_hidden) = (0u64, 0u64);
+    let (mut tick_cost, mut tick_max, mut ticks_timed) = (0.0f64, 0.0f64, 0u64);
     let mut measuring = cfg.warmup <= 0.0;
     while t < cfg.warmup + cfg.seconds {
         if !measuring && t >= cfg.warmup {
@@ -107,16 +116,26 @@ pub fn run(cfg: &LabConfig) -> LabResult {
         }
         // Server tick.
         if t >= server.next_tick_due() {
+            let started = std::time::Instant::now();
             let packets = server.step(t);
+            let cost = started.elapsed().as_secs_f64() * 1e3;
+            if measuring {
+                tick_cost += cost;
+                tick_max = tick_max.max(cost);
+                ticks_timed += 1;
+            }
             let mut allowed: [Option<std::collections::BTreeSet<mftr_sim::UnitId>>; 2] = [None, None];
             for (to, bytes) in &packets {
-                let (Some(team), Ok((_, ServerMessage::Snapshot(s)))) = (server.team_of(*to), decode_server(bytes))
+                let (Some(team), Ok((_, ServerMessage::Snapshot(_)))) = (server.team_of(*to), decode_server(bytes))
                 else {
                     continue;
                 };
+                // Everything the client now knows about (deltas and coasting included) must be
+                // visible to its team.
                 let set = allowed[(team == Team::Red) as usize].get_or_insert_with(|| server.visible_to(team));
-                fog_violations += s.others.iter().filter(|o| !set.contains(&o.id)).count() as u64;
-                fog_hidden += (server.world().units().len() - 1 - s.others.len()) as u64;
+                let known = server.last_sent(*to);
+                fog_violations += known.iter().filter(|id| !set.contains(id)).count() as u64;
+                fog_hidden += (server.world().units().len() - 1).saturating_sub(known.len()) as u64;
             }
             for (to, bytes) in packets {
                 clients[to as usize].down.send(bytes, t);
@@ -134,7 +153,7 @@ pub fn run(cfg: &LabConfig) -> LabResult {
             c.next_frame += frame_dt;
             c.session.update(local);
             match c.session.phase() {
-                Phase::Connecting => {
+                Phase::Connecting | Phase::Lobby => {
                     if t >= c.next_hello {
                         let p = c.session.hello_packet(local);
                         c.up.send(p, t);
@@ -146,13 +165,19 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                     match &mut c.bot {
                         Bot::Click(b) => b.act(&mut c.session, local, t),
                         Bot::Dodge(b) => b.act(&mut c.session, local, t),
+                        Bot::Duel(b) => b.act(&mut c.session, local, t),
                     };
                     if c.session.should_send(local) {
                         let p = c.session.input_packet(local);
                         c.up.send(p, t);
                     }
-                    if let Some(pos) = c.session.own_render_position(local) {
-                        c.jumps.observe(pos, c.session.visible_correction(), frame_dt, CHAMPION_MOVE_SPEED);
+                    // Dashes, lunges, pulls and death legitimately move faster than walking.
+                    let walking = c.session.own_state_now().is_some_and(|s| s.alive() && s.dash.is_none());
+                    match c.session.own_render_position(local) {
+                        Some(pos) if walking => {
+                            c.jumps.observe(pos, c.session.visible_correction(), frame_dt, CHAMPION_MOVE_SPEED)
+                        }
+                        _ => c.jumps.skip(),
                     }
                 }
             }
@@ -167,6 +192,9 @@ pub fn run(cfg: &LabConfig) -> LabResult {
         server_ticks: server.stats.ticks,
         fog_violations,
         fog_hidden,
+        tick_ms_mean: tick_cost / ticks_timed.max(1) as f64,
+        tick_ms_max: tick_max,
+        replay: server.game().replay(),
     }
 }
 
@@ -331,5 +359,194 @@ mod tests {
     fn ghost_hit_detector_fires_under_fault_injection() {
         let s = dodge_rig(LinkProfile::AWFUL, 0.40, Some(-0.06));
         assert!(s.dodge.ghost_hits > 0, "{}", s.dodge_row());
+    }
+
+    /// M1 slice 4 exit, "duel playable end to end": mage vs. marksman bots fight with their
+    /// whole kits at 80 ms. Both sides deal damage, kill and die, respawn and keep fighting,
+    /// while prediction stays within the 03 §1 correction target and skillshot dodges stay
+    /// honest (ghost hits).
+    #[test]
+    fn duel_is_playable_end_to_end() {
+        let r = run(&LabConfig {
+            profile: LinkProfile::MID,
+            clients: 2,
+            seconds: 300.0,
+            seed: 3,
+            fps: 144.0,
+            warmup: 5.0,
+            scenario: Scenario::Duel,
+            proxies: true,
+            reaction: 0.25,
+            margin_override: None,
+        });
+        let s = &r.summary;
+        assert_eq!(s.hard_resets, 0, "{}", s.row());
+        assert!(s.visible_mean < 15.0, "{}", s.row());
+        assert!(s.kills.iter().all(|k| *k >= 2), "both sides score kills: {:?}", s.kills);
+        assert!(s.deaths.iter().all(|d| *d >= 2), "both sides die and respawn: {:?}", s.deaths);
+        assert!(s.damage_dealt.iter().all(|d| *d > 2000.0), "{:?}", s.damage_dealt);
+        assert_eq!(r.fog_violations, 0);
+        assert!(s.dodge.near_misses >= 20, "the bots should be dodging skillshots: {}", s.dodge_row());
+        assert!(s.ghost_rate() < 0.02, "{}", s.dodge_row());
+        assert!((s.dodge.phantom_hits as f64) <= 0.03 * s.dodge.near_misses as f64, "{}", s.dodge_row());
+    }
+
+    /// M2 slice 1: ARAM on The Bridge with 3v3 bots (waves, turrets, relics, fountains): stable
+    /// prediction, nothing leaked through fog, and every bot both kills and dies.
+    #[test]
+    fn aram_bridge_runs_cleanly() {
+        let r = run(&LabConfig {
+            profile: LinkProfile::MID,
+            clients: 6,
+            seconds: 240.0,
+            seed: 3,
+            fps: 60.0,
+            warmup: 5.0,
+            scenario: Scenario::Aram,
+            proxies: true,
+            reaction: 0.25,
+            margin_override: None,
+        });
+        let s = &r.summary;
+        assert_eq!(s.hard_resets, 0, "{}", s.row());
+        assert!(s.visible_mean < 15.0, "{}", s.row());
+        assert_eq!(r.fog_violations, 0);
+        assert!(s.deaths.iter().all(|d| *d >= 1), "{}", s.duel_row());
+        assert!(s.ghost_rate() < 0.02, "{}", s.dodge_row());
+        // M2 slice 2: everyone earns experience and gold (ARAM starts at level 3, 1,400 gold).
+        assert!(s.levels.iter().all(|l| *l >= 5), "{}", s.duel_row());
+        // M2 slice 3: bots follow their build paths whenever they respawn.
+        assert!(s.items.iter().all(|n| *n >= 2), "{}", s.duel_row());
+        // M2 slice 5: the server's recording of this networked session re-simulates exactly.
+        let check = r.replay.verify();
+        assert!(check.hashes_checked >= 20, "{check:?}");
+        assert_eq!(check.mismatch, None);
+        assert_eq!(check.final_hash, r.server_hash);
+    }
+
+    /// M2 slice 5: a real client session goes through champion select over a lossy link
+    /// (rerolls, readies up), gets its Welcome when the match starts, and plays the champion
+    /// it ended up with. A spectator joins too and sees both teams.
+    #[test]
+    fn champion_select_to_playing_end_to_end() {
+        let cfg = ServerConfig { seed: 2, bots: 10, lobby: true, scenario: Scenario::Aram, ..Default::default() };
+        let mut server = ServerCore::new(cfg, 0.0);
+        let mut session = ClientSession::new();
+        let mut watcher = ClientSession::new();
+        watcher.set_spectate(true);
+        let links = |a, b| (SimLink::new(LinkProfile::TYPICAL, a), SimLink::new(LinkProfile::TYPICAL, b));
+        let ((mut up, mut down), (mut wup, mut wdown)) = (links(1, 2), links(3, 4));
+        let (mut t, mut next_hello) = (0.0, 0.0);
+        let (mut rerolled, mut readied, mut picked) = (false, false, None);
+        while t < 12.0 {
+            for (key, link) in [(1, &mut up), (2, &mut wup)] {
+                while let Some(p) = link.recv(t) {
+                    for (to, bytes) in server.handle_packet(key, &p, t) {
+                        if to == 1 { down.send(bytes, t) } else { wdown.send(bytes, t) }
+                    }
+                }
+            }
+            if t >= server.next_tick_due() {
+                for (to, bytes) in server.step(t) {
+                    if to == 1 { down.send(bytes, t) } else { wdown.send(bytes, t) }
+                }
+            }
+            while let Some(p) = down.recv(t) {
+                session.handle_packet(&p, t);
+            }
+            while let Some(p) = wdown.recv(t) {
+                watcher.handle_packet(&p, t);
+            }
+            session.update(t);
+            watcher.update(t);
+            if session.phase() == Phase::Lobby && t >= next_hello {
+                let l = session.lobby().unwrap().clone();
+                let me = *l.slots.iter().find(|s| s.player == l.you).unwrap();
+                if !rerolled {
+                    up.send(session.lobby_packet(mftr_net::msg::LobbyAction::Reroll), t);
+                    rerolled = true;
+                } else if me.rerolls < mftr_server::lobby::REROLLS && !readied {
+                    picked = Some(me.champion);
+                    up.send(session.lobby_packet(mftr_net::msg::LobbyAction::Ready(true)), t);
+                    readied = true;
+                }
+            }
+            if matches!(session.phase(), Phase::Connecting | Phase::Lobby) && t >= next_hello {
+                up.send(session.hello_packet(t), t);
+                wup.send(watcher.hello_packet(t), t);
+                next_hello = t + 0.25;
+            }
+            if session.phase() == Phase::Playing && session.should_send(t) {
+                up.send(session.input_packet(t), t);
+            }
+            if watcher.phase() == Phase::Playing && watcher.should_send(t) {
+                wup.send(watcher.input_packet(t), t);
+            }
+            if matches!(watcher.phase(), Phase::Connecting | Phase::Joining) && t >= next_hello {
+                wup.send(watcher.hello_packet(t), t);
+            }
+            t += 0.001;
+        }
+        assert_eq!(session.phase(), Phase::Playing, "the match started");
+        assert!(readied && t > 4.0);
+        assert_eq!(Some(session.champion()), picked, "the rerolled champion");
+        assert!(session.token() != 0);
+        assert_eq!(server.game().player_count(), 10);
+        assert!(watcher.is_spectator() && watcher.phase() == Phase::Playing);
+        let teams: std::collections::BTreeSet<_> = watcher
+            .remote_render_units(t)
+            .iter()
+            .filter(|u| u.kind == mftr_sim::UnitKind::Champion)
+            .map(|u| u.team as u8)
+            .collect();
+        assert_eq!(teams.len(), 2, "the spectator sees both teams' champions");
+    }
+
+    /// Q13: over a lossy, jittery link with moving minions, every snapshot the client
+    /// reconstructs from deltas equals, bit for bit, what the server recorded for it.
+    #[test]
+    fn delta_snapshots_reconstruct_exactly() {
+        let mut server = ServerCore::new(ServerConfig { scenario: Scenario::MinionSandbox, ..Default::default() }, 0.0);
+        let mut session = ClientSession::new();
+        let (mut up, mut down) = (SimLink::new(LinkProfile::ROUGH, 1), SimLink::new(LinkProfile::ROUGH, 2));
+        let mut bot = ClickBot::new(9);
+        let (mut t, mut next_hello, mut checked) = (0.0, 0.0, 0u32);
+        while t < 40.0 {
+            while let Some(p) = up.recv(t) {
+                for (_, bytes) in server.handle_packet(1, &p, t) {
+                    down.send(bytes, t);
+                }
+            }
+            if t >= server.next_tick_due() {
+                for (_, bytes) in server.step(t) {
+                    down.send(bytes, t);
+                }
+            }
+            while let Some(p) = down.recv(t) {
+                session.handle_packet(&p, t);
+                if let Some((tick, units)) = session.reconstructed()
+                    && let Some(sent) = server.sent_records(1, tick)
+                {
+                    assert_eq!(units, &sent, "tick {}", tick.0);
+                    checked += 1;
+                }
+            }
+            session.update(t);
+            match session.phase() {
+                Phase::Connecting | Phase::Lobby if t >= next_hello => {
+                    up.send(session.hello_packet(t), t);
+                    next_hello = t + 0.25;
+                }
+                Phase::Playing => {
+                    bot.act(&mut session, t, t);
+                    if session.should_send(t) {
+                        up.send(session.input_packet(t), t);
+                    }
+                }
+                _ => {}
+            }
+            t += 0.001;
+        }
+        assert!(checked > 800, "only {checked} snapshots checked");
     }
 }

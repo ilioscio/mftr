@@ -7,11 +7,12 @@
 pub mod bits;
 pub mod clock;
 pub mod conditioner;
+pub mod delta;
 pub mod msg;
 pub mod packet;
 
 /// Bumped on any wire-format change. Client and server must match exactly.
-pub const PROTOCOL_VERSION: u16 = 5;
+pub const PROTOCOL_VERSION: u16 = 12;
 
 /// Packets above this size are a bug (IPv6-safe, see 03b §1).
 pub const MAX_PACKET_BYTES: usize = 1200;

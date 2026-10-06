@@ -6,11 +6,14 @@ reloadable = true
 
 [libraries]
 
+; Debug builds (the editor) load the library straight from cargo's target/debug. Release
+; exports ship it from client/bin, where scripts/package-client.sh puts the `dist` build.
+
 windows.debug.x86_64 = "res://../target/debug/mftr_gdext.dll"
-windows.release.x86_64 = "res://../target/release/mftr_gdext.dll"
+windows.release.x86_64 = "res://bin/mftr_gdext.dll"
 linux.debug.x86_64 = "res://../target/debug/libmftr_gdext.so"
-linux.release.x86_64 = "res://../target/release/libmftr_gdext.so"
+linux.release.x86_64 = "res://bin/libmftr_gdext.so"
 linux.debug.arm64 = "res://../target/debug/libmftr_gdext.so"
-linux.release.arm64 = "res://../target/release/libmftr_gdext.so"
+linux.release.arm64 = "res://bin/libmftr_gdext.so"
 macos.debug = "res://../target/debug/libmftr_gdext.dylib"
-macos.release = "res://../target/release/libmftr_gdext.dylib"
+macos.release = "res://bin/libmftr_gdext.dylib"
