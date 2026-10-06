@@ -23,6 +23,7 @@ const SLOT_ACTIONS := ["cast_q", "cast_w", "cast_e", "cast_r", "cast_d", "cast_f
 
 var client: MatchClient
 var camera: Camera3D
+var ground: MeshInstance3D
 var own_body: Node3D
 var own_champion := ""
 var remote_bodies := {}                 # unit_id -> Node3D
@@ -35,6 +36,8 @@ var proxies_enabled := true
 var attack_move_armed := false
 var own_status := {}
 var floaters := []                      # damage numbers: { pos: Vector3, text, color, age }
+var match_banner := ""                  # "VICTORY" / "DEFEAT" when a Base falls
+var match_banner_age := 0.0
 var notices := []                       # kill feed: { text, age }
 
 
@@ -90,7 +93,8 @@ func _update_shot(delta: float) -> void:
 	_shot_timer += delta
 	# Everything aims toward the arena's center, whichever side we spawned on.
 	var own := client.own_position()
-	var inward := (Vector2(2000, 2000) - own).normalized()
+	var size: Vector2 = client.map_geometry().size
+	var inward := (size / 2.0 - own).normalized()
 	var side := Vector2(-inward.y, inward.x)
 	if not _shot_moved and _shot_timer > 1.0:
 		client.cast(1, own + inward * 700.0 + side * 200.0)
@@ -123,12 +127,8 @@ func _build_world() -> void:
 	sun.light_energy = 1.1
 	add_child(sun)
 
-	var ground := MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	var size_m := ARENA_U * UNITS_TO_METERS
-	plane.size = Vector2(size_m, size_m)
-	ground.mesh = plane
-	ground.position = Vector3(size_m / 2.0, 0, size_m / 2.0)
+	ground = MeshInstance3D.new()
+	_size_ground(Vector2(ARENA_U, ARENA_U))
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://shaders/ground.gdshader")
 	ground.material_override = mat
@@ -372,8 +372,15 @@ func _update_remotes() -> void:
 		remote_info[id] = u
 		if not remote_bodies.has(id):
 			var b: Node3D
-			if u.turret:
-				b = _make_turret(ALLY_COLOR if u.ally else ENEMY_COLOR, u.radius)
+			var team_color := ALLY_COLOR if u.ally else ENEMY_COLOR
+			if u.kind == "gatehouse":
+				b = _make_gatehouse(team_color)
+			elif u.kind == "base":
+				b = _make_base(team_color)
+			elif u.kind == "relic":
+				b = _make_relic()
+			elif u.turret:
+				b = _make_turret(team_color, u.radius)
 			elif u.minion:
 				b = _make_minion(MINION_BLUE if u.ally else MINION_RED, u.radius)
 			else:
@@ -391,7 +398,11 @@ func _update_remotes() -> void:
 			p.y = 0.45
 		elif u.turret:
 			p.y = 1.2
+		elif u.kind in ["gatehouse", "base", "relic"]:
+			p.y = 0.0
 		body.position = p
+		if body.has_node("Protected"):
+			body.get_node("Protected").visible = u.protected
 		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO))
 		_show_statuses(body, u.stunned, u.rooted, u.shield)
 	for id in remote_bodies.keys():
@@ -427,9 +438,34 @@ func _make_minion(color: Color, collision_radius_u: float) -> MeshInstance3D:
 var _map_built := false
 
 
+func _size_ground(size_u: Vector2) -> void:
+	var plane := PlaneMesh.new()
+	plane.size = size_u * UNITS_TO_METERS
+	ground.mesh = plane
+	ground.position = Vector3(size_u.x, 0, size_u.y) * (UNITS_TO_METERS / 2.0)
+
+
 func _build_map() -> void:
 	_map_built = true
 	var geo: Dictionary = client.map_geometry()
+	var size: Vector2 = geo.size
+	_size_ground(size)
+	if size.x != size.y:
+		# A lane map: the dirt lane runs along its middle.
+		var gm: ShaderMaterial = ground.material_override
+		gm.set_shader_parameter("lane_mode", 1.0)
+		gm.set_shader_parameter("lane_z", size.y / 2.0 * UNITS_TO_METERS)
+		gm.set_shader_parameter("lane_width", 13.0)
+	for f in geo.fountains:
+		var disk := MeshInstance3D.new()
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = f.radius * UNITS_TO_METERS
+		cyl.bottom_radius = cyl.top_radius
+		cyl.height = 0.04
+		disk.mesh = cyl
+		disk.material_override = _unshaded(ALLY_COLOR if f.ally else ENEMY_COLOR, 0.18)
+		disk.position = Vector3(f.center.x * UNITS_TO_METERS, 0.02, f.center.y * UNITS_TO_METERS)
+		add_child(disk)
 	var wall_mat := ShaderMaterial.new()
 	wall_mat.shader = load("res://shaders/wall.gdshader")
 	var brush_mat := ShaderMaterial.new()
@@ -462,12 +498,117 @@ func _make_turret(color: Color, collision_radius_u: float) -> MeshInstance3D:
 	cyl.bottom_radius = collision_radius_u * UNITS_TO_METERS
 	cyl.height = 2.4
 	body.mesh = cyl
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.25, 0.25, 0.3)
-	m.emission_enabled = true
-	m.emission = color * 0.3
-	body.material_override = m
+	body.material_override = _structure_material(color)
+	var crown := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.28
+	sphere.height = 0.56
+	crown.mesh = sphere
+	crown.position = Vector3(0, 1.4, 0)
+	crown.material_override = _unshaded(color.lightened(0.3))
+	body.add_child(crown)
+	body.add_child(_make_protected_dome(1.1, 2.0))
 	return body
+
+
+## Structures share the wall rock with a team-colored accent (05 §1 team color language).
+func _structure_material(color: Color) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = load("res://shaders/champion.gdshader")
+	m.set_shader_parameter("base_color", Color(0.36, 0.35, 0.4))
+	m.set_shader_parameter("team_accent", color)
+	m.set_shader_parameter("accent_height", -0.7)
+	return m
+
+
+## A faint dome over a structure that can't be hurt yet (an earlier one in its lane stands).
+func _make_protected_dome(radius_m: float, lift: float) -> MeshInstance3D:
+	var dome := MeshInstance3D.new()
+	dome.name = "Protected"
+	var sphere := SphereMesh.new()
+	sphere.radius = radius_m
+	sphere.height = radius_m * 2.0
+	dome.mesh = sphere
+	dome.position = Vector3(0, lift - 1.2, 0)
+	dome.material_override = _unshaded(Color(0.85, 0.9, 1.0), 0.12)
+	dome.visible = false
+	return dome
+
+
+func _make_gatehouse(color: Color) -> Node3D:
+	var root := Node3D.new()
+	for side in [-1.0, 1.0]:
+		var pillar := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(0.8, 2.2, 0.8)
+		pillar.mesh = box
+		pillar.position = Vector3(0, 1.1, side * 0.9)
+		pillar.material_override = _structure_material(color)
+		root.add_child(pillar)
+	var lintel := MeshInstance3D.new()
+	var top := BoxMesh.new()
+	top.size = Vector3(0.9, 0.5, 2.6)
+	lintel.mesh = top
+	lintel.position = Vector3(0, 2.4, 0)
+	lintel.material_override = _structure_material(color)
+	root.add_child(lintel)
+	var core := MeshInstance3D.new()
+	var orb := SphereMesh.new()
+	orb.radius = 0.35
+	orb.height = 0.7
+	core.mesh = orb
+	core.position = Vector3(0, 1.3, 0)
+	core.material_override = _unshaded(color.lightened(0.4))
+	root.add_child(core)
+	var dome := _make_protected_dome(1.6, 2.4)
+	root.add_child(dome)
+	return root
+
+
+func _make_base(color: Color) -> Node3D:
+	var root := Node3D.new()
+	var plinth := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 1.6
+	cyl.bottom_radius = 2.0
+	cyl.height = 0.6
+	plinth.mesh = cyl
+	plinth.position = Vector3(0, 0.3, 0)
+	plinth.material_override = _structure_material(color)
+	root.add_child(plinth)
+	var crystal := MeshInstance3D.new()
+	var prism := CylinderMesh.new()
+	prism.top_radius = 0.0
+	prism.bottom_radius = 0.9
+	prism.height = 3.2
+	prism.radial_segments = 6
+	crystal.mesh = prism
+	crystal.position = Vector3(0, 2.2, 0)
+	crystal.material_override = _unshaded(color.lightened(0.2), 0.9)
+	root.add_child(crystal)
+	root.add_child(_make_protected_dome(2.4, 2.4))
+	return root
+
+
+func _make_relic() -> Node3D:
+	var orb := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.3
+	sphere.height = 0.6
+	orb.mesh = sphere
+	orb.material_override = _unshaded(Color(0.45, 1.0, 0.55), 0.85)
+	var glow := MeshInstance3D.new()
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.4
+	ring.outer_radius = 0.5
+	glow.mesh = ring
+	glow.position = Vector3(0, -0.55, 0)
+	glow.material_override = _unshaded(Color(0.45, 1.0, 0.55), 0.6)
+	orb.add_child(glow)
+	var holder := Node3D.new()
+	orb.position = Vector3(0, 0.6, 0)
+	holder.add_child(orb)
+	return holder
 
 
 ## Cast windup: a thin aim line that brightens toward the moment the cast fires. Enemy
@@ -686,7 +827,11 @@ func _update_combat_text(delta: float) -> void:
 		var color := Color(0.75, 0.55, 1.0) if c.kind == "magic" else Color(1.0, 0.65, 0.3)
 		if c.target == client.own_unit_id():
 			color = Color(1.0, 0.3, 0.3)
-		floaters.append({ "pos": p, "text": "%d" % roundi(total), "color": color, "age": 0.0 })
+		var text := "%d" % roundi(total)
+		if c.heal:
+			color = Color(0.4, 1.0, 0.45)
+			text = "+" + text
+		floaters.append({ "pos": p, "text": text, "color": color, "age": 0.0 })
 	for n in client.take_notices():
 		var text := ""
 		if n.kind == "died":
@@ -696,6 +841,10 @@ func _update_combat_text(delta: float) -> void:
 			if remote_info.has(n.unit) and remote_info[n.unit].minion:
 				continue
 			text = "%s killed %s" % [_name_of(n.killer), victim]
+		elif n.kind == "match_ended":
+			match_banner = "VICTORY" if n.won else "DEFEAT"
+			match_banner_age = 0.0
+			continue
 		elif n.kind == "blinked":
 			_blink_marks(_to_world(n.from), _to_world(n.to))
 			continue
@@ -706,6 +855,9 @@ func _update_combat_text(delta: float) -> void:
 	for f in floaters:
 		f.age += delta
 	floaters = floaters.filter(func(f): return f.age < 0.9)
+	match_banner_age += delta
+	if match_banner != "" and match_banner_age > 10.0:
+		match_banner = ""
 	for n in notices:
 		n.age += delta
 	notices = notices.filter(func(n): return n.age < 4.0)
@@ -739,12 +891,13 @@ func _draw_overlay() -> void:
 		_draw_bar(own_body.position + Vector3(0, 1.25, 0), Vector2(104, 11), hp, mx, own_status.get("shield", 0.0), Color(0.3, 0.85, 0.35))
 	for id in remote_info:
 		var u: Dictionary = remote_info[id]
-		if u.turret or not remote_bodies.has(id):
+		if u.kind == "relic" or not remote_bodies.has(id):
 			continue
 		var champ: bool = u.champion != ""
+		var structure: bool = u.kind in ["turret", "gatehouse", "base"]
 		var color := Color(0.3, 0.7, 0.95) if u.ally else Color(0.9, 0.25, 0.2)
-		var size := Vector2(104, 11) if champ else Vector2(62, 6)
-		var lift := 1.25 if champ else 0.6
+		var size := Vector2(104, 11) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
+		var lift := 1.25 if champ else (2.6 if structure else 0.6)
 		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color)
 	for f in floaters:
 		var s = _screen(f.pos + Vector3(0, 1.5 + f.age * 0.8, 0))
@@ -799,6 +952,10 @@ func _draw_ability_bar(font: Font) -> void:
 		var label := "" if ready else ("%.1f" % cd if cd < 10.0 else "%d" % ceili(cd))
 		overlay.draw_string(font, Vector2(x + 30, y0 + 20), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
 		overlay.draw_string(font, Vector2(x + 6, y0 + 44), names[slot], HORIZONTAL_ALIGNMENT_LEFT, slot_w - 14, 13, Color(0.8, 0.85, 0.9))
+	if match_banner != "":
+		var c := Color(0.45, 0.8, 1.0) if match_banner == "VICTORY" else Color(1.0, 0.4, 0.35)
+		overlay.draw_string(font, Vector2(0, overlay.size.y * 0.3), match_banner, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 72, c)
+		overlay.draw_string(font, Vector2(0, overlay.size.y * 0.3 + 50), "A new match starts shortly", HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 22, Color.WHITE)
 	if own_status.get("dead", false):
 		var msg := "Respawning in %.1f s" % own_status.respawn_in
 		overlay.draw_rect(Rect2(Vector2.ZERO, overlay.size), Color(0.1, 0.1, 0.1, 0.35))

@@ -55,10 +55,10 @@ fn main() {
                     r.tick_ms_mean,
                     r.tick_ms_max
                 );
-                if matches!(cfg.scenario, Scenario::DodgeRig | Scenario::Duel) {
+                if matches!(cfg.scenario, Scenario::DodgeRig | Scenario::Duel | Scenario::Aram) {
                     println!("{}", r.summary.dodge_row());
                 }
-                if cfg.scenario == Scenario::Duel {
+                if matches!(cfg.scenario, Scenario::Duel | Scenario::Aram) {
                     println!("{}", r.summary.duel_row());
                 }
             }

@@ -1,13 +1,13 @@
 //! `mftr-server`: dedicated UDP match server (M0 prototype, unencrypted).
 //!
-//! Usage: mftr-server [--bind 0.0.0.0:7777] [--seed N] [--max-players N] [--scenario duel|minions|dodge|empty]
+//! Usage: mftr-server [--bind 0.0.0.0:7777] [--seed N] [--max-players N] [--scenario duel|aram|minions|dodge|empty]
 
 use mftr_server::{ClientKey, Scenario, ServerConfig, ServerCore};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--seed N] [--max-players N] [--scenario duel|minions|dodge|empty]";
+const USAGE: &str = "mftr-server [--bind ADDR] [--seed N] [--max-players N] [--scenario duel|aram|minions|dodge|empty]";
 
 fn main() -> std::io::Result<()> {
     let mut bind = "0.0.0.0:7777".to_string();

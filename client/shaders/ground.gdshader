@@ -7,6 +7,9 @@ uniform vec3 grass_a : source_color = vec3(0.20, 0.33, 0.17);
 uniform vec3 grass_b : source_color = vec3(0.27, 0.40, 0.19);
 uniform vec3 dirt : source_color = vec3(0.42, 0.36, 0.27);
 uniform float lane_width = 9.0;
+// 0: a diagonal lane (the M1 arena); 1: a horizontal lane at z = lane_z (The Bridge).
+uniform float lane_mode = 0.0;
+uniform float lane_z = 15.0;
 
 varying vec3 world_pos;
 
@@ -46,7 +49,7 @@ void fragment() {
 	vec3 grass = mix(grass_a, grass_b, smoothstep(0.35, 0.65, large));
 	grass *= 0.9 + 0.2 * small;
 	// A diagonal "lane" of dirt with a noisy edge.
-	float d = abs(p.x - p.y) / sqrt(2.0);
+	float d = lane_mode > 0.5 ? abs(p.y - lane_z) : abs(p.x - p.y) / sqrt(2.0);
 	float edge = lane_width * 0.5 + (fbm(p * 0.25) - 0.5) * 3.0;
 	float lane = 1.0 - smoothstep(edge - 0.6, edge + 0.6, d);
 	vec3 ground = mix(grass, dirt * (0.92 + 0.16 * small), lane);

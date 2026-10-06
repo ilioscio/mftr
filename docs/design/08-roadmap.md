@@ -150,6 +150,30 @@ Fog audit: 0 leaks. Downstream ~12–14 KB/s per player. The larger corrections 
 
 **Exit:** 10 humans finish full matches on a community-hosted server with no desyncs or crashes; total download ≤ 60 MB; a 4-core VPS hosts 10 concurrent bot matches within budget.
 
+### M2 slices (in order of dependency)
+
+| # | Slice | Contents | Done when |
+|---|---|---|---|
+| 1 | **The Bridge & the match loop** | Single-lane map with per-map size; turrets, Gatehouse and Base with a destruction order; minion waves with lane AI, aggro and call-for-help; turret targeting priorities and ramping shots; melee attacks; fountain; health relics; win condition and match reset | A scripted push destroys every structure in order and ends the match (sim test); bot ARAM matches run in the Netcode Lab |
+| 2 | **Economy & progression** | Gold (passive, last hits, kills/bounties, assists), XP sharing, levels 1–18 with stat growth, ability ranks and level-up commands, respawn timers by level | Lab bots level to 18 and the economy curve is reported |
+| 3 | **Items & shop** | Ordered stat-modifier stack (02 §10), ~25 items with a few unique passives, shop while dead or in base, undo | Items change combat numbers exactly as 02 predicts (golden tests) |
+| 4 | **Four more champions** | Tank/Engage, Bruiser, Enchanter, Assassin; new shapes: knock-ups and displacement, ally heals and shields, slows, targeted dashes, melee kits | All six kits pass the D10 linter; prediction parity through the new shapes |
+| 5 | **Match flow** | Basic bots, lobby and custom games, ARAM all-random with rerolls and bench, reconnect, spectating, replays | 10-player bot matches finish; a replay re-simulates to the same hashes |
+| 6 | **Packaging** | Docker compose, release binaries, config docs, size report and budgets in CI | A clean VPS runs a match from the docs alone |
+
+### M2 slice 1 status (2026-10-06): ✅ done
+
+- **The Bridge** (`mftr-sim/map`): 12,000 × 3,000 u, one straight lane from blue (west) to red (east) with cliffs, brush alcoves, two rocks and four health relics. It's point-symmetric, and the lane runs across the screen, so neither the layout nor the camera favors a side. Maps now carry their own size and a **layout**: lanes, wave and champion spawns, fountains, structures.
+- **Structures and their order** (`mftr-sim/lane`, D31): per team an outer, inner and gatehouse turret, a Gatehouse (respawns after 5 min), two base turrets and the Base. A structure can only be hurt when every lower tier of its team is down; the client shows protected structures under a dome. Destroying a Base ends the match, and the server starts a new one 10 s later.
+- **Waves and minion AI:** a wave of 3 melee and 3 casters every 30 s (a siege minion every third wave) walks its lane. Minions answer an enemy champion attacking an allied champion first, else keep a valid target, else take the closest minion, then structure, then champion. Melee attacks land at the end of the windup.
+- **Turret AI** (01 §3): a champion attacking an allied champion in range first, then the current target, then siege > caster > melee minions, then champions. Consecutive shots on the same champion ramp +35% each; shots at minions take a share of max health.
+- **Fountain and relics:** the fountain heals its team (predicted too, since it's map data) and burns enemies; relics heal 25% and return after 40 s. Skillshots and areas pass through structures (D32).
+- Protocol v7: 7 unit kinds, protected flags, gameplay radius on the wire, heal and match-end events. The Godot client draws turrets, Gatehouses, Bases, relics, fountains and protected domes, plus structure health bars and a victory/defeat banner. Server: `--scenario aram`.
+
+**Tests:** a pushing champion takes every red structure strictly in tier order and the match ends; turrets answer an attack on an allied champion and ramp up; relics and the fountain heal; waves meet and fight for 2.5 minutes with every structure standing. A third golden hash covers the lane match loop.
+
+**Netcode Lab, ARAM 3v3 at 80 ms, 10 min:** 0 hard resets, 0 fog leaks, 0 ghost hits of 388 near-misses, mean visible correction 0.22 u, server tick 0.15 ms. **Downstream is 27 KB/s per player**, so 5v5 would exceed the 32 KB/s budget. Snapshot deltas and path coasting (Q13) come next, before slice 2. Bot matches don't end yet: the bots walk into turrets, and they have no levels or items until slices 2–3 and smarter bots until slice 5.
+
 ## M3 — ARAM: Mayhem
 - Augment draft system with ~60 augments across tiers and archetypes (rule breakers, size, ability transformers, quests, spell replacements).
 - Delivery transformers, batched projectile spawns, size scaling with honest hitboxes.

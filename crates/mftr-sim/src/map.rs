@@ -6,6 +6,7 @@
 //! behind this API when the full map needs it (D24).
 
 use crate::math::Vec2;
+use crate::world::{Team, UnitKind};
 use std::collections::BinaryHeap;
 
 /// Which built-in map a match uses. Server and client must agree (sent in the welcome).
@@ -15,6 +16,8 @@ pub enum MapId {
     Open = 0,
     /// M1 sandbox arena: 4,000 u square with rocks, walls and brush patches.
     Arena = 1,
+    /// ARAM map (M2): a single lane, 12,000 × 3,000 u, structures at both ends.
+    Bridge = 2,
 }
 
 impl MapId {
@@ -22,6 +25,7 @@ impl MapId {
         match v {
             0 => Some(MapId::Open),
             1 => Some(MapId::Arena),
+            2 => Some(MapId::Bridge),
             _ => None,
         }
     }
@@ -31,17 +35,20 @@ impl MapId {
         use std::sync::{Arc, OnceLock};
         static OPEN: OnceLock<Arc<Map>> = OnceLock::new();
         static ARENA: OnceLock<Arc<Map>> = OnceLock::new();
+        static BRIDGE: OnceLock<Arc<Map>> = OnceLock::new();
         let cell = match self {
             MapId::Open => &OPEN,
             MapId::Arena => &ARENA,
+            MapId::Bridge => &BRIDGE,
         };
         cell.get_or_init(|| Arc::new(self.build())).clone()
     }
 
     pub fn build(self) -> Map {
         match self {
-            MapId::Open => Map::new(MapId::Open, Vec::new(), Vec::new(), false),
+            MapId::Open => Map::new(MapId::Open, Vec::new(), Vec::new(), None),
             MapId::Arena => arena(),
+            MapId::Bridge => bridge(),
         }
     }
 }
@@ -50,8 +57,30 @@ impl MapId {
 pub const NAV_CELL: f32 = 25.0;
 /// Paths keep this clearance from walls (the champion collision radius).
 pub const NAV_CLEARANCE: f32 = 35.0;
-/// Extent of the navigable area (0..MAP_SIZE on both axes).
+/// Extent of the M1 arena (0..MAP_SIZE on both axes), and of the open plane's nav grid.
 pub const MAP_SIZE: f32 = 4000.0;
+
+/// A structure or pickup placed by the map (01 §3).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Placement {
+    pub kind: UnitKind,
+    pub team: Team,
+    pub pos: Vec2,
+    /// Destruction order within the team (1 = first to fall); 0 for relics.
+    pub tier: u8,
+}
+
+/// What a lane map adds to geometry: lanes, spawn points, fountains and structures.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Layout {
+    /// Each team's lane, from its own base to the enemy's (index = `Team as usize`).
+    pub lanes: [Vec<Vec2>; 2],
+    pub wave_spawn: [Vec2; 2],
+    pub champion_spawn: [Vec2; 2],
+    /// Fountain circles (center, radius) per team.
+    pub fountains: [Option<(Vec2, f32)>; 2],
+    pub placements: Vec<Placement>,
+}
 
 #[derive(Clone, Debug)]
 pub struct Map {
@@ -60,8 +89,12 @@ pub struct Map {
     pub walls: Vec<Vec<Vec2>>,
     /// Brush polygons: walkable, hide units inside from observers outside.
     pub brush: Vec<Vec<Vec2>>,
-    /// Walled in on 0..MAP_SIZE (else the open plane, limited only by the point encoding).
+    /// Walled in on 0..size (else the open plane, limited only by the point encoding).
     pub bounded: bool,
+    /// Width and height of the playable area.
+    pub size: Vec2,
+    /// Lanes, structures and spawn points (empty on sandbox maps).
+    pub layout: Layout,
     edges: Vec<(Vec2, Vec2)>,
     grid_w: usize,
     grid_h: usize,
@@ -69,11 +102,14 @@ pub struct Map {
 }
 
 impl Map {
-    pub fn new(id: MapId, mut walls: Vec<Vec<Vec2>>, brush: Vec<Vec<Vec2>>, bounded: bool) -> Self {
-        // A bounded map has a wall around it: four thin slabs just outside 0..MAP_SIZE.
-        let (s, t) = (MAP_SIZE, 50.0);
+    /// A map of `walls` and `brush`; `bounds` walls it in on `0..bounds` (else it's open).
+    pub fn new(id: MapId, mut walls: Vec<Vec<Vec2>>, brush: Vec<Vec<Vec2>>, bounds: Option<Vec2>) -> Self {
+        // A bounded map has a wall around it: four thin slabs just outside 0..size.
+        let bounded = bounds.is_some();
+        let size = bounds.unwrap_or(Vec2::new(MAP_SIZE, MAP_SIZE));
+        let (w, h, t) = (size.x, size.y, 50.0);
         let slabs = if bounded {
-            vec![(-t, -t, s + t, 0.0), (-t, s, s + t, s + t), (-t, 0.0, 0.0, s), (s, 0.0, s + t, s)]
+            vec![(-t, -t, w + t, 0.0), (-t, h, w + t, h + t), (-t, 0.0, 0.0, h), (w, 0.0, w + t, h)]
         } else {
             Vec::new()
         };
@@ -82,9 +118,10 @@ impl Map {
         }
         let edges: Vec<(Vec2, Vec2)> =
             walls.iter().flat_map(|poly| (0..poly.len()).map(move |i| (poly[i], poly[(i + 1) % poly.len()]))).collect();
-        let grid_w = (MAP_SIZE / NAV_CELL) as usize;
-        let grid_h = grid_w;
-        let mut map = Map { id, walls, brush, bounded, edges, grid_w, grid_h, blocked: Vec::new() };
+        let grid_w = (size.x / NAV_CELL).ceil() as usize;
+        let grid_h = (size.y / NAV_CELL).ceil() as usize;
+        let layout = Layout::default();
+        let mut map = Map { id, walls, brush, bounded, size, layout, edges, grid_w, grid_h, blocked: Vec::new() };
         map.blocked = (0..grid_w * grid_h).map(|i| !map.walkable(map.cell_center(i), NAV_CLEARANCE)).collect();
         map
     }
@@ -104,8 +141,9 @@ impl Map {
 
     /// A circle of `radius` at `p` lies inside the playable area (blinks never leave it).
     pub fn in_bounds(&self, p: Vec2, radius: f32) -> bool {
-        let max = if self.bounded { MAP_SIZE } else { u16::MAX as f32 * crate::math::QPoint::STEP };
-        p.x >= radius && p.y >= radius && p.x <= max - radius && p.y <= max - radius
+        let max =
+            if self.bounded { self.size } else { Vec2::new(1.0, 1.0) * (u16::MAX as f32 * crate::math::QPoint::STEP) };
+        p.x >= radius && p.y >= radius && p.x <= max.x - radius && p.y <= max.y - radius
     }
 
     /// Line of sight between two points: no wall edge crossed (vision, 03 §10).
@@ -138,7 +176,7 @@ impl Map {
 
     /// Nearest walkable cell to `p` (breadth-first over the grid, deterministic).
     fn nearest_open_cell(&self, p: Vec2) -> Option<usize> {
-        let clamped = Vec2::new(p.x.clamp(0.0, MAP_SIZE - 1.0), p.y.clamp(0.0, MAP_SIZE - 1.0));
+        let clamped = Vec2::new(p.x.clamp(0.0, self.size.x - 1.0), p.y.clamp(0.0, self.size.y - 1.0));
         let start = self.cell_of(clamped)?;
         if !self.blocked[start] {
             return Some(start);
@@ -301,7 +339,83 @@ fn arena() -> Map {
         rect(880.0, 1500.0, 1150.0, 1850.0),
         rect(3150.0, 2450.0, 3500.0, 2800.0),
     ];
-    Map::new(MapId::Arena, walls, brush, true)
+    Map::new(MapId::Arena, walls, brush, Some(Vec2::new(MAP_SIZE, MAP_SIZE)))
+}
+
+/// Bridge dimensions.
+pub const BRIDGE_SIZE: Vec2 = Vec2::new(12_000.0, 3_000.0);
+
+/// The point-symmetric image of `p` on The Bridge (red's side of blue's layout): the map is
+/// symmetric under a half turn about its center, so both teams play the same map.
+fn mirror(p: Vec2) -> Vec2 {
+    Vec2::new(BRIDGE_SIZE.x - p.x, BRIDGE_SIZE.y - p.y)
+}
+
+/// The Bridge (ARAM, 06 §2): one straight lane from blue (west) to red (east), cliffs along
+/// both sides with brush alcoves, two rocks for cover mid-lane, health relics, and each team's
+/// fountain, Base, two base turrets, Gatehouse, gatehouse turret, inner and outer turret.
+/// Point-symmetric, so neither side is favored, and the lane runs across the screen, so the
+/// camera's up/down asymmetry (D13) favors nobody either.
+fn bridge() -> Map {
+    let top = poly(&[
+        (2200.0, 0.0),
+        (9800.0, 0.0),
+        (9800.0, 450.0),
+        (9300.0, 700.0),
+        (7600.0, 650.0),
+        (6600.0, 760.0),
+        (6000.0, 700.0),
+        (5400.0, 760.0),
+        (4400.0, 650.0),
+        (2700.0, 700.0),
+        (2200.0, 450.0),
+    ]);
+    let bottom: Vec<Vec2> = top.iter().map(|&p| mirror(p)).collect();
+    let rock = |c: Vec2| -> Vec<Vec2> {
+        // A hexagon of radius 120, axis-aligned so it mirrors exactly.
+        let (r, h) = (120.0, 120.0 * 0.866_025_4);
+        [(r, 0.0), (r * 0.5, h), (-r * 0.5, h), (-r, 0.0), (-r * 0.5, -h), (r * 0.5, -h)]
+            .iter()
+            .map(|&(x, y)| Vec2::new(c.x + x, c.y + y))
+            .collect()
+    };
+    let walls = vec![top, bottom, rock(Vec2::new(5300.0, 1150.0)), rock(mirror(Vec2::new(5300.0, 1150.0)))];
+    let alcove = |x0: f32, y0: f32, x1: f32, y1: f32| rect(x0, y0, x1, y1);
+    let brush = vec![
+        alcove(4500.0, 780.0, 5000.0, 1050.0),
+        alcove(7000.0, 1950.0, 7500.0, 2220.0),
+        alcove(7000.0, 780.0, 7500.0, 1050.0),
+        alcove(4500.0, 1950.0, 5000.0, 2220.0),
+    ];
+    let mut map = Map::new(MapId::Bridge, walls, brush, Some(BRIDGE_SIZE));
+    let blue = [
+        (UnitKind::Turret, Vec2::new(5000.0, 1350.0), 1),
+        (UnitKind::Turret, Vec2::new(3900.0, 1650.0), 2),
+        (UnitKind::Turret, Vec2::new(2700.0, 1350.0), 3),
+        (UnitKind::Gatehouse, Vec2::new(2200.0, 1500.0), 4),
+        (UnitKind::Turret, Vec2::new(1650.0, 1250.0), 5),
+        (UnitKind::Turret, Vec2::new(1650.0, 1750.0), 5),
+        (UnitKind::Base, Vec2::new(1250.0, 1500.0), 6),
+    ];
+    let mut placements = Vec::new();
+    for (kind, pos, tier) in blue {
+        placements.push(Placement { kind, team: Team::Blue, pos, tier });
+        placements.push(Placement { kind, team: Team::Red, pos: mirror(pos), tier });
+    }
+    for pos in [Vec2::new(5600.0, 950.0), Vec2::new(5600.0, 2050.0)] {
+        placements.push(Placement { kind: UnitKind::Relic, team: Team::Blue, pos, tier: 0 });
+        placements.push(Placement { kind: UnitKind::Relic, team: Team::Blue, pos: mirror(pos), tier: 0 });
+    }
+    let lane_blue = vec![Vec2::new(2900.0, 1500.0), Vec2::new(9100.0, 1500.0), Vec2::new(10_750.0, 1500.0)];
+    let lane_red: Vec<Vec2> = lane_blue.iter().map(|&p| mirror(p)).collect();
+    map.layout = Layout {
+        lanes: [lane_blue, lane_red],
+        wave_spawn: [Vec2::new(1700.0, 1500.0), mirror(Vec2::new(1700.0, 1500.0))],
+        champion_spawn: [Vec2::new(450.0, 1500.0), mirror(Vec2::new(450.0, 1500.0))],
+        fountains: [Some((Vec2::new(300.0, 1500.0), 600.0)), Some((mirror(Vec2::new(300.0, 1500.0)), 600.0))],
+        placements,
+    };
+    map
 }
 
 // ---- geometry ---------------------------------------------------------------------------

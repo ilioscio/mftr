@@ -5,7 +5,7 @@
 //! - Each unit of a team is a vision source with a radius by kind.
 //! - Walls block line of sight.
 //! - A point inside a brush polygon is visible only to sources inside the same brush.
-//! - Turrets (structures) are always visible to everyone, like structures in the reference game.
+//! - Structures and relics are always visible to everyone, like structures in the reference game.
 
 use crate::map::Map;
 use crate::math::Vec2;
@@ -15,11 +15,15 @@ pub const VISION_CHAMPION: f32 = 1200.0;
 pub const VISION_MINION: f32 = 900.0;
 pub const VISION_TURRET: f32 = 1300.0;
 
+pub const VISION_STRUCTURE: f32 = 800.0;
+
 pub fn vision_radius(kind: UnitKind) -> f32 {
     match kind {
         UnitKind::Champion => VISION_CHAMPION,
         UnitKind::Minion => VISION_MINION,
-        UnitKind::Turret => VISION_TURRET,
+        UnitKind::RigTurret | UnitKind::Turret => VISION_TURRET,
+        UnitKind::Gatehouse | UnitKind::Base => VISION_STRUCTURE,
+        UnitKind::Relic => 0.0,
     }
 }
 
@@ -36,7 +40,7 @@ impl Vision {
         let sources = world
             .units()
             .iter()
-            .filter(|u| u.team == team && u.state.alive())
+            .filter(|u| u.team == team && u.state.alive() && vision_radius(u.kind) > 0.0)
             .map(|u| (u.state.pos, vision_radius(u.kind), map.brush_at(u.state.pos)))
             .collect();
         Vision { team, sources }
@@ -55,7 +59,7 @@ impl Vision {
         if !unit.state.alive() {
             return false;
         }
-        unit.team == self.team || unit.kind == UnitKind::Turret || self.sees(map, unit.state.pos)
+        unit.team == self.team || unit.kind.is_structure() || self.sees(map, unit.state.pos)
     }
 }
 

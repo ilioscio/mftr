@@ -134,6 +134,9 @@ pub struct Summary {
     pub kills: Vec<u64>,
     pub deaths: Vec<u64>,
     pub damage_dealt: Vec<f64>,
+    /// Lane maps: matches won and lost, summed over clients.
+    pub matches_won: u64,
+    pub matches_lost: u64,
 }
 
 impl Summary {
@@ -186,6 +189,8 @@ impl Summary {
             kills: sessions.iter().map(|(s, _)| s.stats.kills).collect(),
             deaths: sessions.iter().map(|(s, _)| s.stats.deaths).collect(),
             damage_dealt: sessions.iter().map(|(s, _)| s.stats.damage_dealt).collect(),
+            matches_won: sessions.iter().map(|(s, _)| s.stats.matches_won).sum(),
+            matches_lost: sessions.iter().map(|(s, _)| s.stats.matches_lost).sum(),
         }
     }
 
@@ -213,11 +218,13 @@ impl Summary {
 
     pub fn duel_row(&self) -> String {
         format!(
-            "{:<10} kills {:?}  deaths {:?}  damage dealt {:?}",
+            "{:<10} kills {:?}  deaths {:?}  damage dealt {:?}  matches won/lost by clients {}/{}",
             self.label,
             self.kills,
             self.deaths,
-            self.damage_dealt.iter().map(|d| d.round() as i64).collect::<Vec<_>>()
+            self.damage_dealt.iter().map(|d| d.round() as i64).collect::<Vec<_>>(),
+            self.matches_won,
+            self.matches_lost
         )
     }
 
@@ -291,8 +298,9 @@ impl DuelBot {
         }
     }
 
-    fn clamp(p: mftr_sim::Vec2) -> mftr_sim::Vec2 {
-        mftr_sim::Vec2::new(p.x.clamp(300.0, 3700.0), p.y.clamp(300.0, 3700.0))
+    fn clamp(session: &ClientSession, p: mftr_sim::Vec2) -> mftr_sim::Vec2 {
+        let size = session.map().size;
+        mftr_sim::Vec2::new(p.x.clamp(300.0, size.x - 300.0), p.y.clamp(300.0, size.y - 300.0))
     }
 
     pub fn act(&mut self, session: &mut ClientSession, now: f64, elapsed: f64) -> bool {
@@ -312,7 +320,7 @@ impl DuelBot {
             }
             let perp = Vec2::new(-th.dir.y, th.dir.x);
             let side = if (own - th.pos).dot(perp) >= 0.0 { 1.0 } else { -1.0 };
-            let target = Self::clamp(own + perp * (300.0 * side));
+            let target = Self::clamp(session, own + perp * (300.0 * side));
             let ready = |slot: usize| st.cooldowns[slot] <= t;
             self.next_think = elapsed + 0.5;
             return if ready(2) && self.rng.next_f32() < 0.3 {
@@ -332,7 +340,12 @@ impl DuelBot {
             .filter(|r| r.team != team && r.kind == mftr_sim::UnitKind::Champion)
             .min_by(|a, b| a.pos.distance(own).total_cmp(&b.pos.distance(own)));
         let Some(e) = enemy else {
-            // Go looking for the enemy champion, through the middle of the arena.
+            // On a lane map: push down the lane with the minions.
+            let lane = &session.map().layout.lanes[session.team() as usize];
+            if let Some(&end) = lane.last() {
+                return session.attack_move(end, now).is_some();
+            }
+            // Otherwise go looking for the enemy champion, through the middle of the arena.
             let p = Vec2::new(self.rng.range_f32(1300.0, 2700.0), self.rng.range_f32(1300.0, 2700.0));
             return if self.rng.next_u32() % 4 == 0 {
                 session.attack_move(p, now).is_some()
@@ -362,15 +375,15 @@ impl DuelBot {
             return session.cast(slot, e.pos, now).is_some();
         }
         if r < 0.52 && ready(2) {
-            return session.cast(2, Self::clamp(own + perp * 300.0 - to * 100.0), now).is_some();
+            return session.cast(2, Self::clamp(session, own + perp * 300.0 - to * 100.0), now).is_some();
         }
         if r < 0.53 && ready(4) {
-            return session.cast(4, Self::clamp(own + to * 400.0), now).is_some();
+            return session.cast(4, Self::clamp(session, own + to * 400.0), now).is_some();
         }
         if r < 0.85 {
             return session.attack(e.id, now).is_some();
         }
-        session.move_to(Self::clamp(own + perp * 250.0), now).is_some()
+        session.move_to(Self::clamp(session, own + perp * 250.0), now).is_some()
     }
 }
 

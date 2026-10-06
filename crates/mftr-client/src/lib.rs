@@ -66,14 +66,14 @@ impl RemoteTrack {
         }
     }
 
-    /// Gameplay (hitbox) radius, from the replicated kind and collision radius (01 §4).
+    /// Gameplay (hitbox) radius (01 §4).
     fn gameplay_radius(&self) -> f32 {
-        match self.latest.kind {
-            UnitKind::Champion => mftr_sim::world::CHAMPION_GAMEPLAY_RADIUS,
-            UnitKind::Minion if self.latest.collision_radius >= 35 => 65.0,
-            UnitKind::Minion => 48.0,
-            UnitKind::Turret => mftr_sim::world::TURRET_GAMEPLAY_RADIUS,
-        }
+        self.latest.gameplay_radius as f32
+    }
+
+    /// Can be hit by skillshots, as the server decides it (no structures, relics or rigs).
+    fn takes_skillshots(&self) -> bool {
+        !self.latest.kind.is_structure()
     }
 
     fn extrapolate(&self, at: f64) -> Vec2 {
@@ -87,22 +87,15 @@ impl RemoteTrack {
     }
 
     fn proxy(&self, at: f64, collide: bool) -> Unit {
+        // Static during the predicted tick: the server resolves movers (and judges attack range)
+        // against start-of-tick positions, which is exactly what this is.
         let pos = self.extrapolate(at);
-        Unit {
-            id: self.latest.id,
-            kind: self.latest.kind,
-            owner: None,
-            team: self.latest.team,
-            // Static during the predicted tick: the server resolves movers (and judges attack
-            // range) against start-of-tick positions, which is exactly what this is.
-            state: UnitState { health: 1.0, ..UnitState::new(pos, 0.0) },
-            collision_radius: if collide { self.latest.collision_radius as f32 } else { 0.0 },
-            gameplay_radius: self.gameplay_radius(),
-            brain: None,
-            champion: None,
-            stats: mftr_sim::champion::Stats::NONE,
-            home: pos,
-        }
+        let collision = if collide { self.latest.collision_radius as f32 } else { 0.0 };
+        let stats = mftr_sim::champion::Stats { max_health: 1.0, ..mftr_sim::champion::Stats::NONE };
+        let radii = (collision, self.gameplay_radius());
+        let mut u = Unit::new(self.latest.id, self.latest.kind, self.latest.team, pos, radii, stats);
+        u.protected = self.latest.protected;
+        u
     }
 }
 
@@ -127,6 +120,8 @@ pub struct RemoteRender {
     pub stunned: bool,
     pub rooted: bool,
     pub dashing: bool,
+    /// A structure that can't be hurt yet.
+    pub protected: bool,
 }
 
 /// A confirmed damage instance, for floating numbers and the combat log.
@@ -137,6 +132,8 @@ pub struct CombatText {
     pub kind: DamageKind,
     pub amount: f32,
     pub absorbed: f32,
+    /// A heal (relic) rather than damage.
+    pub heal: bool,
 }
 
 /// Kills and respawns of units this client knows about.
@@ -154,6 +151,10 @@ pub enum Notice {
         unit: UnitId,
         from: Vec2,
         to: Vec2,
+    },
+    /// A Base fell (a new match starts shortly).
+    MatchEnded {
+        winner: Team,
     },
 }
 
@@ -206,6 +207,9 @@ pub struct ClientStats {
     pub kills: u64,
     pub minion_kills: u64,
     pub deaths: u64,
+    /// Matches this client's team won and lost (lane maps).
+    pub matches_won: u64,
+    pub matches_lost: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -535,7 +539,7 @@ impl ClientSession {
             .filter(|u| {
                 let d = u.state.pos.distance(own);
                 (u.collision_radius > 0.0 && d <= PROXY_RANGE)
-                    || (u.kind != UnitKind::Turret && d <= TARGET_PROXY_RANGE)
+                    || (u.targetable() && d <= TARGET_PROXY_RANGE)
                     || Some(u.id) == chasing
             })
             .collect();
@@ -669,7 +673,7 @@ impl ClientSession {
                     if target == self.unit {
                         self.stats.damage_taken += (amount + absorbed) as f64;
                     }
-                    self.combat_text.push(CombatText { target, source, kind, amount, absorbed });
+                    self.combat_text.push(CombatText { target, source, kind, amount, absorbed, heal: false });
                 }
                 SimEvent::Died { unit, killer, .. } => {
                     let champion = self.remote.get(&unit).is_some_and(|t| t.latest.kind == UnitKind::Champion);
@@ -679,6 +683,19 @@ impl ClientSession {
                     self.notices.push(Notice::Died { unit, killer });
                 }
                 SimEvent::Respawned { unit, .. } => self.notices.push(Notice::Respawned { unit }),
+                SimEvent::Healed { unit, amount, .. } => self.combat_text.push(CombatText {
+                    target: unit,
+                    source: unit,
+                    kind: DamageKind::True,
+                    amount,
+                    absorbed: 0.0,
+                    heal: true,
+                }),
+                SimEvent::MatchEnded { winner, .. } => {
+                    self.stats.matches_won += (winner == self.team) as u64;
+                    self.stats.matches_lost += (winner != self.team) as u64;
+                    self.notices.push(Notice::MatchEnded { winner });
+                }
                 SimEvent::Blinked { unit, from, to, .. } if unit != self.unit => {
                     self.notices.push(Notice::Blinked { unit, from, to })
                 }
@@ -958,6 +975,7 @@ impl ClientSession {
                     stunned: l.stunned,
                     rooted: l.rooted,
                     dashing: l.dashing,
+                    protected: l.protected,
                 })
             })
             .collect()
@@ -1008,7 +1026,7 @@ impl ClientSession {
     pub fn pick_enemy(&self, at: Vec2, slack: f32, now: f64) -> Option<UnitId> {
         self.remote_render_units(now)
             .into_iter()
-            .filter(|r| r.team != self.team && r.kind != UnitKind::Turret)
+            .filter(|r| r.team != self.team && !matches!(r.kind, UnitKind::RigTurret | UnitKind::Relic))
             .map(|r| (r.pos.distance(at) - r.gameplay_radius, r.id))
             .filter(|(gap, _)| *gap <= slack)
             .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -1032,7 +1050,7 @@ impl ClientSession {
                 let (a, b) = (m.spawn_at.max(s0), end.min(SimTime::end_of(k)));
                 let mut best: Option<SimTime> = None;
                 for track in self.remote.values() {
-                    if track.latest.team != self.team || track.latest.kind == UnitKind::Turret {
+                    if track.latest.team != self.team || !track.takes_skillshots() {
                         continue;
                     }
                     let (q0, q1) = (track.pos_at((k.0 - 1) as f64), track.pos_at(k.0 as f64));

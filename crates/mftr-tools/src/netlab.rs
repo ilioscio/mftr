@@ -77,7 +77,7 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                 down: SimLink::new(cfg.profile, s * 2 + 2),
                 bot: match cfg.scenario {
                     Scenario::DodgeRig => Bot::Dodge(DodgeBot::new(s, cfg.reaction)),
-                    Scenario::Duel => Bot::Duel(DuelBot::new(s, cfg.reaction)),
+                    Scenario::Duel | Scenario::Aram => Bot::Duel(DuelBot::new(s, cfg.reaction)),
                     _ => Bot::Click(ClickBot::new(s)),
                 },
                 jumps: JumpMeter::default(),
@@ -376,5 +376,29 @@ mod tests {
         assert!(s.dodge.near_misses >= 20, "the bots should be dodging skillshots: {}", s.dodge_row());
         assert!(s.ghost_rate() < 0.02, "{}", s.dodge_row());
         assert!((s.dodge.phantom_hits as f64) <= 0.03 * s.dodge.near_misses as f64, "{}", s.dodge_row());
+    }
+
+    /// M2 slice 1: ARAM on The Bridge with 3v3 bots (waves, turrets, relics, fountains): stable
+    /// prediction, nothing leaked through fog, and every bot both kills and dies.
+    #[test]
+    fn aram_bridge_runs_cleanly() {
+        let r = run(&LabConfig {
+            profile: LinkProfile::MID,
+            clients: 6,
+            seconds: 240.0,
+            seed: 3,
+            fps: 60.0,
+            warmup: 5.0,
+            scenario: Scenario::Aram,
+            proxies: true,
+            reaction: 0.25,
+            margin_override: None,
+        });
+        let s = &r.summary;
+        assert_eq!(s.hard_resets, 0, "{}", s.row());
+        assert!(s.visible_mean < 15.0, "{}", s.row());
+        assert_eq!(r.fog_violations, 0);
+        assert!(s.deaths.iter().all(|d| *d >= 1), "{}", s.duel_row());
+        assert!(s.ghost_rate() < 0.02, "{}", s.dodge_row());
     }
 }

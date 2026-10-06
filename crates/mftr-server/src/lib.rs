@@ -39,6 +39,9 @@ pub enum Scenario {
     /// M1 slice 4, the Duel Sandbox: blue spawns west, red east, with a few minion clumps in
     /// between to block skillshots. Minions and champions respawn.
     Duel,
+    /// M2: an ARAM match on The Bridge: structures, minion waves, relics, a winner. A new
+    /// match starts 10 s after a Base falls.
+    Aram,
 }
 
 impl Scenario {
@@ -47,6 +50,7 @@ impl Scenario {
         match self {
             Scenario::Empty => MapId::Open,
             Scenario::MinionSandbox | Scenario::DodgeRig | Scenario::Duel => MapId::Arena,
+            Scenario::Aram => MapId::Bridge,
         }
     }
 
@@ -56,6 +60,7 @@ impl Scenario {
             "minions" => Some(Scenario::MinionSandbox),
             "dodge" => Some(Scenario::DodgeRig),
             "duel" => Some(Scenario::Duel),
+            "aram" => Some(Scenario::Aram),
             _ => None,
         }
     }
@@ -84,8 +89,12 @@ fn populate(world: &mut World, scenario: Scenario) {
         for pos in
             [Vec2::new(900.0, 2000.0), Vec2::new(3100.0, 2000.0), Vec2::new(2000.0, 900.0), Vec2::new(2000.0, 3100.0)]
         {
-            world.spawn_turret(Team::Red, pos, 1100);
+            world.spawn_rig_turret(Team::Red, pos, 1100);
         }
+        return;
+    }
+    if scenario == Scenario::Aram {
+        world.start_match();
         return;
     }
     if scenario == Scenario::Duel {
@@ -349,6 +358,12 @@ impl ServerCore {
         if self.cfg.scenario == Scenario::Duel {
             pos = duel_spawn(team, player);
         }
+        if self.cfg.scenario == Scenario::Aram {
+            // In the fountain, spread out in a small arc per player.
+            let base = self.world.map().layout.champion_spawn[team as usize];
+            let k = (player.0 / 2) as f32;
+            pos = base + Vec2::new(0.0, 90.0 * (k - 2.0));
+        }
         let unit = self.world.spawn_champion(player, team, champion, pos);
         self.conns.insert(
             key,
@@ -384,6 +399,12 @@ impl ServerCore {
             self.leave(k);
         }
 
+        // A new match 10 s after a Base falls (ARAM).
+        if let Some((_, at)) = self.world.game().winner
+            && SimTime::end_of(self.world.tick()) >= at.plus(mftr_sim::SimDuration::from_millis(10_000))
+        {
+            self.world.restart_match();
+        }
         let k = self.world.tick().next();
         let (due, later): (Vec<Command>, Vec<Command>) = self.queue.drain(..).partition(|c| c.tick <= k);
         self.queue = later;
@@ -408,6 +429,8 @@ impl ServerCore {
                     target: st.heading().map(QPoint::from_vec2),
                     speed: st.move_speed.round().clamp(0.0, 1023.0) as u16,
                     collision_radius: u.collision_radius.round().clamp(0.0, 255.0) as u8,
+                    gameplay_radius: u.gameplay_radius.round().clamp(0.0, 255.0) as u8,
+                    protected: u.protected,
                     champion: u.champion,
                     health: hp(st.health.max(if st.alive() { 1.0 } else { 0.0 })),
                     max_health: hp(u.stats.max_health),
@@ -437,7 +460,7 @@ impl ServerCore {
         let knows = |i: usize, unit: UnitId| {
             self.world.unit(unit).is_some_and(|u| {
                 u.team == [Team::Blue, Team::Red][i]
-                    || u.kind == mftr_sim::UnitKind::Turret
+                    || u.kind == mftr_sim::UnitKind::RigTurret
                     || visions[i].sees(&map, u.state.pos)
             })
         };
@@ -470,7 +493,9 @@ impl ServerCore {
                     | SimEvent::Respawned { unit, .. }
                     | SimEvent::Dashed { unit, .. }
                     | SimEvent::Shielded { unit, .. }
+                    | SimEvent::Healed { unit, .. }
                     | SimEvent::Blinked { unit, .. } => knows(i, unit),
+                    SimEvent::MatchEnded { .. } => true,
                     _ => false,
                 };
                 if !ok {

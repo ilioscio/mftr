@@ -298,6 +298,7 @@ impl MatchClient {
             d.set("source", c.source.0 as i64);
             d.set("amount", c.amount);
             d.set("absorbed", c.absorbed);
+            d.set("heal", c.heal);
             d.set(
                 "kind",
                 match c.kind {
@@ -327,6 +328,10 @@ impl MatchClient {
                 Notice::Respawned { unit } => {
                     d.set("kind", "respawned");
                     d.set("unit", unit.0 as i64);
+                }
+                Notice::MatchEnded { winner } => {
+                    d.set("kind", "match_ended");
+                    d.set("won", winner == self.session.team());
                 }
                 Notice::Blinked { unit, from, to } => {
                     d.set("kind", "blinked");
@@ -361,8 +366,9 @@ impl MatchClient {
         out
     }
 
-    /// The match map for drawing: `{ walls: [PackedVector2Array], brush: [PackedVector2Array] }`
-    /// in game units. Valid once the phase is "playing".
+    /// The match map for drawing: `{ walls: [PackedVector2Array], brush: [PackedVector2Array],
+    /// size: Vector2, fountains: [{ center, radius, ally }] }` in game units. Valid once the
+    /// phase is "playing".
     #[func]
     fn map_geometry(&self) -> VarDictionary {
         let to_arrays = |polys: &[Vec<Vec2>]| {
@@ -377,6 +383,18 @@ impl MatchClient {
         let mut d = VarDictionary::new();
         d.set("walls", &to_arrays(&map.walls).to_variant());
         d.set("brush", &to_arrays(&map.brush).to_variant());
+        d.set("size", Vector2::new(map.size.x, map.size.y));
+        let mut fountains = VarArray::new();
+        for (i, f) in map.layout.fountains.iter().enumerate() {
+            if let Some((c, r)) = f {
+                let mut fd = VarDictionary::new();
+                fd.set("center", Vector2::new(c.x, c.y));
+                fd.set("radius", *r);
+                fd.set("ally", i == self.session.team() as usize);
+                fountains.push(&fd.to_variant());
+            }
+        }
+        d.set("fountains", &fountains);
         d
     }
 
@@ -446,7 +464,19 @@ impl MatchClient {
             d.set("id", u.id.0 as i64);
             d.set("pos", Vector2::new(u.pos.x, u.pos.y));
             d.set("minion", u.kind == UnitKind::Minion);
-            d.set("turret", u.kind == UnitKind::Turret);
+            d.set("turret", matches!(u.kind, UnitKind::RigTurret | UnitKind::Turret));
+            d.set(
+                "kind",
+                match u.kind {
+                    UnitKind::Champion => "champion",
+                    UnitKind::Minion => "minion",
+                    UnitKind::RigTurret | UnitKind::Turret => "turret",
+                    UnitKind::Gatehouse => "gatehouse",
+                    UnitKind::Base => "base",
+                    UnitKind::Relic => "relic",
+                },
+            );
+            d.set("protected", u.protected);
             d.set("champion", u.champion.map_or("", |c| c.def().name));
             d.set("health", u.health);
             d.set("max_health", u.max_health);

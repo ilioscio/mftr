@@ -22,6 +22,7 @@ use crate::champion::{AttackSpec, ChampionId, Stats};
 use crate::collision::{Obstacle, choose_detour, constrained_move};
 use crate::combat::resist_multiplier;
 use crate::hash::{StateHasher, StateSink};
+use crate::lane::{self, MatchState, Seen};
 use crate::map::{Map, MapId};
 use crate::math::{QPoint, Vec2};
 use crate::projectile::first_contact;
@@ -45,8 +46,40 @@ pub enum Team {
 pub enum UnitKind {
     Champion,
     Minion,
-    /// Static structure (the dodge rig's shooters for now). Immune to skillshots and attacks.
+    /// The dodge rig's skillshot shooter (M1). Immune to everything.
+    RigTurret,
+    /// Lane turret (01 §3): attacks with turret priorities, destroyed in lane order.
     Turret,
+    /// Gatehouse: respawns; while it's down the other team's waves get stronger.
+    Gatehouse,
+    /// Destroying it wins the match.
+    Base,
+    /// Health relic: walk over it to heal; respawns on a timer.
+    Relic,
+}
+
+impl UnitKind {
+    /// Map structures and pickups: always visible, never move.
+    pub fn is_structure(self) -> bool {
+        matches!(self, UnitKind::RigTurret | UnitKind::Turret | UnitKind::Gatehouse | UnitKind::Base | UnitKind::Relic)
+    }
+
+    pub fn wire(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_wire(v: u8) -> Option<Self> {
+        Some(match v {
+            0 => UnitKind::Champion,
+            1 => UnitKind::Minion,
+            2 => UnitKind::RigTurret,
+            3 => UnitKind::Turret,
+            4 => UnitKind::Gatehouse,
+            5 => UnitKind::Base,
+            6 => UnitKind::Relic,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -428,7 +461,12 @@ pub enum Brain {
     Patrol { a: QPoint, b: QPoint, toward_b: bool },
     /// Fire the turret shot at the nearest enemy champion in range (the dodge rig, 03 §14).
     /// Half the shots aim at the target's position, half lead its movement.
-    Turret { range: u16 },
+    RigTurret { range: u16 },
+    /// Lane minion: walk the team's lane, fight what it meets (01 §4).
+    Laner { next: u8 },
+    /// Lane turret (01 §3): keeps its target while valid; `heat` counts consecutive shots on
+    /// the same champion (each one hits harder).
+    Tower { heat: u8, last: UnitId },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -447,25 +485,54 @@ pub struct Unit {
     pub stats: Stats,
     /// Respawn point.
     pub home: Vec2,
+    /// Basic attack (champions, lane minions, turrets).
+    pub attack: Option<AttackSpec>,
+    /// Structures: destruction order within the team (01 §3); 0 for everything else.
+    pub tier: u8,
+    /// A structure behind one that still stands: can't be hurt. Recomputed every tick.
+    pub protected: bool,
 }
 
 impl Unit {
+    /// A unit with no brain, owner or champion, at full health.
+    pub fn new(id: UnitId, kind: UnitKind, team: Team, pos: Vec2, radii: (f32, f32), stats: Stats) -> Unit {
+        let mut state = UnitState::new(pos, stats.move_speed);
+        state.health = stats.max_health;
+        Unit {
+            id,
+            kind,
+            owner: None,
+            team,
+            state,
+            collision_radius: radii.0,
+            gameplay_radius: radii.1,
+            brain: None,
+            champion: None,
+            stats,
+            home: pos,
+            attack: None,
+            tier: 0,
+            protected: false,
+        }
+    }
+
     /// The ability in `slot`: a champion's kit and utility spells, or the turret's shot.
     pub fn ability(&self, slot: u8) -> Option<Ability> {
         match (self.champion, self.kind) {
             (Some(c), _) => c.ability(slot),
-            (None, UnitKind::Turret) if slot == 0 => Some(TURRET_SHOT),
+            (None, UnitKind::RigTurret) if slot == 0 => Some(TURRET_SHOT),
             _ => None,
         }
     }
 
     pub fn attack_spec(&self) -> Option<AttackSpec> {
-        self.champion.map(|c| c.def().attack)
+        self.attack
     }
 
-    /// Can be hit by skillshots, areas and attacks (turrets are immune for now).
+    /// Can be hit by skillshots, areas and attacks: alive, not a protected structure, not the
+    /// dodge rig's shooter or a relic.
     pub fn targetable(&self) -> bool {
-        self.kind != UnitKind::Turret && self.state.alive()
+        !matches!(self.kind, UnitKind::RigTurret | UnitKind::Relic) && self.state.alive() && !self.protected
     }
 }
 
@@ -560,6 +627,8 @@ pub struct Bolt {
     pub speed: f32,
     pub launched_at: SimTime,
     pub power: f32,
+    /// Physical for attacks; true for a turret's share-of-health shot at a minion.
+    pub kind: DamageKind,
 }
 
 /// Things that happened during a step, for the network layer and the client display.
@@ -637,6 +706,17 @@ pub enum SimEvent {
         at: SimTime,
         until: SimTime,
     },
+    /// Health restored by a relic or the fountain (relics only: the fountain is continuous).
+    Healed {
+        unit: UnitId,
+        amount: f32,
+        at: SimTime,
+    },
+    /// A Base fell: the match is over.
+    MatchEnded {
+        winner: Team,
+        at: SimTime,
+    },
 }
 
 pub const CHAMPION_MOVE_SPEED: f32 = 325.0;
@@ -650,6 +730,16 @@ pub const CHAMPION_RESPAWN: SimDuration = SimDuration::from_millis(6000);
 pub const MINION_RESPAWN: SimDuration = SimDuration::from_millis(12_000);
 
 impl MinionKind {
+    pub fn from_attack_range(range: f32) -> MinionKind {
+        if range >= 500.0 {
+            MinionKind::Caster
+        } else if range >= 200.0 {
+            MinionKind::Siege
+        } else {
+            MinionKind::Melee
+        }
+    }
+
     /// (collision radius, gameplay radius), 01 §4 *(start)* values.
     pub fn radii(self) -> (f32, f32) {
         match self {
@@ -664,7 +754,13 @@ impl MinionKind {
             MinionKind::Caster => (300.0, 0.0),
             MinionKind::Siege => (900.0, 15.0),
         };
-        Stats { max_health, armor, move_speed: MINION_MOVE_SPEED, ..Stats::NONE }
+        Stats {
+            max_health,
+            armor,
+            move_speed: MINION_MOVE_SPEED,
+            attack_damage: lane::minion_damage(self),
+            ..Stats::NONE
+        }
     }
 }
 
@@ -675,6 +771,10 @@ struct Target {
     team: Team,
     pos: Vec2,
     radius: f32,
+    kind: UnitKind,
+    /// Attack range (tells minion types apart for turret shots).
+    range: f32,
+    max_health: f32,
 }
 
 /// Something that fired during phase 2, created in phase 3.
@@ -682,6 +782,13 @@ enum Fired {
     Missile(Missile),
     Area(Area),
     Bolt(Bolt),
+    /// A melee hit, landing at the end of the windup.
+    Melee {
+        owner: UnitId,
+        target: UnitId,
+        power: f32,
+        at: SimTime,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -702,6 +809,8 @@ pub struct World {
     /// attack orders or attack-move. Set by the server from its vision every tick; client
     /// prediction only knows visible units anyway.
     hidden: [Vec<UnitId>; 2],
+    /// The match on a lane map (waves, aggression, winner); idle on sandbox maps.
+    game: MatchState,
 }
 
 impl World {
@@ -718,6 +827,7 @@ impl World {
             prediction: false,
             events: Vec::new(),
             hidden: [Vec::new(), Vec::new()],
+            game: MatchState::default(),
             map: MapId::Open.shared(),
         }
     }
@@ -786,42 +896,96 @@ impl World {
 
     pub fn spawn_minion(&mut self, kind: MinionKind, team: Team, pos: Vec2, brain: Option<Brain>) -> UnitId {
         let id = self.next_id();
-        let (collision_radius, gameplay_radius) = kind.radii();
-        let stats = kind.stats();
-        let mut state = UnitState::new(pos, stats.move_speed);
-        state.health = stats.max_health;
-        self.units.push(Unit {
-            id,
-            kind: UnitKind::Minion,
-            owner: None,
-            team,
-            state,
-            collision_radius,
-            gameplay_radius,
-            brain,
-            champion: None,
-            stats,
-            home: pos,
-        });
+        let mut u = Unit::new(id, UnitKind::Minion, team, pos, kind.radii(), kind.stats());
+        u.brain = brain;
+        u.attack = Some(lane::minion_attack(kind));
+        self.units.push(u);
         id
     }
 
-    pub fn spawn_turret(&mut self, team: Team, pos: Vec2, range: u16) -> UnitId {
+    pub fn spawn_rig_turret(&mut self, team: Team, pos: Vec2, range: u16) -> UnitId {
         let id = self.next_id();
-        self.units.push(Unit {
+        let mut u = Unit::new(
             id,
-            kind: UnitKind::Turret,
-            owner: None,
+            UnitKind::RigTurret,
             team,
-            state: UnitState::new(pos, 0.0),
-            collision_radius: TURRET_COLLISION_RADIUS,
-            gameplay_radius: TURRET_GAMEPLAY_RADIUS,
-            brain: Some(Brain::Turret { range }),
-            champion: None,
-            stats: Stats::NONE,
-            home: pos,
-        });
+            pos,
+            (TURRET_COLLISION_RADIUS, TURRET_GAMEPLAY_RADIUS),
+            Stats::NONE,
+        );
+        u.brain = Some(Brain::RigTurret { range });
+        self.units.push(u);
         id
+    }
+
+    /// A structure or relic from a map layout (01 §3).
+    pub fn spawn_placement(&mut self, p: crate::map::Placement) -> UnitId {
+        let id = self.next_id();
+        let (radii, stats) = match p.kind {
+            UnitKind::Turret => ((TURRET_COLLISION_RADIUS, TURRET_GAMEPLAY_RADIUS), lane::TURRET_STATS),
+            UnitKind::Gatehouse => ((120.0, 140.0), lane::GATEHOUSE_STATS),
+            UnitKind::Base => ((200.0, 220.0), lane::BASE_STATS),
+            _ => ((0.0, 50.0), Stats { max_health: 1.0, ..Stats::NONE }),
+        };
+        let mut u = Unit::new(id, p.kind, p.team, p.pos, radii, stats);
+        u.tier = p.tier;
+        if p.kind == UnitKind::Turret {
+            u.attack = Some(lane::TURRET_ATTACK);
+            u.brain = Some(Brain::Tower { heat: 0, last: UnitId(0) });
+        }
+        self.units.push(u);
+        id
+    }
+
+    /// Start a match on the current map's layout: its structures and relics, and the first
+    /// wave timer. A no-op on maps without a layout.
+    pub fn start_match(&mut self) {
+        let placements = self.map.layout.placements.clone();
+        for p in placements {
+            self.spawn_placement(p);
+        }
+        self.game = MatchState::default();
+        if self.map.layout.lanes[0].len() > 1 {
+            self.game.next_wave_at = Some(SimTime::end_of(self.tick).plus(lane::FIRST_WAVE));
+        }
+    }
+
+    /// Reset for a new match after one ended: structures, relics and minions are replaced,
+    /// champions return to their spawn at full health (tick and unit ids keep counting).
+    pub fn restart_match(&mut self) {
+        self.units.retain(|u| u.kind == UnitKind::Champion);
+        self.missiles.clear();
+        self.areas.clear();
+        self.bolts.clear();
+        for u in self.units.iter_mut() {
+            u.state = UnitState::new(u.home, u.stats.move_speed);
+            u.state.health = u.stats.max_health;
+        }
+        self.start_match();
+    }
+
+    /// The match on a lane map: waves, recent aggression, winner.
+    pub fn game(&self) -> &MatchState {
+        &self.game
+    }
+
+    /// One wave per team at its spawn point, in a column along the lane (melee in front).
+    fn spawn_wave(&mut self) {
+        let n = self.game.waves_spawned;
+        let layout = self.map.layout.clone();
+        for team in [Team::Blue, Team::Red] {
+            let spawn = layout.wave_spawn[team as usize];
+            let ahead =
+                layout.lanes[team as usize].first().map_or(Vec2::new(1.0, 0.0), |&p| (p - spawn).normalize_or_zero());
+            let side = Vec2::new(-ahead.y, ahead.x);
+            for (i, kind) in MatchState::wave(n).into_iter().enumerate() {
+                let (row, col) = ((i / 3) as f32, (i % 3) as f32 - 1.0);
+                let pos = spawn - ahead * (row * 80.0) + side * (col * 70.0);
+                self.spawn_minion(kind, team, pos, Some(Brain::Laner { next: 0 }));
+            }
+        }
+        self.game.waves_spawned += 1;
+        self.game.next_wave_at = self.game.next_wave_at.map(|t| t.plus(lane::WAVE_INTERVAL));
     }
 
     pub fn despawn(&mut self, id: UnitId) {
@@ -871,20 +1035,28 @@ impl World {
         let mut cmds: Vec<&Command> = commands.iter().filter(|c| c.tick == k).collect();
         cmds.sort_by_key(|c| (c.sub, c.player, c.seq));
         let prediction = self.prediction;
-        let World { units, rng, missiles, areas, bolts, next_missile, events, map, hidden, .. } = self;
-        let map: &Map = map;
 
-        // Phase 0: respawns.
-        for u in units.iter_mut() {
+        // Phase 0: lane minions that died are gone; respawns; structure protection; waves.
+        self.units.retain(|u| u.state.alive() || !matches!(u.brain, Some(Brain::Laner { .. })));
+        for u in self.units.iter_mut() {
             if u.state.respawn_at.is_some_and(|r| r <= s0) {
                 u.state = UnitState::new(u.home, u.stats.move_speed);
                 u.state.health = u.stats.max_health;
-                if let Some(Brain::Patrol { a, b, .. }) = u.brain {
-                    u.brain = Some(Brain::Patrol { a, b, toward_b: true });
+                match u.brain {
+                    Some(Brain::Patrol { a, b, .. }) => u.brain = Some(Brain::Patrol { a, b, toward_b: true }),
+                    Some(Brain::Tower { .. }) => u.brain = Some(Brain::Tower { heat: 0, last: UnitId(0) }),
+                    _ => {}
                 }
-                events.push(SimEvent::Respawned { unit: u.id, pos: u.home, at: s0 });
+                self.events.push(SimEvent::Respawned { unit: u.id, pos: u.home, at: s0 });
             }
         }
+        lane::update_protection(&mut self.units);
+        if !prediction && self.game.winner.is_none() && self.game.next_wave_at.is_some_and(|w| w <= s0) {
+            self.spawn_wave();
+        }
+
+        let World { units, rng, missiles, areas, bolts, next_missile, events, map, hidden, game, .. } = self;
+        let map: &Map = map;
 
         // Phase 1: AI.
         let champions: Vec<(Team, Vec2, Option<Vec2>, f32)> = units
@@ -898,7 +1070,7 @@ impl World {
                     unit.state.set_order(Order::MoveTo(if toward_b { b } else { a }), map);
                     unit.brain = Some(Brain::Patrol { a, b, toward_b: !toward_b });
                 }
-                Some(Brain::Turret { range }) if unit.state.can_cast(s0, 0) => {
+                Some(Brain::RigTurret { range }) if unit.state.can_cast(s0, 0) => {
                     let me = unit.state.pos;
                     let mut best: Option<(f32, Vec2, Option<Vec2>, f32)> = None;
                     for &(team, pos, heading, speed) in &champions {
@@ -927,6 +1099,20 @@ impl World {
                 _ => {}
             }
         }
+        if !prediction && map.layout.lanes[0].len() > 1 {
+            let seen: Vec<Seen> = units.iter().filter(|u| u.state.alive()).map(Seen::of).collect();
+            for unit in units.iter_mut() {
+                let hide = &hidden[unit.team as usize];
+                match unit.brain {
+                    Some(Brain::Laner { .. }) => {
+                        let lane = &map.layout.lanes[unit.team as usize];
+                        lane::laner_think(unit, &seen, lane, &game.aggression, hide, map);
+                    }
+                    Some(Brain::Tower { .. }) => lane::tower_think(unit, &seen, &game.aggression, hide, map),
+                    _ => {}
+                }
+            }
+        }
 
         // Phase 2: per-unit timelines against start-of-tick positions (order-independent).
         let starts: Vec<(UnitId, UnitKind, Team, Obstacle)> = units
@@ -937,7 +1123,15 @@ impl World {
         let roster: Vec<Target> = units
             .iter()
             .filter(|u| u.targetable())
-            .map(|u| Target { id: u.id, team: u.team, pos: u.state.pos, radius: u.gameplay_radius })
+            .map(|u| Target {
+                id: u.id,
+                team: u.team,
+                pos: u.state.pos,
+                radius: u.gameplay_radius,
+                kind: u.kind,
+                range: u.attack.map_or(0.0, |a| a.range),
+                max_health: u.stats.max_health,
+            })
             .collect();
         let start_pos: Vec<(UnitId, Vec2)> = units.iter().map(|u| (u.id, u.state.pos)).collect();
         let mut fired: Vec<Fired> = Vec::new();
@@ -1009,7 +1203,12 @@ impl World {
         }
 
         // Phase 3: effects.
+        let mut melee: Vec<(UnitId, UnitId, f32, SimTime)> = Vec::new();
         for f in fired {
+            if let Fired::Melee { owner, target, power, at } = f {
+                melee.push((owner, target, power, at));
+                continue;
+            }
             let id = if prediction {
                 0
             } else {
@@ -1038,13 +1237,27 @@ impl World {
                         bolts.push(b);
                     }
                 }
+                Fired::Melee { .. } => {}
             }
         }
         if !prediction {
+            let first_event = events.len();
+            melee.sort_by_key(|m| (m.3, m.0));
+            for (owner, target, power, at) in melee {
+                if let Some(u) = units.iter_mut().find(|u| u.id == target) {
+                    deal_damage(u, owner, power, DamageKind::Physical, at, events);
+                }
+            }
             resolve_effects(units, missiles, areas, bolts, &start_pos, s0, s1, events);
+            let had_winner = game.winner.is_some();
+            note_outcomes(units, game, &events[first_event..], s1);
+            if let (false, Some((winner, at))) = (had_winner, game.winner) {
+                events.push(SimEvent::MatchEnded { winner, at });
+            }
         }
 
-        // Phase 4: regeneration and shield expiry.
+        // Phase 4: fountains, relics, regeneration and shield expiry.
+        fountains_and_relics(units, map, prediction, s1, events);
         for u in units.iter_mut().filter(|u| u.state.alive()) {
             let max = u.stats.max_health;
             if u.state.health < max && u.stats.health_regen > 0.0 {
@@ -1071,9 +1284,18 @@ impl World {
             match u.brain {
                 None => h.write_u8(0),
                 Some(Brain::Patrol { toward_b, .. }) => h.write_u8(1 + toward_b as u8),
-                Some(Brain::Turret { range }) => {
+                Some(Brain::RigTurret { range }) => {
                     h.write_u8(3);
                     h.write_u16(range);
+                }
+                Some(Brain::Laner { next }) => {
+                    h.write_u8(4);
+                    h.write_u8(next);
+                }
+                Some(Brain::Tower { heat, last }) => {
+                    h.write_u8(5);
+                    h.write_u8(heat);
+                    h.write_u32(last.0);
                 }
             }
         }
@@ -1083,6 +1305,7 @@ impl World {
                 h.write_u32(id.0);
             }
         }
+        self.game.hash_into(&mut h);
         h.write_u32(self.next_missile);
         for m in &self.missiles {
             h.write_u32(m.id);
@@ -1122,21 +1345,13 @@ impl Unit {
         home: Vec2,
         stats: Stats,
     ) -> Unit {
-        let mut state = UnitState::new(pos, stats.move_speed);
-        state.health = stats.max_health;
-        Unit {
-            id,
-            kind: UnitKind::Champion,
-            owner: Some(owner),
-            team,
-            state,
-            collision_radius: CHAMPION_COLLISION_RADIUS,
-            gameplay_radius: CHAMPION_GAMEPLAY_RADIUS,
-            brain: None,
-            champion: Some(champion),
-            stats,
-            home,
-        }
+        let radii = (CHAMPION_COLLISION_RADIUS, CHAMPION_GAMEPLAY_RADIUS);
+        let mut u = Unit::new(id, UnitKind::Champion, team, pos, radii, stats);
+        u.owner = Some(owner);
+        u.champion = Some(champion);
+        u.home = home;
+        u.attack = Some(champion.def().attack);
+        u
     }
 }
 
@@ -1226,19 +1441,32 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
     {
         unit.state.attack = None;
         if let Some(atk) = unit.attack_spec()
-            && roster.iter().any(|r| r.id == w.target)
+            && let Some(target) = roster.iter().find(|r| r.id == w.target)
         {
-            fired.push(Fired::Bolt(Bolt {
-                id: 0,
-                owner: id,
-                team,
-                target: w.target,
-                origin: unit.state.pos,
-                pos: unit.state.pos,
-                speed: atk.bolt_speed,
-                launched_at: t,
-                power: stats.attack_damage,
-            }));
+            let (power, share) = lane::turret_shot(
+                &mut unit.brain,
+                stats.attack_damage,
+                target.id,
+                target.kind,
+                target.range,
+                target.max_health,
+            );
+            if atk.bolt_speed <= 0.0 {
+                fired.push(Fired::Melee { owner: id, target: w.target, power, at: t });
+            } else {
+                fired.push(Fired::Bolt(Bolt {
+                    id: 0,
+                    owner: id,
+                    team,
+                    target: w.target,
+                    origin: unit.state.pos,
+                    pos: unit.state.pos,
+                    speed: atk.bolt_speed,
+                    launched_at: t,
+                    power,
+                    kind: if share { DamageKind::True } else { DamageKind::Physical },
+                }));
+            }
         }
     }
     if let Some(d) = unit.state.dash
@@ -1370,9 +1598,10 @@ fn resolve_effects(
     s1: SimTime,
     events: &mut Vec<SimEvent>,
 ) {
+    // Skillshots and areas hit units, not structures (those take attacks only).
     let motion: Vec<(UnitId, Team, f32, Vec2, Vec2)> = units
         .iter()
-        .filter(|u| u.targetable())
+        .filter(|u| u.targetable() && !u.kind.is_structure())
         .map(|u| {
             let start = start_pos.iter().find(|(id, _)| *id == u.id).map_or(u.state.pos, |(_, p)| *p);
             (u.id, u.team, u.gameplay_radius, start, u.state.pos)
@@ -1441,7 +1670,7 @@ fn resolve_effects(
         if gap <= step {
             let at = SimTime(from.0 + (gap / b.speed * SUBTICKS_PER_SECOND as f32) as u64).min(s1);
             events.push(SimEvent::AttackLanded { id: b.id, target: b.target, at, hit: true });
-            deal_damage(target, b.owner, b.power, DamageKind::Physical, at, events);
+            deal_damage(target, b.owner, b.power, b.kind, at, events);
             return false;
         }
         b.pos += to.normalize_or_zero() * step;
@@ -1470,9 +1699,87 @@ fn deal_damage(u: &mut Unit, source: UnitId, raw: f32, kind: DamageKind, at: Sim
     st.health -= amount;
     events.push(SimEvent::Damage { source, target: u.id, kind, amount, absorbed, at });
     if st.health <= 0.0 {
-        let respawn_at = at.plus(if u.kind == UnitKind::Champion { CHAMPION_RESPAWN } else { MINION_RESPAWN });
+        let respawn_at = match u.kind {
+            UnitKind::Champion => at.plus(CHAMPION_RESPAWN),
+            UnitKind::Gatehouse => at.plus(lane::GATEHOUSE_RESPAWN),
+            UnitKind::Turret | UnitKind::Base => SimTime(u64::MAX), // destroyed for good
+            _ => at.plus(MINION_RESPAWN),
+        };
         *st = UnitState { respawn_at: Some(respawn_at), ..UnitState::new(st.pos, st.move_speed) };
         events.push(SimEvent::Died { unit: u.id, killer: source, at, respawn_at });
+    }
+}
+
+/// After this tick's effects: remember champion-on-champion attacks (turrets and minions answer
+/// them, 01 §3–§4) and end the match when a Base falls.
+fn note_outcomes(units: &[Unit], game: &mut MatchState, events: &[SimEvent], s1: SimTime) {
+    let kind = |id: UnitId| units.iter().find(|u| u.id == id).map(|u| (u.kind, u.team));
+    for e in events {
+        match *e {
+            SimEvent::Damage { source, target, at, .. } => {
+                if let (Some((UnitKind::Champion, a)), Some((UnitKind::Champion, v))) = (kind(source), kind(target))
+                    && a != v
+                {
+                    game.aggression.push((source, target, at));
+                }
+            }
+            SimEvent::Died { unit, at, .. } => {
+                if let Some((UnitKind::Base, team)) = kind(unit)
+                    && game.winner.is_none()
+                {
+                    let winner = if team == Team::Blue { Team::Red } else { Team::Blue };
+                    game.winner = Some((winner, at));
+                    game.next_wave_at = None;
+                }
+            }
+            _ => {}
+        }
+    }
+    let horizon = SimTime(s1.0.saturating_sub(lane::AGGRESSION_MEMORY.0));
+    game.aggression.retain(|(_, _, t)| *t >= horizon);
+}
+
+/// Phase 4 on lane maps: fountains heal their team's champions (predicted too: it's map data)
+/// and burn enemies (server only); a champion touching a relic takes it.
+fn fountains_and_relics(units: &mut [Unit], map: &Map, prediction: bool, s1: SimTime, events: &mut Vec<SimEvent>) {
+    let layout = &map.layout;
+    if layout.fountains.iter().all(Option::is_none) {
+        return;
+    }
+    for u in units.iter_mut().filter(|u| u.kind == UnitKind::Champion && u.state.alive()) {
+        for (i, f) in layout.fountains.iter().enumerate() {
+            let Some((c, r)) = *f else { continue };
+            if (u.state.pos - c).length_sq() > r * r {
+                continue;
+            }
+            if u.team as usize == i {
+                let max = u.stats.max_health;
+                u.state.health = (u.state.health + max * lane::FOUNTAIN_HEAL * TICK_DT).min(max);
+            } else if !prediction {
+                deal_damage(u, UnitId(0), lane::FOUNTAIN_DPS * TICK_DT, DamageKind::True, s1, events);
+            }
+        }
+    }
+    if prediction {
+        return;
+    }
+    let relics: Vec<(UnitId, Vec2, f32)> = units
+        .iter()
+        .filter(|u| u.kind == UnitKind::Relic && u.state.alive())
+        .map(|u| (u.id, u.state.pos, u.gameplay_radius))
+        .collect();
+    for (relic, pos, r) in relics {
+        let taker = units.iter_mut().find(|u| {
+            u.kind == UnitKind::Champion && u.state.alive() && (u.state.pos - pos).length() <= r + u.gameplay_radius
+        });
+        let Some(c) = taker else { continue };
+        let max = c.stats.max_health;
+        let amount = (max * lane::RELIC_HEAL).min(max - c.state.health);
+        c.state.health += amount;
+        events.push(SimEvent::Healed { unit: c.id, amount, at: s1 });
+        if let Some(rel) = units.iter_mut().find(|u| u.id == relic) {
+            rel.state.respawn_at = Some(s1.plus(lane::RELIC_RESPAWN));
+        }
     }
 }
 
@@ -1856,7 +2163,7 @@ mod tests {
     #[test]
     fn turret_shoots_the_nearest_enemy_champion() {
         let mut w = World::new(1);
-        w.spawn_turret(Team::Red, Vec2::new(1000.0, 1000.0), 1100);
+        w.spawn_rig_turret(Team::Red, Vec2::new(1000.0, 1000.0), 1100);
         let target = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, Vec2::new(1600.0, 1000.0));
         w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, Vec2::new(1300.0, 1000.0)); // ally of the turret
         let ev = run_until_quiet(&mut w, 40);
@@ -1868,7 +2175,7 @@ mod tests {
     fn prediction_without_missiles_matches_the_caster() {
         let mut full = World::new(9);
         let me = full.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, Vec2::new(1000.0, 1000.0));
-        full.spawn_turret(Team::Red, Vec2::new(5000.0, 5000.0), 1100); // out of range
+        full.spawn_rig_turret(Team::Red, Vec2::new(5000.0, 5000.0), 1100); // out of range
         let mut predicted = World::from_units(full.tick(), vec![full.unit(me).unwrap().clone()]);
         predicted.set_prediction_mode(true);
         let mut rng = Pcg32::new(3, 3);
@@ -2133,6 +2440,129 @@ mod tests {
         }
     }
 
+    fn bridge_world() -> World {
+        let mut w = World::new(5);
+        w.set_map(MapId::Bridge.shared());
+        w.start_match();
+        w
+    }
+
+    fn deaths(ev: &[SimEvent], w: &World) -> Vec<(UnitKind, Team, u8)> {
+        ev.iter()
+            .filter_map(|e| match e {
+                SimEvent::Died { unit, .. } => w.unit(*unit).map(|u| (u.kind, u.team, u.tier)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// M2 slice 1: waves meet mid-lane and fight; turrets defend; with no champions around,
+    /// no structure falls and nothing gets stuck.
+    #[test]
+    fn bridge_waves_meet_fight_and_turrets_defend() {
+        let mut w = bridge_world();
+        let mut ev = Vec::new();
+        for _ in 0..(30 * 150) {
+            w.step(&[]);
+            ev.extend(w.take_events());
+        }
+        // Dead lane minions are removed the next tick, so anything that died and is gone was one.
+        let died = ev.iter().filter(|e| matches!(e, SimEvent::Died { .. })).count();
+        let d = deaths(&ev, &w);
+        assert!(died - d.len() > 30, "waves should fight: {} minion deaths", died - d.len());
+        assert!(d.iter().all(|(k, ..)| *k == UnitKind::Minion), "only minions die: {d:?}");
+        assert!(w.game().winner.is_none());
+        assert_eq!(w.game().waves_spawned, 5, "0:15, 0:45, 1:15, 1:45, 2:15");
+        // Lane minions stay on the lane (nobody wandered off into a corner).
+        for u in w.units().iter().filter(|u| u.kind == UnitKind::Minion) {
+            assert!(u.state.pos.y > 600.0 && u.state.pos.y < 2400.0, "{:?}", u.state.pos);
+        }
+    }
+
+    #[test]
+    fn turrets_answer_a_champion_attacking_an_allied_champion() {
+        let mut w = bridge_world();
+        let ally = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, Vec2::new(4700.0, 1500.0));
+        let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Vesper, Vec2::new(5300.0, 1500.0));
+        w.step(&[attack(1, 1, 1, ally)]);
+        let mut ev = w.take_events();
+        ev.extend(run_until_quiet(&mut w, 90));
+        let shots_at_enemy = ev
+            .iter()
+            .filter(|e| matches!(e, SimEvent::AttackLaunched(b) if b.target == enemy && w.unit(b.owner).is_some_and(|u| u.kind == UnitKind::Turret)))
+            .count();
+        assert!(shots_at_enemy >= 2, "the blue outer turret should shoot the aggressor");
+        // Consecutive shots ramp up.
+        let dmg: Vec<f32> = damage_to(&ev, enemy).into_iter().map(|(_, a)| a).filter(|a| *a > 60.0).collect();
+        assert!(dmg.windows(2).any(|p| p[1] > p[0]), "{dmg:?}");
+    }
+
+    /// A strong champion pushing alone takes every red structure strictly in lane order, and
+    /// the Base falling ends the match.
+    #[test]
+    fn a_push_destroys_structures_in_order_and_ends_the_match() {
+        let mut w = bridge_world();
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(450.0, 1500.0));
+        {
+            let u = w.unit_mut(me).unwrap();
+            u.stats.attack_damage = 900.0;
+            u.stats.max_health = 1.0e7;
+            u.stats.health_regen = 1.0e5;
+            u.state.health = 1.0e7;
+        }
+        let goal = QPoint::from_vec2(Vec2::new(10_750.0, 1500.0));
+        let mut ev = Vec::new();
+        let mut seq = 0;
+        for k in 1..=(30 * 600u32) {
+            let mut c = Vec::new();
+            if k % 60 == 1 {
+                seq += 1;
+                c.push(Command {
+                    player: PlayerId(0),
+                    seq,
+                    tick: Tick(k),
+                    sub: SubTick::START,
+                    kind: CommandKind::AttackMove(goal),
+                });
+            }
+            w.step(&c);
+            ev.extend(w.take_events());
+            if w.game().winner.is_some() {
+                break;
+            }
+        }
+        let tiers: Vec<u8> = deaths(&ev, &w)
+            .into_iter()
+            .filter(|(k, t, _)| *t == Team::Red && *k != UnitKind::Minion)
+            .map(|(.., tier)| tier)
+            .collect();
+        assert_eq!(tiers, vec![1, 2, 3, 4, 5, 5, 6], "structures fall in lane order");
+        assert!(matches!(w.game().winner, Some((Team::Blue, _))));
+        assert!(ev.iter().any(|e| matches!(e, SimEvent::MatchEnded { winner: Team::Blue, .. })));
+    }
+
+    #[test]
+    fn relics_heal_and_respawn_and_the_fountain_heals_its_own_team() {
+        let mut w = bridge_world();
+        let relic = w.units().iter().find(|u| u.kind == UnitKind::Relic).unwrap().clone();
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, relic.state.pos + Vec2::new(-200.0, 0.0));
+        w.unit_mut(me).unwrap().state.health = 100.0;
+        w.step(&[cmd(0, 1, 1, 0, (relic.state.pos.x + 200.0, relic.state.pos.y))]);
+        let ev = run_until_quiet(&mut w, 30);
+        assert!(
+            ev.iter().any(|e| matches!(e, SimEvent::Healed { unit, amount, .. } if *unit == me && *amount == 150.0))
+        );
+        assert!(!w.unit(relic.id).unwrap().state.alive(), "taken");
+        run_until_quiet(&mut w, 30 * 41);
+        assert!(w.unit(relic.id).unwrap().state.alive(), "back after 40 s");
+        // In the fountain: 15% of max health per second.
+        let u = w.unit_mut(me).unwrap();
+        u.state = UnitState { health: 100.0, ..UnitState::new(Vec2::new(400.0, 1500.0), 325.0) };
+        run_until_quiet(&mut w, 30);
+        let hp = w.unit(me).unwrap().state.health;
+        assert!((hp - (100.0 + 90.0 + 1.5)).abs() < 1.0, "{hp}");
+    }
+
     fn arena_world(seed: u64) -> World {
         let mut w = World::new(seed);
         w.set_map(MapId::Arena.shared());
@@ -2215,7 +2645,51 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0x3c56_d326_2231_2020;
+    const GOLDEN_HASH_ARENA: u64 = 0x3459_6e7f_582b_c05a;
+
+    /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
+    /// fountains on The Bridge, with four champions fighting through it.
+    #[test]
+    fn golden_state_hash_bridge() {
+        let mut w = bridge_world();
+        for p in 0..4u8 {
+            let team = if p % 2 == 0 { Team::Blue } else { Team::Red };
+            let home = w.map().layout.champion_spawn[team as usize];
+            w.spawn_champion(
+                PlayerId(p),
+                team,
+                ChampionId::ALL[p as usize % 2],
+                home + Vec2::new(0.0, 80.0 * p as f32),
+            );
+        }
+        let mut rng = Pcg32::new(31, 3);
+        let mut seq = 0;
+        let mut died = 0;
+        for k in 1..=9000u32 {
+            let mut cmds = Vec::new();
+            for p in 0..4u8 {
+                if rng.next_u32() % 29 == 0 {
+                    seq += 1;
+                    let t = (rng.range_f32(3000.0, 9000.0), rng.range_f32(900.0, 2100.0));
+                    let sub = (rng.next_u32() % SUBTICKS as u32) as u8;
+                    cmds.push(match rng.next_u32() % 4 {
+                        0 => cast_slot(p, seq, k, sub, (rng.next_u32() % 4) as u8, t),
+                        1 => Command {
+                            kind: CommandKind::AttackMove(QPoint::from_vec2(Vec2::new(t.0, t.1))),
+                            ..cmd(p, seq, k, sub, t)
+                        },
+                        _ => cmd(p, seq, k, sub, t),
+                    });
+                }
+            }
+            w.step(&cmds);
+            died += w.take_events().iter().filter(|e| matches!(e, SimEvent::Died { .. })).count();
+        }
+        assert!(died > 50, "waves and champions should be fighting: {died}");
+        assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
+    }
+
+    const GOLDEN_HASH_BRIDGE: u64 = 0xdf6f_2d80_c555_1f9e;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -2235,7 +2709,7 @@ mod tests {
                 let start = a.to_vec2() + Vec2::new(0.0, 55.0 * j as f32);
                 w.spawn_minion(MinionKind::Caster, Team::Blue, start, Some(Brain::Patrol { a, b, toward_b: true }));
             }
-            w.spawn_turret(Team::Red, Vec2::new(1500.0 + 3500.0 * i as f32, 7600.0), 1100);
+            w.spawn_rig_turret(Team::Red, Vec2::new(1500.0 + 3500.0 * i as f32, 7600.0), 1100);
         }
         // A duelling pair that only attacks each other: deaths and respawns in the hash.
         let duel_a = w.spawn_champion(PlayerId(10), Team::Blue, ChampionId::Vesper, Vec2::new(7000.0, 12_000.0));
@@ -2286,5 +2760,5 @@ mod tests {
 
     /// Recorded on x86_64-unknown-linux-gnu (debug and release agree). CI checks Linux, macOS
     /// (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0xa34f_9cfd_b71b_2c23;
+    const GOLDEN_HASH: u64 = 0xd5aa_d91e_2698_b4a8;
 }
