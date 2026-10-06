@@ -141,7 +141,9 @@ jobs:
 
   image:
     name: server image
+    # Only once the GitHub release is out, so a failed release never publishes an image.
     if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
