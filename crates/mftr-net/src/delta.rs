@@ -25,7 +25,7 @@ pub const COAST_TOLERANCE: f32 = 0.5;
 pub const STATIC: u8 = 1; // kind, team, radii, champion: only when a unit is new to the client
 pub const POS: u8 = 2;
 pub const MOTION: u8 = 4; // heading target and speed
-pub const VITALS: u8 = 8; // health, max health, shield
+pub const VITALS: u8 = 8; // health, max health, shield, level
 pub const FLAGS: u8 = 16; // casting, attacking, stunned, rooted, dashing, protected
 pub const ALL: u8 = STATIC | POS | MOTION | VITALS | FLAGS;
 
@@ -74,7 +74,9 @@ pub fn diff(base: Option<&RemoteUnit>, current: &RemoteUnit, ticks: u32) -> (Opt
     if (b.target, b.speed) != (current.target, current.speed) {
         mask |= MOTION;
     }
-    if (b.health, b.max_health, b.shield) != (current.health, current.max_health, current.shield) {
+    if (b.health, b.max_health, b.shield, b.level)
+        != (current.health, current.max_health, current.shield, current.level)
+    {
         mask |= VITALS;
     }
     if flags(b) != flags(current) {
@@ -109,7 +111,7 @@ pub fn apply(base: Option<&RemoteUnit>, update: Option<&UnitUpdate>, ticks: u32)
         (r.target, r.speed) = (n.target, n.speed);
     }
     if u.mask & VITALS != 0 {
-        (r.health, r.max_health, r.shield) = (n.health, n.max_health, n.shield);
+        (r.health, r.max_health, r.shield, r.level) = (n.health, n.max_health, n.shield, n.level);
     }
     if u.mask & FLAGS != 0 {
         [r.casting, r.attacking, r.stunned, r.rooted, r.dashing, r.protected] = flags(n);
@@ -163,6 +165,7 @@ mod tests {
             health: 300,
             max_health: 300,
             shield: 0,
+            level: 0,
             casting: false,
             attacking: false,
             stunned: false,

@@ -119,6 +119,7 @@ pub struct RemoteRender {
     pub health: f32,
     pub max_health: f32,
     pub shield: f32,
+    pub level: u8,
     pub attacking: bool,
     pub stunned: bool,
     pub rooted: bool,
@@ -158,6 +159,11 @@ pub enum Notice {
     /// A Base fell (a new match starts shortly).
     MatchEnded {
         winner: Team,
+    },
+    /// Gold and experience the own champion earned.
+    Reward {
+        gold: f32,
+        xp: u32,
     },
 }
 
@@ -230,6 +236,7 @@ pub struct ClientSession {
     team: Team,
     champion: ChampionId,
     home: Vec2,
+    rules: mftr_sim::world::Rules,
     /// Requested in the hello (the server picks when `None`).
     champion_request: Option<ChampionId>,
     /// The map from the welcome: prediction runs with the same walls and pathing as the server.
@@ -293,6 +300,7 @@ impl ClientSession {
             team: Team::Blue,
             champion: ChampionId::Ember,
             home: Vec2::ZERO,
+            rules: mftr_sim::world::Rules::SANDBOX,
             champion_request: None,
             map: mftr_sim::map::MapId::Open.shared(),
             world: World::from_units(Tick(0), Vec::new()),
@@ -464,6 +472,16 @@ impl ClientSession {
         self.issue(CommandKind::Cast { slot, target: QPoint::from_vec2(target) }, now)
     }
 
+    /// Spend an ability point on slot 0–3 (Q W E R).
+    pub fn level_up(&mut self, slot: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::LevelUp(slot), now)
+    }
+
+    /// The match rules from the welcome.
+    pub fn rules(&self) -> mftr_sim::world::Rules {
+        self.rules
+    }
+
     /// Basic-attack a visible unit (chasing it into range).
     pub fn attack(&mut self, target: UnitId, now: f64) -> Option<Command> {
         self.issue(CommandKind::Attack(target), now)
@@ -600,8 +618,12 @@ impl ClientSession {
             self.history.pop_back();
         }
         self.world.set_tick(base_tick);
+        let champion = self.champion;
         if let Some(u) = self.world.unit_mut(self.unit) {
             u.state = base;
+            // Stats follow the level in the state (the server already applied any level-up).
+            u.stats = champion.def().stats_at(base.progress.level);
+            u.stats_level = base.progress.level;
         }
         // Own missiles, areas and bolts predicted after the base tick are re-created by the
         // re-simulation.
@@ -630,9 +652,20 @@ impl ClientSession {
         self.send.on_ack(header.ack, header.ack_bits);
         match message {
             ServerMessage::Welcome {
-                player, unit, team, map, champion, home, tick, since_tick_us, time_echo, ..
+                player,
+                unit,
+                team,
+                map,
+                champion,
+                home,
+                rules,
+                tick,
+                since_tick_us,
+                time_echo,
+                ..
             } => {
                 if self.phase == Phase::Connecting {
+                    self.rules = rules;
                     self.player = player;
                     self.unit = unit;
                     self.team = team;
@@ -704,6 +737,9 @@ impl ClientSession {
                     absorbed: 0.0,
                     heal: true,
                 }),
+                SimEvent::Reward { unit, gold, xp, .. } if unit == self.unit => {
+                    self.notices.push(Notice::Reward { gold, xp })
+                }
                 SimEvent::MatchEnded { winner, .. } => {
                     self.stats.matches_won += (winner == self.team) as u64;
                     self.stats.matches_lost += (winner != self.team) as u64;
@@ -912,7 +948,10 @@ impl ClientSession {
         let stats = self.champion.def().stats;
         let mut unit = Unit::champion(self.unit, self.player, self.team, self.champion, state.pos, self.home, stats);
         unit.state = state;
+        unit.stats = self.champion.def().stats_at(state.progress.level);
+        unit.stats_level = state.progress.level;
         self.world = World::from_units(tick, vec![unit]);
+        self.world.set_rules(self.rules);
         self.world.set_prediction_mode(true);
         self.world.set_map(self.map.clone());
         self.history.clear();
@@ -1005,6 +1044,7 @@ impl ClientSession {
                     health: l.health as f32,
                     max_health: l.max_health as f32,
                     shield: l.shield as f32,
+                    level: l.level,
                     attacking: l.attacking,
                     stunned: l.stunned,
                     rooted: l.rooted,

@@ -403,6 +403,9 @@ mod tests {
         assert_eq!(r.fog_violations, 0);
         assert!(s.deaths.iter().all(|d| *d >= 1), "{}", s.duel_row());
         assert!(s.ghost_rate() < 0.02, "{}", s.dodge_row());
+        // M2 slice 2: everyone earns experience and gold (ARAM starts at level 3, 1,400 gold).
+        assert!(s.levels.iter().all(|l| *l >= 5), "{}", s.duel_row());
+        assert!(s.gold.iter().all(|g| *g > 2500.0), "{}", s.duel_row());
     }
 
     /// Q13: over a lossy, jittery link with moving minions, every snapshot the client

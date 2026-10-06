@@ -3,11 +3,14 @@
 //! skillshot, a delayed ground AoE, a dash or blink, and a hard-CC skillshot, plus a ranged
 //! basic attack. All numbers are *(start)* values.
 //!
-//! The sandbox has no levels, items or resources yet: stats are fixed "mid-game-ish" values.
+//! Stats are level-1 values that grow with level (02 §1); ability numbers are rank-1 values that
+//! grow with rank (M2 slice 2). Sandboxes play everything at level 1, rank 1.
 
 use crate::ability::{
-    Ability, BARRIER, BLINK, Blink, Cc, Damage, DamageKind, Dash, DelayedArea, Effect, LineSkillshot, ReactionClass,
+    Ability, BARRIER, BLINK, Blink, Cc, Damage, DamageKind, Dash, DelayedArea, Effect, LineSkillshot, RankScaling,
+    ReactionClass,
 };
+use crate::combat::stat_at_level;
 use crate::time::SimDuration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -99,9 +102,51 @@ impl AttackSpec {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChampionDef {
     pub name: &'static str,
+    /// Level 1.
     pub stats: Stats,
+    /// Added per level on the 02 §1 curve (move speed doesn't grow).
+    pub growth: Stats,
     pub attack: AttackSpec,
     pub abilities: [Ability; 4],
+}
+
+impl ChampionDef {
+    /// Stats at `level` (1–18).
+    pub fn stats_at(&self, level: u8) -> Stats {
+        let (b, g) = (&self.stats, &self.growth);
+        let at = |base: f32, growth: f32| stat_at_level(base, growth, level.max(1));
+        Stats {
+            max_health: at(b.max_health, g.max_health),
+            health_regen: at(b.health_regen, g.health_regen),
+            armor: at(b.armor, g.armor),
+            magic_resist: at(b.magic_resist, g.magic_resist),
+            attack_damage: at(b.attack_damage, g.attack_damage),
+            ability_power: at(b.ability_power, g.ability_power),
+            move_speed: b.move_speed,
+        }
+    }
+}
+
+/// Highest rank of slot `slot` (0–3) at `level`: basic abilities ⌈level / 2⌉ up to 5, the
+/// ultimate 1 / 2 / 3 at levels 6 / 11 / 16.
+pub fn max_rank(slot: u8, level: u8) -> u8 {
+    if slot == 3 { (level.saturating_sub(1) / 5).min(3) } else { level.div_ceil(2).min(5) }
+}
+
+const fn growth(health: f32, armor: f32, magic_resist: f32, attack_damage: f32) -> Stats {
+    Stats {
+        max_health: health,
+        health_regen: 0.08,
+        armor,
+        magic_resist,
+        attack_damage,
+        ability_power: 0.0,
+        move_speed: 0.0,
+    }
+}
+
+const fn ranks(damage: f32, cooldown_ms: u64) -> RankScaling {
+    RankScaling { damage, cooldown: SimDuration::from_millis(cooldown_ms) }
 }
 
 const fn ms(v: u64) -> SimDuration {
@@ -119,6 +164,7 @@ pub const EMBER: ChampionDef = ChampionDef {
         ability_power: 80.0,
         move_speed: 325.0,
     },
+    growth: growth(90.0, 4.2, 1.3, 3.0),
     attack: AttackSpec { range: 525.0, attack_speed: 0.65, windup_fraction: 0.2, bolt_speed: 1600.0 },
     abilities: [
         Ability {
@@ -133,6 +179,7 @@ pub const EMBER: ChampionDef = ChampionDef {
                 cc: Cc::None,
             }),
             reaction: ReactionClass::Burst,
+            per_rank: ranks(40.0, 500),
         },
         Ability {
             name: "Cinder Bloom",
@@ -145,12 +192,14 @@ pub const EMBER: ChampionDef = ChampionDef {
                 damage: Damage { kind: DamageKind::Magic, base: 90.0, ad_ratio: 0.0, ap_ratio: 0.7 },
             }),
             reaction: ReactionClass::Burst,
+            per_rank: ranks(40.0, 500),
         },
         Ability {
             name: "Flicker",
             cooldown: ms(14_000),
             effect: Effect::Blink(Blink { range: 350.0 }),
             reaction: ReactionClass::None,
+            per_rank: ranks(0.0, 1000),
         },
         Ability {
             name: "Binding Sigil",
@@ -164,6 +213,7 @@ pub const EMBER: ChampionDef = ChampionDef {
                 cc: Cc::Stun(ms(1250)),
             }),
             reaction: ReactionClass::HardCc,
+            per_rank: ranks(80.0, 3000),
         },
     ],
 };
@@ -179,6 +229,7 @@ pub const VESPER: ChampionDef = ChampionDef {
         ability_power: 0.0,
         move_speed: 325.0,
     },
+    growth: growth(96.0, 4.4, 1.3, 3.2),
     attack: AttackSpec { range: 575.0, attack_speed: 0.8, windup_fraction: 0.18, bolt_speed: 2200.0 },
     abilities: [
         Ability {
@@ -193,6 +244,7 @@ pub const VESPER: ChampionDef = ChampionDef {
                 cc: Cc::None,
             }),
             reaction: ReactionClass::Poke,
+            per_rank: ranks(35.0, 400),
         },
         Ability {
             name: "Shrapnel Charge",
@@ -205,12 +257,14 @@ pub const VESPER: ChampionDef = ChampionDef {
                 damage: Damage { kind: DamageKind::Physical, base: 50.0, ad_ratio: 0.8, ap_ratio: 0.0 },
             }),
             reaction: ReactionClass::Burst,
+            per_rank: ranks(30.0, 600),
         },
         Ability {
             name: "Tumble",
             cooldown: ms(7000),
             effect: Effect::Dash(Dash { range: 325.0, speed: 1000.0 }),
             reaction: ReactionClass::None,
+            per_rank: ranks(0.0, 600),
         },
         Ability {
             name: "Snare Net",
@@ -224,6 +278,7 @@ pub const VESPER: ChampionDef = ChampionDef {
                 cc: Cc::Root(ms(1500)),
             }),
             reaction: ReactionClass::HardCc,
+            per_rank: ranks(60.0, 3000),
         },
     ],
 };
@@ -267,5 +322,25 @@ mod tests {
         assert_eq!(a.windup().0, 432); // 18% of it
         assert_eq!(ChampionId::by_name("ember"), Some(ChampionId::Ember));
         assert_eq!(ChampionId::from_u8(1), Some(ChampionId::Vesper));
+    }
+}
+
+#[cfg(test)]
+mod rank_tests {
+    use super::*;
+
+    #[test]
+    fn rank_gates_and_growth() {
+        assert_eq!((max_rank(0, 1), max_rank(0, 2), max_rank(0, 3), max_rank(0, 9), max_rank(0, 18)), (1, 1, 2, 5, 5));
+        assert_eq!(
+            (max_rank(3, 5), max_rank(3, 6), max_rank(3, 11), max_rank(3, 16), max_rank(3, 18)),
+            (0, 1, 2, 3, 3)
+        );
+        assert_eq!(EMBER.stats_at(1), EMBER.stats);
+        let l18 = VESPER.stats_at(18);
+        assert!((l18.max_health - (620.0 + 96.0 * 17.0)).abs() < 1e-3);
+        let q = EMBER.abilities[0];
+        assert_eq!(q.cooldown_at(5).0, q.cooldown.0 - 4 * SimDuration::from_millis(500).0);
+        assert_eq!(q.bonus_damage_at(3), 80.0);
     }
 }

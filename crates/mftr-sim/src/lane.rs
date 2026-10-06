@@ -19,6 +19,44 @@ pub const MINION_ACQUIRE: f32 = 700.0;
 pub const MINION_LEASH: f32 = 1000.0;
 /// How long an attack on a champion keeps calling for help (minions and turrets, 01 §3–§4).
 pub const AGGRESSION_MEMORY: SimDuration = SimDuration::from_millis(2000);
+/// Champions who damaged a champion this recently share its kill as assists (01 §5).
+pub const ASSIST_MEMORY: SimDuration = SimDuration::from_millis(10_000);
+/// Champions this close to a dying enemy share its experience (01 §6).
+pub const XP_RANGE: f32 = 1400.0;
+/// Every champion of the team that destroys a turret gets this much gold.
+pub const TURRET_GOLD: f32 = 150.0;
+pub const KILL_GOLD: f32 = 300.0;
+
+/// (gold for the last hit, experience) of a lane minion, by its attack range (01 §5–§6).
+pub fn minion_reward(attack_range: f32) -> (f32, u32) {
+    match crate::world::MinionKind::from_attack_range(attack_range) {
+        crate::world::MinionKind::Melee => (21.0, 60),
+        crate::world::MinionKind::Caster => (14.0, 30),
+        crate::world::MinionKind::Siege => (60.0, 90),
+    }
+}
+
+/// Kill gold for a champion on `streak` (01 §5): kill streaks raise the bounty, death streaks
+/// lower it.
+pub fn bounty(streak: i8) -> f32 {
+    if streak >= 2 {
+        KILL_GOLD + (50.0 * (streak - 1) as f32).min(500.0)
+    } else if streak <= -2 {
+        (KILL_GOLD - 40.0 * ((-streak - 1).min(4)) as f32).max(140.0)
+    } else {
+        KILL_GOLD
+    }
+}
+
+/// Each of `sharers` gets `total / n`, plus 15% per extra sharer (01 §6: fewer sharers level
+/// faster, but sharing isn't a pure split).
+pub fn shared_xp(total: u32, sharers: usize) -> u32 {
+    if sharers == 0 {
+        return 0;
+    }
+    let n = sharers as f32;
+    (total as f32 / n * (1.0 + 0.15 * (n - 1.0))).round() as u32
+}
 /// Consecutive turret shots on the same champion hit harder: +35% each, up to 5 steps.
 pub const TURRET_HEAT_STEP: f32 = 0.35;
 pub const TURRET_HEAT_MAX: u8 = 5;

@@ -207,6 +207,9 @@ impl ServerCore {
     pub fn new(cfg: ServerConfig, start: f64) -> Self {
         let mut world = World::new(cfg.seed);
         world.set_map(cfg.scenario.map().shared());
+        if cfg.scenario == Scenario::Aram {
+            world.set_rules(mftr_sim::world::Rules::ARAM);
+        }
         populate(&mut world, cfg.scenario);
         Self {
             cfg,
@@ -279,6 +282,7 @@ impl ServerCore {
                         map: self.world.map().id,
                         champion: champ,
                         home,
+                        rules: self.world.rules(),
                         tick,
                         tick_hz: TICK_HZ as u8,
                         since_tick_us: since,
@@ -446,6 +450,7 @@ impl ServerCore {
                     health: hp(st.health.max(if st.alive() { 1.0 } else { 0.0 })),
                     max_health: hp(u.stats.max_health),
                     shield: hp(if st.shield_until > s1 { st.shield } else { 0.0 }),
+                    level: if u.champion.is_some() { st.progress.level } else { 0 },
                     casting: st.cast.is_some(),
                     attacking: st.attack.is_some(),
                     stunned: st.stunned_until > s1,
@@ -543,9 +548,10 @@ impl ServerCore {
                 }
                 push(conn, *e);
             }
-            // Own-team missiles and areas: at spawn, unmodified.
+            // Own-team missiles and areas: at spawn, unmodified. Rewards: only to the earner.
             for e in &events {
                 match *e {
+                    SimEvent::Reward { unit, .. } if unit == conn.unit => push(conn, *e),
                     SimEvent::MissileSpawned(m) if m.team == conn.team => {
                         conn.revealed.insert(m.id);
                         push(conn, *e);

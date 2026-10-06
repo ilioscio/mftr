@@ -9,7 +9,7 @@ use crate::delta::{self, UnitUpdate};
 use crate::packet::PacketHeader;
 use mftr_sim::ability::{Cc, Damage, DamageKind, LineSkillshot, SLOTS};
 use mftr_sim::map::MapId;
-use mftr_sim::world::{MAX_PATH, Path};
+use mftr_sim::world::{MAX_PATH, Path, Progress, Rules};
 use mftr_sim::{
     Area, AttackWindup, Bolt, Cast, ChampionId, Command, CommandKind, DashMove, Missile, Order, PlayerId, QPoint,
     SimDuration, SimEvent, SimTime, SubTick, Team, Tick, UnitId, UnitKind, UnitState, Vec2,
@@ -87,6 +87,8 @@ pub struct RemoteUnit {
     pub health: u16,
     pub max_health: u16,
     pub shield: u16,
+    /// Champion level (1–18; 0 for other units).
+    pub level: u8,
     /// Status flags for display (windup animations, CC indicators).
     pub casting: bool,
     pub attacking: bool,
@@ -128,6 +130,8 @@ pub enum ServerMessage {
         /// Own champion and respawn point (prediction rebuilds the unit from these).
         champion: ChampionId,
         home: Vec2,
+        /// Match rules prediction applies too (passive gold, ranks).
+        rules: Rules,
         tick: Tick,
         tick_hz: u8,
         since_tick_us: u32,
@@ -179,6 +183,10 @@ fn write_command(w: &mut BitWriter, c: &Command) {
             w.write(4, 3);
             write_qpoint(w, q);
         }
+        CommandKind::LevelUp(slot) => {
+            w.write(5, 3);
+            w.write(slot as u64, 2);
+        }
     }
 }
 
@@ -198,6 +206,7 @@ fn read_command(r: &mut BitReader) -> Result<Command, DecodeError> {
         }
         3 => CommandKind::Attack(UnitId(r.read_u32()?)),
         4 => CommandKind::AttackMove(read_qpoint(r)?),
+        5 => CommandKind::LevelUp(r.read(2)? as u8),
         _ => return Err(DecodeError::Invalid("command kind")),
     };
     Ok(Command { player: PlayerId(0), seq, tick, sub, kind })
@@ -437,6 +446,13 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             write_team(w, *winner);
             write_time(w, *at);
         }
+        SimEvent::Reward { unit, gold, xp, at } => {
+            w.write(16, 5);
+            w.write_u32(unit.0);
+            w.write_f32(*gold);
+            w.write_u32(*xp);
+            write_time(w, *at);
+        }
     }
 }
 
@@ -512,6 +528,7 @@ fn read_event(r: &mut BitReader) -> Result<SimEvent, DecodeError> {
         13 => SimEvent::Shielded { unit: unit(r)?, amount: read_finite(r)?, at: read_time(r)?, until: read_time(r)? },
         14 => SimEvent::Healed { unit: unit(r)?, amount: read_finite(r)?, at: read_time(r)? },
         15 => SimEvent::MatchEnded { winner: read_team(r)?, at: read_time(r)? },
+        16 => SimEvent::Reward { unit: unit(r)?, gold: read_finite(r)?, xp: r.read_u32()?, at: read_time(r)? },
         _ => return Err(DecodeError::Invalid("event kind")),
     })
 }
@@ -588,6 +605,15 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     w.write_f32(s.shield);
     write_time(w, s.shield_until);
     write_opt_time(w, s.respawn_at);
+    let p = &s.progress;
+    w.write(p.level as u64, 5);
+    w.write_u32(p.xp);
+    w.write_f32(p.gold);
+    for r in p.ranks {
+        w.write(r as u64, 3);
+    }
+    w.write(p.points as u64, 5);
+    w.write_u8(p.streak as u8);
 }
 
 fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
@@ -638,6 +664,16 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let shield = read_finite(r)?;
     let shield_until = read_time(r)?;
     let respawn_at = read_opt_time(r)?;
+    let level = r.read(5)? as u8;
+    let xp = r.read_u32()?;
+    let gold = read_finite(r)?;
+    let mut ranks = [0u8; 4];
+    for x in ranks.iter_mut() {
+        *x = r.read(3)? as u8;
+    }
+    let points = r.read(5)? as u8;
+    let streak = r.read_u8()? as i8;
+    let progress = Progress { level, xp, gold, ranks, points, streak };
     Ok(UnitState {
         pos,
         order,
@@ -656,6 +692,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         shield,
         shield_until,
         respawn_at,
+        progress,
     })
 }
 
@@ -695,6 +732,7 @@ fn write_update(w: &mut BitWriter, u: &UnitUpdate) {
         w.write_u16(o.health);
         w.write_u16(o.max_health);
         w.write_u16(o.shield);
+        w.write(o.level as u64, 5);
     }
     if u.mask & delta::FLAGS != 0 {
         for f in [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected] {
@@ -722,6 +760,7 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         health: 0,
         max_health: 0,
         shield: 0,
+        level: 0,
         casting: false,
         attacking: false,
         stunned: false,
@@ -744,6 +783,7 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
     }
     if mask & delta::VITALS != 0 {
         (o.health, o.max_health, o.shield) = (r.read_u16()?, r.read_u16()?, r.read_u16()?);
+        o.level = r.read(5)? as u8;
     }
     if mask & delta::FLAGS != 0 {
         let mut f = [false; 6];
@@ -840,7 +880,19 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
 
 pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
     match msg {
-        ServerMessage::Welcome { player, unit, team, map, champion, home, tick, tick_hz, since_tick_us, time_echo } => {
+        ServerMessage::Welcome {
+            player,
+            unit,
+            team,
+            map,
+            champion,
+            home,
+            rules,
+            tick,
+            tick_hz,
+            since_tick_us,
+            time_echo,
+        } => {
             let mut w = begin(header, 0);
             w.write_u8(player.0);
             w.write_u32(unit.0);
@@ -848,6 +900,10 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             w.write_u8(*map as u8);
             write_champion(&mut w, Some(*champion));
             write_vec2(&mut w, *home);
+            w.write(rules.start_level as u64, 5);
+            w.write_f32(rules.start_gold);
+            w.write_f32(rules.passive_gold);
+            w.write_bool(rules.ranked);
             w.write_u32(tick.0);
             w.write_u8(*tick_hz);
             w.write_u32(*since_tick_us);
@@ -917,6 +973,12 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             map: MapId::from_u8(r.read_u8()?).ok_or(DecodeError::Invalid("map id"))?,
             champion: read_champion(&mut r)?.ok_or(DecodeError::Invalid("champion"))?,
             home: read_vec2(&mut r)?,
+            rules: Rules {
+                start_level: r.read(5)? as u8,
+                start_gold: read_finite(&mut r)?,
+                passive_gold: read_finite(&mut r)?,
+                ranked: r.read_bool()?,
+            },
             tick: Tick(r.read_u32()?),
             tick_hz: r.read_u8()?,
             since_tick_us: r.read_u32()?,
@@ -1009,6 +1071,7 @@ mod tests {
             c(43, CommandKind::Cast { slot: 5, target: QPoint { x: 7, y: 9 } }),
             c(44, CommandKind::Attack(UnitId(812))),
             c(45, CommandKind::AttackMove(QPoint { x: 1, y: 65535 })),
+            c(46, CommandKind::LevelUp(3)),
         ];
         let msg = ClientMessage::Input { client_time_us: 0xABCD_1234, event_ack: 99, snapshot_ack: 1230, commands };
         let bytes = encode_client(&hdr(), &msg);
@@ -1058,6 +1121,7 @@ mod tests {
             shield: 77.7,
             shield_until: SimTime(130_000),
             respawn_at: Some(SimTime(140_000)),
+            progress: Progress { level: 17, xp: 1234, gold: 2875.25, ranks: [5, 3, 1, 2], points: 2, streak: -3 },
         }
     }
 
@@ -1117,6 +1181,7 @@ mod tests {
             health: 512,
             max_health: 620,
             shield: 150,
+            level: 12,
             casting: true,
             attacking: false,
             stunned: true,
@@ -1161,6 +1226,7 @@ mod tests {
             SimEvent::Shielded { unit: UnitId(4), amount: 150.0, at: SimTime(2), until: SimTime(4_802) },
             SimEvent::Healed { unit: UnitId(4), amount: 150.0, at: SimTime(3) },
             SimEvent::MatchEnded { winner: Team::Red, at: SimTime(99_000) },
+            SimEvent::Reward { unit: UnitId(3), gold: 21.5, xp: 60, at: SimTime(99_001) },
         ];
         let snap = Snapshot {
             tick: Tick(99),
@@ -1205,6 +1271,7 @@ mod tests {
             map: MapId::Arena,
             champion: ChampionId::Vesper,
             home: Vec2::new(3400.0, 2000.0),
+            rules: Rules::ARAM,
             tick: Tick(77),
             tick_hz: 30,
             since_tick_us: 12,

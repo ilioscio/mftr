@@ -97,6 +97,8 @@ func _update_shot(delta: float) -> void:
 	var inward := (size / 2.0 - own).normalized()
 	var side := Vector2(-inward.y, inward.x)
 	if not _shot_moved and _shot_timer > 1.0:
+		for slot in 3:
+			client.level_up(slot)  # ranked modes start with points to spend
 		client.cast(1, own + inward * 700.0 + side * 200.0)
 		_shot_moved = true
 	elif _shot_moved and _shot_timer > 1.4 and _shot_timer - delta <= 1.4:
@@ -281,6 +283,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	for slot in SLOT_ACTIONS.size():
 		if event.is_action_pressed(SLOT_ACTIONS[slot]):
+			# Ctrl + Q/W/E/R spends an ability point (01 §13).
+			if slot < 4 and event is InputEventKey and (event as InputEventKey).ctrl_pressed:
+				client.level_up(slot)
+				return
 			var aim = _cursor_ground()
 			if aim != null:
 				client.cast(slot, aim)
@@ -841,6 +847,10 @@ func _update_combat_text(delta: float) -> void:
 			if remote_info.has(n.unit) and remote_info[n.unit].minion:
 				continue
 			text = "%s killed %s" % [_name_of(n.killer), victim]
+		elif n.kind == "reward":
+			if n.gold >= 1.0 and own_body != null:
+				floaters.append({ "pos": own_body.position + Vector3(0.6, 0, 0), "text": "+%dg" % roundi(n.gold), "color": Color(1.0, 0.85, 0.3), "age": 0.0 })
+			continue
 		elif n.kind == "match_ended":
 			match_banner = "VICTORY" if n.won else "DEFEAT"
 			match_banner_age = 0.0
@@ -899,6 +909,10 @@ func _draw_overlay() -> void:
 		var size := Vector2(104, 11) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
 		var lift := 1.25 if champ else (2.6 if structure else 0.6)
 		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color)
+		if champ and u.level > 0:
+			var sp = _screen(remote_bodies[id].position + Vector3(0, lift, 0))
+			if sp != null:
+				overlay.draw_string(font, sp + Vector2(-size.x / 2.0 - 26, 0), "%d" % u.level, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
 	for f in floaters:
 		var s = _screen(f.pos + Vector3(0, 1.5 + f.age * 0.8, 0))
 		if s != null:
@@ -938,6 +952,10 @@ func _draw_ability_bar(font: Font) -> void:
 	var hp: float = own_status.health
 	var mx: float = own_status.max_health
 	var header := "%s   %d / %d" % [own_status.champion, roundi(hp), roundi(mx)]
+	if own_status.get("ranked", false):
+		header = "Lv %d  %s   %d / %d     %d gold" % [own_status.level, own_status.champion, roundi(hp), roundi(mx), own_status.gold]
+		var xp_frac := float(own_status.xp) / maxf(float(own_status.xp_next), 1.0)
+		overlay.draw_rect(Rect2(x0 - 10, y0 - 38, (slot_w * 6.0 + 20) * xp_frac, 4), Color(0.6, 0.45, 1.0))
 	if own_status.shield > 0.0:
 		header += "  (+%d shield)" % roundi(own_status.shield)
 	overlay.draw_string(font, Vector2(x0, y0 - 10), header, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
@@ -952,6 +970,16 @@ func _draw_ability_bar(font: Font) -> void:
 		var label := "" if ready else ("%.1f" % cd if cd < 10.0 else "%d" % ceili(cd))
 		overlay.draw_string(font, Vector2(x + 30, y0 + 20), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
 		overlay.draw_string(font, Vector2(x + 6, y0 + 44), names[slot], HORIZONTAL_ALIGNMENT_LEFT, slot_w - 14, 13, Color(0.8, 0.85, 0.9))
+		if slot < 4 and own_status.get("ranked", false):
+			var rank: int = own_status.ranks[slot]
+			var max_pips := 3 if slot == 3 else 5
+			for i in max_pips:
+				var c := Color(1.0, 0.8, 0.3) if i < rank else Color(0.3, 0.3, 0.35)
+				overlay.draw_rect(Rect2(x + 6 + i * 12, y0 + 50, 9, 3), c)
+			if rank == 0:
+				overlay.draw_rect(box, Color(0, 0, 0, 0.55))
+			if own_status.can_rank[slot]:
+				overlay.draw_string(font, Vector2(x + slot_w - 30, y0 + 20), "+", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.85, 0.3))
 	if match_banner != "":
 		var c := Color(0.45, 0.8, 1.0) if match_banner == "VICTORY" else Color(1.0, 0.4, 0.35)
 		overlay.draw_string(font, Vector2(0, overlay.size.y * 0.3), match_banner, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 72, c)
@@ -962,6 +990,8 @@ func _draw_ability_bar(font: Font) -> void:
 		overlay.draw_string(font, Vector2(0, overlay.size.y * 0.4), msg, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 36, Color.WHITE)
 	if attack_move_armed:
 		overlay.draw_string(font, Vector2(x0, y0 + 80), "Attack-move: left-click a point", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ENEMY_COLOR)
+	elif own_status.get("points", 0) > 0:
+		overlay.draw_string(font, Vector2(x0, y0 + 80), "%d ability point(s): Ctrl + Q/W/E/R" % own_status.points, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
 	if blind_state == "playing":
 		var left := maxf(blind_seconds - client.blind_elapsed(), 0.0)
 		var txt := "Blind round %d / %d   %d:%02d" % [client.blind_round() + 1, client.blind_rounds(), int(left) / 60, int(left) % 60]

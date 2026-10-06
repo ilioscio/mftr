@@ -130,7 +130,9 @@ pub struct Summary {
     pub down_kbps: f64,
     pub hard_resets: u64,
     pub dodge: mftr_client::DodgeStats,
-    /// Per client (duel): confirmed kills, deaths and damage dealt.
+    /// Per client (duel): confirmed kills, deaths and damage dealt; level and gold at the end.
+    pub levels: Vec<u8>,
+    pub gold: Vec<f32>,
     pub kills: Vec<u64>,
     pub deaths: Vec<u64>,
     pub damage_dealt: Vec<f64>,
@@ -186,6 +188,8 @@ impl Summary {
                 a.died_first += d.died_first;
                 a
             }),
+            levels: sessions.iter().map(|(s, _)| s.own_state_now().map_or(0, |st| st.progress.level)).collect(),
+            gold: sessions.iter().map(|(s, _)| s.own_state_now().map_or(0.0, |st| st.progress.gold)).collect(),
             kills: sessions.iter().map(|(s, _)| s.stats.kills).collect(),
             deaths: sessions.iter().map(|(s, _)| s.stats.deaths).collect(),
             damage_dealt: sessions.iter().map(|(s, _)| s.stats.damage_dealt).collect(),
@@ -218,8 +222,10 @@ impl Summary {
 
     pub fn duel_row(&self) -> String {
         format!(
-            "{:<10} kills {:?}  deaths {:?}  damage dealt {:?}  matches won/lost by clients {}/{}",
+            "{:<10} levels {:?}  gold {:?}  kills {:?}  deaths {:?}  damage dealt {:?}  matches won/lost by clients {}/{}",
             self.label,
+            self.levels,
+            self.gold.iter().map(|g| g.round() as i64).collect::<Vec<_>>(),
             self.kills,
             self.deaths,
             self.damage_dealt.iter().map(|d| d.round() as i64).collect::<Vec<_>>(),
@@ -313,6 +319,21 @@ impl DuelBot {
         };
         if !st.alive() {
             return false;
+        }
+        // Spend ability points: the ultimate whenever possible, else the lowest-ranked basic.
+        let p = st.progress;
+        if p.points > 0 {
+            use mftr_sim::champion::max_rank;
+            let slot = if p.ranks[3] < max_rank(3, p.level) {
+                Some(3)
+            } else {
+                (0..3u8).filter(|s| p.ranks[*s as usize] < max_rank(*s, p.level)).min_by_key(|s| p.ranks[*s as usize])
+            };
+            if let Some(slot) = slot
+                && session.level_up(slot, now).is_some()
+            {
+                return true;
+            }
         }
         for th in session.threats(now) {
             if th.predicted_hit.is_none() || th.visible_for < self.reaction || !self.dodged.insert(th.id) {

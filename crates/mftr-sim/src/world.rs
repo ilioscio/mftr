@@ -139,6 +139,76 @@ pub struct DashMove {
     pub end_at: SimTime,
 }
 
+/// A champion's progression (M2): survives death and respawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Progress {
+    /// 1–18.
+    pub level: u8,
+    /// Experience into the current level.
+    pub xp: u32,
+    pub gold: f32,
+    /// Ranks of Q W E R (0 = not learned).
+    pub ranks: [u8; 4],
+    /// Unspent ability points.
+    pub points: u8,
+    /// Kill streak (> 0) or death streak (< 0), for bounties.
+    pub streak: i8,
+}
+
+impl Progress {
+    /// Sandbox default: level 1, every ability at rank 1, nothing to spend.
+    pub const SANDBOX: Progress = Progress { level: 1, xp: 0, gold: 0.0, ranks: [1; 4], points: 0, streak: 0 };
+
+    pub fn hash_into(&self, h: &mut impl StateSink) {
+        h.write_u8(self.level);
+        h.write_u32(self.xp);
+        h.write_f32(self.gold);
+        for r in self.ranks {
+            h.write_u8(r);
+        }
+        h.write_u8(self.points);
+        h.write_u8(self.streak as u8);
+    }
+}
+
+pub const MAX_LEVEL: u8 = 18;
+
+/// Experience from `level` to the next (02/01 §6 *(start)*): 280 at level 1, +100 per level.
+pub fn xp_to_next(level: u8) -> u32 {
+    180 + 100 * level as u32
+}
+
+/// Match rules that prediction must know too (sent in the welcome).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rules {
+    pub start_level: u8,
+    pub start_gold: f32,
+    /// Gold per second for every champion.
+    pub passive_gold: f32,
+    /// Ability ranks are learned with points (else every ability is rank 1).
+    pub ranked: bool,
+}
+
+impl Rules {
+    /// Sandboxes: level 1, every ability at rank 1, no economy.
+    pub const SANDBOX: Rules = Rules { start_level: 1, start_gold: 0.0, passive_gold: 0.0, ranked: false };
+    /// ARAM (06 §2): a quick start and faster gold *(start values)*.
+    pub const ARAM: Rules = Rules { start_level: 3, start_gold: 1400.0, passive_gold: 4.0, ranked: true };
+
+    pub fn progress(&self) -> Progress {
+        if !self.ranked {
+            return Progress { gold: self.start_gold, ..Progress::SANDBOX };
+        }
+        Progress {
+            level: self.start_level,
+            gold: self.start_gold,
+            ranks: [0; 4],
+            points: self.start_level,
+            ..Progress::SANDBOX
+        }
+    }
+}
+
 /// Most waypoints a path keeps; longer paths are re-planned when they run out.
 pub const MAX_PATH: usize = 12;
 
@@ -201,6 +271,7 @@ pub struct UnitState {
     pub shield_until: SimTime,
     /// Dead until this instant (then respawns at home).
     pub respawn_at: Option<SimTime>,
+    pub progress: Progress,
 }
 
 impl UnitState {
@@ -223,6 +294,7 @@ impl UnitState {
             shield: 0.0,
             shield_until: SimTime(0),
             respawn_at: None,
+            progress: Progress::SANDBOX,
         }
     }
 
@@ -272,7 +344,9 @@ impl UnitState {
 
     /// Whether `slot` could be cast at `at` (alive, not stunned, not busy, off cooldown).
     pub fn can_cast(&self, at: SimTime, slot: u8) -> bool {
-        self.alive()
+        let learned = self.progress.ranks.get(slot as usize).is_none_or(|r| *r > 0);
+        learned
+            && self.alive()
             && self.cast.is_none()
             && self.dash.is_none()
             && self.stunned_until <= at
@@ -451,6 +525,7 @@ impl UnitState {
                 h.write_u64(t.0);
             }
         }
+        self.progress.hash_into(h);
     }
 }
 
@@ -491,6 +566,8 @@ pub struct Unit {
     pub tier: u8,
     /// A structure behind one that still stands: can't be hurt. Recomputed every tick.
     pub protected: bool,
+    /// The level `stats` were computed for (champions: recomputed when the level changes).
+    pub stats_level: u8,
 }
 
 impl Unit {
@@ -513,6 +590,7 @@ impl Unit {
             attack: None,
             tier: 0,
             protected: false,
+            stats_level: 1,
         }
     }
 
@@ -548,6 +626,8 @@ pub enum CommandKind {
     /// Basic-attack a unit (chasing it into range).
     Attack(UnitId),
     AttackMove(QPoint),
+    /// Spend an ability point on slot 0–3 (Q W E R).
+    LevelUp(u8),
 }
 
 /// A player command, applied at `tick` at sub-tick position `sub` (03a §3).
@@ -712,6 +792,13 @@ pub enum SimEvent {
         amount: f32,
         at: SimTime,
     },
+    /// Gold and experience earned (sent to the earner only).
+    Reward {
+        unit: UnitId,
+        gold: f32,
+        xp: u32,
+        at: SimTime,
+    },
     /// A Base fell: the match is over.
     MatchEnded {
         winner: Team,
@@ -725,8 +812,12 @@ pub const CHAMPION_GAMEPLAY_RADIUS: f32 = 65.0;
 pub const MINION_MOVE_SPEED: f32 = 325.0;
 pub const TURRET_COLLISION_RADIUS: f32 = 60.0;
 pub const TURRET_GAMEPLAY_RADIUS: f32 = 80.0;
-/// Sandbox respawn timers (01 §12 scales these with level later).
+/// Champion respawn at level 1 (01 §12): 6 s, +1.5 s per level *(start)*.
 pub const CHAMPION_RESPAWN: SimDuration = SimDuration::from_millis(6000);
+
+pub fn respawn_time(level: u8) -> SimDuration {
+    SimDuration(CHAMPION_RESPAWN.0 + SimDuration::from_millis(1500).0 * level.saturating_sub(1) as u64)
+}
 pub const MINION_RESPAWN: SimDuration = SimDuration::from_millis(12_000);
 
 impl MinionKind {
@@ -811,6 +902,7 @@ pub struct World {
     hidden: [Vec<UnitId>; 2],
     /// The match on a lane map (waves, aggression, winner); idle on sandbox maps.
     game: MatchState,
+    rules: Rules,
 }
 
 impl World {
@@ -828,6 +920,7 @@ impl World {
             events: Vec::new(),
             hidden: [Vec::new(), Vec::new()],
             game: MatchState::default(),
+            rules: Rules::SANDBOX,
             map: MapId::Open.shared(),
         }
     }
@@ -889,8 +982,12 @@ impl World {
 
     pub fn spawn_champion(&mut self, owner: PlayerId, team: Team, champion: ChampionId, pos: Vec2) -> UnitId {
         let id = self.next_id();
-        let stats = champion.def().stats;
-        self.units.push(Unit::champion(id, owner, team, champion, pos, pos, stats));
+        let progress = self.rules.progress();
+        let stats = champion.def().stats_at(progress.level);
+        let mut u = Unit::champion(id, owner, team, champion, pos, pos, stats);
+        u.state.progress = progress;
+        u.stats_level = progress.level;
+        self.units.push(u);
         id
     }
 
@@ -957,9 +1054,15 @@ impl World {
         self.missiles.clear();
         self.areas.clear();
         self.bolts.clear();
+        let progress = self.rules.progress();
         for u in self.units.iter_mut() {
+            if let Some(c) = u.champion {
+                u.stats = c.def().stats_at(progress.level);
+                u.stats_level = progress.level;
+            }
             u.state = UnitState::new(u.home, u.stats.move_speed);
             u.state.health = u.stats.max_health;
+            u.state.progress = progress;
         }
         self.start_match();
     }
@@ -967,6 +1070,15 @@ impl World {
     /// The match on a lane map: waves, recent aggression, winner.
     pub fn game(&self) -> &MatchState {
         &self.game
+    }
+
+    pub fn rules(&self) -> Rules {
+        self.rules
+    }
+
+    /// Set before spawning champions (they start with the rules' level, gold and points).
+    pub fn set_rules(&mut self, rules: Rules) {
+        self.rules = rules;
     }
 
     /// One wave per team at its spawn point, in a column along the lane (melee in front).
@@ -1040,8 +1152,10 @@ impl World {
         self.units.retain(|u| u.state.alive() || !matches!(u.brain, Some(Brain::Laner { .. })));
         for u in self.units.iter_mut() {
             if u.state.respawn_at.is_some_and(|r| r <= s0) {
+                let progress = u.state.progress;
                 u.state = UnitState::new(u.home, u.stats.move_speed);
                 u.state.health = u.stats.max_health;
+                u.state.progress = progress;
                 match u.brain {
                     Some(Brain::Patrol { a, b, .. }) => u.brain = Some(Brain::Patrol { a, b, toward_b: true }),
                     Some(Brain::Tower { .. }) => u.brain = Some(Brain::Tower { heat: 0, last: UnitId(0) }),
@@ -1050,12 +1164,26 @@ impl World {
                 self.events.push(SimEvent::Respawned { unit: u.id, pos: u.home, at: s0 });
             }
         }
+        for u in self.units.iter_mut() {
+            if let Some(c) = u.champion
+                && u.stats_level != u.state.progress.level
+            {
+                // Level up: new stats; current health rises with max health.
+                let stats = c.def().stats_at(u.state.progress.level);
+                if u.state.alive() {
+                    u.state.health += (stats.max_health - u.stats.max_health).max(0.0);
+                }
+                u.stats = stats;
+                u.stats_level = u.state.progress.level;
+            }
+        }
         lane::update_protection(&mut self.units);
         if !prediction && self.game.winner.is_none() && self.game.next_wave_at.is_some_and(|w| w <= s0) {
             self.spawn_wave();
         }
 
-        let World { units, rng, missiles, areas, bolts, next_missile, events, map, hidden, game, .. } = self;
+        let World { units, rng, missiles, areas, bolts, next_missile, events, map, hidden, game, rules, .. } = self;
+        let rules = *rules;
         let map: &Map = map;
 
         // Phase 1: AI.
@@ -1101,14 +1229,17 @@ impl World {
         }
         if !prediction && map.layout.lanes[0].len() > 1 {
             let seen: Vec<Seen> = units.iter().filter(|u| u.state.alive()).map(Seen::of).collect();
+            let since = SimTime(s0.0.saturating_sub(lane::AGGRESSION_MEMORY.0));
+            let recent: Vec<(UnitId, UnitId, SimTime)> =
+                game.aggression.iter().filter(|(_, _, t)| *t >= since).copied().collect();
             for unit in units.iter_mut() {
                 let hide = &hidden[unit.team as usize];
                 match unit.brain {
                     Some(Brain::Laner { .. }) => {
                         let lane = &map.layout.lanes[unit.team as usize];
-                        lane::laner_think(unit, &seen, lane, &game.aggression, hide, map);
+                        lane::laner_think(unit, &seen, lane, &recent, hide, map);
                     }
-                    Some(Brain::Tower { .. }) => lane::tower_think(unit, &seen, &game.aggression, hide, map),
+                    Some(Brain::Tower { .. }) => lane::tower_think(unit, &seen, &recent, hide, map),
                     _ => {}
                 }
             }
@@ -1251,13 +1382,22 @@ impl World {
             resolve_effects(units, missiles, areas, bolts, &start_pos, s0, s1, events);
             let had_winner = game.winner.is_some();
             note_outcomes(units, game, &events[first_event..], s1);
+            if rules.ranked {
+                let tick_events: Vec<SimEvent> = events[first_event..].to_vec();
+                rewards(units, game, &tick_events, events);
+            }
             if let (false, Some((winner, at))) = (had_winner, game.winner) {
                 events.push(SimEvent::MatchEnded { winner, at });
             }
         }
 
-        // Phase 4: fountains, relics, regeneration and shield expiry.
+        // Phase 4: fountains, relics, passive gold, regeneration and shield expiry.
         fountains_and_relics(units, map, prediction, s1, events);
+        if rules.passive_gold > 0.0 {
+            for u in units.iter_mut().filter(|u| u.kind == UnitKind::Champion) {
+                u.state.progress.gold += rules.passive_gold * TICK_DT;
+            }
+        }
         for u in units.iter_mut().filter(|u| u.state.alive()) {
             let max = u.stats.max_health;
             if u.state.health < max && u.stats.health_regen > 0.0 {
@@ -1409,7 +1549,10 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
         && c.fire_at == t
     {
         unit.state.cast = None;
-        match unit.ability(c.slot).map(|a| a.effect) {
+        let ability = unit.ability(c.slot);
+        let bonus = ability
+            .map_or(0.0, |a| a.bonus_damage_at(unit.state.progress.ranks.get(c.slot as usize).copied().unwrap_or(1)));
+        match ability.map(|a| a.effect) {
             Some(Effect::Line(spec)) => fired.push(Fired::Missile(Missile {
                 id: 0,
                 owner: id,
@@ -1419,7 +1562,7 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
                 spec,
                 spawn_at: t,
                 cast_seq: c.seq,
-                power: spec.damage.raw(stats.attack_damage, stats.ability_power),
+                power: spec.damage.raw(stats.attack_damage, stats.ability_power) + bonus,
             })),
             Some(Effect::Area(a)) => fired.push(Fired::Area(Area {
                 id: 0,
@@ -1430,7 +1573,7 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
                 spawn_at: t,
                 detonate_at: t.plus(a.delay),
                 kind: a.damage.kind,
-                power: a.damage.raw(stats.attack_damage, stats.ability_power),
+                power: a.damage.raw(stats.attack_damage, stats.ability_power) + bonus,
                 cast_seq: c.seq,
             })),
             _ => {}
@@ -1505,6 +1648,16 @@ fn apply_command(unit: &mut Unit, c: &Command, t: SimTime, map: &Map, events: &m
             st.set_order(Order::Idle, map);
         }
         CommandKind::Cast { slot, target } => try_cast(unit, slot, target.to_vec2(), t, c.seq, map, events),
+        CommandKind::LevelUp(slot) => {
+            let p = &mut st.progress;
+            if p.points > 0
+                && let Some(rank) = p.ranks.get_mut(slot as usize)
+                && *rank < crate::champion::max_rank(slot, p.level)
+            {
+                *rank += 1;
+                p.points -= 1;
+            }
+        }
     }
 }
 
@@ -1567,7 +1720,8 @@ fn try_cast(unit: &mut Unit, slot: u8, target: Vec2, t: SimTime, seq: u32, map: 
             events.push(SimEvent::Shielded { unit: id, amount: s.amount, at: t, until: st.shield_until });
         }
     }
-    st.cooldowns[slot as usize] = t.plus(ability.cooldown);
+    let rank = st.progress.ranks.get(slot as usize).copied().unwrap_or(1);
+    st.cooldowns[slot as usize] = t.plus(ability.cooldown_at(rank));
 }
 
 /// Where a blink toward `dir` lands: the farthest walkable, in-bounds point on the line, so a
@@ -1700,12 +1854,13 @@ fn deal_damage(u: &mut Unit, source: UnitId, raw: f32, kind: DamageKind, at: Sim
     events.push(SimEvent::Damage { source, target: u.id, kind, amount, absorbed, at });
     if st.health <= 0.0 {
         let respawn_at = match u.kind {
-            UnitKind::Champion => at.plus(CHAMPION_RESPAWN),
+            UnitKind::Champion => at.plus(respawn_time(st.progress.level)),
             UnitKind::Gatehouse => at.plus(lane::GATEHOUSE_RESPAWN),
             UnitKind::Turret | UnitKind::Base => SimTime(u64::MAX), // destroyed for good
             _ => at.plus(MINION_RESPAWN),
         };
-        *st = UnitState { respawn_at: Some(respawn_at), ..UnitState::new(st.pos, st.move_speed) };
+        *st =
+            UnitState { respawn_at: Some(respawn_at), progress: st.progress, ..UnitState::new(st.pos, st.move_speed) };
         events.push(SimEvent::Died { unit: u.id, killer: source, at, respawn_at });
     }
 }
@@ -1735,8 +1890,100 @@ fn note_outcomes(units: &[Unit], game: &mut MatchState, events: &[SimEvent], s1:
             _ => {}
         }
     }
-    let horizon = SimTime(s1.0.saturating_sub(lane::AGGRESSION_MEMORY.0));
+    let horizon = SimTime(s1.0.saturating_sub(lane::ASSIST_MEMORY.0));
     game.aggression.retain(|(_, _, t)| *t >= horizon);
+}
+
+/// Gold and experience for this tick's deaths (01 §5–§6; ranked matches only): last hits,
+/// shared experience, kill bounties and assists, turret gold.
+fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], events: &mut Vec<SimEvent>) {
+    let mut pay: Vec<(UnitId, f32, u32, SimTime)> = Vec::new();
+    for e in tick_events {
+        let SimEvent::Died { unit, killer, at, .. } = *e else { continue };
+        let Some(victim) = units.iter().find(|u| u.id == unit) else { continue };
+        let (vteam, vpos) = (victim.team, victim.state.pos);
+        let enemy_champ = |id: UnitId| {
+            units.iter().find(|u| u.id == id).filter(|u| u.kind == UnitKind::Champion && u.team != vteam).map(|u| u.id)
+        };
+        let nearby: Vec<UnitId> = units
+            .iter()
+            .filter(|u| u.kind == UnitKind::Champion && u.team != vteam && u.state.alive())
+            .filter(|u| (u.state.pos - vpos).length() <= lane::XP_RANGE)
+            .map(|u| u.id)
+            .collect();
+        match victim.kind {
+            UnitKind::Minion => {
+                let (gold, xp) = lane::minion_reward(victim.attack.map_or(0.0, |a| a.range));
+                if let Some(k) = enemy_champ(killer) {
+                    pay.push((k, gold, 0, at));
+                }
+                let share = lane::shared_xp(xp, nearby.len());
+                pay.extend(nearby.iter().map(|id| (*id, 0.0, share, at)));
+            }
+            UnitKind::Champion => {
+                // Credit: the killer if it's a champion, else the latest champion to hurt them.
+                let hurt: Vec<UnitId> =
+                    game.aggression.iter().rev().filter(|(_, v, _)| *v == unit).map(|(a, ..)| *a).collect();
+                let credit = enemy_champ(killer).or_else(|| hurt.iter().find_map(|a| enemy_champ(*a)));
+                let (vstreak, vlevel) = (victim.state.progress.streak, victim.state.progress.level);
+                let mut assists: Vec<UnitId> = Vec::new();
+                for a in hurt.iter().filter_map(|a| enemy_champ(*a)) {
+                    if Some(a) != credit && !assists.contains(&a) {
+                        assists.push(a);
+                    }
+                }
+                let gold = lane::bounty(vstreak);
+                if let Some(k) = credit {
+                    pay.push((k, gold, 0, at));
+                    if let Some(u) = units.iter_mut().find(|u| u.id == k) {
+                        u.state.progress.streak = u.state.progress.streak.max(0).saturating_add(1);
+                    }
+                }
+                if !assists.is_empty() {
+                    let each = gold * 0.5 / assists.len() as f32;
+                    pay.extend(assists.iter().map(|a| (*a, each, 0, at)));
+                }
+                if let Some(v) = units.iter_mut().find(|u| u.id == unit) {
+                    v.state.progress.streak = v.state.progress.streak.min(0).saturating_sub(1);
+                }
+                let share = lane::shared_xp(140 + 30 * vlevel as u32, nearby.len());
+                pay.extend(nearby.iter().map(|id| (*id, 0.0, share, at)));
+            }
+            UnitKind::Turret => {
+                let team: Vec<UnitId> =
+                    units.iter().filter(|u| u.kind == UnitKind::Champion && u.team != vteam).map(|u| u.id).collect();
+                pay.extend(team.into_iter().map(|id| (id, lane::TURRET_GOLD, 0, at)));
+            }
+            _ => {}
+        }
+    }
+    // One reward event per earner per tick.
+    let mut earners: Vec<UnitId> = pay.iter().map(|p| p.0).collect();
+    earners.sort();
+    earners.dedup();
+    for id in earners {
+        let (gold, xp, at) =
+            pay.iter().filter(|p| p.0 == id).fold((0.0, 0, SimTime(0)), |(g, x, t), p| (g + p.1, x + p.2, t.max(p.3)));
+        if let Some(u) = units.iter_mut().find(|u| u.id == id) {
+            let p = &mut u.state.progress;
+            p.gold += gold;
+            gain_xp(p, xp);
+            events.push(SimEvent::Reward { unit: id, gold, xp, at });
+        }
+    }
+}
+
+/// Add experience, leveling up (with an ability point each level) as thresholds pass.
+pub fn gain_xp(p: &mut Progress, xp: u32) {
+    p.xp += xp;
+    while p.level < MAX_LEVEL && p.xp >= xp_to_next(p.level) {
+        p.xp -= xp_to_next(p.level);
+        p.level += 1;
+        p.points += 1;
+    }
+    if p.level == MAX_LEVEL {
+        p.xp = 0;
+    }
 }
 
 /// Phase 4 on lane maps: fountains heal their team's champions (predicted too: it's map data)
@@ -1828,6 +2075,7 @@ mod tests {
     use super::*;
     use crate::ability::Cc;
     use crate::champion::EMBER;
+    use crate::lane;
     use crate::time::SUBTICKS;
 
     fn cmd(player: u8, seq: u32, tick: u32, sub: u8, target: (f32, f32)) -> Command {
@@ -2563,6 +2811,120 @@ mod tests {
         assert!((hp - (100.0 + 90.0 + 1.5)).abs() < 1.0, "{hp}");
     }
 
+    fn ranked_world() -> World {
+        let mut w = World::new(2);
+        w.set_rules(Rules::ARAM);
+        w
+    }
+
+    fn level_up(player: u8, seq: u32, tick: u32, slot: u8) -> Command {
+        Command {
+            player: PlayerId(player),
+            seq,
+            tick: Tick(tick),
+            sub: SubTick::START,
+            kind: CommandKind::LevelUp(slot),
+        }
+    }
+
+    /// M2 slice 2: abilities must be learned; ranks are gated by level (R at 6 / 11 / 16) and
+    /// raise damage and cut cooldowns.
+    #[test]
+    fn abilities_are_learned_with_points_and_gated_by_level() {
+        let mut w = ranked_world();
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, Vec2::new(1000.0, 1000.0));
+        assert_eq!(w.unit(me).unwrap().state.progress.points, 3, "ARAM starts at level 3");
+        w.step(&[cast(0, 1, 1, 0, (2000.0, 1000.0))]);
+        assert!(w.take_events().is_empty(), "Q not learned yet");
+        w.step(&[level_up(0, 2, 2, 3)]); // R at level 3: refused
+        w.step(&[level_up(0, 3, 3, 0), level_up(0, 4, 3, 0)]); // Q to 2 (level 3 allows 2)
+        w.step(&[level_up(0, 5, 4, 0)]); // Q to 3: refused at level 3
+        let p = w.unit(me).unwrap().state.progress;
+        assert_eq!((p.ranks, p.points), ([2, 0, 0, 0], 1));
+        w.step(&[cast(0, 6, 5, 0, (2000.0, 1000.0))]);
+        let ev = w.take_events();
+        assert!(matches!(ev[0], SimEvent::CastStarted { slot: 0, .. }));
+        let q = EMBER.abilities[0];
+        assert_eq!(w.unit(me).unwrap().state.cooldowns[0], SimTime::at(Tick(5), SubTick::START).plus(q.cooldown_at(2)));
+    }
+
+    #[test]
+    fn last_hits_pay_gold_and_nearby_champions_share_experience() {
+        let mut w = ranked_world();
+        let a = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        let b = w.spawn_champion(PlayerId(1), Team::Blue, ChampionId::Ember, Vec2::new(1000.0, 1300.0));
+        let far = w.spawn_champion(PlayerId(2), Team::Blue, ChampionId::Ember, Vec2::new(5000.0, 5000.0));
+        let minion = w.spawn_minion(MinionKind::Caster, Team::Red, Vec2::new(1500.0, 1000.0), None);
+        w.step(&[attack(0, 1, 1, minion)]);
+        let ev = run_until_quiet(&mut w, 200);
+        let reward = |id| {
+            ev.iter()
+                .filter_map(|e| match e {
+                    SimEvent::Reward { unit, gold, xp, .. } if *unit == id => Some((*gold, *xp)),
+                    _ => None,
+                })
+                .fold((0.0, 0), |(g, x), (dg, dx)| (g + dg, x + dx))
+        };
+        assert_eq!(reward(a), (14.0, lane::shared_xp(30, 2)), "last hit: 14 gold, half of 30 xp +15%");
+        assert_eq!(reward(b), (0.0, lane::shared_xp(30, 2)));
+        assert_eq!(reward(far), (0.0, 0), "too far to share");
+        let gold = w.unit(a).unwrap().state.progress.gold;
+        assert!((gold - (1400.0 + 14.0 + 4.0 * 201.0 / 30.0)).abs() < 0.05, "start + last hit + passive: {gold}");
+    }
+
+    #[test]
+    fn experience_levels_champions_up_and_stats_grow() {
+        let mut p = Rules::ARAM.progress();
+        gain_xp(&mut p, xp_to_next(3) + 10);
+        assert_eq!((p.level, p.xp, p.points), (4, 10, 4));
+        let mut w = ranked_world();
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        let before = w.unit(me).unwrap().clone();
+        w.unit_mut(me).unwrap().state.progress.level = 10;
+        w.step(&[]);
+        let after = w.unit(me).unwrap();
+        assert_eq!(after.stats, VESPER_STATS_AT_10());
+        assert!(
+            (after.state.health - before.state.health - (after.stats.max_health - before.stats.max_health)).abs() < 1.0
+        );
+    }
+
+    #[allow(non_snake_case)]
+    fn VESPER_STATS_AT_10() -> crate::champion::Stats {
+        crate::champion::VESPER.stats_at(10)
+    }
+
+    #[test]
+    fn champion_kills_pay_bounty_and_assists() {
+        let mut w = ranked_world();
+        let a = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        let b = w.spawn_champion(PlayerId(1), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1300.0));
+        let victim = w.spawn_champion(PlayerId(2), Team::Red, ChampionId::Ember, Vec2::new(1500.0, 1150.0));
+        w.unit_mut(victim).unwrap().state.health = 150.0;
+        w.step(&[attack(0, 1, 1, victim), attack(1, 2, 1, victim)]);
+        let ev = run_until_quiet(&mut w, 90);
+        let died = ev.iter().find_map(|e| match e {
+            SimEvent::Died { unit, killer, .. } if *unit == victim => Some(*killer),
+            _ => None,
+        });
+        let killer = died.expect("victim dies");
+        let assister = if killer == a { b } else { a };
+        let gold_of = |id| {
+            ev.iter()
+                .filter_map(|e| match e {
+                    SimEvent::Reward { unit, gold, .. } if *unit == id => Some(*gold),
+                    _ => None,
+                })
+                .sum::<f32>()
+        };
+        assert_eq!(gold_of(killer), lane::KILL_GOLD);
+        assert_eq!(gold_of(assister), lane::KILL_GOLD * 0.5);
+        assert_eq!(w.unit(killer).unwrap().state.progress.streak, 1);
+        assert_eq!(w.unit(victim).unwrap().state.progress.streak, -1);
+        assert_eq!(lane::bounty(4), 450.0);
+        assert_eq!(lane::bounty(-3), 220.0);
+    }
+
     fn arena_world(seed: u64) -> World {
         let mut w = World::new(seed);
         w.set_map(MapId::Arena.shared());
@@ -2645,13 +3007,14 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0x3459_6e7f_582b_c05a;
+    const GOLDEN_HASH_ARENA: u64 = 0xc715_76ec_c30c_f52b;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
     #[test]
     fn golden_state_hash_bridge() {
         let mut w = bridge_world();
+        w.set_rules(Rules::ARAM);
         for p in 0..4u8 {
             let team = if p % 2 == 0 { Team::Blue } else { Team::Red };
             let home = w.map().layout.champion_spawn[team as usize];
@@ -2672,8 +3035,9 @@ mod tests {
                     seq += 1;
                     let t = (rng.range_f32(3000.0, 9000.0), rng.range_f32(900.0, 2100.0));
                     let sub = (rng.next_u32() % SUBTICKS as u32) as u8;
-                    cmds.push(match rng.next_u32() % 4 {
+                    cmds.push(match rng.next_u32() % 5 {
                         0 => cast_slot(p, seq, k, sub, (rng.next_u32() % 4) as u8, t),
+                        4 => level_up(p, seq, k, (rng.next_u32() % 4) as u8),
                         1 => Command {
                             kind: CommandKind::AttackMove(QPoint::from_vec2(Vec2::new(t.0, t.1))),
                             ..cmd(p, seq, k, sub, t)
@@ -2686,10 +3050,13 @@ mod tests {
             died += w.take_events().iter().filter(|e| matches!(e, SimEvent::Died { .. })).count();
         }
         assert!(died > 50, "waves and champions should be fighting: {died}");
+        let levels: Vec<u8> =
+            w.units().iter().filter(|u| u.kind == UnitKind::Champion).map(|u| u.state.progress.level).collect();
+        assert!(levels.iter().all(|l| *l > 3), "experience should level everyone: {levels:?}");
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0xdf6f_2d80_c555_1f9e;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x883f_1ed3_1548_44aa;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -2760,5 +3127,5 @@ mod tests {
 
     /// Recorded on x86_64-unknown-linux-gnu (debug and release agree). CI checks Linux, macOS
     /// (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0xd5aa_d91e_2698_b4a8;
+    const GOLDEN_HASH: u64 = 0x58f1_c35d_a88f_4ed7;
 }

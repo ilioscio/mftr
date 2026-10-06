@@ -158,9 +158,36 @@ pub enum Effect {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ability {
     pub name: &'static str,
+    /// Cooldown at rank 1.
     pub cooldown: SimDuration,
     pub effect: Effect,
     pub reaction: ReactionClass,
+    /// What each rank past the first adds (M2: ranks 1–5, ultimates 1–3).
+    pub per_rank: RankScaling,
+}
+
+/// Per-rank growth of an ability: more base damage, a shorter cooldown.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RankScaling {
+    pub damage: f32,
+    pub cooldown: SimDuration,
+}
+
+impl RankScaling {
+    pub const NONE: RankScaling = RankScaling { damage: 0.0, cooldown: SimDuration(0) };
+}
+
+impl Ability {
+    /// Cooldown at `rank` (1-based; rank 0 is treated as 1).
+    pub fn cooldown_at(&self, rank: u8) -> SimDuration {
+        let steps = rank.max(1) as u64 - 1;
+        SimDuration(self.cooldown.0.saturating_sub(self.per_rank.cooldown.0 * steps))
+    }
+
+    /// Extra base damage at `rank` over rank 1.
+    pub fn bonus_damage_at(&self, rank: u8) -> f32 {
+        self.per_rank.damage * (rank.max(1) - 1) as f32
+    }
 }
 
 /// Ability slots on the wire and in the cooldown array: Q W E R, then utility spells D F.
@@ -173,6 +200,7 @@ pub const BLINK: Ability = Ability {
     cooldown: SimDuration::from_millis(300_000),
     effect: Effect::Blink(Blink { range: 400.0 }),
     reaction: ReactionClass::None,
+    per_rank: RankScaling::NONE,
 };
 
 /// Utility spell: Barrier (01 §10; R01 §5 shows it lasting ~2.2 s).
@@ -181,6 +209,7 @@ pub const BARRIER: Ability = Ability {
     cooldown: SimDuration::from_millis(180_000),
     effect: Effect::Shield(Shield { amount: 150.0, duration: SimDuration::from_millis(2500) }),
     reaction: ReactionClass::None,
+    per_rank: RankScaling::NONE,
 };
 
 /// The dodge-rig turret's shot (03 §14): a hard-CC line missile with no damage, on a steady
@@ -197,6 +226,7 @@ pub const TURRET_SHOT: Ability = Ability {
         cc: Cc::Stun(SimDuration::from_millis(750)),
     }),
     reaction: ReactionClass::HardCc,
+    per_rank: RankScaling::NONE,
 };
 
 #[cfg(test)]

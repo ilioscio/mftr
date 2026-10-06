@@ -231,6 +231,15 @@ impl MatchClient {
         }
     }
 
+    /// Spend an ability point on slot 0–3 (Q W E R).
+    #[func]
+    fn level_up(&mut self, slot: i64) {
+        let now = self.now();
+        if (0..4).contains(&slot) && self.session.level_up(slot as u8, now).is_some() {
+            self.send_input(now);
+        }
+    }
+
     /// Basic-attack a unit by id (chases it into range).
     #[func]
     fn attack_unit(&mut self, id: i64) {
@@ -329,6 +338,11 @@ impl MatchClient {
                     d.set("kind", "respawned");
                     d.set("unit", unit.0 as i64);
                 }
+                Notice::Reward { gold, xp } => {
+                    d.set("kind", "reward");
+                    d.set("gold", gold);
+                    d.set("xp", xp as i64);
+                }
                 Notice::MatchEnded { winner } => {
                     d.set("kind", "match_ended");
                     d.set("won", winner == self.session.team());
@@ -414,10 +428,27 @@ impl MatchClient {
         d.set("abilities", &names);
         if let (Some(s), Some(t)) = (self.session.own_state_now(), self.session.input_sim_time(now)) {
             d.set("health", s.health);
-            d.set("max_health", champ.def().stats.max_health);
+            d.set("max_health", champ.def().stats_at(s.progress.level).max_health);
             d.set("shield", if s.shield_until > t { s.shield } else { 0.0 });
             d.set("dead", !s.alive());
             d.set("respawn_in", s.respawn_at.map_or(0.0, |r| r.secs_since(t)));
+            let p = s.progress;
+            d.set("level", p.level as i64);
+            d.set("xp", p.xp as i64);
+            d.set("xp_next", mftr_sim::world::xp_to_next(p.level) as i64);
+            d.set("gold", p.gold.floor() as i64);
+            d.set("points", p.points as i64);
+            d.set("ranked", self.session.rules().ranked);
+            let mut ranks = VarArray::new();
+            let mut can_rank = VarArray::new();
+            for slot in 0..4u8 {
+                let r = p.ranks[slot as usize];
+                ranks.push(&(r as i64).to_variant());
+                let ok = p.points > 0 && r < mftr_sim::champion::max_rank(slot, p.level);
+                can_rank.push(&ok.to_variant());
+            }
+            d.set("ranks", &ranks);
+            d.set("can_rank", &can_rank);
             d.set("stunned", s.stunned_until > t);
             d.set("rooted", s.rooted_until > t);
             d.set("casting", s.cast.is_some());
@@ -481,6 +512,7 @@ impl MatchClient {
             d.set("health", u.health);
             d.set("max_health", u.max_health);
             d.set("shield", u.shield);
+            d.set("level", u.level as i64);
             d.set("gameplay_radius", u.gameplay_radius);
             d.set("attacking", u.attacking);
             d.set("rooted", u.rooted);

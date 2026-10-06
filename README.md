@@ -40,6 +40,7 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The server star
 | A, then left-click | Attack-move |
 | Q W E R | Abilities, cast at the cursor (skillshot, delayed area, dash or blink, hard-CC skillshot) |
 | D / F | Blink / Barrier |
+| Ctrl + Q / W / E / R | Spend an ability point (ARAM) |
 | S | Stop |
 | F1 / F2 | Net graph / client collision proxies (to feel the difference) |
 

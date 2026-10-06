@@ -187,6 +187,21 @@ Other units are now sent as deltas against the newest snapshot the client recons
 
 A lossy-link lab test (120 ms, 2% loss) checks every reconstructed snapshot against what the server recorded for that client: bit-exact. The fog audit now checks everything each client can reconstruct, not just what one packet carries: still 0 leaks.
 
+### M2 slice 2 status (2026-10-06): ✅ done
+
+- **Levels 1–18** (D34): experience to the next level is 180 + 100 × level. Champion stats grow on the 02 §1 curve from per-champion growth values, and current health rises with max health on level-up. Respawn takes 6 s + 1.5 s per level.
+- **Ability ranks:** a point per level, spent with **Ctrl + Q/W/E/R** (`LevelUp` command, predicted). Basic abilities go up to rank ⌈level / 2⌉ (max 5); the ultimate unlocks at 6 / 11 / 16. Each rank adds base damage and shortens the cooldown (per-ability data). Unlearned abilities can't be cast.
+- **Gold:**
+  - Passive income.
+  - Last hits: 21 / 14 / 60 for melee / caster / siege minions.
+  - Champion kills: 300 gold, up to +500 on a kill streak, down to 140 on a death streak. Champions who hurt the victim in the last 10 s split half of the kill value as assists. If a turret or minion finishes the kill, credit goes to the last champion who hurt the victim.
+  - 150 gold to every champion on the team that destroys a turret.
+- **Experience** is shared by enemy champions within 1,400 u of a death, +15% per extra sharer. Rewards go only to the client who earned them.
+- **Match rules** come in the welcome (`Rules`: start level, start gold, passive gold, ranked), so prediction applies passive gold and rank gates too. Sandboxes keep every ability at rank 1 with no economy, so all M1 numbers and tests are unchanged. ARAM starts at level 3 with 1,400 gold and earns 4 g/s.
+- Protocol v9. HUD: level, XP bar, gold, rank pips, a "+" on abilities that can be ranked, gold popups, and enemy champion levels next to their health bars. Bots spend their points (ultimate first).
+
+**Netcode Lab, ARAM 3v3, 15 min:** bots reach levels 9–15 and 10–15k gold, with 0 ghost hits, 0 fog leaks and 0 hard resets. Gold piles up until the shop exists (slice 3).
+
 ## M3 — ARAM: Mayhem
 - Augment draft system with ~60 augments across tiers and archetypes (rule breakers, size, ability transformers, quests, spell replacements).
 - Delivery transformers, batched projectile spawns, size scaling with honest hitboxes.
