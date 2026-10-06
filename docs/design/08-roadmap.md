@@ -137,7 +137,7 @@ Fog audit: 0 leaks. Downstream ~12–14 KB/s per player. The larger corrections 
 - **Telegraph grammar and D14 VFX** as shaders (all Compatibility-safe): linear skillshots have a rounded leading edge at the true hitbox front, a constant-width body with an always-visible edge sheath, a slim noisy core and a trail that fades *behind* the hitbox only. Hard-CC missiles carry moving chevrons in the shared accent color. Area telegraphs show a crisp outline from cast and a fill that reaches the edge exactly at detonation, then flash. Enemy missiles get a spawn streak from the caster's drawn hand (03a §7). Blink leaves a golden mark at its origin for 1.5 s and a burst where it lands (R01 §5).
 - **Noise-shader art pass**: rock walls (world-space noise, strata, mossy tops), swaying brush, and champions with toon-banded light, rim light, object-space noise detail, a per-champion identity color and a team-accent band at the feet (05 §1, §4). Still no textures.
 
-**Exit (blind playtest run):** needs human testers. Run it with `-- --blind`, collect the `blind_results.tsv` files and summarize them with `mftr-tools blind-report`. The harness itself is verified end to end with `--blind-auto` (automatic answers) against a real server.
+**Exit (blind playtest run):** needs human testers. The [playtest guide](../playtest.md) has the steps for testers and organizers: run it with `-- --blind`, collect the `blind_results.tsv` files and summarize them with `mftr-tools blind-report`. The transport decision left from M0 is proposed as D40 and waits for the owner's OK. The harness itself is verified end to end with `--blind-auto` (automatic answers) against a real server.
 
 ## M2 — ARAM ("a real game")
 **Goal:** the smallest complete MOBA match.
