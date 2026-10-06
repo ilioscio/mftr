@@ -37,6 +37,8 @@ jobs:
       - name: Encrypted UDP smoke test (server and bot, pinned key)
         if: matrix.os == 'ubuntu-latest'
         run: |
+          # `cargo test` builds the test harnesses, not the binaries.
+          cargo build -q --release -p mftr-server -p mftr-tools
           key="$RUNNER_TEMP/server.key"
           ./target/release/mftr-server --bind 127.0.0.1:7777 --key "$key" &
           sleep 1
