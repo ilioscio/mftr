@@ -63,6 +63,63 @@ fn main() {
                 }
             }
         }
+        Some("botmatch") => {
+            // M2 slice 5: server bots play ARAM to the end; the replay must re-simulate exactly.
+            let cfg = mftr_server::ServerConfig {
+                seed: num("--seed", 1.0) as u64,
+                bots: num("--bots", 10.0) as u8,
+                scenario: Scenario::Aram,
+                ..Default::default()
+            };
+            let minutes = num("--minutes", 40.0);
+            let started = std::time::Instant::now();
+            let m = mftr_server::run_bot_match(cfg, (minutes * 60.0 * 30.0) as u32);
+            let secs = m.ticks as f64 / 30.0;
+            match m.winner {
+                Some((team, _)) => println!("{team:?} won after {}:{:02}", secs as u32 / 60, secs as u32 % 60),
+                None => println!("no winner after {} minutes", minutes),
+            }
+            println!(
+                "champion deaths {}  structures destroyed {}  simulated in {:.1} s",
+                m.champion_kills,
+                m.structures_destroyed,
+                started.elapsed().as_secs_f64()
+            );
+            for (t, team, kind, tier) in &m.falls {
+                let s = t.0 / 30;
+                println!("  {:>2}:{:02}  {team:?} {kind:?} (tier {tier})", s / 60, s % 60);
+            }
+            if let Some(path) = get("--replay") {
+                std::fs::write(&path, m.replay.to_text()).expect("write replay");
+                println!("replay written to {path}");
+            }
+            let check = m.replay.verify();
+            println!(
+                "replay: {} ticks, {} hashes checked, {}",
+                check.ticks,
+                check.hashes_checked,
+                match check.mismatch {
+                    None => "all match".to_string(),
+                    Some((t, a, b)) => format!("MISMATCH at tick {}: {a:016x} vs {b:016x}", t.0),
+                }
+            );
+        }
+        Some("replay") => {
+            // Re-simulate a replay file and check its hashes.
+            let path = args.get(1).expect("replay FILE");
+            let text = std::fs::read_to_string(path).expect("read replay");
+            let replay = mftr_server::Replay::from_text(&text).unwrap_or_else(|e| panic!("{path}: {e}"));
+            let check = replay.verify();
+            println!(
+                "{} ticks, {} hashes checked, final hash {:016x}",
+                check.ticks, check.hashes_checked, check.final_hash
+            );
+            if let Some((t, a, b)) = check.mismatch {
+                println!("MISMATCH at tick {}: recorded {a:016x}, re-simulated {b:016x}", t.0);
+                std::process::exit(1);
+            }
+            println!("all hashes match");
+        }
         Some("bot") => {
             let cfg = bot::BotConfig {
                 server: get("--server").expect("--server HOST:PORT required"),

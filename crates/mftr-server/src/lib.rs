@@ -12,10 +12,15 @@ use mftr_sim::ability::LineSkillshot;
 use mftr_sim::map::MapId;
 use mftr_sim::vision::Vision;
 use mftr_sim::{
-    Area, Brain, ChampionId, Command, MinionKind, Missile, PlayerId, QPoint, SimEvent, SimTime, SubTick, TICK_DT_F64,
-    TICK_HZ, Team, Tick, UnitId, Vec2, World,
+    Area, ChampionId, Command, Missile, PlayerId, QPoint, SimEvent, SimTime, SubTick, TICK_DT_F64, TICK_HZ, Team, Tick,
+    UnitId, Vec2, World,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+pub mod bots;
+pub mod game;
+pub use bots::Bot;
+pub use game::{Fog, Match, Replay, ReplayCheck, ReplayEntry};
 
 /// Opaque per-connection address key, assigned by the transport.
 pub type ClientKey = u64;
@@ -67,12 +72,24 @@ impl Scenario {
             _ => None,
         }
     }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Scenario::Empty => "empty",
+            Scenario::MinionSandbox => "minions",
+            Scenario::DodgeRig => "dodge",
+            Scenario::Duel => "duel",
+            Scenario::Aram => "aram",
+        }
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ServerConfig {
     pub seed: u64,
     pub max_players: u8,
+    /// Server-side bots that join at start (M2 slice 5); they count toward `max_players`.
+    pub bots: u8,
     /// Spawn area: a square from `arena_min` to `arena_max` on both axes.
     pub arena_min: f32,
     pub arena_max: f32,
@@ -81,79 +98,8 @@ pub struct ServerConfig {
 
 impl Default for ServerConfig {
     fn default() -> Self {
-        Self { seed: 1, max_players: 10, arena_min: 500.0, arena_max: 3500.0, scenario: Scenario::Empty }
+        Self { seed: 1, max_players: 10, bots: 0, arena_min: 500.0, arena_max: 3500.0, scenario: Scenario::Empty }
     }
-}
-
-/// Populate the M1 minion sandbox (inside the default 0..4000 u arena).
-fn populate(world: &mut World, scenario: Scenario) {
-    if scenario == Scenario::DodgeRig {
-        // Four turrets around the middle; together they cover most of the arena.
-        for pos in
-            [Vec2::new(900.0, 2000.0), Vec2::new(3100.0, 2000.0), Vec2::new(2000.0, 900.0), Vec2::new(2000.0, 3100.0)]
-        {
-            world.spawn_rig_turret(Team::Red, pos, 1100);
-        }
-        return;
-    }
-    if scenario == Scenario::Aram {
-        world.start_match();
-        return;
-    }
-    if scenario == Scenario::Duel {
-        for (center, team) in [(Vec2::new(1700.0, 2050.0), Team::Red), (Vec2::new(2300.0, 2150.0), Team::Blue)] {
-            clump(world, center, 1, team);
-        }
-        return;
-    }
-    if scenario != Scenario::MinionSandbox {
-        return;
-    }
-    // Static clumps.
-    for (center, rings, team) in [
-        (Vec2::new(1200.0, 1200.0), 1i32, Team::Red),
-        (Vec2::new(2800.0, 1300.0), 2, Team::Blue),
-        (Vec2::new(1300.0, 2800.0), 2, Team::Red),
-        (Vec2::new(2900.0, 2900.0), 1, Team::Blue),
-    ] {
-        clump(world, center, rings, team);
-    }
-    // Two patrolling waves (2 rows of 3) crossing the arena through the middle.
-    for (a, b, team) in [
-        (Vec2::new(500.0, 2000.0), Vec2::new(3500.0, 2000.0), Team::Blue),
-        (Vec2::new(2000.0, 500.0), Vec2::new(2000.0, 3500.0), Team::Red),
-    ] {
-        let along = (b - a).normalize_or_zero();
-        let across = Vec2::new(-along.y, along.x);
-        for i in 0..6 {
-            let offset = along * (-60.0 * (i % 3) as f32) + across * (if i < 3 { -30.0 } else { 30.0 });
-            let pa = QPoint::from_vec2(a + offset);
-            let pb = QPoint::from_vec2(b + offset);
-            let kind = if i < 3 { MinionKind::Melee } else { MinionKind::Caster };
-            world.spawn_minion(kind, team, pa.to_vec2(), Some(Brain::Patrol { a: pa, b: pb, toward_b: true }));
-        }
-    }
-}
-
-/// A hex-packed minion clump, adjacent minions touching, like a wave fighting in lane.
-fn clump(world: &mut World, center: Vec2, rings: i32, team: Team) {
-    for q in -rings..=rings {
-        for r in -rings..=rings {
-            if (q + r).abs() > rings {
-                continue;
-            }
-            let x = center.x + 50.0 * (q as f32 + r as f32 * 0.5);
-            let y = center.y + 50.0 * 0.866_025_4 * r as f32;
-            let kind = if (q + r) % 2 == 0 { MinionKind::Melee } else { MinionKind::Caster };
-            world.spawn_minion(kind, team, Vec2::new(x, y), None);
-        }
-    }
-}
-
-/// Duel spawn points (west for blue, east for red), spread a little per player.
-fn duel_spawn(team: Team, player: PlayerId) -> Vec2 {
-    let y = 2000.0 + 150.0 * ((player.0 / 2) as f32) * if player.0 % 4 < 2 { 1.0 } else { -1.0 };
-    Vec2::new(if team == Team::Blue { 500.0 } else { 3500.0 }, y)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -192,7 +138,8 @@ struct Conn {
 
 pub struct ServerCore {
     cfg: ServerConfig,
-    world: World,
+    game: Match,
+    bots: Vec<Bot>,
     start: f64,
     conns: BTreeMap<ClientKey, Conn>,
     queue: Vec<Command>,
@@ -205,15 +152,17 @@ pub struct ServerCore {
 impl ServerCore {
     /// `start`: the server-clock time (seconds) at which tick 0 ends.
     pub fn new(cfg: ServerConfig, start: f64) -> Self {
-        let mut world = World::new(cfg.seed);
-        world.set_map(cfg.scenario.map().shared());
-        if cfg.scenario == Scenario::Aram {
-            world.set_rules(mftr_sim::world::Rules::ARAM);
+        let mut game = Match::new(cfg.clone());
+        let mut bots = Vec::new();
+        for _ in 0..cfg.bots.min(cfg.max_players) {
+            let Some(player) = game.free_player() else { break };
+            game.join(player, None);
+            bots.push(Bot::new(player, cfg.seed));
         }
-        populate(&mut world, cfg.scenario);
         Self {
+            game,
+            bots,
             cfg,
-            world,
             start,
             conns: BTreeMap::new(),
             queue: Vec::new(),
@@ -224,11 +173,16 @@ impl ServerCore {
     }
 
     pub fn world(&self) -> &World {
-        &self.world
+        &self.game.world
     }
 
     pub fn player_count(&self) -> usize {
         self.conns.len()
+    }
+
+    /// The match driver (replay recording, joins).
+    pub fn game(&self) -> &Match {
+        &self.game
     }
 
     /// Wall time at which tick `k`'s interval ends, i.e. when it may be simulated.
@@ -237,7 +191,7 @@ impl ServerCore {
     }
 
     pub fn next_tick_due(&self) -> f64 {
-        self.tick_time(self.world.tick().next())
+        self.tick_time(self.game.world.tick().next())
     }
 
     fn header(conn: &mut Conn) -> PacketHeader {
@@ -260,15 +214,15 @@ impl ServerCore {
             ClientMessage::Hello { protocol, client_time_us, champion } => {
                 if protocol != PROTOCOL_VERSION {
                     out.push((from, self.reject(RejectReason::ProtocolMismatch)));
-                } else if !self.conns.contains_key(&from) && self.conns.len() >= self.cfg.max_players as usize {
+                } else if !self.conns.contains_key(&from) && self.game.player_count() >= self.cfg.max_players as usize {
                     out.push((from, self.reject(RejectReason::ServerFull)));
                 } else {
                     if !self.conns.contains_key(&from) {
                         self.join(from, now, champion);
                     }
-                    let tick = self.world.tick();
+                    let tick = self.game.world.tick();
                     let since = ((now - self.tick_time(tick)).max(0.0) * 1e6) as u32;
-                    let me = self.world.unit(self.conns[&from].unit);
+                    let me = self.game.world.unit(self.conns[&from].unit);
                     let team = me.map_or(Team::Blue, |u| u.team);
                     let champ = me.and_then(|u| u.champion).unwrap_or(ChampionId::Ember);
                     let home = me.map_or(Vec2::ZERO, |u| u.home);
@@ -279,10 +233,10 @@ impl ServerCore {
                         player: conn.player,
                         unit: conn.unit,
                         team,
-                        map: self.world.map().id,
+                        map: self.game.world.map().id,
                         champion: champ,
                         home,
-                        rules: self.world.rules(),
+                        rules: self.game.world.rules(),
                         tick,
                         tick_hz: TICK_HZ as u8,
                         since_tick_us: since,
@@ -295,7 +249,7 @@ impl ServerCore {
                 }
             }
             ClientMessage::Input { client_time_us, event_ack, snapshot_ack, commands } => {
-                let world_tick = self.world.tick();
+                let world_tick = self.game.world.tick();
                 let start = self.start;
                 let Some(conn) = self.conns.get_mut(&from) else { return out };
                 if !conn.recv.record(header.seq) {
@@ -350,38 +304,8 @@ impl ServerCore {
     }
 
     fn join(&mut self, key: ClientKey, now: f64, champion: Option<ChampionId>) {
-        let used: Vec<u8> = self.conns.values().map(|c| c.player.0).collect();
-        let player = PlayerId((0..=u8::MAX).find(|p| !used.contains(p)).unwrap());
-        let team = if player.0 % 2 == 0 || self.cfg.scenario == Scenario::DodgeRig { Team::Blue } else { Team::Red };
-        // Without a preference: in ARAM, each of the six in turn (all-random comes with the
-        // lobby); elsewhere alternate, so the first duel is mage vs. marksman.
-        let champion = champion.unwrap_or(if self.cfg.scenario == Scenario::Aram {
-            ChampionId::ALL[player.0 as usize % ChampionId::ALL.len()]
-        } else {
-            ChampionId::ALL[((player.0 / 2) as usize % 2) ^ (team == Team::Red) as usize]
-        });
-        let (lo, hi) = (self.cfg.arena_min, self.cfg.arena_max);
-        // A random spot with nothing within 150 u (deterministic: the world RNG).
-        let mut pos = Vec2::ZERO;
-        for _ in 0..64 {
-            let rng = self.world.rng();
-            pos = QPoint::from_vec2(Vec2::new(rng.range_f32(lo, hi), rng.range_f32(lo, hi))).to_vec2();
-            if self.world.map().walkable(pos, 60.0)
-                && self.world.units().iter().all(|u| u.state.pos.distance(pos) > 150.0)
-            {
-                break;
-            }
-        }
-        if self.cfg.scenario == Scenario::Duel {
-            pos = duel_spawn(team, player);
-        }
-        if self.cfg.scenario == Scenario::Aram {
-            // In the fountain, spread out in a small arc per player.
-            let base = self.world.map().layout.champion_spawn[team as usize];
-            let k = (player.0 / 2) as f32;
-            pos = base + Vec2::new(0.0, 90.0 * (k - 2.0));
-        }
-        let unit = self.world.spawn_champion(player, team, champion, pos);
+        let Some(player) = self.game.free_player() else { return };
+        let (unit, team, _) = self.game.join(player, champion);
         self.conns.insert(
             key,
             Conn {
@@ -405,7 +329,7 @@ impl ServerCore {
 
     fn leave(&mut self, key: ClientKey) {
         if let Some(c) = self.conns.remove(&key) {
-            self.world.despawn(c.unit);
+            self.game.leave(c.player);
             self.queue.retain(|cmd| cmd.player != c.player);
         }
     }
@@ -418,22 +342,19 @@ impl ServerCore {
             self.leave(k);
         }
 
-        // A new match 10 s after a Base falls (ARAM).
-        if let Some((_, at)) = self.world.game().winner
-            && SimTime::end_of(self.world.tick()) >= at.plus(mftr_sim::SimDuration::from_millis(10_000))
-        {
-            self.world.restart_match();
-        }
-        let k = self.world.tick().next();
-        let (due, later): (Vec<Command>, Vec<Command>) = self.queue.drain(..).partition(|c| c.tick <= k);
+        let k = self.game.world.tick().next();
+        let (mut due, later): (Vec<Command>, Vec<Command>) = self.queue.drain(..).partition(|c| c.tick <= k);
         self.queue = later;
-        self.world.step(&due);
-        let events = self.world.take_events();
+        for bot in &mut self.bots {
+            due.extend(bot.think(&self.game.world, k));
+        }
+        let (events, fog) = self.game.step(due);
         self.stats.ticks += 1;
 
         let since = ((now - self.tick_time(k)).max(0.0) * 1e6) as u32;
         let (s0, s1) = (SimTime::end_of(Tick(k.0 - 1)), SimTime::end_of(k));
         let units: Vec<(UnitId, mftr_sim::UnitState, RemoteUnit)> = self
+            .game
             .world
             .units()
             .iter()
@@ -466,20 +387,12 @@ impl ServerCore {
             })
             .collect();
         // Fog of war (03 §10): what each team sees this tick.
-        let map = self.world.map().clone();
-        let visions = [Vision::of(&self.world, Team::Blue), Vision::of(&self.world, Team::Red)];
-        let seen: [BTreeSet<UnitId>; 2] =
-            [0, 1].map(|i| self.world.units().iter().filter(|u| visions[i].sees_unit(&map, u)).map(|u| u.id).collect());
-        // Units a team can't see can't be targeted by its attacks next tick.
-        for (i, team) in [Team::Blue, Team::Red].into_iter().enumerate() {
-            let hidden = self.world.units().iter().filter(|u| u.team != team && !seen[i].contains(&u.id)).map(|u| u.id);
-            let hidden = hidden.collect();
-            self.world.set_hidden(team, hidden);
-        }
+        let map = self.game.world.map().clone();
+        let Fog { visions, seen } = fog;
         // Whether team `i` may hear about something happening to `unit` at its position this
         // tick (also for units that just died, which vision no longer lists).
         let knows = |i: usize, unit: UnitId| {
-            self.world.unit(unit).is_some_and(|u| {
+            self.game.world.unit(unit).is_some_and(|u| {
                 u.team == [Team::Blue, Team::Red][i]
                     || u.kind == mftr_sim::UnitKind::RigTurret
                     || visions[i].sees(&map, u.state.pos)
@@ -528,7 +441,7 @@ impl ServerCore {
                         SimEvent::Blinked { unit, from: to, to, at }
                     }
                     SimEvent::Dashed { unit, from, to, at, end_at } if !visions[i].sees(&map, from) => {
-                        let start = self.world.unit(unit).map_or(to, |u| u.state.pos);
+                        let start = self.game.world.unit(unit).map_or(to, |u| u.state.pos);
                         SimEvent::Dashed { unit, from: start, to, at, end_at }
                     }
                     other => other,
@@ -691,19 +604,81 @@ impl ServerCore {
 
     /// Direct world access for tests and scripted scenarios.
     pub fn world_mut(&mut self) -> &mut World {
-        &mut self.world
+        &mut self.game.world
     }
 
     /// Unit ids a client on `team` may currently know about (tests, debugging).
     pub fn visible_to(&self, team: Team) -> BTreeSet<UnitId> {
-        let map = self.world.map().clone();
-        let v = Vision::of(&self.world, team);
-        self.world.units().iter().filter(|u| v.sees_unit(&map, u)).map(|u| u.id).collect()
+        let map = self.game.world.map().clone();
+        let v = Vision::of(&self.game.world, team);
+        self.game.world.units().iter().filter(|u| v.sees_unit(&map, u)).map(|u| u.id).collect()
     }
 }
 
 /// The same missile, as first seen at `t`: identical path from there on, but starting at its
 /// position at `t`, so where it was fired from stays hidden.
+/// The outcome of [`run_bot_match`].
+#[derive(Clone, Debug)]
+pub struct BotMatch {
+    /// The winner and the tick the match ended (None: still going at the limit).
+    pub winner: Option<(Team, Tick)>,
+    pub ticks: u32,
+    pub champion_kills: u32,
+    pub structures_destroyed: u32,
+    /// Structures that fell: when, whose, what, tier.
+    pub falls: Vec<(Tick, Team, mftr_sim::UnitKind, u8)>,
+    pub replay: Replay,
+}
+
+/// Play a match with server bots only, as fast as possible (no network, no clients), until a
+/// Base falls or `max_ticks` pass.
+pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
+    let mut core = ServerCore::new(cfg, 0.0);
+    let (mut kills, mut structures) = (0, 0);
+    let mut falls = Vec::new();
+    for _ in 0..max_ticks {
+        let k = core.game.world.tick().next();
+        let mut due = Vec::new();
+        for bot in &mut core.bots {
+            due.extend(bot.think(&core.game.world, k));
+        }
+        let (events, _) = core.game.step(due);
+        for e in &events {
+            if let SimEvent::Died { unit, .. } = e
+                && let Some(u) = core.game.world.unit(*unit)
+            {
+                match u.kind {
+                    mftr_sim::UnitKind::Champion => kills += 1,
+                    kind if kind.is_structure() => {
+                        structures += 1;
+                        falls.push((k, u.team, kind, u.tier));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if let Some((team, at)) = core.game.world.game().winner {
+            let tick = Tick((at.0 / mftr_sim::SUBTICKS as u64) as u32);
+            return BotMatch {
+                winner: Some((team, tick)),
+                ticks: core.game.world.tick().0,
+                champion_kills: kills,
+                structures_destroyed: structures,
+                falls,
+                replay: core.game.replay(),
+            };
+        }
+    }
+    BotMatch {
+        winner: None,
+        ticks: core.game.world.tick().0,
+        champion_kills: kills,
+        structures_destroyed: structures,
+        falls,
+        replay: core.game.replay(),
+    }
+}
+
 fn rebase(m: &Missile, t: SimTime) -> Missile {
     if t <= m.spawn_at {
         return *m;
@@ -751,7 +726,7 @@ mod tests {
         hello(&mut core, 2); // player 1, red
         let (me, enemy) = (core.conns[&1].unit, core.conns[&2].unit);
         // Only the two champions provide vision in this test.
-        let minions: Vec<UnitId> = core.world.units().iter().filter(|u| u.owner.is_none()).map(|u| u.id).collect();
+        let minions: Vec<UnitId> = core.game.world.units().iter().filter(|u| u.owner.is_none()).map(|u| u.id).collect();
         for id in minions {
             core.world_mut().despawn(id);
         }
@@ -786,12 +761,76 @@ mod tests {
     }
 
     /// Duel: players get alternating champions at their team's spawn by default.
+    /// M2 slice 5 exit: ten server bots finish an ARAM match, and its replay (through the text
+    /// format) re-simulates to the same hashes.
+    #[test]
+    fn ten_bots_finish_a_match_and_its_replay_matches() {
+        let cfg = ServerConfig { seed: 6, bots: 10, scenario: Scenario::Aram, ..Default::default() };
+        let m = run_bot_match(cfg, 60 * 60 * 30);
+        let (_, at) = m.winner.expect("a Base falls within an hour");
+        assert!(at.0 > 5 * 60 * 30, "not before five minutes: {}", at.0);
+        assert!(
+            m.champion_kills > 10 && m.structures_destroyed >= 7,
+            "{} kills, {} structures",
+            m.champion_kills,
+            m.structures_destroyed
+        );
+        assert_eq!(m.replay.entries.iter().filter(|e| matches!(e, ReplayEntry::Join { .. })).count(), 10);
+        let text = m.replay.to_text();
+        let parsed = Replay::from_text(&text).unwrap();
+        assert_eq!(parsed, m.replay);
+        let check = parsed.verify();
+        assert!(check.hashes_checked >= 80, "{check:?}");
+        assert_eq!(check.mismatch, None);
+        // A tampered command changes the outcome, and the check notices.
+        let mut tampered = parsed.clone();
+        let cmds = tampered.entries.iter_mut().find_map(|e| match e {
+            ReplayEntry::Commands { commands, tick } if tick.0 > 3000 => Some(commands),
+            _ => None,
+        });
+        cmds.unwrap()[0].kind = mftr_sim::CommandKind::MoveTo(QPoint::from_vec2(Vec2::new(6000.0, 300.0)));
+        assert!(tampered.verify().mismatch.is_some());
+    }
+
+    /// Joins and leaves at any point (before, between and after commands) replay exactly.
+    #[test]
+    fn replays_handle_joins_and_leaves() {
+        let mut m = Match::new(ServerConfig { scenario: Scenario::Duel, ..Default::default() });
+        let mut bots: Vec<Bot> = Vec::new();
+        for k in 1..=900u32 {
+            if k == 1 || k == 200 || k == 450 {
+                let p = m.free_player().unwrap();
+                m.join(p, None);
+                bots.push(Bot::new(p, 7));
+            }
+            if k == 600 {
+                let gone = bots.remove(0).player;
+                m.leave(gone);
+            }
+            let mut due = Vec::new();
+            for b in &mut bots {
+                due.extend(b.think(m.world(), Tick(k)));
+            }
+            m.step(due);
+            if k == 700 {
+                let p = m.free_player().unwrap();
+                m.join(p, Some(ChampionId::Shade));
+                bots.push(Bot::new(p, 8));
+            }
+        }
+        let replay = Replay::from_text(&m.replay().to_text()).unwrap();
+        let check = replay.verify();
+        assert_eq!(check.mismatch, None);
+        assert_eq!(check.final_hash, m.world().state_hash());
+        assert_eq!(check.hashes_checked, 3);
+    }
+
     #[test]
     fn duel_assigns_champions_and_spawns() {
         let mut core = ServerCore::new(ServerConfig { scenario: Scenario::Duel, ..Default::default() }, 0.0);
         hello(&mut core, 1);
         hello(&mut core, 2);
-        let unit = |core: &ServerCore, key| core.world.unit(core.conns[&key].unit).unwrap().clone();
+        let unit = |core: &ServerCore, key| core.game.world.unit(core.conns[&key].unit).unwrap().clone();
         assert_eq!(unit(&core, 1).champion, Some(ChampionId::Ember));
         assert_eq!(unit(&core, 2).champion, Some(ChampionId::Vesper));
         assert_eq!(unit(&core, 1).state.pos, Vec2::new(500.0, 2000.0));
@@ -806,7 +845,7 @@ mod tests {
         hello_as(&mut core, 1, ChampionId::Vesper);
         hello_as(&mut core, 2, ChampionId::Ember);
         let (blue, red) = (core.conns[&1].unit, core.conns[&2].unit);
-        let minions: Vec<UnitId> = core.world.units().iter().filter(|u| u.owner.is_none()).map(|u| u.id).collect();
+        let minions: Vec<UnitId> = core.game.world.units().iter().filter(|u| u.owner.is_none()).map(|u| u.id).collect();
         for id in minions {
             core.world_mut().despawn(id);
         }
@@ -839,7 +878,7 @@ mod tests {
                 }
             }
         }
-        let hp = core.world.unit(red).unwrap().state.health;
+        let hp = core.game.world.unit(red).unwrap().state.health;
         assert!(hp < ChampionId::Ember.def().stats.max_health - 50.0, "red took the area: {hp}");
         assert!(red_heard, "the victim's client hears its own damage");
         assert!(!blue_saw_red && !blue_heard, "nothing about the hidden unit reaches blue");

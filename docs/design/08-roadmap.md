@@ -249,6 +249,15 @@ Four more placeholder champions (original kits, D36), so all six M2 archetypes e
 
 **Netcode Lab, ARAM 3v3 with all six, 5 min:** 0 ghost hits, 0 fog leaks and 0 hard resets on every profile. Being pulled, or lunging at a target known only from interpolated positions, adds corrections: largest correction 23 u with no added latency (it was 3.5 u). The lab's jump meter now ignores dashes, which it used to count as pops.
 
+### M2 slice 5 status (2026-10-06): in progress
+
+**Done: bots and replays** (D37), the slice's exit criteria:
+- **Server bots** (`--bots N`): they follow their wave and siege structures when it's safe (minions tank the turret, or they outnumber the defenders by two). They fight enemy champions with their whole kit, heal and shield allies, fall back to relics or turret cover when low, shop their build path and spend points. They issue ordinary commands, so the replay records them like anyone else.
+- **Replays** (`--replay FILE`, `mftr-tools replay FILE`): one match driver is shared by the server and the replayer. It records joins, leaves, commands and a hash every 10 s.
+- **10-bot ARAM matches finish:** 9 seeds out of 9 within an hour (14–46 min), simulated in about 2 s each. Every replay re-simulates to the recorded hashes, a tampered command is detected, and a networked Netcode Lab session's recording re-simulates to the server's final hash.
+
+**Next:** lobby and custom games, ARAM all-random with rerolls and bench, reconnect, spectating.
+
 ## M3 — ARAM: Mayhem
 - Augment draft system with ~60 augments across tiers and archetypes (rule breakers, size, ability transformers, quests, spell replacements).
 - Delivery transformers, batched projectile spawns, size scaling with honest hitboxes.

@@ -49,6 +49,8 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The server star
 
 **ARAM on The Bridge** (M2, in progress): start the server with `--scenario aram`. You get one lane with turrets, a Gatehouse and a Base per team, minion waves every 30 s, health relics and a fountain; destroy the enemy Base to win. You start at level 3 with 1,400 gold: press **P** in the fountain to shop. Bots (`mftr-tools bot --duel`) also play it, though not well yet.
 
+**Bots and replays:** `--bots N` fills N slots with server bots (e.g. `--scenario aram --bots 9` for a full match against bots), and `--replay match.replay` records the session. `mftr-tools replay match.replay` re-simulates a recording and checks it, and `mftr-tools botmatch --seed 3` plays a 10-bot ARAM match headless in a couple of seconds.
+
 No one to duel? Start a sparring bot: `cargo run --release -p mftr-tools -- bot --server 127.0.0.1:7777 --duel --seconds 600`. Other scenarios: `--scenario aram` (see above), `--scenario minions` (minion-block sandbox), `--scenario dodge` (turrets that fire skillshots at you) and `--scenario empty`. To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
 
 Headless tools:

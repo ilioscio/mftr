@@ -57,6 +57,8 @@ pub struct LabResult {
     /// Wall-clock cost of one server tick (simulation + snapshots), mean and max, in ms.
     pub tick_ms_mean: f64,
     pub tick_ms_max: f64,
+    /// The server's recording of the session (M2 slice 5).
+    pub replay: mftr_server::Replay,
 }
 
 pub fn run(cfg: &LabConfig) -> LabResult {
@@ -190,6 +192,7 @@ pub fn run(cfg: &LabConfig) -> LabResult {
         fog_hidden,
         tick_ms_mean: tick_cost / ticks_timed.max(1) as f64,
         tick_ms_max: tick_max,
+        replay: server.game().replay(),
     }
 }
 
@@ -412,6 +415,11 @@ mod tests {
         assert!(s.levels.iter().all(|l| *l >= 5), "{}", s.duel_row());
         // M2 slice 3: bots follow their build paths whenever they respawn.
         assert!(s.items.iter().all(|n| *n >= 2), "{}", s.duel_row());
+        // M2 slice 5: the server's recording of this networked session re-simulates exactly.
+        let check = r.replay.verify();
+        assert!(check.hashes_checked >= 20, "{check:?}");
+        assert_eq!(check.mismatch, None);
+        assert_eq!(check.final_hash, r.server_hash);
     }
 
     /// Q13: over a lossy, jittery link with moving minions, every snapshot the client

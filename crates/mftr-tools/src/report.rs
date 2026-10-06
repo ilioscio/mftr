@@ -309,100 +309,6 @@ pub struct DuelBot {
     next_shop: f64,
 }
 
-/// Bot build paths (components first, so recipes discount them).
-fn build_path(champion: mftr_sim::ChampionId) -> &'static [u8] {
-    use mftr_sim::items::*;
-    match champion {
-        mftr_sim::ChampionId::Ember => &[
-            BOOTS,
-            CHARGED_WAND,
-            VITAL_CRYSTAL,
-            FOCUS_CHARM,
-            INFERNO_DIADEM,
-            SAGE_BOOTS,
-            CHARGED_WAND,
-            CHARGED_WAND,
-            GRAND_GRIMOIRE,
-            WARDING_CLOAK,
-            VITAL_CRYSTAL,
-            FOCUS_CHARM,
-            WARDSTONE_MANTLE,
-        ],
-        mftr_sim::ChampionId::Vesper => &[
-            BOOTS,
-            LONG_KNIFE,
-            LEECH_FANG,
-            HEAVY_PICK,
-            CRIMSON_FANG,
-            QUICK_DAGGER,
-            BATTLE_BOOTS,
-            HEAVY_PICK,
-            QUICK_DAGGER,
-            ARC_BOW,
-            GALE_SABER,
-            VITAL_CRYSTAL,
-            TITAN_BELT,
-            HEAVY_PICK,
-            LIFELINE_TALISMAN,
-        ],
-        mftr_sim::ChampionId::Bastion => &[
-            BOOTS,
-            VITAL_CRYSTAL,
-            PADDED_VEST,
-            CHAIN_COAT,
-            BRAMBLE_PLATE,
-            SWIFT_BOOTS,
-            VITAL_CRYSTAL,
-            TITAN_BELT,
-            VITAL_CRYSTAL,
-            HEARTSTONE,
-            WARDING_CLOAK,
-            VITAL_CRYSTAL,
-            FOCUS_CHARM,
-            WARDSTONE_MANTLE,
-        ],
-        mftr_sim::ChampionId::Rook => &[
-            BOOTS,
-            LONG_KNIFE,
-            LEECH_FANG,
-            VITAL_CRYSTAL,
-            TITAN_BELT,
-            HEAVY_PICK,
-            LIFELINE_TALISMAN,
-            QUICK_DAGGER,
-            BATTLE_BOOTS,
-            PADDED_VEST,
-            CHAIN_COAT,
-            VITAL_CRYSTAL,
-            BRAMBLE_PLATE,
-        ],
-        mftr_sim::ChampionId::Lumen => &[
-            BOOTS,
-            CHARGED_WAND,
-            VITAL_CRYSTAL,
-            FOCUS_CHARM,
-            INFERNO_DIADEM,
-            SAGE_BOOTS,
-            WARDING_CLOAK,
-            VITAL_CRYSTAL,
-            FOCUS_CHARM,
-            WARDSTONE_MANTLE,
-        ],
-        mftr_sim::ChampionId::Shade => &[
-            BOOTS,
-            LONG_KNIFE,
-            LEECH_FANG,
-            HEAVY_PICK,
-            CRIMSON_FANG,
-            SWIFT_BOOTS,
-            HEAVY_PICK,
-            QUICK_DAGGER,
-            ARC_BOW,
-            GALE_SABER,
-        ],
-    }
-}
-
 impl DuelBot {
     pub fn new(seed: u64, reaction: f64) -> Self {
         Self {
@@ -417,7 +323,7 @@ impl DuelBot {
 
     /// Follow the build path while the shop is open (dead or in the fountain).
     fn shop(&mut self, session: &mut ClientSession, p: &mftr_sim::world::Progress, now: f64, elapsed: f64) -> bool {
-        let path = build_path(session.champion());
+        let path = mftr_sim::items::build_path(session.champion());
         while self.build < path.len() && p.items.contains(&path[self.build]) {
             self.build += 1;
         }

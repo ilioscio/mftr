@@ -308,6 +308,100 @@ pub fn champion_stats(def: &ChampionDef, level: u8, inventory: &[u8; INVENTORY])
     (stats, AttackSpec { attack_speed, ..def.attack })
 }
 
+/// Bot build paths (components first, so recipes discount them).
+pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
+    use crate::champion::ChampionId;
+    match champion {
+        ChampionId::Ember => &[
+            BOOTS,
+            CHARGED_WAND,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            INFERNO_DIADEM,
+            SAGE_BOOTS,
+            CHARGED_WAND,
+            CHARGED_WAND,
+            GRAND_GRIMOIRE,
+            WARDING_CLOAK,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            WARDSTONE_MANTLE,
+        ],
+        ChampionId::Vesper => &[
+            BOOTS,
+            LONG_KNIFE,
+            LEECH_FANG,
+            HEAVY_PICK,
+            CRIMSON_FANG,
+            QUICK_DAGGER,
+            BATTLE_BOOTS,
+            HEAVY_PICK,
+            QUICK_DAGGER,
+            ARC_BOW,
+            GALE_SABER,
+            VITAL_CRYSTAL,
+            TITAN_BELT,
+            HEAVY_PICK,
+            LIFELINE_TALISMAN,
+        ],
+        ChampionId::Bastion => &[
+            BOOTS,
+            VITAL_CRYSTAL,
+            PADDED_VEST,
+            CHAIN_COAT,
+            BRAMBLE_PLATE,
+            SWIFT_BOOTS,
+            VITAL_CRYSTAL,
+            TITAN_BELT,
+            VITAL_CRYSTAL,
+            HEARTSTONE,
+            WARDING_CLOAK,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            WARDSTONE_MANTLE,
+        ],
+        ChampionId::Rook => &[
+            BOOTS,
+            LONG_KNIFE,
+            LEECH_FANG,
+            VITAL_CRYSTAL,
+            TITAN_BELT,
+            HEAVY_PICK,
+            LIFELINE_TALISMAN,
+            QUICK_DAGGER,
+            BATTLE_BOOTS,
+            PADDED_VEST,
+            CHAIN_COAT,
+            VITAL_CRYSTAL,
+            BRAMBLE_PLATE,
+        ],
+        ChampionId::Lumen => &[
+            BOOTS,
+            CHARGED_WAND,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            INFERNO_DIADEM,
+            SAGE_BOOTS,
+            WARDING_CLOAK,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            WARDSTONE_MANTLE,
+        ],
+        ChampionId::Shade => &[
+            BOOTS,
+            LONG_KNIFE,
+            LEECH_FANG,
+            HEAVY_PICK,
+            CRIMSON_FANG,
+            SWIFT_BOOTS,
+            HEAVY_PICK,
+            QUICK_DAGGER,
+            ARC_BOW,
+            GALE_SABER,
+        ],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

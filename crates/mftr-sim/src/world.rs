@@ -1271,6 +1271,11 @@ impl World {
     }
 
     /// Units `team` can't see (and so can't attack) from the next tick on.
+    /// Enemy units `team` can't see this tick (sorted).
+    pub fn hidden(&self, team: Team) -> &[UnitId] {
+        &self.hidden[team as usize]
+    }
+
     pub fn set_hidden(&mut self, team: Team, mut ids: Vec<UnitId>) {
         ids.sort();
         self.hidden[team as usize] = ids;
