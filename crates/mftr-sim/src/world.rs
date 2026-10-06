@@ -3873,5 +3873,5 @@ mod tests {
 
     /// Recorded on x86_64-unknown-linux-gnu (debug and release agree). CI checks Linux, macOS
     /// (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x40a9_70ea_3885_e507;
+    const GOLDEN_HASH: u64 = 0x951d_c97b_0131_cea0;
 }

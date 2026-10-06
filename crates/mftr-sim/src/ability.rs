@@ -253,8 +253,10 @@ pub const BARRIER: Ability = Ability {
     per_rank: RankScaling::NONE,
 };
 
-/// The dodge-rig turret's shot (03 §14): a hard-CC line missile with no damage, on a steady
-/// cadence, so the rig measures dodging without anyone dying.
+/// The dodge-rig turret's shot (03 §14): a line missile timed like a hard-CC skillshot, on a
+/// steady cadence. It neither damages nor stuns: a hit shows the impact flash and counts in
+/// the playtest stats, and the tester keeps moving (chained stuns made the next shots
+/// undodgeable and skewed the dodge data).
 pub const TURRET_SHOT: Ability = Ability {
     name: "Turret shot",
     cooldown: SimDuration::from_millis(1200),
@@ -264,7 +266,7 @@ pub const TURRET_SHOT: Ability = Ability {
         radius: 35.0,
         range: 1100.0,
         damage: Damage::NONE,
-        cc: Cc::Stun(SimDuration::from_millis(750)),
+        cc: Cc::None,
     }),
     reaction: ReactionClass::HardCc,
     per_rank: RankScaling::NONE,
