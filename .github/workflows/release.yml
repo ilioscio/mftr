@@ -128,10 +128,17 @@ jobs:
     needs: [native, client]
     runs-on: ubuntu-latest
     steps:
+      # Only our archives: a run can hold other artifacts (Docker build records) that
+      # download-artifact can't fetch.
       - uses: actions/download-artifact@v4
         with:
+          pattern: server-*
           path: artifacts
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: clients
+          path: artifacts
       - uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -153,6 +160,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
+        env:
+          # No build-record artifact in the run (nothing downloads it).
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           push: true
