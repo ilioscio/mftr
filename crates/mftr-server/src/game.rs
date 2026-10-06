@@ -92,7 +92,7 @@ impl Match {
     /// Add `player`'s champion: team by player id, champion as requested or assigned, spawn by
     /// scenario. Deterministic (the world RNG), so a replay places it identically.
     pub fn join(&mut self, player: PlayerId, champion: Option<ChampionId>) -> (UnitId, Team, ChampionId) {
-        self.log.push(ReplayEntry::Join { tick: self.world.tick(), player, champion });
+        self.record(ReplayEntry::Join { tick: self.world.tick(), player, champion });
         self.players.insert(player);
         let scenario = self.cfg.scenario;
         let team = if player.0 % 2 == 0 || scenario == Scenario::DodgeRig { Team::Blue } else { Team::Red };
@@ -132,7 +132,7 @@ impl Match {
         if !self.players.remove(&player) {
             return;
         }
-        self.log.push(ReplayEntry::Leave { tick: self.world.tick(), player });
+        self.record(ReplayEntry::Leave { tick: self.world.tick(), player });
         let units: Vec<UnitId> = self.world.units().iter().filter(|u| u.owner == Some(player)).map(|u| u.id).collect();
         for u in units {
             self.world.despawn(u);
@@ -151,7 +151,7 @@ impl Match {
         let k = self.world.tick().next();
         self.world.step(&due);
         if !due.is_empty() {
-            self.log.push(ReplayEntry::Commands { tick: k, commands: due });
+            self.record(ReplayEntry::Commands { tick: k, commands: due });
         }
         let events = self.world.take_events();
         let map = self.world.map().clone();
@@ -162,13 +162,19 @@ impl Match {
             let hidden = self.world.units().iter().filter(|u| u.team != team && !seen[i].contains(&u.id)).map(|u| u.id);
             self.world.set_hidden(team, hidden.collect());
         }
-        if k.0 % HASH_EVERY == 0 {
-            self.log.push(ReplayEntry::Hash { tick: k, hash: self.world.state_hash() });
+        if self.cfg.record && k.0 % HASH_EVERY == 0 {
+            self.record(ReplayEntry::Hash { tick: k, hash: self.world.state_hash() });
         }
         (events, Fog { visions, seen })
     }
 
-    /// Everything recorded so far.
+    fn record(&mut self, e: ReplayEntry) {
+        if self.cfg.record {
+            self.log.push(e);
+        }
+    }
+
+    /// Everything recorded so far (nothing unless `ServerConfig::record`).
     pub fn replay(&self) -> Replay {
         Replay { cfg: self.cfg.clone(), entries: self.log.clone() }
     }
@@ -286,6 +292,7 @@ impl Replay {
             max_players: f[2].parse().map_err(|e| format!("max players: {e}"))?,
             bots: f[3].parse().map_err(|e| format!("bots: {e}"))?,
             lobby: f[4] == "1",
+            record: true,
             arena_min: num(f[5])? as f32,
             arena_max: num(f[6])? as f32,
             scenario: Scenario::by_name(f[7]).ok_or(format!("scenario {}", f[7]))?,

@@ -265,6 +265,25 @@ Four more placeholder champions (original kits, D36), so all six M2 archetypes e
 
 **Tests:** champion select rerolls, readies and starts with ten players; a real client session goes from champion select to playing over a lossy link, with a spectator alongside that sees both teams; reconnecting by token, from a new address, until the grace period ends; spectators see every unit and can't issue commands.
 
+### M2 slice 6 status (2026-10-06): ✅ done (one check left)
+
+- **[Hosting guide](../hosting.md):** Docker, Compose, the binary with a systemd unit, every option, replays, measured costs, troubleshooting.
+- **Server image** (`Dockerfile`): distroless, non-root, 40 MB. **Compose** (`deploy/compose.yaml`): an ARAM server with champion select, bots and replay recording, plus a duel server. Tested here: the container serves a lab client, and its recorded replay re-simulates exactly.
+- **Release workflow** (`.github/workflows/release.yml`, on `v*` tags): server and tools for Linux, Windows and macOS, the Godot client exported for all three (`scripts/package-client.sh`), a GitHub release, and the image on ghcr.io.
+- **Size budgets in CI** (`mftr-tools size-report`, D39):
+
+| Item | Size | Budget |
+|---|---:|---:|
+| Server binary | 0.79 MiB | 5 MiB |
+| Tools binary | 1.13 MiB | 5 MiB |
+| Godot extension | 3.46 MiB | 15 MiB |
+| Client project (scripts, shaders) | 0.07 MiB | 20 MiB |
+| Linux client download (export, compressed) | 26.6 MiB | 60 MiB |
+
+- **Capacity:** one 10-player ARAM costs 0.18 ms per 33 ms tick (about 0.5% of one core) and about 105 KB/s upload. Ten concurrent matches fit on one core of a 4-core VPS many times over.
+
+**Left for the M2 exit:** the release workflow runs on GitHub for the first time with the first tag, and ten humans still need to finish a match on a community-hosted server.
+
 ## M3 — ARAM: Mayhem
 - Augment draft system with ~60 augments across tiers and archetypes (rule breakers, size, ability transformers, quests, spell replacements).
 - Delivery transformers, batched projectile spawns, size scaling with honest hitboxes.

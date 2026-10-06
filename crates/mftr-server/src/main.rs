@@ -30,7 +30,10 @@ fn main() -> std::io::Result<()> {
             }
             "--bots" => cfg.bots = args.next().and_then(|v| v.parse().ok()).expect("--bots needs a number"),
             "--lobby" => cfg.lobby = true,
-            "--replay" => replay_path = Some(args.next().expect("--replay needs a file")),
+            "--replay" => {
+                replay_path = Some(args.next().expect("--replay needs a file"));
+                cfg.record = true;
+            }
             "--scenario" => {
                 let name = args.next().expect("--scenario needs a name");
                 cfg.scenario = Scenario::by_name(&name).unwrap_or_else(|| panic!("unknown scenario {name}\n{USAGE}"));
@@ -104,9 +107,10 @@ fn main() -> std::io::Result<()> {
         if t - last_report >= 5.0 {
             let s = &core.stats;
             println!(
-                "tick {:>6}  players {}  cmds {} (late {}, dropped {})  in {:.1} KB/s  out {:.1} KB/s  tick avg {:.3} ms max {:.3} ms",
+                "tick {:>6}  players {} (+{} bots)  cmds {} (late {}, dropped {})  in {:.1} KB/s  out {:.1} KB/s  tick avg {:.3} ms max {:.3} ms",
                 core.world().tick().0,
                 core.player_count(),
+                core.bot_count(),
                 s.commands,
                 s.commands_late,
                 s.commands_dropped,

@@ -100,6 +100,9 @@ pub struct ServerConfig {
     pub bots: u8,
     /// Champion select before the match (ARAM all-random with rerolls); humans replace bots.
     pub lobby: bool,
+    /// Record a replay (joins, leaves, commands, hashes) in memory, about 5 MB per hour of a
+    /// busy 5v5 server. Off by default so a long-running server doesn't grow.
+    pub record: bool,
     /// Spawn area: a square from `arena_min` to `arena_max` on both axes.
     pub arena_min: f32,
     pub arena_max: f32,
@@ -113,6 +116,7 @@ impl Default for ServerConfig {
             max_players: 10,
             bots: 0,
             lobby: false,
+            record: false,
             arena_min: 500.0,
             arena_max: 3500.0,
             scenario: Scenario::Empty,
@@ -256,6 +260,11 @@ impl ServerCore {
 
     pub fn player_count(&self) -> usize {
         self.conns.len()
+    }
+
+    /// Server bots playing (champion-select bots count once the match starts).
+    pub fn bot_count(&self) -> usize {
+        self.bots.len()
     }
 
     /// The match driver (replay recording, joins).
@@ -848,7 +857,7 @@ pub struct BotMatch {
 /// Play a match with server bots only, as fast as possible (no network, no clients), until a
 /// Base falls or `max_ticks` pass.
 pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
-    let mut core = ServerCore::new(cfg, 0.0);
+    let mut core = ServerCore::new(ServerConfig { record: true, ..cfg }, 0.0);
     let (mut kills, mut structures) = (0, 0);
     let mut falls = Vec::new();
     for _ in 0..max_ticks {
@@ -1160,7 +1169,7 @@ mod tests {
     /// Joins and leaves at any point (before, between and after commands) replay exactly.
     #[test]
     fn replays_handle_joins_and_leaves() {
-        let mut m = Match::new(ServerConfig { scenario: Scenario::Duel, ..Default::default() });
+        let mut m = Match::new(ServerConfig { scenario: Scenario::Duel, record: true, ..Default::default() });
         let mut bots: Vec<Bot> = Vec::new();
         for k in 1..=900u32 {
             if k == 1 || k == 200 || k == 450 {

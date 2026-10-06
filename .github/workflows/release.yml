@@ -1,0 +1,159 @@
+name: Release
+
+# M2 slice 6: on a version tag (or by hand), build the server, tools and Godot extension on every
+# desktop OS, export the client for Linux, Windows and macOS, check sizes against their budgets,
+# publish a GitHub release, and push the server image to the GitHub container registry.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+  GODOT_VERSION: "4.5"
+
+jobs:
+  native:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: linux-x86_64, lib: libmftr_gdext.so, exe: "" }
+          - { os: windows-latest, target: windows-x86_64, lib: mftr_gdext.dll, exe: ".exe" }
+          - { os: macos-latest, target: macos-universal, lib: libmftr_gdext.dylib, exe: "" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (dist profile)
+        run: cargo build --locked --profile dist -p mftr-server -p mftr-tools -p mftr-gdext
+
+      - name: Universal macOS extension (Apple Silicon + Intel)
+        if: matrix.os == 'macos-latest'
+        run: |
+          cargo build --locked --profile dist -p mftr-gdext --target x86_64-apple-darwin
+          lipo -create target/dist/libmftr_gdext.dylib target/x86_64-apple-darwin/dist/libmftr_gdext.dylib \
+            -output target/dist/libmftr_gdext.universal.dylib
+          mv target/dist/libmftr_gdext.universal.dylib target/dist/libmftr_gdext.dylib
+
+      - name: Package server and tools
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          name="mftr-server-$version-${{ matrix.target }}"
+          mkdir -p "out/$name"
+          cp target/dist/mftr-server${{ matrix.exe }} target/dist/mftr-tools${{ matrix.exe }} LICENSE "out/$name/"
+          cp docs/hosting.md "out/$name/README.md"
+          if [ "${{ matrix.os }}" = windows-latest ]; then
+            (cd out && 7z a -bd "$name.zip" "$name" > /dev/null)
+          else
+            tar -C out -czf "out/$name.tar.gz" "$name"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.target }}
+          path: out/mftr-server-*.*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdext-${{ matrix.target }}
+          path: target/dist/${{ matrix.lib }}
+
+  client:
+    name: export client
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gdext-*
+          path: client/bin
+          merge-multiple: true
+
+      - name: Cache Godot and its export templates
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-stable
+
+      - name: Download Godot and the export templates
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          base="https://github.com/godotengine/godot/releases/download/$GODOT_VERSION-stable"
+          mkdir -p ~/godot ~/.local/share/godot/export_templates
+          curl -sSL -o /tmp/godot.zip "$base/Godot_v$GODOT_VERSION-stable_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d ~/godot
+          curl -sSL -o /tmp/templates.tpz "$base/Godot_v$GODOT_VERSION-stable_export_templates.tpz"
+          unzip -q /tmp/templates.tpz -d /tmp/templates
+          # Desktop templates only (the full set is ~2 GB).
+          dest=~/.local/share/godot/export_templates/$GODOT_VERSION.stable
+          mkdir -p "$dest"
+          cp /tmp/templates/templates/{version.txt,linux_release.x86_64,linux_debug.x86_64,windows_release_x86_64.exe,windows_debug_x86_64.exe,windows_release_x86_64_console.exe,windows_debug_x86_64_console.exe,macos.zip} "$dest/"
+
+      - name: Export Linux, Windows and macOS
+        run: |
+          # The editor loads the extension from target/debug while exporting (scripts type-check).
+          mkdir -p target/debug && cp client/bin/libmftr_gdext.so target/debug/
+          godot=$(ls ~/godot/Godot_v*_linux.x86_64)
+          for p in linux windows macos; do scripts/package-client.sh "$p" "$godot"; done
+          ls -la dist
+
+      - name: Size report (budgets)
+        run: |
+          cargo run -q --release -p mftr-tools -- size-report --client-package dist/mftr-client-*-linux.tar.gz \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clients
+          path: dist/mftr-client-*
+
+  publish:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [native, client]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/mftr-server-*
+            artifacts/mftr-client-*
+          generate_release_notes: true
+
+  image:
+    name: server image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/server:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}/server:latest

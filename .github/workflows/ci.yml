@@ -43,3 +43,28 @@ jobs:
             cargo run -q --release -p mftr-tools -- netlab --profile all --clients 10 --seconds 120
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  size:
+    name: size budgets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: dist
+      - name: Build what we ship (dist profile)
+        run: cargo build --locked --profile dist -p mftr-server -p mftr-tools -p mftr-gdext
+      - name: Size report (fails over budget)
+        run: ./target/dist/mftr-tools size-report | tee -a "$GITHUB_STEP_SUMMARY"
+
+  docker:
+    name: server image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: mftr-server:ci

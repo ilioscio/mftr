@@ -63,8 +63,10 @@ pub struct LabResult {
 
 pub fn run(cfg: &LabConfig) -> LabResult {
     const STEP: f64 = 0.0005;
-    let mut server =
-        ServerCore::new(ServerConfig { seed: cfg.seed, scenario: cfg.scenario, ..Default::default() }, 0.0);
+    let mut server = ServerCore::new(
+        ServerConfig { seed: cfg.seed, scenario: cfg.scenario, record: true, ..Default::default() },
+        0.0,
+    );
     let mut clients: Vec<LabClient> = (0..cfg.clients)
         .map(|i| {
             let s = cfg.seed.wrapping_mul(1000) + i as u64;

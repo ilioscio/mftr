@@ -1,0 +1,27 @@
+# MFTR on a server: `docker compose -f deploy/compose.yaml up -d` from the repository root.
+# One ARAM server with champion select and bots filling empty slots, recording a replay of the
+# session into the `replays` volume (copy it out with
+# `docker compose -f deploy/compose.yaml cp aram:/data/session.replay .`, then check it with
+# `mftr-tools replay session.replay`).
+services:
+  aram:
+    build: ..
+    image: mftr-server
+    restart: unless-stopped
+    ports:
+      - "7777:7777/udp"
+    volumes:
+      - replays:/data
+    command: ["--scenario", "aram", "--bots", "10", "--lobby", "--seed", "1", "--replay", "/data/session.replay"]
+
+  # A second, smaller game on another port: the Duel Sandbox for practice.
+  duel:
+    image: mftr-server
+    depends_on: [aram]
+    restart: unless-stopped
+    ports:
+      - "7778:7777/udp"
+    command: ["--scenario", "duel", "--max-players", "4"]
+
+volumes:
+  replays:

@@ -104,6 +104,15 @@ fn main() {
                 }
             );
         }
+        Some("size-report") => {
+            // M2 slice 6: sizes of what we ship against their budgets (exit 1 when over).
+            let package = get("--client-package").map(std::path::PathBuf::from);
+            let items = mftr_tools::size::report(std::path::Path::new("."), package.as_deref());
+            print!("{}", mftr_tools::size::table(&items));
+            if items.iter().any(|i| i.over()) {
+                std::process::exit(1);
+            }
+        }
         Some("replay") => {
             // Re-simulate a replay file and check its hashes.
             let path = args.get(1).expect("replay FILE");
