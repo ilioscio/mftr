@@ -22,6 +22,7 @@ use crate::champion::{AttackSpec, ChampionId, Stats};
 use crate::collision::{Obstacle, choose_detour, constrained_move};
 use crate::combat::resist_multiplier;
 use crate::hash::{StateHasher, StateSink};
+use crate::items::{self, INVENTORY};
 use crate::lane::{self, MatchState, Seen};
 use crate::map::{Map, MapId};
 use crate::math::{QPoint, Vec2};
@@ -153,11 +154,40 @@ pub struct Progress {
     pub points: u8,
     /// Kill streak (> 0) or death streak (< 0), for bounties.
     pub streak: i8,
+    /// Inventory (item ids, 0 = empty).
+    pub items: [u8; INVENTORY],
+    /// When the Lifeline passive is ready again (item cooldowns survive death).
+    pub lifeline_ready: SimTime,
+    /// Trades that can still be undone, oldest first (`undo_len` valid). Cleared when the
+    /// shop closes (01 §11: undo until you leave the fountain).
+    pub undo: [Trade; UNDO],
+    pub undo_len: u8,
 }
+
+/// One buy or sell: the inventory before it and the gold it changed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Trade {
+    pub items: [u8; INVENTORY],
+    pub gold: f32,
+}
+
+/// How many trades can be undone.
+pub const UNDO: usize = 4;
 
 impl Progress {
     /// Sandbox default: level 1, every ability at rank 1, nothing to spend.
-    pub const SANDBOX: Progress = Progress { level: 1, xp: 0, gold: 0.0, ranks: [1; 4], points: 0, streak: 0 };
+    pub const SANDBOX: Progress = Progress {
+        level: 1,
+        xp: 0,
+        gold: 0.0,
+        ranks: [1; 4],
+        points: 0,
+        streak: 0,
+        items: [0; INVENTORY],
+        lifeline_ready: SimTime(0),
+        undo: [Trade { items: [0; INVENTORY], gold: 0.0 }; UNDO],
+        undo_len: 0,
+    };
 
     pub fn hash_into(&self, h: &mut impl StateSink) {
         h.write_u8(self.level);
@@ -168,6 +198,26 @@ impl Progress {
         }
         h.write_u8(self.points);
         h.write_u8(self.streak as u8);
+        for i in self.items {
+            h.write_u8(i);
+        }
+        h.write_u64(self.lifeline_ready.0);
+        h.write_u8(self.undo_len);
+        for t in &self.undo[..self.undo_len as usize] {
+            for i in t.items {
+                h.write_u8(i);
+            }
+            h.write_f32(t.gold);
+        }
+    }
+
+    fn push_trade(&mut self, t: Trade) {
+        if self.undo_len as usize == UNDO {
+            self.undo.copy_within(1.., 0);
+            self.undo_len -= 1;
+        }
+        self.undo[self.undo_len as usize] = t;
+        self.undo_len += 1;
     }
 }
 
@@ -566,8 +616,9 @@ pub struct Unit {
     pub tier: u8,
     /// A structure behind one that still stands: can't be hurt. Recomputed every tick.
     pub protected: bool,
-    /// The level `stats` were computed for (champions: recomputed when the level changes).
-    pub stats_level: u8,
+    /// The level and items `stats` and `attack` were computed for (champions: recomputed when
+    /// either changes).
+    pub stats_for: (u8, [u8; INVENTORY]),
 }
 
 impl Unit {
@@ -590,7 +641,7 @@ impl Unit {
             attack: None,
             tier: 0,
             protected: false,
-            stats_level: 1,
+            stats_for: (1, [0; INVENTORY]),
         }
     }
 
@@ -605,6 +656,38 @@ impl Unit {
 
     pub fn attack_spec(&self) -> Option<AttackSpec> {
         self.attack
+    }
+
+    /// Champions: recompute stats and attack from the level and items in the progression
+    /// state (02 §10 stat stack), if they changed. Current health rises with max health and
+    /// is capped by it. Returns whether anything was recomputed.
+    pub fn refresh_stats(&mut self) -> bool {
+        let Some(c) = self.champion else { return false };
+        let key = (self.state.progress.level, self.state.progress.items);
+        if key == self.stats_for {
+            return false;
+        }
+        let (stats, attack) = items::champion_stats(c.def(), key.0, &key.1);
+        if self.state.alive() {
+            self.state.health =
+                (self.state.health + (stats.max_health - self.stats.max_health).max(0.0)).min(stats.max_health);
+        }
+        self.stats = stats;
+        self.attack = Some(attack);
+        self.state.move_speed = stats.move_speed;
+        self.stats_for = key;
+        true
+    }
+
+    /// Recompute stats for the progression state now, without touching health (prediction
+    /// re-syncs, spawns).
+    pub fn reset_stats(&mut self) {
+        let Some(c) = self.champion else { return };
+        let key = (self.state.progress.level, self.state.progress.items);
+        let (stats, attack) = items::champion_stats(c.def(), key.0, &key.1);
+        self.stats = stats;
+        self.attack = Some(attack);
+        self.stats_for = key;
     }
 
     /// Can be hit by skillshots, areas and attacks: alive, not a protected structure, not the
@@ -628,6 +711,12 @@ pub enum CommandKind {
     AttackMove(QPoint),
     /// Spend an ability point on slot 0–3 (Q W E R).
     LevelUp(u8),
+    /// Buy an item by id (recipes consume their components).
+    Buy(u8),
+    /// Sell the item in an inventory slot (0–5).
+    Sell(u8),
+    /// Undo the last buy or sell while the shop is still open.
+    Undo,
 }
 
 /// A player command, applied at `tick` at sub-tick position `sub` (03a §3).
@@ -986,7 +1075,7 @@ impl World {
         let stats = champion.def().stats_at(progress.level);
         let mut u = Unit::champion(id, owner, team, champion, pos, pos, stats);
         u.state.progress = progress;
-        u.stats_level = progress.level;
+        u.reset_stats();
         self.units.push(u);
         id
     }
@@ -1056,10 +1145,8 @@ impl World {
         self.bolts.clear();
         let progress = self.rules.progress();
         for u in self.units.iter_mut() {
-            if let Some(c) = u.champion {
-                u.stats = c.def().stats_at(progress.level);
-                u.stats_level = progress.level;
-            }
+            u.state.progress = progress;
+            u.reset_stats();
             u.state = UnitState::new(u.home, u.stats.move_speed);
             u.state.health = u.stats.max_health;
             u.state.progress = progress;
@@ -1165,16 +1252,9 @@ impl World {
             }
         }
         for u in self.units.iter_mut() {
-            if let Some(c) = u.champion
-                && u.stats_level != u.state.progress.level
-            {
-                // Level up: new stats; current health rises with max health.
-                let stats = c.def().stats_at(u.state.progress.level);
-                if u.state.alive() {
-                    u.state.health += (stats.max_health - u.stats.max_health).max(0.0);
-                }
-                u.stats = stats;
-                u.stats_level = u.state.progress.level;
+            u.refresh_stats(); // level-ups and purchases
+            if u.state.progress.undo_len > 0 && !can_shop(u, &self.map, &self.rules) {
+                u.state.progress.undo_len = 0; // left the fountain: trades are final
             }
         }
         lane::update_protection(&mut self.units);
@@ -1272,7 +1352,11 @@ impl World {
                 None => Vec::new(),
             };
             if !unit.state.alive() {
-                continue; // commands while dead are dropped
+                // Commands while dead are dropped, except shopping.
+                for c in &mine {
+                    shop(unit, c.kind, map, &rules);
+                }
+                continue;
             }
             let here = unit.state.pos;
             let (kind, team) = (unit.kind, unit.team);
@@ -1295,7 +1379,7 @@ impl World {
                 while let Some(c) = mine.get(next_cmd)
                     && SimTime::at(k, c.sub) == t
                 {
-                    apply_command(unit, c, t, map, events);
+                    apply_command(unit, c, t, map, &rules, events);
                     next_cmd += 1;
                 }
                 if t >= s1 {
@@ -1621,7 +1705,7 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
     }
 }
 
-fn apply_command(unit: &mut Unit, c: &Command, t: SimTime, map: &Map, events: &mut Vec<SimEvent>) {
+fn apply_command(unit: &mut Unit, c: &Command, t: SimTime, map: &Map, rules: &Rules, events: &mut Vec<SimEvent>) {
     let st = &mut unit.state;
     match c.kind {
         CommandKind::MoveTo(q) => {
@@ -1658,6 +1742,61 @@ fn apply_command(unit: &mut Unit, c: &Command, t: SimTime, map: &Map, events: &m
                 p.points -= 1;
             }
         }
+        CommandKind::Buy(_) | CommandKind::Sell(_) | CommandKind::Undo => shop(unit, c.kind, map, rules),
+    }
+}
+
+/// Whether `unit` may shop now (01 §11, ARAM rule 06 §2): ranked matches only, while dead or
+/// inside its own fountain.
+pub fn can_shop(unit: &Unit, map: &Map, rules: &Rules) -> bool {
+    rules.ranked
+        && unit.kind == UnitKind::Champion
+        && (!unit.state.alive()
+            || map.layout.fountains[unit.team as usize].is_some_and(|(c, r)| (unit.state.pos - c).length() <= r))
+}
+
+/// Buy or sell (stats follow at the next tick's recompute). Invalid requests do nothing.
+fn shop(unit: &mut Unit, kind: CommandKind, map: &Map, rules: &Rules) {
+    if !matches!(kind, CommandKind::Buy(_) | CommandKind::Sell(_) | CommandKind::Undo) || !can_shop(unit, map, rules) {
+        return;
+    }
+    let p = &mut unit.state.progress;
+    match kind {
+        CommandKind::Buy(id) => {
+            let (Some(item), Some((cost, used))) = (items::item(id), items::price(id, &p.items)) else { return };
+            let mut inv = p.items;
+            for s in used {
+                inv[s] = 0;
+            }
+            // One pair of boots; a free slot once the components are gone.
+            let boots = inv.iter().any(|i| items::item(*i).is_some_and(|i| i.boots));
+            let Some(slot) = inv.iter().position(|i| *i == 0) else { return };
+            if cost > p.gold || (item.boots && boots) {
+                return;
+            }
+            inv[slot] = id;
+            p.push_trade(Trade { items: p.items, gold: -cost });
+            p.items = inv;
+            p.gold -= cost;
+        }
+        CommandKind::Sell(slot) => {
+            let before = p.items;
+            if let Some(i) = p.items.get_mut(slot as usize)
+                && let Some(item) = items::item(*i)
+            {
+                let refund = item.cost * items::SELL_REFUND;
+                *i = 0;
+                p.gold += refund;
+                p.push_trade(Trade { items: before, gold: refund });
+            }
+        }
+        CommandKind::Undo if p.undo_len > 0 => {
+            p.undo_len -= 1;
+            let t = p.undo[p.undo_len as usize];
+            p.items = t.items;
+            p.gold -= t.gold;
+        }
+        _ => {}
     }
 }
 
@@ -1665,7 +1804,7 @@ fn apply_command(unit: &mut Unit, c: &Command, t: SimTime, map: &Map, events: &m
 /// areas wind up (rooted); dashes, blinks and shields take effect at once.
 fn try_cast(unit: &mut Unit, slot: u8, target: Vec2, t: SimTime, seq: u32, map: &Map, events: &mut Vec<SimEvent>) {
     let Some(ability) = unit.ability(slot) else { return };
-    let (id, radius) = (unit.id, unit.collision_radius);
+    let (id, radius, haste) = (unit.id, unit.collision_radius, unit.stats.ability_haste);
     let st = &mut unit.state;
     if !st.can_cast(t, slot) {
         return;
@@ -1721,7 +1860,12 @@ fn try_cast(unit: &mut Unit, slot: u8, target: Vec2, t: SimTime, seq: u32, map: 
         }
     }
     let rank = st.progress.ranks.get(slot as usize).copied().unwrap_or(1);
-    st.cooldowns[slot as usize] = t.plus(ability.cooldown_at(rank));
+    let mut cooldown = ability.cooldown_at(rank);
+    if slot < 4 && haste > 0.0 {
+        // Ability haste (02 §8) shortens Q W E R, not utility spells; whole sub-ticks.
+        cooldown = SimDuration((cooldown.0 as f64 * 100.0 / (100.0 + haste as f64)).round() as u64);
+    }
+    st.cooldowns[slot as usize] = t.plus(cooldown);
 }
 
 /// Where a blink toward `dir` lands: the farthest walkable, in-bounds point on the line, so a
@@ -1811,6 +1955,7 @@ fn resolve_effects(
         }
         false
     });
+    let mut landed: Vec<(UnitId, UnitId, f32, SimTime)> = Vec::new();
     bolts.retain_mut(|b| {
         let Some(target) = units.iter_mut().find(|u| u.id == b.target && u.targetable()) else {
             events.push(SimEvent::AttackLanded { id: b.id, target: b.target, at: s1, hit: false });
@@ -1824,18 +1969,52 @@ fn resolve_effects(
         if gap <= step {
             let at = SimTime(from.0 + (gap / b.speed * SUBTICKS_PER_SECOND as f32) as u64).min(s1);
             events.push(SimEvent::AttackLanded { id: b.id, target: b.target, at, hit: true });
-            deal_damage(target, b.owner, b.power, b.kind, at, events);
+            let dealt = deal_damage(target, b.owner, b.power, b.kind, at, events);
+            landed.push((b.owner, b.target, dealt, at));
             return false;
         }
         b.pos += to.normalize_or_zero() * step;
         true
     });
+    on_hit(units, &landed, events);
+}
+
+/// Item effects of landed basic attacks: on-hit magic damage, then life steal on the attack's
+/// damage (02 §10 order).
+fn on_hit(units: &mut [Unit], landed: &[(UnitId, UnitId, f32, SimTime)], events: &mut Vec<SimEvent>) {
+    for &(owner, target, dealt, at) in landed {
+        let Some(o) = units.iter().find(|u| u.id == owner && u.kind == UnitKind::Champion) else { continue };
+        let (passives, stats) = (items::passives(&o.state.progress.items), o.stats);
+        if let Some((base, ap_ratio)) = passives.on_hit_magic
+            && let Some(t) = units.iter_mut().find(|u| u.id == target)
+        {
+            deal_damage(t, owner, base + ap_ratio * stats.ability_power, DamageKind::Magic, at, events);
+        }
+        if stats.life_steal > 0.0
+            && dealt > 0.0
+            && let Some(o) = units.iter_mut().find(|u| u.id == owner && u.state.alive())
+        {
+            let amount = (stats.life_steal * dealt).min(o.stats.max_health - o.state.health);
+            if amount > 0.0 {
+                o.state.health += amount;
+                events.push(SimEvent::Healed { unit: owner, amount, at });
+            }
+        }
+    }
 }
 
 /// The damage pipeline (02 §5), M1 subset: resistance mitigation, shields, health, death.
-fn deal_damage(u: &mut Unit, source: UnitId, raw: f32, kind: DamageKind, at: SimTime, events: &mut Vec<SimEvent>) {
+/// Returns the damage dealt (shields included).
+fn deal_damage(
+    u: &mut Unit,
+    source: UnitId,
+    raw: f32,
+    kind: DamageKind,
+    at: SimTime,
+    events: &mut Vec<SimEvent>,
+) -> f32 {
     if raw <= 0.0 || !u.targetable() {
-        return;
+        return 0.0;
     }
     let resist = match kind {
         DamageKind::Physical => u.stats.armor,
@@ -1852,6 +2031,19 @@ fn deal_damage(u: &mut Unit, source: UnitId, raw: f32, kind: DamageKind, at: Sim
     }
     st.health -= amount;
     events.push(SimEvent::Damage { source, target: u.id, kind, amount, absorbed, at });
+    let dealt = amount + absorbed;
+    if st.health > 0.0
+        && u.kind == UnitKind::Champion
+        && let Some((shield, threshold, duration_ms, cooldown_ms)) = items::passives(&st.progress.items).lifeline
+        && st.health < threshold * u.stats.max_health
+        && st.progress.lifeline_ready <= at
+    {
+        // Lifeline (item passive): a shield when dropping low, on a long cooldown.
+        st.shield = if st.shield_until > at { st.shield + shield } else { shield };
+        st.shield_until = st.shield_until.max(at.plus(SimDuration::from_millis(duration_ms)));
+        st.progress.lifeline_ready = at.plus(SimDuration::from_millis(cooldown_ms));
+        events.push(SimEvent::Shielded { unit: u.id, amount: shield, at, until: st.shield_until });
+    }
     if st.health <= 0.0 {
         let respawn_at = match u.kind {
             UnitKind::Champion => at.plus(respawn_time(st.progress.level)),
@@ -1863,6 +2055,7 @@ fn deal_damage(u: &mut Unit, source: UnitId, raw: f32, kind: DamageKind, at: Sim
             UnitState { respawn_at: Some(respawn_at), progress: st.progress, ..UnitState::new(st.pos, st.move_speed) };
         events.push(SimEvent::Died { unit: u.id, killer: source, at, respawn_at });
     }
+    dealt
 }
 
 /// After this tick's effects: remember champion-on-champion attacks (turrets and minions answer
@@ -2848,6 +3041,140 @@ mod tests {
         assert_eq!(w.unit(me).unwrap().state.cooldowns[0], SimTime::at(Tick(5), SubTick::START).plus(q.cooldown_at(2)));
     }
 
+    fn shop(player: u8, seq: u32, tick: u32, kind: CommandKind) -> Command {
+        Command { player: PlayerId(player), seq, tick: Tick(tick), sub: SubTick::START, kind }
+    }
+
+    /// M2 slice 3: buying only in the own fountain or while dead; recipes consume components
+    /// and cost the difference; selling refunds 70%; stats follow the next tick.
+    #[test]
+    fn shopping_follows_the_fountain_rule_and_recipes() {
+        use crate::items::*;
+        let mut w = ranked_world();
+        w.set_map(MapId::Bridge.shared());
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(400.0, 1500.0));
+        let ad = w.unit(me).unwrap().stats.attack_damage;
+        w.step(&[shop(0, 1, 1, CommandKind::Buy(LONG_KNIFE))]);
+        w.step(&[]);
+        let u = w.unit(me).unwrap();
+        assert_eq!(u.stats.attack_damage, ad + 10.0);
+        assert!((u.state.progress.gold - (1400.0 + 2.0 * 4.0 * TICK_DT - 350.0)).abs() < 1e-3);
+        let gold = u.state.progress.gold;
+        w.step(&[shop(0, 2, 3, CommandKind::Buy(LEECH_FANG)), shop(0, 3, 3, CommandKind::Buy(GRAND_GRIMOIRE))]);
+        let p = w.unit(me).unwrap().state.progress;
+        assert_eq!(p.items, [LEECH_FANG, 0, 0, 0, 0, 0], "the knife went into the fang; no gold for the grimoire");
+        assert!((p.gold - (gold + 4.0 * TICK_DT - 550.0)).abs() < 1e-3);
+        // Out of the fountain: no shopping. Dead: shopping again.
+        w.unit_mut(me).unwrap().state.pos = Vec2::new(3000.0, 1500.0);
+        w.step(&[shop(0, 4, 4, CommandKind::Sell(0)), shop(0, 5, 4, CommandKind::Buy(BOOTS))]);
+        assert_eq!(w.unit(me).unwrap().state.progress.items, [LEECH_FANG, 0, 0, 0, 0, 0]);
+        w.unit_mut(me).unwrap().state.respawn_at = Some(SimTime::end_of(Tick(200)));
+        let gold = w.unit(me).unwrap().state.progress.gold;
+        w.step(&[shop(0, 6, 5, CommandKind::Sell(0)), shop(0, 7, 5, CommandKind::Buy(BOOTS))]);
+        w.step(&[shop(0, 8, 6, CommandKind::Buy(SAGE_BOOTS)), shop(0, 9, 6, CommandKind::Buy(BOOTS))]);
+        let p = w.unit(me).unwrap().state.progress;
+        assert_eq!(p.items, [SAGE_BOOTS, 0, 0, 0, 0, 0], "boots upgrade; a second pair is refused");
+        let expect = gold + 2.0 * 4.0 * TICK_DT + 900.0 * SELL_REFUND - 300.0 - 650.0;
+        assert!((p.gold - expect).abs() < 1e-3, "{} vs {expect}", p.gold);
+        // Undo walks the trades back (boots upgrade, boots, the sale), not the refused ones.
+        assert_eq!(p.undo_len, 3);
+        w.step(&[shop(0, 10, 7, CommandKind::Undo), shop(0, 11, 7, CommandKind::Undo)]);
+        let q = w.unit(me).unwrap().state.progress;
+        assert_eq!(q.items, [0; INVENTORY]);
+        assert!((q.gold - (p.gold + 4.0 * TICK_DT + 950.0)).abs() < 1e-3);
+        w.step(&[shop(0, 12, 8, CommandKind::Undo), shop(0, 13, 8, CommandKind::Undo)]);
+        let q = w.unit(me).unwrap().state.progress;
+        assert_eq!((q.items, q.undo_len), ([LEECH_FANG, 0, 0, 0, 0, 0], 0), "the sale undone; nothing more");
+        // Trades are final once the shop closes.
+        w.step(&[shop(0, 14, 9, CommandKind::Sell(0))]);
+        assert_eq!(w.unit(me).unwrap().state.progress.undo_len, 1);
+        w.unit_mut(me).unwrap().state.respawn_at = None;
+        w.step(&[]);
+        w.step(&[shop(0, 15, 11, CommandKind::Undo)]);
+        let q = w.unit(me).unwrap().state.progress;
+        assert_eq!((q.items, q.undo_len), ([0; INVENTORY], 0));
+        // Not ranked: no shop at all.
+        let mut sandbox = World::new(3);
+        let me = sandbox.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(400.0, 1500.0));
+        sandbox.unit_mut(me).unwrap().state.progress.gold = 5000.0;
+        sandbox.step(&[shop(0, 1, 1, CommandKind::Buy(LONG_KNIFE))]);
+        assert_eq!(sandbox.unit(me).unwrap().state.progress.items, [0; INVENTORY]);
+    }
+
+    /// Item stats and passives change combat numbers exactly (02 §5, §7, §8, §10): flat AD,
+    /// attack speed into the attack period, life steal, on-hit magic, ability haste, Lifeline.
+    #[test]
+    fn items_change_combat_numbers_exactly() {
+        use crate::items::*;
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, Vec2::new(1500.0, 1000.0));
+        {
+            let u = w.unit_mut(me).unwrap();
+            u.state.progress.items = [LEECH_FANG, QUICK_DAGGER, ARC_TEMPEST, 0, 0, 0];
+            u.state.health = 300.0;
+        }
+        w.step(&[]);
+        let u = w.unit(me).unwrap();
+        assert_eq!(u.stats.attack_damage, 66.0 + 15.0);
+        assert_eq!(u.stats.ability_power, 50.0);
+        let spec = u.attack.unwrap();
+        assert!((spec.attack_speed - 0.8 * (1.0 + 0.12 + 0.40)).abs() < 1e-6);
+        assert_eq!(spec.period(), SimDuration((1920.0f32 / spec.attack_speed).round() as u64));
+        w.step(&[attack(0, 1, 2, enemy)]);
+        let ev = run_until_quiet(&mut w, 120);
+        let hits: Vec<(DamageKind, f32)> = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::Damage { target, kind, amount, .. } if *target == enemy => Some((*kind, *amount)),
+                _ => None,
+            })
+            .collect();
+        let physical = 81.0 * 100.0 / 122.0;
+        let magic = (15.0 + 0.15 * 50.0) * 100.0 / 130.0;
+        assert!(hits.len() >= 6, "{hits:?}");
+        for pair in hits.chunks(2) {
+            assert_eq!(pair[0].0, DamageKind::Physical);
+            assert!((pair[0].1 - physical).abs() < 1e-3, "{pair:?}");
+            assert_eq!(pair[1].0, DamageKind::Magic);
+            assert!((pair[1].1 - magic).abs() < 1e-3, "{pair:?}");
+        }
+        let heals: Vec<f32> = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::Healed { unit, amount, .. } if *unit == me => Some(*amount),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(heals.len(), hits.len() / 2);
+        assert!(heals.iter().all(|h| (h - 0.07 * physical).abs() < 1e-3), "life steal on the attack: {heals:?}");
+
+        // Haste: Ember's Q with a Focus Charm (10 haste) recharges in 100/110 of the time.
+        let mut w = World::new(1);
+        let ember = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, Vec2::new(1000.0, 1000.0));
+        w.unit_mut(ember).unwrap().state.progress.items[0] = FOCUS_CHARM;
+        w.step(&[]);
+        w.step(&[cast(0, 1, 2, 0, (2000.0, 1000.0))]);
+        let q = EMBER.abilities[0].cooldown_at(1);
+        let expect = SimDuration((q.0 as f64 * 100.0 / 110.0).round() as u64);
+        assert_eq!(w.unit(ember).unwrap().state.cooldowns[0], SimTime::at(Tick(2), SubTick::START).plus(expect));
+
+        // Lifeline: dropping under 30% grants 250 shield once, then it is on cooldown.
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Vesper, Vec2::new(1500.0, 1000.0));
+        w.unit_mut(me).unwrap().state.progress.items[0] = LIFELINE_TALISMAN;
+        w.step(&[]);
+        let max = w.unit(me).unwrap().stats.max_health;
+        assert_eq!(max, 620.0 + 400.0);
+        w.unit_mut(me).unwrap().state.health = 0.3 * max + 20.0;
+        w.step(&[attack(1, 1, 2, me)]);
+        let ev = run_until_quiet(&mut w, 150);
+        let shields: Vec<&SimEvent> = ev.iter().filter(|e| matches!(e, SimEvent::Shielded { .. })).collect();
+        assert_eq!(shields.len(), 1, "{shields:?}");
+        assert!(matches!(shields[0], SimEvent::Shielded { unit, amount, .. } if *unit == me && *amount == 250.0));
+    }
+
     #[test]
     fn last_hits_pay_gold_and_nearby_champions_share_experience() {
         let mut w = ranked_world();
@@ -3007,7 +3334,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0xc715_76ec_c30c_f52b;
+    const GOLDEN_HASH_ARENA: u64 = 0x5bab_9cc6_febc_de8b;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -3035,9 +3362,13 @@ mod tests {
                     seq += 1;
                     let t = (rng.range_f32(3000.0, 9000.0), rng.range_f32(900.0, 2100.0));
                     let sub = (rng.next_u32() % SUBTICKS as u32) as u8;
-                    cmds.push(match rng.next_u32() % 5 {
+                    cmds.push(match rng.next_u32() % 7 {
                         0 => cast_slot(p, seq, k, sub, (rng.next_u32() % 4) as u8, t),
                         4 => level_up(p, seq, k, (rng.next_u32() % 4) as u8),
+                        // Shopping works while dead (and in the fountain): items, recipes and
+                        // their stats and passives are part of the canary.
+                        5 => shop(p, seq, k, CommandKind::Buy(1 + (rng.next_u32() % 26) as u8)),
+                        6 => shop(p, seq, k, CommandKind::Undo),
                         1 => Command {
                             kind: CommandKind::AttackMove(QPoint::from_vec2(Vec2::new(t.0, t.1))),
                             ..cmd(p, seq, k, sub, t)
@@ -3053,10 +3384,12 @@ mod tests {
         let levels: Vec<u8> =
             w.units().iter().filter(|u| u.kind == UnitKind::Champion).map(|u| u.state.progress.level).collect();
         assert!(levels.iter().all(|l| *l > 3), "experience should level everyone: {levels:?}");
+        let owned: usize = w.units().iter().map(|u| u.state.progress.items.iter().filter(|i| **i != 0).count()).sum();
+        assert!(owned >= 4, "champions should have bought items: {owned}");
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x883f_1ed3_1548_44aa;
+    const GOLDEN_HASH_BRIDGE: u64 = 0xd1ec_f29e_23bd_88c6;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -3127,5 +3460,5 @@ mod tests {
 
     /// Recorded on x86_64-unknown-linux-gnu (debug and release agree). CI checks Linux, macOS
     /// (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x58f1_c35d_a88f_4ed7;
+    const GOLDEN_HASH: u64 = 0x8ca6_19c3_d4eb_3d77;
 }

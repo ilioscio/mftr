@@ -133,6 +133,8 @@ pub struct Summary {
     /// Per client (duel): confirmed kills, deaths and damage dealt; level and gold at the end.
     pub levels: Vec<u8>,
     pub gold: Vec<f32>,
+    /// Items held at the end (per client).
+    pub items: Vec<usize>,
     pub kills: Vec<u64>,
     pub deaths: Vec<u64>,
     pub damage_dealt: Vec<f64>,
@@ -190,6 +192,10 @@ impl Summary {
             }),
             levels: sessions.iter().map(|(s, _)| s.own_state_now().map_or(0, |st| st.progress.level)).collect(),
             gold: sessions.iter().map(|(s, _)| s.own_state_now().map_or(0.0, |st| st.progress.gold)).collect(),
+            items: sessions
+                .iter()
+                .map(|(s, _)| s.own_state_now().map_or(0, |st| st.progress.items.iter().filter(|i| **i != 0).count()))
+                .collect(),
             kills: sessions.iter().map(|(s, _)| s.stats.kills).collect(),
             deaths: sessions.iter().map(|(s, _)| s.stats.deaths).collect(),
             damage_dealt: sessions.iter().map(|(s, _)| s.stats.damage_dealt).collect(),
@@ -222,10 +228,11 @@ impl Summary {
 
     pub fn duel_row(&self) -> String {
         format!(
-            "{:<10} levels {:?}  gold {:?}  kills {:?}  deaths {:?}  damage dealt {:?}  matches won/lost by clients {}/{}",
+            "{:<10} levels {:?}  gold {:?}  items {:?}  kills {:?}  deaths {:?}  damage dealt {:?}  matches won/lost by clients {}/{}",
             self.label,
             self.levels,
             self.gold.iter().map(|g| g.round() as i64).collect::<Vec<_>>(),
+            self.items,
             self.kills,
             self.deaths,
             self.damage_dealt.iter().map(|d| d.round() as i64).collect::<Vec<_>>(),
@@ -292,6 +299,48 @@ pub struct DuelBot {
     reaction: f64,
     next_think: f64,
     dodged: std::collections::BTreeSet<u32>,
+    /// Next step of the build path, and when shopping may be tried again.
+    build: usize,
+    next_shop: f64,
+}
+
+/// Bot build paths (components first, so recipes discount them).
+fn build_path(champion: mftr_sim::ChampionId) -> &'static [u8] {
+    use mftr_sim::items::*;
+    match champion {
+        mftr_sim::ChampionId::Ember => &[
+            BOOTS,
+            CHARGED_WAND,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            INFERNO_DIADEM,
+            SAGE_BOOTS,
+            CHARGED_WAND,
+            CHARGED_WAND,
+            GRAND_GRIMOIRE,
+            WARDING_CLOAK,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            WARDSTONE_MANTLE,
+        ],
+        mftr_sim::ChampionId::Vesper => &[
+            BOOTS,
+            LONG_KNIFE,
+            LEECH_FANG,
+            HEAVY_PICK,
+            CRIMSON_FANG,
+            QUICK_DAGGER,
+            BATTLE_BOOTS,
+            HEAVY_PICK,
+            QUICK_DAGGER,
+            ARC_BOW,
+            GALE_SABER,
+            VITAL_CRYSTAL,
+            TITAN_BELT,
+            HEAVY_PICK,
+            LIFELINE_TALISMAN,
+        ],
+    }
 }
 
 impl DuelBot {
@@ -301,7 +350,24 @@ impl DuelBot {
             reaction,
             next_think: 0.5,
             dodged: Default::default(),
+            build: 0,
+            next_shop: 0.0,
         }
+    }
+
+    /// Follow the build path while the shop is open (dead or in the fountain).
+    fn shop(&mut self, session: &mut ClientSession, p: &mftr_sim::world::Progress, now: f64, elapsed: f64) -> bool {
+        let path = build_path(session.champion());
+        while self.build < path.len() && p.items.contains(&path[self.build]) {
+            self.build += 1;
+        }
+        let Some(&next) = path.get(self.build) else { return false };
+        if elapsed < self.next_shop || !session.can_shop() {
+            return false;
+        }
+        self.next_shop = elapsed + 0.25;
+        let affordable = mftr_sim::items::price(next, &p.items).is_some_and(|(cost, _)| cost <= p.gold);
+        affordable && session.buy(next, now).is_some()
     }
 
     fn clamp(session: &ClientSession, p: mftr_sim::Vec2) -> mftr_sim::Vec2 {
@@ -317,6 +383,9 @@ impl DuelBot {
         else {
             return false;
         };
+        if self.shop(session, &st.progress, now, elapsed) {
+            return true;
+        }
         if !st.alive() {
             return false;
         }

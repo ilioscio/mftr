@@ -202,6 +202,28 @@ A lossy-link lab test (120 ms, 2% loss) checks every reconstructed snapshot agai
 
 **Netcode Lab, ARAM 3v3, 15 min:** bots reach levels 9–15 and 10–15k gold, with 0 ghost hits, 0 fog leaks and 0 hard resets. Gold piles up until the shop exists (slice 3).
 
+### M2 slice 3 status (2026-10-06): ✅ done
+
+- **26 items** (D35, `mftr-sim/items.rs`), all original:
+  - Components: Long Knife, Spark Shard, Vital Crystal, Padded Vest, Warding Cloak, Quick Dagger, Boots, Focus Charm, Heavy Pick, Charged Wand.
+  - Upgrades: Titan Belt, Leech Fang, Arc Bow, Chain Coat.
+  - Boots upgrades: Swift, Battle and Sage Boots.
+  - Legendaries: Inferno Diadem, Grand Grimoire (+35% AP), Crimson Fang, Heartstone, Bramble Plate, Wardstone Mantle, Arc Tempest (on-hit magic), Gale Saber, Lifeline Talisman (a shield when low).
+- **Stat stack** (02 §10): level stats, then flat item bonuses, then percent bonuses, then caps. New stats: ability haste (Q W E R cooldowns × 100 / (100 + haste)), life steal on basic attacks, bonus attack speed (into the attack period, capped at 2.5/s), flat and percent move speed (soft-capped).
+- **Shop:** six inventory slots in the progression state, so items survive death and prediction handles them like any other state. `Buy`, `Sell` and `Undo` commands are predicted. The shop works only in ranked matches, while dead or inside your fountain. Recipes use owned components and cost the difference. Selling refunds 70%, and the last 4 trades can be undone until you leave.
+- Protocol v10 (4-bit command kinds). Godot client: a shop panel on **P** (grouped by tier, price after owned components, a stats line, click an inventory slot to sell, Undo) and an inventory strip next to the ability bar. Bots follow a build path per champion whenever they respawn.
+
+**Tests:**
+- 02 §10 golden case: flat AP before Grand Grimoire's +35%.
+- Attack speed cap; boots don't stack.
+- Recipe discounts.
+- Fountain/death shop rule, refunds and undo.
+- Exact damage per hit with AD items and Arc Tempest's on-hit magic.
+- Life steal amounts; the attack period follows bonus attack speed; haste on cooldowns; Lifeline fires once.
+- The Bridge golden hash now includes random purchases and undos.
+
+**Netcode Lab, ARAM 3v3, 5 min:** bots hold 2–4 items each, with 0 ghost hits, 0 fog leaks and 0 hard resets on every profile. Corrections are in line with the previous build.
+
 ## M3 — ARAM: Mayhem
 - Augment draft system with ~60 augments across tiers and archetypes (rule breakers, size, ability transformers, quests, spell replacements).
 - Delivery transformers, batched projectile spawns, size scaling with honest hitboxes.

@@ -9,6 +9,7 @@ use mftr_client::blind::{BlindPlan, BlindRating, BlindRecord, RoundStats, TSV_HE
 use mftr_client::{ClientSession, Notice, OwnMissileDisplay, Phase, Side};
 use mftr_net::conditioner::{LinkProfile, SimLink};
 use mftr_sim::ability::{DamageKind, SLOTS};
+use mftr_sim::items::{self, INVENTORY};
 use mftr_sim::{ChampionId, Team, UnitId, UnitKind, Vec2};
 use std::net::UdpSocket;
 use std::time::Instant;
@@ -240,6 +241,75 @@ impl MatchClient {
         }
     }
 
+    /// Buy an item by id (see `shop_catalog`).
+    #[func]
+    fn buy(&mut self, item: i64) {
+        let now = self.now();
+        if (1..256).contains(&item) && self.session.buy(item as u8, now).is_some() {
+            self.send_input(now);
+        }
+    }
+
+    /// Sell the item in inventory slot 0–5.
+    #[func]
+    fn sell(&mut self, slot: i64) {
+        let now = self.now();
+        if (0..INVENTORY as i64).contains(&slot) && self.session.sell(slot as u8, now).is_some() {
+            self.send_input(now);
+        }
+    }
+
+    /// Every item: `{ id, name, cost, price (with owned components), tier, stats (text),
+    /// recipe (ids), affordable, owned }`, in catalog order.
+    #[func]
+    fn shop_catalog(&self) -> VarArray {
+        let mut out = VarArray::new();
+        let p = self.session.own_state_now().map(|s| s.progress);
+        for it in items::CATALOG.iter() {
+            let inv = p.map_or([0; INVENTORY], |p| p.items);
+            let price = items::price(it.id, &inv).map_or(it.cost, |(c, _)| c);
+            let mut d = VarDictionary::new();
+            d.set("id", it.id as i64);
+            d.set("name", it.name);
+            d.set("cost", it.cost as i64);
+            d.set("price", price as i64);
+            // 0 = component, 1 = upgraded component or boots, 2 = legendary.
+            let tier = if it.recipe.is_empty() {
+                0
+            } else if it.cost >= 2500.0 {
+                2
+            } else {
+                1
+            };
+            d.set("tier", tier as i64);
+            d.set("stats", item_text(it).as_str());
+            let mut recipe = VarArray::new();
+            for r in it.recipe {
+                recipe.push(&(*r as i64).to_variant());
+            }
+            d.set("recipe", &recipe);
+            d.set("affordable", p.is_some_and(|p| p.gold >= price));
+            d.set("owned", inv.contains(&it.id));
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// Undo the last buy or sell while the shop is open.
+    #[func]
+    fn undo_trade(&mut self) {
+        let now = self.now();
+        if self.session.undo_trade(now).is_some() {
+            self.send_input(now);
+        }
+    }
+
+    /// Whether buying and selling works right now (dead or in the own fountain, ranked).
+    #[func]
+    fn can_shop(&self) -> bool {
+        self.session.can_shop()
+    }
+
     /// Basic-attack a unit by id (chases it into range).
     #[func]
     fn attack_unit(&mut self, id: i64) {
@@ -428,7 +498,21 @@ impl MatchClient {
         d.set("abilities", &names);
         if let (Some(s), Some(t)) = (self.session.own_state_now(), self.session.input_sim_time(now)) {
             d.set("health", s.health);
-            d.set("max_health", champ.def().stats_at(s.progress.level).max_health);
+            let (stats, attack) = items::champion_stats(champ.def(), s.progress.level, &s.progress.items);
+            d.set("max_health", stats.max_health);
+            d.set("attack_damage", stats.attack_damage);
+            d.set("ability_power", stats.ability_power);
+            d.set("armor", stats.armor);
+            d.set("magic_resist", stats.magic_resist);
+            d.set("attack_speed", attack.attack_speed);
+            d.set("move_speed", stats.move_speed);
+            d.set("ability_haste", stats.ability_haste);
+            let mut inv = VarArray::new();
+            for i in s.progress.items {
+                inv.push(&(i as i64).to_variant());
+            }
+            d.set("items", &inv);
+            d.set("can_undo", s.progress.undo_len > 0);
             d.set("shield", if s.shield_until > t { s.shield } else { 0.0 });
             d.set("dead", !s.alive());
             d.set("respawn_in", s.respawn_at.map_or(0.0, |r| r.secs_since(t)));
@@ -672,4 +756,44 @@ impl MatchClient {
             _ => {}
         }
     }
+}
+
+/// One line describing an item's bonuses and passive.
+fn item_text(it: &items::Item) -> String {
+    let b = &it.bonus;
+    let mut parts: Vec<String> = Vec::new();
+    let mut flat = |v: f32, name: &str| {
+        if v != 0.0 {
+            parts.push(format!("+{v} {name}"));
+        }
+    };
+    flat(b.health, "HP");
+    flat(b.health_regen, "HP/s");
+    flat(b.armor, "armor");
+    flat(b.magic_resist, "MR");
+    flat(b.attack_damage, "AD");
+    flat(b.ability_power, "AP");
+    flat(b.ability_haste, "haste");
+    flat(b.move_speed, "MS");
+    let mut pct = |v: f32, name: &str| {
+        if v != 0.0 {
+            parts.push(format!("+{}% {name}", (v * 100.0).round()));
+        }
+    };
+    pct(b.attack_speed, "AS");
+    pct(b.life_steal, "life steal");
+    pct(b.move_speed_pct, "MS");
+    pct(b.ability_power_pct, "AP");
+    match it.passive {
+        items::Passive::OnHitMagic { base, ap_ratio } => {
+            parts.push(format!("attacks deal {base} + {}% AP magic", (ap_ratio * 100.0).round()))
+        }
+        items::Passive::Lifeline { shield, threshold, cooldown_ms, .. } => parts.push(format!(
+            "{shield} shield below {}% HP ({} s cooldown)",
+            (threshold * 100.0).round(),
+            cooldown_ms / 1000
+        )),
+        items::Passive::None => {}
+    }
+    parts.join(", ")
 }

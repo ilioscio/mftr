@@ -61,6 +61,10 @@ pub struct Stats {
     pub attack_damage: f32,
     pub ability_power: f32,
     pub move_speed: f32,
+    /// Ability haste (items): cooldowns × 100 / (100 + haste) (02 §8).
+    pub ability_haste: f32,
+    /// Share of basic-attack damage dealt returned as health (items).
+    pub life_steal: f32,
 }
 
 impl Stats {
@@ -73,6 +77,8 @@ impl Stats {
         attack_damage: 0.0,
         ability_power: 0.0,
         move_speed: 0.0,
+        ability_haste: 0.0,
+        life_steal: 0.0,
     };
 }
 
@@ -123,6 +129,8 @@ impl ChampionDef {
             attack_damage: at(b.attack_damage, g.attack_damage),
             ability_power: at(b.ability_power, g.ability_power),
             move_speed: b.move_speed,
+            ability_haste: 0.0,
+            life_steal: 0.0,
         }
     }
 }
@@ -142,6 +150,8 @@ const fn growth(health: f32, armor: f32, magic_resist: f32, attack_damage: f32) 
         attack_damage,
         ability_power: 0.0,
         move_speed: 0.0,
+        ability_haste: 0.0,
+        life_steal: 0.0,
     }
 }
 
@@ -163,6 +173,8 @@ pub const EMBER: ChampionDef = ChampionDef {
         attack_damage: 50.0,
         ability_power: 80.0,
         move_speed: 325.0,
+        ability_haste: 0.0,
+        life_steal: 0.0,
     },
     growth: growth(90.0, 4.2, 1.3, 3.0),
     attack: AttackSpec { range: 525.0, attack_speed: 0.65, windup_fraction: 0.2, bolt_speed: 1600.0 },
@@ -228,6 +240,8 @@ pub const VESPER: ChampionDef = ChampionDef {
         attack_damage: 66.0,
         ability_power: 0.0,
         move_speed: 325.0,
+        ability_haste: 0.0,
+        life_steal: 0.0,
     },
     growth: growth(96.0, 4.4, 1.3, 3.2),
     attack: AttackSpec { range: 575.0, attack_speed: 0.8, windup_fraction: 0.18, bolt_speed: 2200.0 },

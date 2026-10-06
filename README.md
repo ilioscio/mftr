@@ -41,12 +41,13 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The server star
 | Q W E R | Abilities, cast at the cursor (skillshot, delayed area, dash or blink, hard-CC skillshot) |
 | D / F | Blink / Barrier |
 | Ctrl + Q / W / E / R | Spend an ability point (ARAM) |
+| P | Shop (ARAM: buy while dead or in your fountain) |
 | S | Stop |
 | F1 / F2 | Net graph / client collision proxies (to feel the difference) |
 
 **Blind playtest** (helps us tune netcode against how it *feels*): start the client with `godot --path client -- --blind` (add a server address if it isn't local). You'll play 10 one-minute rounds under hidden network conditions and rate each one. Your answers go to `blind_results.tsv` in Godot's user data folder (the path is shown at the end). Send us that file; `mftr-tools blind-report blind_results.tsv` summarizes it.
 
-**ARAM on The Bridge** (M2, in progress): start the server with `--scenario aram`. You get one lane with turrets, a Gatehouse and a Base per team, minion waves every 30 s, health relics and a fountain; destroy the enemy Base to win. Bots (`mftr-tools bot --duel`) also play it, though not well yet.
+**ARAM on The Bridge** (M2, in progress): start the server with `--scenario aram`. You get one lane with turrets, a Gatehouse and a Base per team, minion waves every 30 s, health relics and a fountain; destroy the enemy Base to win. You start at level 3 with 1,400 gold: press **P** in the fountain to shop. Bots (`mftr-tools bot --duel`) also play it, though not well yet.
 
 No one to duel? Start a sparring bot: `cargo run --release -p mftr-tools -- bot --server 127.0.0.1:7777 --duel --seconds 600`. Other scenarios: `--scenario aram` (see above), `--scenario minions` (minion-block sandbox), `--scenario dodge` (turrets that fire skillshots at you) and `--scenario empty`. To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
 

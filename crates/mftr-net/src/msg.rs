@@ -8,8 +8,9 @@ use crate::bits::{BitReader, BitWriter, DecodeError};
 use crate::delta::{self, UnitUpdate};
 use crate::packet::PacketHeader;
 use mftr_sim::ability::{Cc, Damage, DamageKind, LineSkillshot, SLOTS};
+use mftr_sim::items::INVENTORY;
 use mftr_sim::map::MapId;
-use mftr_sim::world::{MAX_PATH, Path, Progress, Rules};
+use mftr_sim::world::{MAX_PATH, Path, Progress, Rules, Trade, UNDO};
 use mftr_sim::{
     Area, AttackWindup, Bolt, Cast, ChampionId, Command, CommandKind, DashMove, Missile, Order, PlayerId, QPoint,
     SimDuration, SimEvent, SimTime, SubTick, Team, Tick, UnitId, UnitKind, UnitState, Vec2,
@@ -166,27 +167,36 @@ fn write_command(w: &mut BitWriter, c: &Command) {
     w.write(c.sub.get() as u64, 6);
     match c.kind {
         CommandKind::MoveTo(q) => {
-            w.write(0, 3);
+            w.write(0, 4);
             write_qpoint(w, q);
         }
-        CommandKind::Stop => w.write(1, 3),
+        CommandKind::Stop => w.write(1, 4),
         CommandKind::Cast { slot, target } => {
-            w.write(2, 3);
+            w.write(2, 4);
             w.write(slot as u64, 3);
             write_qpoint(w, target);
         }
         CommandKind::Attack(id) => {
-            w.write(3, 3);
+            w.write(3, 4);
             w.write_u32(id.0);
         }
         CommandKind::AttackMove(q) => {
-            w.write(4, 3);
+            w.write(4, 4);
             write_qpoint(w, q);
         }
         CommandKind::LevelUp(slot) => {
-            w.write(5, 3);
+            w.write(5, 4);
             w.write(slot as u64, 2);
         }
+        CommandKind::Buy(item) => {
+            w.write(6, 4);
+            w.write_u8(item);
+        }
+        CommandKind::Sell(slot) => {
+            w.write(7, 4);
+            w.write(slot as u64, 3);
+        }
+        CommandKind::Undo => w.write(8, 4),
     }
 }
 
@@ -194,7 +204,7 @@ fn read_command(r: &mut BitReader) -> Result<Command, DecodeError> {
     let seq = r.read_u32()?;
     let tick = Tick(r.read_u32()?);
     let sub = SubTick::new(r.read(6)? as u8);
-    let kind = match r.read(3)? {
+    let kind = match r.read(4)? {
         0 => CommandKind::MoveTo(read_qpoint(r)?),
         1 => CommandKind::Stop,
         2 => {
@@ -207,6 +217,9 @@ fn read_command(r: &mut BitReader) -> Result<Command, DecodeError> {
         3 => CommandKind::Attack(UnitId(r.read_u32()?)),
         4 => CommandKind::AttackMove(read_qpoint(r)?),
         5 => CommandKind::LevelUp(r.read(2)? as u8),
+        6 => CommandKind::Buy(r.read_u8()?),
+        7 => CommandKind::Sell(r.read(3)? as u8),
+        8 => CommandKind::Undo,
         _ => return Err(DecodeError::Invalid("command kind")),
     };
     Ok(Command { player: PlayerId(0), seq, tick, sub, kind })
@@ -614,6 +627,17 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     }
     w.write(p.points as u64, 5);
     w.write_u8(p.streak as u8);
+    for i in p.items {
+        w.write_u8(i);
+    }
+    write_time(w, p.lifeline_ready);
+    w.write(p.undo_len as u64, 3);
+    for t in &p.undo[..p.undo_len as usize] {
+        for i in t.items {
+            w.write_u8(i);
+        }
+        w.write_f32(t.gold);
+    }
 }
 
 fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
@@ -673,7 +697,23 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     }
     let points = r.read(5)? as u8;
     let streak = r.read_u8()? as i8;
-    let progress = Progress { level, xp, gold, ranks, points, streak };
+    let mut items = [0u8; INVENTORY];
+    for i in items.iter_mut() {
+        *i = r.read_u8()?;
+    }
+    let lifeline_ready = read_time(r)?;
+    let undo_len = r.read(3)? as u8;
+    if undo_len as usize > UNDO {
+        return Err(DecodeError::Invalid("undo"));
+    }
+    let mut undo = [Trade { items: [0; INVENTORY], gold: 0.0 }; UNDO];
+    for t in undo.iter_mut().take(undo_len as usize) {
+        for i in t.items.iter_mut() {
+            *i = r.read_u8()?;
+        }
+        t.gold = read_finite(r)?;
+    }
+    let progress = Progress { level, xp, gold, ranks, points, streak, items, lifeline_ready, undo, undo_len };
     Ok(UnitState {
         pos,
         order,
@@ -1072,10 +1112,16 @@ mod tests {
             c(44, CommandKind::Attack(UnitId(812))),
             c(45, CommandKind::AttackMove(QPoint { x: 1, y: 65535 })),
             c(46, CommandKind::LevelUp(3)),
+            c(47, CommandKind::Buy(25)),
+            c(48, CommandKind::Sell(5)),
+            c(49, CommandKind::Undo),
         ];
-        let msg = ClientMessage::Input { client_time_us: 0xABCD_1234, event_ack: 99, snapshot_ack: 1230, commands };
-        let bytes = encode_client(&hdr(), &msg);
-        assert_eq!(decode_client(&bytes).unwrap(), (hdr(), msg));
+        // At most 8 commands per packet: two packets cover every kind.
+        for commands in [commands[..8].to_vec(), commands[8..].to_vec()] {
+            let msg = ClientMessage::Input { client_time_us: 0xABCD_1234, event_ack: 99, snapshot_ack: 1230, commands };
+            let bytes = encode_client(&hdr(), &msg);
+            assert_eq!(decode_client(&bytes).unwrap(), (hdr(), msg));
+        }
         let hello = ClientMessage::Hello {
             protocol: crate::PROTOCOL_VERSION,
             client_time_us: 5,
@@ -1121,7 +1167,23 @@ mod tests {
             shield: 77.7,
             shield_until: SimTime(130_000),
             respawn_at: Some(SimTime(140_000)),
-            progress: Progress { level: 17, xp: 1234, gold: 2875.25, ranks: [5, 3, 1, 2], points: 2, streak: -3 },
+            progress: Progress {
+                level: 17,
+                xp: 1234,
+                gold: 2875.25,
+                ranks: [5, 3, 1, 2],
+                points: 2,
+                streak: -3,
+                items: [19, 0, 7, 26, 0, 3],
+                lifeline_ready: SimTime(98_765),
+                undo: [
+                    Trade { items: [10, 0, 7, 26, 0, 3], gold: -2750.0 },
+                    Trade { items: [10, 0, 7, 26, 0, 0], gold: 280.0 },
+                    Trade { items: [0; INVENTORY], gold: 0.0 },
+                    Trade { items: [0; INVENTORY], gold: 0.0 },
+                ],
+                undo_len: 2,
+            },
         }
     }
 

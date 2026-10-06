@@ -77,8 +77,7 @@ pub const TURRET_STATS: Stats = Stats {
     armor: 50.0,
     magic_resist: 50.0,
     attack_damage: 160.0,
-    ability_power: 0.0,
-    move_speed: 0.0,
+    ..Stats::NONE
 };
 pub const TURRET_ATTACK: AttackSpec =
     AttackSpec { range: 775.0, attack_speed: 0.83, windup_fraction: 0.15, bolt_speed: 1200.0 };

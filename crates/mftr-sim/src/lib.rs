@@ -9,6 +9,7 @@ pub mod champion;
 pub mod collision;
 pub mod combat;
 pub mod hash;
+pub mod items;
 pub mod lane;
 pub mod map;
 pub mod math;

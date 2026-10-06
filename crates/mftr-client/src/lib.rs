@@ -477,6 +477,26 @@ impl ClientSession {
         self.issue(CommandKind::LevelUp(slot), now)
     }
 
+    /// Buy an item (predicted: the sim checks gold, slots and the fountain rule).
+    pub fn buy(&mut self, item: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::Buy(item), now)
+    }
+
+    /// Sell the item in inventory slot 0–5.
+    pub fn sell(&mut self, slot: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::Sell(slot), now)
+    }
+
+    /// Undo the last buy or sell (while the shop is still open).
+    pub fn undo_trade(&mut self, now: f64) -> Option<Command> {
+        self.issue(CommandKind::Undo, now)
+    }
+
+    /// Whether the shop is open for the own champion right now (predicted state).
+    pub fn can_shop(&self) -> bool {
+        self.world.unit(self.unit).is_some_and(|u| mftr_sim::world::can_shop(u, self.world.map(), &self.rules))
+    }
+
     /// The match rules from the welcome.
     pub fn rules(&self) -> mftr_sim::world::Rules {
         self.rules
@@ -618,12 +638,10 @@ impl ClientSession {
             self.history.pop_back();
         }
         self.world.set_tick(base_tick);
-        let champion = self.champion;
         if let Some(u) = self.world.unit_mut(self.unit) {
             u.state = base;
-            // Stats follow the level in the state (the server already applied any level-up).
-            u.stats = champion.def().stats_at(base.progress.level);
-            u.stats_level = base.progress.level;
+            // Stats follow the level and items in the state (the server already applied them).
+            u.reset_stats();
         }
         // Own missiles, areas and bolts predicted after the base tick are re-created by the
         // re-simulation.
@@ -948,8 +966,7 @@ impl ClientSession {
         let stats = self.champion.def().stats;
         let mut unit = Unit::champion(self.unit, self.player, self.team, self.champion, state.pos, self.home, stats);
         unit.state = state;
-        unit.stats = self.champion.def().stats_at(state.progress.level);
-        unit.stats_level = state.progress.level;
+        unit.reset_stats();
         self.world = World::from_units(tick, vec![unit]);
         self.world.set_rules(self.rules);
         self.world.set_prediction_mode(true);

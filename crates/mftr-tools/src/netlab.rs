@@ -405,7 +405,8 @@ mod tests {
         assert!(s.ghost_rate() < 0.02, "{}", s.dodge_row());
         // M2 slice 2: everyone earns experience and gold (ARAM starts at level 3, 1,400 gold).
         assert!(s.levels.iter().all(|l| *l >= 5), "{}", s.duel_row());
-        assert!(s.gold.iter().all(|g| *g > 2500.0), "{}", s.duel_row());
+        // M2 slice 3: bots follow their build paths whenever they respawn.
+        assert!(s.items.iter().all(|n| *n >= 2), "{}", s.duel_row());
     }
 
     /// Q13: over a lossy, jittery link with moving minions, every snapshot the client

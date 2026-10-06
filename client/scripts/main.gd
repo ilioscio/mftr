@@ -3,7 +3,7 @@ extends Node3D
 ## and draws what it reports. No gameplay decisions are made here (04 §1).
 ##
 ## User args (after `--`): a server address (default 127.0.0.1:7777), `--champion ember|vesper`,
-## `--shot <file.png>` / `--shot-at <seconds>` for scripted screenshots, and the blind playtest
+## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots, and the blind playtest
 ## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`.
 
 const UNITS_TO_METERS := 0.01           # 1 game unit = 1 cm
@@ -66,6 +66,8 @@ func _ready() -> void:
 		elif args[i] == "--blind-seconds" and i + 1 < args.size():
 			blind_seconds = float(args[i + 1])
 			i += 1
+		elif args[i] == "--shot-shop":
+			_shot_shop = true
 		elif args[i] == "--blind-auto":
 			blind_auto = true
 		elif args[i] == "--champion" and i + 1 < args.size():
@@ -85,6 +87,7 @@ var _shot_path := ""
 var _shot_timer := 0.0
 var _shot_moved := false
 var _shot_at := 1.05                     # `--shot-at <seconds>` after joining
+var _shot_shop := false                  # `--shot-shop`: buy from the fountain, show the shop
 
 
 func _update_shot(delta: float) -> void:
@@ -99,6 +102,10 @@ func _update_shot(delta: float) -> void:
 	if not _shot_moved and _shot_timer > 1.0:
 		for slot in 3:
 			client.level_up(slot)  # ranked modes start with points to spend
+		if _shot_shop:
+			for item in [7, 1, 3]:  # Boots, Long Knife, Vital Crystal from the fountain
+				client.buy(item)
+			_toggle_shop()
 		client.cast(1, own + inward * 700.0 + side * 200.0)
 		_shot_moved = true
 	elif _shot_moved and _shot_timer > 1.4 and _shot_timer - delta <= 1.4:
@@ -299,6 +306,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("toggle_proxies"):
 		proxies_enabled = not proxies_enabled
 		client.set_collision_proxies(proxies_enabled)
+	elif event.is_action_pressed("toggle_shop"):
+		_toggle_shop()
 	elif event.is_action_pressed("toggle_net_graph") and not blind_enabled:
 		show_net_graph = not show_net_graph
 
@@ -329,6 +338,7 @@ func _process(delta: float) -> void:
 	if playing:
 		_update_blind()
 	own_status = client.own_status() if playing else {}
+	_update_shop(delta)
 	if playing and own_body == null:
 		own_champion = own_status.get("champion", "")
 		own_body = _make_champion(OWN_COLOR, own_champion)
@@ -980,6 +990,8 @@ func _draw_ability_bar(font: Font) -> void:
 				overlay.draw_rect(box, Color(0, 0, 0, 0.55))
 			if own_status.can_rank[slot]:
 				overlay.draw_string(font, Vector2(x + slot_w - 30, y0 + 20), "+", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.85, 0.3))
+	if own_status.get("ranked", false) and own_status.has("items"):
+		_draw_inventory(font, Vector2(x0 + slot_w * 6.0 + 24, y0 - 34))
 	if match_banner != "":
 		var c := Color(0.45, 0.8, 1.0) if match_banner == "VICTORY" else Color(1.0, 0.4, 0.35)
 		overlay.draw_string(font, Vector2(0, overlay.size.y * 0.3), match_banner, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 72, c)
@@ -992,6 +1004,8 @@ func _draw_ability_bar(font: Font) -> void:
 		overlay.draw_string(font, Vector2(x0, y0 + 80), "Attack-move: left-click a point", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ENEMY_COLOR)
 	elif own_status.get("points", 0) > 0:
 		overlay.draw_string(font, Vector2(x0, y0 + 80), "%d ability point(s): Ctrl + Q/W/E/R" % own_status.points, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
+	elif own_status.get("ranked", false) and client.can_shop():
+		overlay.draw_string(font, Vector2(x0, y0 + 80), "[P] shop", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
 	if blind_state == "playing":
 		var left := maxf(blind_seconds - client.blind_elapsed(), 0.0)
 		var txt := "Blind round %d / %d   %d:%02d" % [client.blind_round() + 1, client.blind_rounds(), int(left) / 60, int(left) % 60]
@@ -1007,7 +1021,7 @@ func _update_net_graph() -> void:
 		net_label.text = "MFTR — %s…  %s" % [phase if phase != "" else "disconnected", client.last_error()]
 		return
 	var s: Dictionary = client.net_stats()
-	net_label.text = "FPS %d   RTT %.0f ms   margin %.1f ms   interp %.0f ms\ncommands %d   late %d   corrections %d (last %.1f u)   on-screen correction %.1f u\nup %.1f KB   down %.1f KB   collision proxies %s\nenemy missiles %d   near-misses %d   ghost hits %d   phantom hits %d   K/D %d/%d\n[RMB] move / attack  [A+LMB] attack-move  [Q W E R] abilities  [D] Blink  [F] Barrier  [S] stop  [F1] net graph  [F2] proxies" % [
+	net_label.text = "FPS %d   RTT %.0f ms   margin %.1f ms   interp %.0f ms\ncommands %d   late %d   corrections %d (last %.1f u)   on-screen correction %.1f u\nup %.1f KB   down %.1f KB   collision proxies %s\nenemy missiles %d   near-misses %d   ghost hits %d   phantom hits %d   K/D %d/%d\n[RMB] move / attack  [A+LMB] attack-move  [Q W E R] abilities  [D] Blink  [F] Barrier  [S] stop  [P] shop  [F1] net graph  [F2] proxies" % [
 		Engine.get_frames_per_second(), s.rtt_ms, s.margin_ms, s.interp_ms,
 		s.commands, s.late, s.corrections, s.last_correction, s.visible_correction,
 		s.kb_up, s.kb_down, "ON" if proxies_enabled else "OFF",
@@ -1216,3 +1230,152 @@ func _update_fx(delta: float) -> void:
 		if f.age >= f.life:
 			node.queue_free()
 	fx = fx.filter(func(f): return f.age < f.life)
+
+
+## ---- Shop (01 §11) ------------------------------------------------------------------------------
+## Opens with P anywhere; buying and selling only work while dead or in the own fountain (the
+## sim decides, the panel just greys things out). Click an item to buy it (owned components are
+## used and discounted), click an inventory slot to sell it for 70%. Undo works until you leave.
+
+var shop_panel: PanelContainer
+var shop_title: Label
+var shop_grid: GridContainer
+var shop_inventory: HBoxContainer
+var shop_stats: Label
+var shop_undo: Button
+var shop_buttons := {}                  # item id -> Button
+var shop_slot_buttons := []
+var item_names := {}                    # item id -> name
+var _shop_refresh := 0.0
+
+
+func _toggle_shop() -> void:
+	if shop_panel == null:
+		_build_shop()
+	shop_panel.visible = not shop_panel.visible
+	_shop_refresh = 0.0
+
+
+func _build_shop() -> void:
+	shop_panel = PanelContainer.new()
+	shop_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	shop_panel.position = Vector2(16, 160)
+	shop_panel.custom_minimum_size = Vector2(800, 0)
+	var margin := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 14)
+	shop_panel.add_child(margin)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	margin.add_child(v)
+	shop_title = Label.new()
+	shop_title.add_theme_font_size_override("font_size", 22)
+	v.add_child(shop_title)
+	var tiers := ["Components", "Upgrades and boots", "Legendary"]
+	var catalog: Array = client.shop_catalog()
+	for it in catalog:
+		item_names[it.id] = it.name
+	for tier in 3:
+		var l := Label.new()
+		l.text = tiers[tier]
+		l.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
+		v.add_child(l)
+		shop_grid = GridContainer.new()
+		shop_grid.columns = 5
+		shop_grid.add_theme_constant_override("h_separation", 6)
+		shop_grid.add_theme_constant_override("v_separation", 6)
+		v.add_child(shop_grid)
+		for it in catalog:
+			if it.tier != tier:
+				continue
+			var b := Button.new()
+			b.custom_minimum_size = Vector2(150, 40)
+			b.add_theme_font_size_override("font_size", 12)
+			b.clip_text = true
+			b.focus_mode = Control.FOCUS_NONE
+			b.pressed.connect(func(): client.buy(it.id); _shop_refresh = 0.0)
+			shop_grid.add_child(b)
+			shop_buttons[it.id] = b
+	var inv_label := Label.new()
+	inv_label.text = "Inventory (click to sell for 70%)"
+	inv_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
+	v.add_child(inv_label)
+	shop_inventory = HBoxContainer.new()
+	shop_inventory.add_theme_constant_override("separation", 6)
+	v.add_child(shop_inventory)
+	for slot in 6:
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(124, 30)
+		b.add_theme_font_size_override("font_size", 12)
+		b.clip_text = true
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(func(): client.sell(slot); _shop_refresh = 0.0)
+		shop_inventory.add_child(b)
+		shop_slot_buttons.append(b)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 16)
+	v.add_child(row)
+	shop_undo = Button.new()
+	shop_undo.text = "Undo"
+	shop_undo.focus_mode = Control.FOCUS_NONE
+	shop_undo.custom_minimum_size = Vector2(90, 30)
+	shop_undo.pressed.connect(func(): client.undo_trade(); _shop_refresh = 0.0)
+	row.add_child(shop_undo)
+	shop_stats = Label.new()
+	shop_stats.add_theme_color_override("font_color", Color(0.8, 0.85, 0.9))
+	row.add_child(shop_stats)
+	shop_panel.visible = false
+	overlay.get_parent().add_child(shop_panel)
+
+
+func _update_shop(delta: float) -> void:
+	if shop_panel == null or not shop_panel.visible:
+		return
+	_shop_refresh -= delta
+	if _shop_refresh > 0.0:
+		return
+	_shop_refresh = 0.15
+	var open: bool = client.can_shop()
+	var gold: int = own_status.get("gold", 0)
+	shop_title.text = "Shop — %d gold%s" % [gold, "" if open else "   (closed: return to your fountain, or shop while dead)"]
+	for it in client.shop_catalog():
+		var b: Button = shop_buttons[it.id]
+		var price: int = it.price
+		b.text = "%s  %d\n%s" % [it.name, price, it.stats]
+		b.tooltip_text = "%s (%d total)\n%s" % [it.name, it.cost, it.stats]
+		if it.recipe.size() > 0:
+			var parts := []
+			for r in it.recipe:
+				parts.append(item_names.get(r, "?"))
+			b.tooltip_text += "\nBuilds from: " + ", ".join(parts)
+		b.disabled = not open or not it.affordable
+		b.modulate = Color(0.75, 1.0, 0.75) if it.owned else Color.WHITE
+	var inv: Array = own_status.get("items", [])
+	for slot in shop_slot_buttons.size():
+		var id: int = inv[slot] if slot < inv.size() else 0
+		var b: Button = shop_slot_buttons[slot]
+		b.text = item_names.get(id, "—") if id != 0 else "—"
+		b.disabled = not open or id == 0
+	shop_undo.disabled = not open or not own_status.get("can_undo", false)
+	if not own_status.is_empty() and own_status.has("attack_damage"):
+		shop_stats.text = "AD %d   AP %d   armor %d   MR %d   AS %.2f   MS %d   haste %d   HP %d" % [
+			roundi(own_status.attack_damage), roundi(own_status.ability_power), roundi(own_status.armor),
+			roundi(own_status.magic_resist), own_status.attack_speed, roundi(own_status.move_speed),
+			roundi(own_status.ability_haste), roundi(own_status.max_health),
+		]
+
+
+func _draw_inventory(font: Font, origin: Vector2) -> void:
+	if item_names.is_empty():
+		for it in client.shop_catalog():
+			item_names[it.id] = it.name
+	var inv: Array = own_status.items
+	overlay.draw_rect(Rect2(origin - Vector2(8, 0), Vector2(3 * 92 + 12, 120)), Color(0, 0, 0, 0.55))
+	for slot in 6:
+		var p := origin + Vector2((slot % 3) * 92, 24 + (slot / 3) * 46)
+		var box := Rect2(p, Vector2(86, 40))
+		var id: int = inv[slot]
+		overlay.draw_rect(box, Color(0.18, 0.2, 0.24) if id != 0 else Color(0.1, 0.1, 0.12))
+		overlay.draw_rect(box, Color(0.85, 0.7, 0.35) if id != 0 else Color(0.3, 0.3, 0.35), false, 1.5)
+		if id != 0:
+			overlay.draw_string(font, p + Vector2(4, 24), item_names.get(id, "?"), HORIZONTAL_ALIGNMENT_LEFT, 80, 12, Color(0.9, 0.9, 0.95))
