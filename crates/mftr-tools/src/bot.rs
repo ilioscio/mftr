@@ -58,7 +58,15 @@ pub fn run(cfg: &BotConfig) -> std::io::Result<Summary> {
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => break,
+                // ICMP "port unreachable": the server may just not be listening yet.
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    break;
+                }
                 Err(e) => return Err(e),
             }
         }

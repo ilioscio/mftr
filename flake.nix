@@ -1,5 +1,5 @@
 {
-  description = "MFTR (Moba For The Rest of us): development environment";
+  description = "MFTR (Moba For The Rest of us): game server package, NixOS module and development environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -9,7 +9,7 @@
     };
   };
 
-  outputs = { nixpkgs, rust-overlay, ... }:
+  outputs = { self, nixpkgs, rust-overlay, ... }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system:
@@ -19,6 +19,32 @@
         }));
     in
     {
+      # `nix build github:ilioscio/mftr` → result/bin/mftr-server and mftr-tools.
+      packages = forAllSystems (pkgs: rec {
+        mftr-server = pkgs.callPackage ./nix/package.nix { };
+        default = mftr-server;
+      });
+
+      overlays.default = final: _prev: {
+        mftr-server = final.callPackage ./nix/package.nix { };
+      };
+
+      # On a NixOS machine whose configuration is a flake (docs/hosting.md, "NixOS"):
+      #   inputs.mftr.url = "github:ilioscio/mftr";
+      #   modules = [ mftr.nixosModules.default { services.mftr.enable = true; } ];
+      # Redeploy the latest version with `nix flake update mftr` and a rebuild.
+      nixosModules.default = { pkgs, lib, ... }: {
+        imports = [ ./nix/module.nix ];
+        services.mftr.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.mftr-server;
+      };
+      nixosModules.mftr = self.nixosModules.default;
+
+      # `nix flake check`: the package builds, and a VM boots the module and plays through it.
+      checks = forAllSystems (pkgs: {
+        inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) mftr-server;
+        nixos = pkgs.testers.runNixOSTest (import ./nix/test.nix { module = self.nixosModules.default; });
+      });
+
       devShells = forAllSystems (pkgs:
         let
           # Same toolchain as everyone else: rust-toolchain.toml at the repo root.

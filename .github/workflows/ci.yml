@@ -78,3 +78,21 @@ jobs:
           context: .
           push: false
           tags: mftr-server:ci
+
+  nix:
+    name: nix package and NixOS module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Let the Nix builder use KVM (fast NixOS VM tests)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: system-features = nixos-test benchmark big-parallel kvm
+      - name: Build the server package
+        run: nix build -L .#mftr-server
+      - name: NixOS VM test (two servers, key kept across restarts, encrypted bot with a pinned key)
+        run: nix build -L .#checks.x86_64-linux.nixos
