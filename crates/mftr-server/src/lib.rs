@@ -11,8 +11,8 @@ use mftr_sim::ability::LineSkillshot;
 use mftr_sim::map::MapId;
 use mftr_sim::vision::Vision;
 use mftr_sim::{
-    Brain, Command, MinionKind, Missile, PlayerId, QPoint, SimEvent, SimTime, SubTick, TICK_DT_F64, TICK_HZ, Team,
-    Tick, UnitId, Vec2, World,
+    Area, Brain, ChampionId, Command, MinionKind, Missile, PlayerId, QPoint, SimEvent, SimTime, SubTick, TICK_DT_F64,
+    TICK_HZ, Team, Tick, UnitId, Vec2, World,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -36,6 +36,9 @@ pub enum Scenario {
     /// M1 slice 1: static minion clumps plus two patrolling waves, to exercise minion block
     /// and client collision proxies (03a §5).
     MinionSandbox,
+    /// M1 slice 4, the Duel Sandbox: blue spawns west, red east, with a few minion clumps in
+    /// between to block skillshots. Minions and champions respawn.
+    Duel,
 }
 
 impl Scenario {
@@ -43,7 +46,7 @@ impl Scenario {
     pub fn map(self) -> MapId {
         match self {
             Scenario::Empty => MapId::Open,
-            Scenario::MinionSandbox | Scenario::DodgeRig => MapId::Arena,
+            Scenario::MinionSandbox | Scenario::DodgeRig | Scenario::Duel => MapId::Arena,
         }
     }
 
@@ -52,6 +55,7 @@ impl Scenario {
             "empty" => Some(Scenario::Empty),
             "minions" => Some(Scenario::MinionSandbox),
             "dodge" => Some(Scenario::DodgeRig),
+            "duel" => Some(Scenario::Duel),
             _ => None,
         }
     }
@@ -84,27 +88,23 @@ fn populate(world: &mut World, scenario: Scenario) {
         }
         return;
     }
+    if scenario == Scenario::Duel {
+        for (center, team) in [(Vec2::new(1700.0, 2050.0), Team::Red), (Vec2::new(2300.0, 2150.0), Team::Blue)] {
+            clump(world, center, 1, team);
+        }
+        return;
+    }
     if scenario != Scenario::MinionSandbox {
         return;
     }
-    // Static clumps: hex-packed, adjacent minions touching, like a wave fighting in lane.
+    // Static clumps.
     for (center, rings, team) in [
         (Vec2::new(1200.0, 1200.0), 1i32, Team::Red),
         (Vec2::new(2800.0, 1300.0), 2, Team::Blue),
         (Vec2::new(1300.0, 2800.0), 2, Team::Red),
         (Vec2::new(2900.0, 2900.0), 1, Team::Blue),
     ] {
-        for q in -rings..=rings {
-            for r in -rings..=rings {
-                if (q + r).abs() > rings {
-                    continue;
-                }
-                let x = center.x + 50.0 * (q as f32 + r as f32 * 0.5);
-                let y = center.y + 50.0 * 0.866_025_4 * r as f32;
-                let kind = if (q + r) % 2 == 0 { MinionKind::Melee } else { MinionKind::Caster };
-                world.spawn_minion(kind, team, Vec2::new(x, y), None);
-            }
-        }
+        clump(world, center, rings, team);
     }
     // Two patrolling waves (2 rows of 3) crossing the arena through the middle.
     for (a, b, team) in [
@@ -121,6 +121,27 @@ fn populate(world: &mut World, scenario: Scenario) {
             world.spawn_minion(kind, team, pa.to_vec2(), Some(Brain::Patrol { a: pa, b: pb, toward_b: true }));
         }
     }
+}
+
+/// A hex-packed minion clump, adjacent minions touching, like a wave fighting in lane.
+fn clump(world: &mut World, center: Vec2, rings: i32, team: Team) {
+    for q in -rings..=rings {
+        for r in -rings..=rings {
+            if (q + r).abs() > rings {
+                continue;
+            }
+            let x = center.x + 50.0 * (q as f32 + r as f32 * 0.5);
+            let y = center.y + 50.0 * 0.866_025_4 * r as f32;
+            let kind = if (q + r) % 2 == 0 { MinionKind::Melee } else { MinionKind::Caster };
+            world.spawn_minion(kind, team, Vec2::new(x, y), None);
+        }
+    }
+}
+
+/// Duel spawn points (west for blue, east for red), spread a little per player.
+fn duel_spawn(team: Team, player: PlayerId) -> Vec2 {
+    let y = 2000.0 + 150.0 * ((player.0 / 2) as f32) * if player.0 % 4 < 2 { 1.0 } else { -1.0 };
+    Vec2::new(if team == Team::Blue { 500.0 } else { 3500.0 }, y)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -146,7 +167,8 @@ struct Conn {
     events: VecDeque<(u32, SimEvent)>,
     next_event_seq: u32,
     team: Team,
-    /// Enemy missiles this client has been told about (03 §10: only once they enter vision).
+    /// Missiles, areas and bolts this client has been told about (03 §10: enemy ones only
+    /// once they enter vision), so it also gets their ends.
     revealed: BTreeSet<u32>,
     last_heard: f64,
 }
@@ -157,8 +179,9 @@ pub struct ServerCore {
     start: f64,
     conns: BTreeMap<ClientKey, Conn>,
     queue: Vec<Command>,
-    /// Live missiles (for fog-of-war reveal), by id.
+    /// Live missiles and areas (for fog-of-war reveal), by id.
     missiles: BTreeMap<u32, Missile>,
+    areas: BTreeMap<u32, Area>,
     pub stats: ServerStats,
 }
 
@@ -175,6 +198,7 @@ impl ServerCore {
             conns: BTreeMap::new(),
             queue: Vec::new(),
             missiles: BTreeMap::new(),
+            areas: BTreeMap::new(),
             stats: ServerStats::default(),
         }
     }
@@ -213,18 +237,21 @@ impl ServerCore {
         };
         let mut out = Vec::new();
         match message {
-            ClientMessage::Hello { protocol, client_time_us } => {
+            ClientMessage::Hello { protocol, client_time_us, champion } => {
                 if protocol != PROTOCOL_VERSION {
                     out.push((from, self.reject(RejectReason::ProtocolMismatch)));
                 } else if !self.conns.contains_key(&from) && self.conns.len() >= self.cfg.max_players as usize {
                     out.push((from, self.reject(RejectReason::ServerFull)));
                 } else {
                     if !self.conns.contains_key(&from) {
-                        self.join(from, now);
+                        self.join(from, now, champion);
                     }
                     let tick = self.world.tick();
                     let since = ((now - self.tick_time(tick)).max(0.0) * 1e6) as u32;
-                    let team = self.world.unit(self.conns[&from].unit).map_or(Team::Blue, |u| u.team);
+                    let me = self.world.unit(self.conns[&from].unit);
+                    let team = me.map_or(Team::Blue, |u| u.team);
+                    let champ = me.and_then(|u| u.champion).unwrap_or(ChampionId::Ember);
+                    let home = me.map_or(Vec2::ZERO, |u| u.home);
                     let conn = self.conns.get_mut(&from).unwrap();
                     conn.recv.record(header.seq);
                     conn.last_heard = now;
@@ -233,6 +260,8 @@ impl ServerCore {
                         unit: conn.unit,
                         team,
                         map: self.world.map().id,
+                        champion: champ,
+                        home,
                         tick,
                         tick_hz: TICK_HZ as u8,
                         since_tick_us: since,
@@ -298,10 +327,13 @@ impl ServerCore {
         bytes
     }
 
-    fn join(&mut self, key: ClientKey, now: f64) {
+    fn join(&mut self, key: ClientKey, now: f64, champion: Option<ChampionId>) {
         let used: Vec<u8> = self.conns.values().map(|c| c.player.0).collect();
         let player = PlayerId((0..=u8::MAX).find(|p| !used.contains(p)).unwrap());
         let team = if player.0 % 2 == 0 || self.cfg.scenario == Scenario::DodgeRig { Team::Blue } else { Team::Red };
+        // Without a preference, alternate: the first duel is mage vs. marksman.
+        let champion =
+            champion.unwrap_or(ChampionId::ALL[((player.0 / 2) as usize % 2) ^ (team == Team::Red) as usize]);
         let (lo, hi) = (self.cfg.arena_min, self.cfg.arena_max);
         // A random spot with nothing within 150 u (deterministic: the world RNG).
         let mut pos = Vec2::ZERO;
@@ -314,7 +346,10 @@ impl ServerCore {
                 break;
             }
         }
-        let unit = self.world.spawn_champion(player, team, pos);
+        if self.cfg.scenario == Scenario::Duel {
+            pos = duel_spawn(team, player);
+        }
+        let unit = self.world.spawn_champion(player, team, champion, pos);
         self.conns.insert(
             key,
             Conn {
@@ -357,41 +392,101 @@ impl ServerCore {
         self.stats.ticks += 1;
 
         let since = ((now - self.tick_time(k)).max(0.0) * 1e6) as u32;
+        let (s0, s1) = (SimTime::end_of(Tick(k.0 - 1)), SimTime::end_of(k));
         let units: Vec<(UnitId, mftr_sim::UnitState, RemoteUnit)> = self
             .world
             .units()
             .iter()
             .map(|u| {
+                let st = &u.state;
+                let hp = |v: f32| v.round().clamp(0.0, u16::MAX as f32) as u16;
                 let remote = RemoteUnit {
                     id: u.id,
                     kind: u.kind,
                     team: u.team,
-                    pos: QPoint::from_vec2(u.state.pos),
-                    target: u.state.heading().map(QPoint::from_vec2),
-                    speed: u.state.move_speed.round().clamp(0.0, 1023.0) as u16,
+                    pos: QPoint::from_vec2(st.pos),
+                    target: st.heading().map(QPoint::from_vec2),
+                    speed: st.move_speed.round().clamp(0.0, 1023.0) as u16,
                     collision_radius: u.collision_radius.round().clamp(0.0, 255.0) as u8,
-                    casting: u.state.cast.is_some(),
-                    stunned: u.state.stunned_until > SimTime::end_of(k),
+                    champion: u.champion,
+                    health: hp(st.health.max(if st.alive() { 1.0 } else { 0.0 })),
+                    max_health: hp(u.stats.max_health),
+                    shield: hp(if st.shield_until > s1 { st.shield } else { 0.0 }),
+                    casting: st.cast.is_some(),
+                    attacking: st.attack.is_some(),
+                    stunned: st.stunned_until > s1,
+                    rooted: st.rooted_until > s1,
+                    dashing: st.dash.is_some(),
                 };
                 (u.id, u.state, remote)
             })
             .collect();
         // Fog of war (03 §10): what each team sees this tick.
-        let (s0, s1) = (SimTime::end_of(Tick(k.0 - 1)), SimTime::end_of(k));
         let map = self.world.map().clone();
         let visions = [Vision::of(&self.world, Team::Blue), Vision::of(&self.world, Team::Red)];
         let seen: [BTreeSet<UnitId>; 2] =
             [0, 1].map(|i| self.world.units().iter().filter(|u| visions[i].sees_unit(&map, u)).map(|u| u.id).collect());
+        // Units a team can't see can't be targeted by its attacks next tick.
+        for (i, team) in [Team::Blue, Team::Red].into_iter().enumerate() {
+            let hidden = self.world.units().iter().filter(|u| u.team != team && !seen[i].contains(&u.id)).map(|u| u.id);
+            let hidden = hidden.collect();
+            self.world.set_hidden(team, hidden);
+        }
+        // Whether team `i` may hear about something happening to `unit` at its position this
+        // tick (also for units that just died, which vision no longer lists).
+        let knows = |i: usize, unit: UnitId| {
+            self.world.unit(unit).is_some_and(|u| {
+                u.team == [Team::Blue, Team::Red][i]
+                    || u.kind == mftr_sim::UnitKind::Turret
+                    || visions[i].sees(&map, u.state.pos)
+            })
+        };
         let mut ended: BTreeMap<u32, SimTime> = BTreeMap::new();
         for e in &events {
             match *e {
                 SimEvent::MissileSpawned(m) => {
                     self.missiles.insert(m.id, m);
                 }
-                SimEvent::MissileHit { id, at, .. } | SimEvent::MissileExpired { id, at } => {
+                SimEvent::AreaSpawned(a) => {
+                    self.areas.insert(a.id, a);
+                }
+                SimEvent::MissileHit { id, at, .. }
+                | SimEvent::MissileExpired { id, at }
+                | SimEvent::AreaDetonated { id, at } => {
                     ended.insert(id, at);
                 }
                 _ => {}
+            }
+        }
+        // Per team: the events it may receive, in order (the per-client parts follow).
+        let mut team_events: [Vec<SimEvent>; 2] = [Vec::new(), Vec::new()];
+        for (i, list) in team_events.iter_mut().enumerate() {
+            for e in &events {
+                let ok = match *e {
+                    SimEvent::CastStarted { unit, .. }
+                    | SimEvent::AttackLaunched(mftr_sim::Bolt { owner: unit, .. }) => seen[i].contains(&unit),
+                    SimEvent::Damage { target: unit, .. }
+                    | SimEvent::Died { unit, .. }
+                    | SimEvent::Respawned { unit, .. }
+                    | SimEvent::Dashed { unit, .. }
+                    | SimEvent::Shielded { unit, .. }
+                    | SimEvent::Blinked { unit, .. } => knows(i, unit),
+                    _ => false,
+                };
+                if !ok {
+                    continue;
+                }
+                // A blink or dash seen only at its end doesn't reveal where it started.
+                list.push(match *e {
+                    SimEvent::Blinked { unit, from, to, at } if !visions[i].sees(&map, from) => {
+                        SimEvent::Blinked { unit, from: to, to, at }
+                    }
+                    SimEvent::Dashed { unit, from, to, at, end_at } if !visions[i].sees(&map, from) => {
+                        let start = self.world.unit(unit).map_or(to, |u| u.state.pos);
+                        SimEvent::Dashed { unit, from: start, to, at, end_at }
+                    }
+                    other => other,
+                });
             }
         }
 
@@ -406,12 +501,21 @@ impl ServerCore {
                 conn.events.push_back((conn.next_event_seq, e));
                 conn.next_event_seq += 1;
             };
-            // Casts: only if the caster is visible. Own-team missiles: at spawn, unmodified.
+            for e in &team_events[ti] {
+                if let SimEvent::AttackLaunched(b) = e {
+                    conn.revealed.insert(b.id);
+                }
+                push(conn, *e);
+            }
+            // Own-team missiles and areas: at spawn, unmodified.
             for e in &events {
                 match *e {
-                    SimEvent::CastStarted { unit, .. } if seen[ti].contains(&unit) => push(conn, *e),
                     SimEvent::MissileSpawned(m) if m.team == conn.team => {
                         conn.revealed.insert(m.id);
+                        push(conn, *e);
+                    }
+                    SimEvent::AreaSpawned(a) if a.team == conn.team => {
+                        conn.revealed.insert(a.id);
                         push(conn, *e);
                     }
                     _ => {}
@@ -431,22 +535,32 @@ impl ServerCore {
                     push(conn, SimEvent::MissileSpawned(rebase(m, t)));
                 }
             }
-            // Ends: only for missiles this client knows about.
+            // Enemy areas: the telegraph shows once its center is in vision.
+            for a in self.areas.values() {
+                if a.team != conn.team && !conn.revealed.contains(&a.id) && visions[ti].sees(&map, a.center) {
+                    conn.revealed.insert(a.id);
+                    push(conn, SimEvent::AreaSpawned(*a));
+                }
+            }
+            // Ends: only for things this client knows about.
             for e in &events {
-                if let SimEvent::MissileHit { id, .. } | SimEvent::MissileExpired { id, .. } = *e
+                if let SimEvent::MissileHit { id, .. }
+                | SimEvent::MissileExpired { id, .. }
+                | SimEvent::AreaDetonated { id, .. }
+                | SimEvent::AttackLanded { id, .. } = *e
                     && conn.revealed.remove(&id)
                 {
                     push(conn, *e);
                 }
             }
-            let others = units
+            let others: Vec<RemoteUnit> = units
                 .iter()
                 .filter(|(id, _, _)| *id != conn.unit && seen[ti].contains(id))
                 .map(|(_, _, r)| *r)
                 .collect();
             let reports: Vec<CommandReport> =
                 conn.reports.iter().rev().take(msg::MAX_REPORTS_PER_SNAPSHOT).rev().map(|(_, r)| *r).collect();
-            let snap = Snapshot {
+            let mut snap = Snapshot {
                 tick: k,
                 since_tick_us: since,
                 time_echo: conn
@@ -460,11 +574,18 @@ impl ServerCore {
                 others,
             };
             let h = Self::header(conn);
-            let bytes = msg::encode_server(&h, &ServerMessage::Snapshot(Box::new(snap)));
+            // Stay under the packet limit (03b §1): a backlog of reliable events waits for the
+            // next snapshots instead of growing this one.
+            let mut bytes = msg::encode_server(&h, &ServerMessage::Snapshot(Box::new(snap.clone())));
+            while bytes.len() > mftr_net::MAX_PACKET_BYTES && !snap.events.is_empty() {
+                snap.events.truncate(snap.events.len() / 2);
+                bytes = msg::encode_server(&h, &ServerMessage::Snapshot(Box::new(snap.clone())));
+            }
             self.stats.bytes_out += bytes.len() as u64;
             out.push((*key, bytes));
         }
         self.missiles.retain(|id, _| !ended.contains_key(id));
+        self.areas.retain(|id, _| !ended.contains_key(id));
         out
     }
 
@@ -509,7 +630,7 @@ mod tests {
     fn hello(core: &mut ServerCore, key: ClientKey) {
         let bytes = encode_client(
             &PacketHeader::default(),
-            &ClientMessage::Hello { protocol: PROTOCOL_VERSION, client_time_us: 0 },
+            &ClientMessage::Hello { protocol: PROTOCOL_VERSION, client_time_us: 0, champion: None },
         );
         core.handle_packet(key, &bytes, 0.0);
     }
@@ -540,7 +661,9 @@ mod tests {
             core.world_mut().despawn(id);
         }
         let place = |core: &mut ServerCore, id: UnitId, x: f32, y: f32| {
-            core.world_mut().unit_mut(id).unwrap().state = mftr_sim::UnitState::new(Vec2::new(x, y), 325.0);
+            let u = core.world_mut().unit_mut(id).unwrap();
+            u.state =
+                mftr_sim::UnitState { health: u.stats.max_health, ..mftr_sim::UnitState::new(Vec2::new(x, y), 325.0) };
         };
         place(&mut core, me, 2200.0, 1200.0);
         let mut t = 0.0;
@@ -557,5 +680,72 @@ mod tests {
         check(&mut core, 2200.0, 1900.0, true); // in plain view
         check(&mut core, 2775.0, 1765.0, false); // inside brush 1, observer outside
         check(&mut core, 3900.0, 100.0, false); // out of range
+    }
+
+    fn hello_as(core: &mut ServerCore, key: ClientKey, champion: ChampionId) {
+        let bytes = encode_client(
+            &PacketHeader::default(),
+            &ClientMessage::Hello { protocol: PROTOCOL_VERSION, client_time_us: 0, champion: Some(champion) },
+        );
+        core.handle_packet(key, &bytes, 0.0);
+    }
+
+    /// Duel: players get alternating champions at their team's spawn by default.
+    #[test]
+    fn duel_assigns_champions_and_spawns() {
+        let mut core = ServerCore::new(ServerConfig { scenario: Scenario::Duel, ..Default::default() }, 0.0);
+        hello(&mut core, 1);
+        hello(&mut core, 2);
+        let unit = |core: &ServerCore, key| core.world.unit(core.conns[&key].unit).unwrap().clone();
+        assert_eq!(unit(&core, 1).champion, Some(ChampionId::Ember));
+        assert_eq!(unit(&core, 2).champion, Some(ChampionId::Vesper));
+        assert_eq!(unit(&core, 1).state.pos, Vec2::new(500.0, 2000.0));
+        assert_eq!(unit(&core, 2).state.pos, Vec2::new(3500.0, 2000.0));
+    }
+
+    /// Fog applies to combat events: blue lobs an area into a bush where red hides. The server
+    /// damages red and red's client hears it, but blue's client learns nothing about red.
+    #[test]
+    fn damage_to_a_hidden_unit_is_not_sent_to_the_attacker() {
+        let mut core = ServerCore::new(ServerConfig { scenario: Scenario::Duel, ..Default::default() }, 0.0);
+        hello_as(&mut core, 1, ChampionId::Vesper);
+        hello_as(&mut core, 2, ChampionId::Ember);
+        let (blue, red) = (core.conns[&1].unit, core.conns[&2].unit);
+        let minions: Vec<UnitId> = core.world.units().iter().filter(|u| u.owner.is_none()).map(|u| u.id).collect();
+        for id in minions {
+            core.world_mut().despawn(id);
+        }
+        core.world_mut().unit_mut(red).unwrap().state.pos = Vec2::new(1015.0, 1675.0); // brush 2
+        core.world_mut().unit_mut(blue).unwrap().state.pos = Vec2::new(1015.0, 1250.0); // outside, 425 u away
+        let cast = ClientMessage::Input {
+            client_time_us: 0,
+            event_ack: 0,
+            commands: vec![Command {
+                player: PlayerId(0),
+                seq: 1,
+                tick: Tick(2),
+                sub: SubTick::START,
+                kind: mftr_sim::CommandKind::Cast { slot: 1, target: QPoint::from_vec2(Vec2::new(1015.0, 1675.0)) },
+            }],
+        };
+        core.handle_packet(1, &encode_client(&PacketHeader { seq: 1, ack: 0, ack_bits: 0 }, &cast), 0.0);
+        let (mut blue_heard, mut red_heard, mut blue_saw_red) = (false, false, false);
+        for i in 1..=60 {
+            for (to, bytes) in core.step(i as f64 / 30.0) {
+                let Ok((_, ServerMessage::Snapshot(s))) = decode_server(&bytes) else { continue };
+                let about_red =
+                    s.events.iter().any(|(_, e)| matches!(e, SimEvent::Damage { target, .. } if *target == red));
+                if to == 1 {
+                    blue_heard |= about_red;
+                    blue_saw_red |= s.others.iter().any(|o| o.id == red);
+                } else {
+                    red_heard |= about_red;
+                }
+            }
+        }
+        let hp = core.world.unit(red).unwrap().state.health;
+        assert!(hp < ChampionId::Ember.def().stats.max_health - 50.0, "red took the area: {hp}");
+        assert!(red_heard, "the victim's client hears its own damage");
+        assert!(!blue_saw_red && !blue_heard, "nothing about the hidden unit reaches blue");
     }
 }

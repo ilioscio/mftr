@@ -12,7 +12,7 @@ MFTR aims to deliver the thing players love about the best-known lane-based MOBA
 
 ## Status
 
-**M0 (foundations)** is in place: a deterministic Rust simulation, the netcode core (sub-tick commands, own-champion prediction, reconciliation, clock and margin control loops), a dedicated UDP server, a headless Netcode Lab, and a Godot 4.7 client you can move around in. Design docs: start with the [design index](docs/design/README.md). M0 results: [roadmap](docs/design/08-roadmap.md#m0--foundations).
+**M0 (foundations)** is in place: a deterministic Rust simulation, the netcode core (sub-tick commands, own-champion prediction, reconciliation, clock and margin control loops), a dedicated UDP server, a headless Netcode Lab, and a Godot client. **M1 (Duel Sandbox)** is in progress: unit collision, skillshots and the dodge rig, an arena with walls, brush and fog of war, and two placeholder champions you can duel with (slices 1–4). Design docs: start with the [design index](docs/design/README.md). Results so far: [roadmap](docs/design/08-roadmap.md).
 
 ## Build & run
 
@@ -32,7 +32,18 @@ Build the Godot extension (once, and after Rust changes):
 cargo build -p mftr-gdext
 ```
 
-Then open `client/project.godot` in Godot (4.5+) and press Play. Right-click moves, S stops, Q casts a skillshot at the cursor, F1 toggles the net graph and F2 toggles client collision proxies (to feel the difference). The server starts in the `minions` sandbox by default. `--scenario dodge` adds turrets that fire skillshots at you, and `--scenario empty` gives champions only. To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
+Then open `client/project.godot` in Godot (4.5+) and press Play. The server starts the **Duel Sandbox** by default: blue spawns west, red east, with minion clumps in between. Two placeholder champions: **Ember** (skillshot mage) and **Vesper** (marksman); by default players alternate, or pick one with a user argument: `godot --path client -- --champion vesper`.
+
+| Input | Action |
+|---|---|
+| Right-click ground / enemy | Move / attack |
+| A, then left-click | Attack-move |
+| Q W E R | Abilities, cast at the cursor (skillshot, delayed area, dash or blink, hard-CC skillshot) |
+| D / F | Blink / Barrier |
+| S | Stop |
+| F1 / F2 | Net graph / client collision proxies (to feel the difference) |
+
+No one to duel? Start a sparring bot: `cargo run --release -p mftr-tools -- bot --server 127.0.0.1:7777 --duel --seconds 600`. Other scenarios: `--scenario minions` (minion-block sandbox), `--scenario dodge` (turrets that fire skillshots at you) and `--scenario empty`. To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
 
 Headless tools:
 
@@ -42,6 +53,7 @@ cargo test --workspace --release
 
 ```bash
 cargo run --release -p mftr-tools -- netlab --profile all --scenario dodge
+cargo run --release -p mftr-tools -- netlab --profile mid --clients 2 --scenario duel
 ```
 
 ```bash
@@ -52,7 +64,7 @@ cargo run --release -p mftr-tools -- bot --server 127.0.0.1:7777 --profile rough
 
 | Path | What |
 |---|---|
-| `crates/mftr-sim` | Deterministic simulation: ticks, movement, combat math, analytic projectiles |
+| `crates/mftr-sim` | Deterministic simulation: ticks, movement, pathing, vision, champions, combat, analytic projectiles |
 | `crates/mftr-net` | Wire protocol: bit-packing, packets, messages, link conditioner, clock sync |
 | `crates/mftr-client` | Engine-independent client runtime: prediction, reconciliation, interpolation |
 | `crates/mftr-server` | Authoritative server core and the `mftr-server` UDP binary |

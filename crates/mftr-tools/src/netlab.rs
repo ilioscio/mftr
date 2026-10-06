@@ -1,7 +1,7 @@
 //! Headless Netcode Lab (03 §14): one server and N scripted clients over link-conditioned
 //! links, in deterministic virtual time. Same seed → same result, so it's usable in CI.
 
-use crate::report::{ClickBot, DodgeBot, JumpMeter, Summary};
+use crate::report::{ClickBot, DodgeBot, DuelBot, JumpMeter, Summary};
 use mftr_client::{ClientSession, Phase};
 use mftr_net::conditioner::{LinkProfile, SimLink};
 use mftr_net::msg::{ServerMessage, decode_server};
@@ -31,6 +31,7 @@ pub struct LabConfig {
 enum Bot {
     Click(ClickBot),
     Dodge(DodgeBot),
+    Duel(DuelBot),
 }
 
 struct LabClient {
@@ -53,6 +54,9 @@ pub struct LabResult {
     pub fog_violations: u64,
     /// Unit-snapshots withheld by fog (sanity check that culling actually happens).
     pub fog_hidden: u64,
+    /// Wall-clock cost of one server tick (simulation + snapshots), mean and max, in ms.
+    pub tick_ms_mean: f64,
+    pub tick_ms_max: f64,
 }
 
 pub fn run(cfg: &LabConfig) -> LabResult {
@@ -71,10 +75,10 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                 },
                 up: SimLink::new(cfg.profile, s * 2 + 1),
                 down: SimLink::new(cfg.profile, s * 2 + 2),
-                bot: if cfg.scenario == Scenario::DodgeRig {
-                    Bot::Dodge(DodgeBot::new(s, cfg.reaction))
-                } else {
-                    Bot::Click(ClickBot::new(s))
+                bot: match cfg.scenario {
+                    Scenario::DodgeRig => Bot::Dodge(DodgeBot::new(s, cfg.reaction)),
+                    Scenario::Duel => Bot::Duel(DuelBot::new(s, cfg.reaction)),
+                    _ => Bot::Click(ClickBot::new(s)),
                 },
                 jumps: JumpMeter::default(),
                 clock_offset: 1000.0 + 37.0 * i as f64,
@@ -87,6 +91,7 @@ pub fn run(cfg: &LabConfig) -> LabResult {
     let frame_dt = 1.0 / cfg.fps;
     let mut t = 0.0;
     let (mut fog_violations, mut fog_hidden) = (0u64, 0u64);
+    let (mut tick_cost, mut tick_max, mut ticks_timed) = (0.0f64, 0.0f64, 0u64);
     let mut measuring = cfg.warmup <= 0.0;
     while t < cfg.warmup + cfg.seconds {
         if !measuring && t >= cfg.warmup {
@@ -107,7 +112,14 @@ pub fn run(cfg: &LabConfig) -> LabResult {
         }
         // Server tick.
         if t >= server.next_tick_due() {
+            let started = std::time::Instant::now();
             let packets = server.step(t);
+            let cost = started.elapsed().as_secs_f64() * 1e3;
+            if measuring {
+                tick_cost += cost;
+                tick_max = tick_max.max(cost);
+                ticks_timed += 1;
+            }
             let mut allowed: [Option<std::collections::BTreeSet<mftr_sim::UnitId>>; 2] = [None, None];
             for (to, bytes) in &packets {
                 let (Some(team), Ok((_, ServerMessage::Snapshot(s)))) = (server.team_of(*to), decode_server(bytes))
@@ -146,6 +158,7 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                     match &mut c.bot {
                         Bot::Click(b) => b.act(&mut c.session, local, t),
                         Bot::Dodge(b) => b.act(&mut c.session, local, t),
+                        Bot::Duel(b) => b.act(&mut c.session, local, t),
                     };
                     if c.session.should_send(local) {
                         let p = c.session.input_packet(local);
@@ -167,6 +180,8 @@ pub fn run(cfg: &LabConfig) -> LabResult {
         server_ticks: server.stats.ticks,
         fog_violations,
         fog_hidden,
+        tick_ms_mean: tick_cost / ticks_timed.max(1) as f64,
+        tick_ms_max: tick_max,
     }
 }
 
@@ -331,5 +346,35 @@ mod tests {
     fn ghost_hit_detector_fires_under_fault_injection() {
         let s = dodge_rig(LinkProfile::AWFUL, 0.40, Some(-0.06));
         assert!(s.dodge.ghost_hits > 0, "{}", s.dodge_row());
+    }
+
+    /// M1 slice 4 exit, "duel playable end to end": mage vs. marksman bots fight with their
+    /// whole kits at 80 ms. Both sides deal damage, kill and die, respawn and keep fighting,
+    /// while prediction stays within the 03 §1 correction target and skillshot dodges stay
+    /// honest (ghost hits).
+    #[test]
+    fn duel_is_playable_end_to_end() {
+        let r = run(&LabConfig {
+            profile: LinkProfile::MID,
+            clients: 2,
+            seconds: 300.0,
+            seed: 3,
+            fps: 144.0,
+            warmup: 5.0,
+            scenario: Scenario::Duel,
+            proxies: true,
+            reaction: 0.25,
+            margin_override: None,
+        });
+        let s = &r.summary;
+        assert_eq!(s.hard_resets, 0, "{}", s.row());
+        assert!(s.visible_mean < 15.0, "{}", s.row());
+        assert!(s.kills.iter().all(|k| *k >= 2), "both sides score kills: {:?}", s.kills);
+        assert!(s.deaths.iter().all(|d| *d >= 2), "both sides die and respawn: {:?}", s.deaths);
+        assert!(s.damage_dealt.iter().all(|d| *d > 2000.0), "{:?}", s.damage_dealt);
+        assert_eq!(r.fog_violations, 0);
+        assert!(s.dodge.near_misses >= 20, "the bots should be dodging skillshots: {}", s.dodge_row());
+        assert!(s.ghost_rate() < 0.02, "{}", s.dodge_row());
+        assert!((s.dodge.phantom_hits as f64) <= 0.03 * s.dodge.near_misses as f64, "{}", s.dodge_row());
     }
 }

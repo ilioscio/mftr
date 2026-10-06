@@ -1,7 +1,9 @@
-//! UDP bot client: connects to a real `mftr-server`, clicks around, and reports netcode stats.
-//! A local link conditioner can add latency, jitter and loss on top of the real network.
+//! UDP bot client: connects to a real `mftr-server`, clicks around (or, with `--duel`, fights
+//! like the Netcode Lab's duel bot: a sparring partner for the Duel Sandbox), and reports
+//! netcode stats. A local link conditioner can add latency, jitter and loss on top of the real
+//! network.
 
-use crate::report::{ClickBot, JumpMeter, Summary};
+use crate::report::{ClickBot, DuelBot, JumpMeter, Summary};
 use mftr_client::{ClientSession, Phase};
 use mftr_net::conditioner::{LinkProfile, SimLink};
 use mftr_sim::world::CHAMPION_MOVE_SPEED;
@@ -14,6 +16,9 @@ pub struct BotConfig {
     pub seconds: f64,
     pub seed: u64,
     pub fps: f64,
+    /// Fight with the whole kit instead of wandering.
+    pub duel: bool,
+    pub champion: Option<mftr_sim::ChampionId>,
 }
 
 pub fn run(cfg: &BotConfig) -> std::io::Result<Summary> {
@@ -24,7 +29,9 @@ pub fn run(cfg: &BotConfig) -> std::io::Result<Summary> {
     let clock = Instant::now();
     let now = || clock.elapsed().as_secs_f64();
     let mut session = ClientSession::new();
+    session.set_champion_request(cfg.champion);
     let mut bot = ClickBot::new(cfg.seed);
+    let mut duel = DuelBot::new(cfg.seed, 0.25);
     let mut jumps = JumpMeter::default();
     // Extra simulated impairment in each direction, applied locally.
     let mut up = SimLink::new(cfg.profile, cfg.seed * 2 + 1);
@@ -63,7 +70,11 @@ pub fn run(cfg: &BotConfig) -> std::io::Result<Summary> {
                 }
                 Phase::Playing => {
                     played_from.get_or_insert(t);
-                    bot.act(&mut session, t, t);
+                    if cfg.duel {
+                        duel.act(&mut session, t, t);
+                    } else {
+                        bot.act(&mut session, t, t);
+                    }
                     if session.should_send(t) {
                         up.send(session.input_packet(t), t);
                     }

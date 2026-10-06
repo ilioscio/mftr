@@ -36,7 +36,7 @@ impl Vision {
         let sources = world
             .units()
             .iter()
-            .filter(|u| u.team == team)
+            .filter(|u| u.team == team && u.state.alive())
             .map(|u| (u.state.pos, vision_radius(u.kind), map.brush_at(u.state.pos)))
             .collect();
         Vision { team, sources }
@@ -50,8 +50,11 @@ impl Vision {
         })
     }
 
-    /// Whether the team sees `unit` (own units and structures always).
+    /// Whether the team sees `unit` (own units and structures always; dead units never).
     pub fn sees_unit(&self, map: &Map, unit: &Unit) -> bool {
+        if !unit.state.alive() {
+            return false;
+        }
         unit.team == self.team || unit.kind == UnitKind::Turret || self.sees(map, unit.state.pos)
     }
 }
@@ -59,6 +62,7 @@ impl Vision {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::champion::ChampionId;
     use crate::map::MapId;
     use crate::world::PlayerId;
 
@@ -71,10 +75,10 @@ mod tests {
     #[test]
     fn walls_and_range_hide_units() {
         let mut w = world();
-        w.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(2200.0, 1200.0));
-        let behind_wall = w.spawn_champion(PlayerId(1), Team::Red, Vec2::new(2700.0, 1200.0));
-        let in_view = w.spawn_champion(PlayerId(2), Team::Red, Vec2::new(2200.0, 1900.0));
-        let far = w.spawn_champion(PlayerId(3), Team::Red, Vec2::new(3800.0, 3800.0));
+        w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, Vec2::new(2200.0, 1200.0));
+        let behind_wall = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, Vec2::new(2700.0, 1200.0));
+        let in_view = w.spawn_champion(PlayerId(2), Team::Red, ChampionId::Ember, Vec2::new(2200.0, 1900.0));
+        let far = w.spawn_champion(PlayerId(3), Team::Red, ChampionId::Ember, Vec2::new(3800.0, 3800.0));
         let v = Vision::of(&w, Team::Blue);
         let seen = |id| v.sees_unit(w.map(), w.unit(id).unwrap());
         assert!(!seen(behind_wall));
@@ -86,12 +90,12 @@ mod tests {
     fn brush_hides_unless_you_share_it() {
         let mut w = world();
         let bush_center = Vec2::new(1800.0, 2530.0); // brush 0
-        w.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(1800.0, 2200.0)); // outside, close
-        let hider = w.spawn_champion(PlayerId(1), Team::Red, bush_center);
+        w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, Vec2::new(1800.0, 2200.0)); // outside, close
+        let hider = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, bush_center);
         let v = Vision::of(&w, Team::Blue);
         assert!(!v.sees_unit(w.map(), w.unit(hider).unwrap()), "hidden in brush");
         // Step into the same brush: now visible.
-        w.spawn_champion(PlayerId(2), Team::Blue, bush_center + Vec2::new(60.0, 0.0));
+        w.spawn_champion(PlayerId(2), Team::Blue, ChampionId::Ember, bush_center + Vec2::new(60.0, 0.0));
         let v = Vision::of(&w, Team::Blue);
         assert!(v.sees_unit(w.map(), w.unit(hider).unwrap()), "same brush sees it");
         // And the one in the brush still sees out.

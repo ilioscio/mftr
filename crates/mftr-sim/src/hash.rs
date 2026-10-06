@@ -10,40 +10,54 @@ impl Default for StateHasher {
     }
 }
 
+/// A byte sink for state serialization. The same `hash_into` code feeds the state hash and
+/// the bit-exact comparison prediction reconciliation uses (a `Vec<u8>`).
+pub trait StateSink {
+    fn write_bytes(&mut self, bytes: &[u8]);
+
+    fn write_u8(&mut self, v: u8) {
+        self.write_bytes(&[v]);
+    }
+
+    fn write_u16(&mut self, v: u16) {
+        self.write_bytes(&v.to_le_bytes());
+    }
+
+    fn write_u32(&mut self, v: u32) {
+        self.write_bytes(&v.to_le_bytes());
+    }
+
+    fn write_u64(&mut self, v: u64) {
+        self.write_bytes(&v.to_le_bytes());
+    }
+
+    fn write_f32(&mut self, v: f32) {
+        self.write_u32(v.to_bits());
+    }
+}
+
 impl StateHasher {
     pub fn new() -> Self {
         Self(0xcbf2_9ce4_8422_2325)
     }
 
-    pub fn write_bytes(&mut self, bytes: &[u8]) {
+    pub fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+impl StateSink for StateHasher {
+    fn write_bytes(&mut self, bytes: &[u8]) {
         for &b in bytes {
             self.0 ^= b as u64;
             self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
         }
     }
+}
 
-    pub fn write_u8(&mut self, v: u8) {
-        self.write_bytes(&[v]);
-    }
-
-    pub fn write_u16(&mut self, v: u16) {
-        self.write_bytes(&v.to_le_bytes());
-    }
-
-    pub fn write_u32(&mut self, v: u32) {
-        self.write_bytes(&v.to_le_bytes());
-    }
-
-    pub fn write_u64(&mut self, v: u64) {
-        self.write_bytes(&v.to_le_bytes());
-    }
-
-    pub fn write_f32(&mut self, v: f32) {
-        self.write_u32(v.to_bits());
-    }
-
-    pub fn finish(&self) -> u64 {
-        self.0
+impl StateSink for Vec<u8> {
+    fn write_bytes(&mut self, bytes: &[u8]) {
+        self.extend_from_slice(bytes);
     }
 }
 

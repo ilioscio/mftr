@@ -5,8 +5,9 @@
 //! command entry points to GDScript.
 
 use godot::prelude::*;
-use mftr_client::{ClientSession, Phase, Side};
-use mftr_sim::{Team, UnitKind, Vec2};
+use mftr_client::{ClientSession, Notice, Phase, Side};
+use mftr_sim::ability::{DamageKind, SLOTS};
+use mftr_sim::{ChampionId, Team, UnitId, UnitKind, Vec2};
 use std::net::UdpSocket;
 use std::time::Instant;
 
@@ -26,6 +27,15 @@ pub struct MatchClient {
     clock: Instant,
     next_hello: f64,
     last_error: GString,
+    champion_request: Option<ChampionId>,
+}
+
+fn side_name(side: Side) -> &'static str {
+    match side {
+        Side::Own => "own",
+        Side::Ally => "ally",
+        Side::Enemy => "enemy",
+    }
 }
 
 #[godot_api]
@@ -38,6 +48,7 @@ impl INode for MatchClient {
             clock: Instant::now(),
             next_hello: 0.0,
             last_error: GString::new(),
+            champion_request: None,
         }
     }
 
@@ -65,6 +76,7 @@ impl MatchClient {
             Ok(s) => {
                 self.socket = Some(s);
                 self.session = ClientSession::new();
+                self.session.set_champion_request(self.champion_request);
                 self.next_hello = 0.0;
                 self.last_error = GString::new();
                 true
@@ -110,16 +122,131 @@ impl MatchClient {
         }
     }
 
-    /// Cast Q toward a ground point (game units). Windup and missile are predicted at once.
+    /// Champion to ask for when connecting ("ember", "vesper"; empty = the server picks).
+    /// Returns false for an unknown name.
     #[func]
-    fn cast_q(&mut self, target: Vector2) {
+    fn set_champion(&mut self, name: GString) -> bool {
+        let name = name.to_string();
+        self.champion_request = ChampionId::by_name(&name);
+        name.is_empty() || self.champion_request.is_some()
+    }
+
+    /// Cast the ability in `slot` (0–5 = Q W E R D F) toward a ground point (game units).
+    /// Windups, missiles, areas, dashes, blinks and shields are predicted at once.
+    #[func]
+    fn cast(&mut self, slot: i64, target: Vector2) {
         let now = self.now();
-        if self.session.cast_q(Vec2::new(target.x, target.y), now).is_some() {
+        if (0..SLOTS as i64).contains(&slot)
+            && self.session.cast(slot as u8, Vec2::new(target.x, target.y), now).is_some()
+        {
             self.send_input(now);
         }
     }
 
-    /// Missiles to draw: `{ key, pos, dir, radius, side: "own"|"ally"|"enemy", impact }`.
+    /// Basic-attack a unit by id (chases it into range).
+    #[func]
+    fn attack_unit(&mut self, id: i64) {
+        let now = self.now();
+        if self.session.attack(UnitId(id as u32), now).is_some() {
+            self.send_input(now);
+        }
+    }
+
+    /// Attack-move toward a ground point.
+    #[func]
+    fn attack_move(&mut self, target: Vector2) {
+        let now = self.now();
+        if self.session.attack_move(Vec2::new(target.x, target.y), now).is_some() {
+            self.send_input(now);
+        }
+    }
+
+    /// The enemy whose drawn hitbox contains a ground point (plus `slack` u), or -1.
+    #[func]
+    fn pick_enemy(&self, at: Vector2, slack: f32) -> i64 {
+        self.session.pick_enemy(Vec2::new(at.x, at.y), slack, self.now()).map_or(-1, |id| id.0 as i64)
+    }
+
+    /// Ground areas: `{ key, center, radius, side, progress (0..1 to detonation), detonated }`.
+    #[func]
+    fn areas(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for a in self.session.areas_render(self.now()) {
+            let mut d = VarDictionary::new();
+            d.set("key", a.key as i64);
+            d.set("center", Vector2::new(a.center.x, a.center.y));
+            d.set("radius", a.radius);
+            d.set("side", side_name(a.side));
+            d.set("progress", a.progress);
+            d.set("detonated", a.detonated);
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// Basic-attack bolts in flight: `{ key, pos, dir, side }`.
+    #[func]
+    fn bolts(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for b in self.session.bolts_render(self.now()) {
+            let mut d = VarDictionary::new();
+            d.set("key", b.key as i64);
+            d.set("pos", Vector2::new(b.pos.x, b.pos.y));
+            d.set("dir", Vector2::new(b.dir.x, b.dir.y));
+            d.set("side", side_name(b.side));
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// Confirmed damage since the last call: `{ target, source, amount, absorbed, kind }`
+    /// (`kind`: "physical" | "magic" | "true"). Call once per frame.
+    #[func]
+    fn take_combat_text(&mut self) -> VarArray {
+        let mut out = VarArray::new();
+        for c in self.session.take_combat_text() {
+            let mut d = VarDictionary::new();
+            d.set("target", c.target.0 as i64);
+            d.set("source", c.source.0 as i64);
+            d.set("amount", c.amount);
+            d.set("absorbed", c.absorbed);
+            d.set(
+                "kind",
+                match c.kind {
+                    DamageKind::Physical => "physical",
+                    DamageKind::Magic => "magic",
+                    DamageKind::True => "true",
+                },
+            );
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// Kills and respawns since the last call: `{ kind: "died"|"respawned", unit, killer }`.
+    #[func]
+    fn take_notices(&mut self) -> VarArray {
+        let mut out = VarArray::new();
+        for n in self.session.take_notices() {
+            let mut d = VarDictionary::new();
+            match n {
+                Notice::Died { unit, killer } => {
+                    d.set("kind", "died");
+                    d.set("unit", unit.0 as i64);
+                    d.set("killer", killer.0 as i64);
+                }
+                Notice::Respawned { unit } => {
+                    d.set("kind", "respawned");
+                    d.set("unit", unit.0 as i64);
+                }
+            }
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// Missiles to draw: `{ key, pos, dir, radius, side: "own"|"ally"|"enemy", impact,
+    /// unconfirmed, hard_cc }`.
     #[func]
     fn missiles(&self) -> VarArray {
         let mut out = VarArray::new();
@@ -129,16 +256,10 @@ impl MatchClient {
             d.set("pos", Vector2::new(m.pos.x, m.pos.y));
             d.set("dir", Vector2::new(m.dir.x, m.dir.y));
             d.set("radius", m.radius);
-            d.set(
-                "side",
-                match m.side {
-                    Side::Own => "own",
-                    Side::Ally => "ally",
-                    Side::Enemy => "enemy",
-                },
-            );
+            d.set("side", side_name(m.side));
             d.set("impact", m.impact);
             d.set("unconfirmed", m.unconfirmed);
+            d.set("hard_cc", m.hard_cc);
             out.push(&d.to_variant());
         }
         out
@@ -163,15 +284,36 @@ impl MatchClient {
         d
     }
 
-    /// Own champion status on the input timeline: `{ stunned, casting, q_cooldown }` (seconds).
+    /// Own champion on the input timeline: `{ champion, health, max_health, shield, dead,
+    /// respawn_in, stunned, rooted, casting, attacking, dashing, cooldowns: [6 × seconds],
+    /// abilities: [6 × name] }`. Health and shield are predicted; damage arrives from the server.
     #[func]
     fn own_status(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
         let now = self.now();
+        let champ = self.session.champion();
+        d.set("champion", champ.def().name);
+        let mut names = VarArray::new();
+        for slot in 0..SLOTS as u8 {
+            names.push(&champ.ability(slot).map_or("", |a| a.name).to_variant());
+        }
+        d.set("abilities", &names);
         if let (Some(s), Some(t)) = (self.session.own_state_now(), self.session.input_sim_time(now)) {
+            d.set("health", s.health);
+            d.set("max_health", champ.def().stats.max_health);
+            d.set("shield", if s.shield_until > t { s.shield } else { 0.0 });
+            d.set("dead", !s.alive());
+            d.set("respawn_in", s.respawn_at.map_or(0.0, |r| r.secs_since(t)));
             d.set("stunned", s.stunned_until > t);
+            d.set("rooted", s.rooted_until > t);
             d.set("casting", s.cast.is_some());
-            d.set("q_cooldown", s.q_ready_at.secs_since(t));
+            d.set("attacking", s.attack.is_some());
+            d.set("dashing", s.dash.is_some());
+            let mut cds = VarArray::new();
+            for c in s.cooldowns {
+                cds.push(&c.secs_since(t).to_variant());
+            }
+            d.set("cooldowns", &cds);
         }
         d
     }
@@ -196,7 +338,9 @@ impl MatchClient {
         Vector2::new(p.x, p.y)
     }
 
-    /// Remote units to draw. Each entry: `{ id, pos: Vector2, minion: bool, red: bool, radius }`.
+    /// Remote units to draw. Each entry: `{ id, pos: Vector2, minion, turret, champion (name or
+    /// ""), red, ally, radius (collision), gameplay_radius, health, max_health, shield,
+    /// stunned, rooted, attacking, dashing, windup?, windup_dir? }`.
     /// Champions are on `T_interp`; minions near us blend toward `T_input` (03a §5).
     #[func]
     fn remote_units(&self) -> VarArray {
@@ -207,6 +351,14 @@ impl MatchClient {
             d.set("pos", Vector2::new(u.pos.x, u.pos.y));
             d.set("minion", u.kind == UnitKind::Minion);
             d.set("turret", u.kind == UnitKind::Turret);
+            d.set("champion", u.champion.map_or("", |c| c.def().name));
+            d.set("health", u.health);
+            d.set("max_health", u.max_health);
+            d.set("shield", u.shield);
+            d.set("gameplay_radius", u.gameplay_radius);
+            d.set("attacking", u.attacking);
+            d.set("rooted", u.rooted);
+            d.set("dashing", u.dashing);
             d.set("stunned", u.stunned);
             if let Some((p, dir)) = u.windup {
                 d.set("windup", p);
@@ -248,6 +400,8 @@ impl MatchClient {
         d.set("near_misses", dodge.near_misses as i64);
         d.set("ghost_hits", dodge.ghost_hits as i64);
         d.set("phantom_hits", dodge.phantom_hits as i64);
+        d.set("kills", st.kills as i64);
+        d.set("deaths", st.deaths as i64);
         d
     }
 }

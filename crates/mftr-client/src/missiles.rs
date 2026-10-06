@@ -64,6 +64,8 @@ pub struct MissileRender {
     pub impact: bool,
     /// Predicted to be intercepted by another unit: draw dimmed until the server confirms.
     pub unconfirmed: bool,
+    /// Stuns or roots on hit: drawn with the shared hard-CC accent (05 §1).
+    pub hard_cc: bool,
 }
 
 /// An enemy missile as the player sees it, for scripted dodgers (dodge rig bot).
@@ -89,6 +91,9 @@ pub struct DodgeStats {
     pub phantom_hits: u64,
     /// Resolved while shown as unconfirmed (predicted interception); not judged either way.
     pub uncertain: u64,
+    /// Resolved after the server had already killed us with something else (the missile
+    /// passed a corpse); not judged either way.
+    pub died_first: u64,
 }
 
 #[derive(Default)]
@@ -208,6 +213,12 @@ impl MissileBook {
                     s.uncertain += 1;
                     continue;
                 }
+                // Our history is authoritative up to the latest snapshot: were we already dead?
+                let end_tick = Tick((t.end.map_or(t.m.end_at(), |(e, _)| e).0 / SUBTICKS as u64) as u32 + 1);
+                if !server_hit && history(end_tick).is_some_and(|h| !h.alive()) {
+                    s.died_first += 1;
+                    continue;
+                }
                 s.near_misses += t.near_miss as u64;
                 s.shown_hits += (shown == Outcome::Hit) as u64;
                 match (shown, server_hit) {
@@ -252,12 +263,14 @@ impl MissileBook {
                         radius: m.spec.radius,
                         impact: true,
                         unconfirmed: false,
+                        hard_cc: m.spec.cc.is_hard(),
                     });
                 }
                 return;
             }
             let (pos, dir, radius) = (pos_at(m, at), m.dir, m.spec.radius);
-            out.push(MissileRender { key, side, pos, dir, radius, impact: false, unconfirmed });
+            let hard_cc = m.spec.cc.is_hard();
+            out.push(MissileRender { key, side, pos, dir, radius, impact: false, unconfirmed, hard_cc });
         };
         let own_display = |m: &Missile| {
             let traveled =

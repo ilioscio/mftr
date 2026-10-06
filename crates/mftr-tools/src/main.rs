@@ -1,7 +1,8 @@
 //! mftr-tools: developer CLI.
 //!
 //!   mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--warmup S] [--seed N] [--fps F]
-//!   mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N]
+//!                     [--scenario empty|minions|dodge|duel] [--no-proxies] [--reaction S]
+//!   mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]
 //!
 //! Profiles: perfect, lan, good, typical, rough, awful.
 
@@ -43,15 +44,20 @@ fn main() {
                 };
                 let r = netlab::run(&cfg);
                 println!(
-                    "{}   ticks {} hash {:#018x}  fog: {} withheld, {} leaked",
+                    "{}   ticks {} hash {:#018x}  fog: {} withheld, {} leaked  tick {:.3} ms (max {:.3})",
                     r.summary.row(),
                     r.server_ticks,
                     r.server_hash,
                     r.fog_hidden,
-                    r.fog_violations
+                    r.fog_violations,
+                    r.tick_ms_mean,
+                    r.tick_ms_max
                 );
-                if cfg.scenario == Scenario::DodgeRig {
+                if matches!(cfg.scenario, Scenario::DodgeRig | Scenario::Duel) {
                     println!("{}", r.summary.dodge_row());
+                }
+                if cfg.scenario == Scenario::Duel {
+                    println!("{}", r.summary.duel_row());
                 }
             }
         }
@@ -62,6 +68,9 @@ fn main() {
                 seconds: num("--seconds", 30.0),
                 seed: num("--seed", 1.0) as u64,
                 fps: num("--fps", 144.0),
+                duel: args.iter().any(|a| a == "--duel"),
+                champion: get("--champion")
+                    .map(|c| mftr_sim::ChampionId::by_name(&c).unwrap_or_else(|| panic!("unknown champion {c}"))),
             };
             match bot::run(&cfg) {
                 Ok(s) => {
@@ -76,7 +85,9 @@ fn main() {
         }
         _ => {
             eprintln!("usage: mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--seed N]");
-            eprintln!("       mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N]");
+            eprintln!(
+                "       mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]"
+            );
             std::process::exit(2);
         }
     }

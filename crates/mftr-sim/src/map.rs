@@ -60,6 +60,8 @@ pub struct Map {
     pub walls: Vec<Vec<Vec2>>,
     /// Brush polygons: walkable, hide units inside from observers outside.
     pub brush: Vec<Vec<Vec2>>,
+    /// Walled in on 0..MAP_SIZE (else the open plane, limited only by the point encoding).
+    pub bounded: bool,
     edges: Vec<(Vec2, Vec2)>,
     grid_w: usize,
     grid_h: usize,
@@ -82,7 +84,7 @@ impl Map {
             walls.iter().flat_map(|poly| (0..poly.len()).map(move |i| (poly[i], poly[(i + 1) % poly.len()]))).collect();
         let grid_w = (MAP_SIZE / NAV_CELL) as usize;
         let grid_h = grid_w;
-        let mut map = Map { id, walls, brush, edges, grid_w, grid_h, blocked: Vec::new() };
+        let mut map = Map { id, walls, brush, bounded, edges, grid_w, grid_h, blocked: Vec::new() };
         map.blocked = (0..grid_w * grid_h).map(|i| !map.walkable(map.cell_center(i), NAV_CLEARANCE)).collect();
         map
     }
@@ -98,6 +100,12 @@ impl Map {
             return false;
         }
         self.edges.iter().all(|&(a, b)| dist_point_segment(p, a, b) >= radius)
+    }
+
+    /// A circle of `radius` at `p` lies inside the playable area (blinks never leave it).
+    pub fn in_bounds(&self, p: Vec2, radius: f32) -> bool {
+        let max = if self.bounded { MAP_SIZE } else { u16::MAX as f32 * crate::math::QPoint::STEP };
+        p.x >= radius && p.y >= radius && p.x <= max - radius && p.y <= max - radius
     }
 
     /// Line of sight between two points: no wall edge crossed (vision, 03 §10).

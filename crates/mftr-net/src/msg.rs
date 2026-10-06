@@ -6,12 +6,12 @@
 
 use crate::bits::{BitReader, BitWriter, DecodeError};
 use crate::packet::PacketHeader;
-use mftr_sim::ability::LineSkillshot;
+use mftr_sim::ability::{Cc, Damage, DamageKind, LineSkillshot, SLOTS};
 use mftr_sim::map::MapId;
 use mftr_sim::world::{MAX_PATH, Path};
 use mftr_sim::{
-    Cast, Command, CommandKind, Missile, Order, PlayerId, QPoint, SimDuration, SimEvent, SimTime, SubTick, Team, Tick,
-    UnitId, UnitKind, UnitState, Vec2,
+    Area, AttackWindup, Bolt, Cast, ChampionId, Command, CommandKind, DashMove, Missile, Order, PlayerId, QPoint,
+    SimDuration, SimEvent, SimTime, SubTick, Team, Tick, UnitId, UnitKind, UnitState, Vec2,
 };
 
 const MAGIC: u8 = 0x4D; // 'M'
@@ -28,6 +28,8 @@ pub enum ClientMessage {
     Hello {
         protocol: u16,
         client_time_us: u32,
+        /// Preferred champion (the server may assign another when none is asked for).
+        champion: Option<ChampionId>,
     },
     /// The `player` field of each command is ignored by the server (taken from the connection).
     Input {
@@ -70,9 +72,17 @@ pub struct RemoteUnit {
     pub speed: u16,
     /// Collision radius in whole units (8 bits).
     pub collision_radius: u8,
-    /// Status flags for display (windup animation, stun indicator).
+    pub champion: Option<ChampionId>,
+    /// Whole health points (16 bits each): confirmed values only (03a §7).
+    pub health: u16,
+    pub max_health: u16,
+    pub shield: u16,
+    /// Status flags for display (windup animations, CC indicators).
     pub casting: bool,
+    pub attacking: bool,
     pub stunned: bool,
+    pub rooted: bool,
+    pub dashing: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -100,6 +110,9 @@ pub enum ServerMessage {
         team: Team,
         /// The map both sides simulate on (walls, brush, pathing).
         map: MapId,
+        /// Own champion and respawn point (prediction rebuilds the unit from these).
+        champion: ChampionId,
+        home: Vec2,
         tick: Tick,
         tick_hz: u8,
         since_tick_us: u32,
@@ -134,12 +147,21 @@ fn write_command(w: &mut BitWriter, c: &Command) {
     w.write(c.sub.get() as u64, 6);
     match c.kind {
         CommandKind::MoveTo(q) => {
-            w.write(0, 2);
+            w.write(0, 3);
             write_qpoint(w, q);
         }
-        CommandKind::Stop => w.write(1, 2),
-        CommandKind::CastQ(q) => {
-            w.write(2, 2);
+        CommandKind::Stop => w.write(1, 3),
+        CommandKind::Cast { slot, target } => {
+            w.write(2, 3);
+            w.write(slot as u64, 3);
+            write_qpoint(w, target);
+        }
+        CommandKind::Attack(id) => {
+            w.write(3, 3);
+            w.write_u32(id.0);
+        }
+        CommandKind::AttackMove(q) => {
+            w.write(4, 3);
             write_qpoint(w, q);
         }
     }
@@ -149,10 +171,18 @@ fn read_command(r: &mut BitReader) -> Result<Command, DecodeError> {
     let seq = r.read_u32()?;
     let tick = Tick(r.read_u32()?);
     let sub = SubTick::new(r.read(6)? as u8);
-    let kind = match r.read(2)? {
+    let kind = match r.read(3)? {
         0 => CommandKind::MoveTo(read_qpoint(r)?),
         1 => CommandKind::Stop,
-        2 => CommandKind::CastQ(read_qpoint(r)?),
+        2 => {
+            let slot = r.read(3)? as u8;
+            if slot as usize >= SLOTS {
+                return Err(DecodeError::Invalid("ability slot"));
+            }
+            CommandKind::Cast { slot, target: read_qpoint(r)? }
+        }
+        3 => CommandKind::Attack(UnitId(r.read_u32()?)),
+        4 => CommandKind::AttackMove(read_qpoint(r)?),
         _ => return Err(DecodeError::Invalid("command kind")),
     };
     Ok(Command { player: PlayerId(0), seq, tick, sub, kind })
@@ -169,6 +199,31 @@ fn read_time(r: &mut BitReader) -> Result<SimTime, DecodeError> {
     Ok(SimTime::join(ticks, r.read(6)? as u8))
 }
 
+fn write_opt_time(w: &mut BitWriter, t: Option<SimTime>) {
+    w.write_bool(t.is_some());
+    if let Some(t) = t {
+        write_time(w, t);
+    }
+}
+
+fn read_opt_time(r: &mut BitReader) -> Result<Option<SimTime>, DecodeError> {
+    Ok(if r.read_bool()? { Some(read_time(r)?) } else { None })
+}
+
+fn write_duration(w: &mut BitWriter, d: SimDuration) {
+    w.write_u32(d.0.min(u32::MAX as u64) as u32);
+}
+
+fn read_duration(r: &mut BitReader) -> Result<SimDuration, DecodeError> {
+    Ok(SimDuration(r.read_u32()? as u64))
+}
+
+/// A finite f32 (untrusted input never yields NaN or infinities in the sim).
+fn read_finite(r: &mut BitReader) -> Result<f32, DecodeError> {
+    let v = r.read_f32()?;
+    if v.is_finite() { Ok(v) } else { Err(DecodeError::Invalid("non-finite number")) }
+}
+
 fn write_vec2(w: &mut BitWriter, v: Vec2) {
     w.write_f32(v.x);
     w.write_f32(v.y);
@@ -179,89 +234,289 @@ fn read_vec2(r: &mut BitReader) -> Result<Vec2, DecodeError> {
     if v.x.is_finite() && v.y.is_finite() { Ok(v) } else { Err(DecodeError::Invalid("vector")) }
 }
 
+fn write_team(w: &mut BitWriter, t: Team) {
+    w.write_bool(t == Team::Red);
+}
+
+fn read_team(r: &mut BitReader) -> Result<Team, DecodeError> {
+    Ok(if r.read_bool()? { Team::Red } else { Team::Blue })
+}
+
+fn write_damage_kind(w: &mut BitWriter, k: DamageKind) {
+    w.write(k as u64, 2);
+}
+
+fn read_damage_kind(r: &mut BitReader) -> Result<DamageKind, DecodeError> {
+    Ok(match r.read(2)? {
+        0 => DamageKind::Physical,
+        1 => DamageKind::Magic,
+        2 => DamageKind::True,
+        _ => return Err(DecodeError::Invalid("damage kind")),
+    })
+}
+
+fn write_line_spec(w: &mut BitWriter, s: &LineSkillshot) {
+    write_duration(w, s.windup);
+    w.write_f32(s.speed);
+    w.write_f32(s.radius);
+    w.write_f32(s.range);
+    write_damage_kind(w, s.damage.kind);
+    w.write_f32(s.damage.base);
+    w.write_f32(s.damage.ad_ratio);
+    w.write_f32(s.damage.ap_ratio);
+    match s.cc {
+        Cc::None => w.write(0, 2),
+        Cc::Stun(d) => {
+            w.write(1, 2);
+            write_duration(w, d);
+        }
+        Cc::Root(d) => {
+            w.write(2, 2);
+            write_duration(w, d);
+        }
+    }
+}
+
+fn read_line_spec(r: &mut BitReader) -> Result<LineSkillshot, DecodeError> {
+    let windup = read_duration(r)?;
+    let (speed, radius, range) = (read_finite(r)?, read_finite(r)?, read_finite(r)?);
+    if speed <= 0.0 {
+        return Err(DecodeError::Invalid("missile spec"));
+    }
+    let kind = read_damage_kind(r)?;
+    let damage = Damage { kind, base: read_finite(r)?, ad_ratio: read_finite(r)?, ap_ratio: read_finite(r)? };
+    let cc = match r.read(2)? {
+        0 => Cc::None,
+        1 => Cc::Stun(read_duration(r)?),
+        2 => Cc::Root(read_duration(r)?),
+        _ => return Err(DecodeError::Invalid("cc kind")),
+    };
+    Ok(LineSkillshot { windup, speed, radius, range, damage, cc })
+}
+
 fn write_event(w: &mut BitWriter, e: &SimEvent) {
     match e {
-        SimEvent::CastStarted { unit, at, dir, fire_at, seq } => {
-            w.write(0, 2);
+        SimEvent::CastStarted { unit, slot, at, dir, point, fire_at, seq } => {
+            w.write(0, 4);
             w.write_u32(unit.0);
+            w.write(*slot as u64, 3);
             write_time(w, *at);
             write_vec2(w, *dir);
+            write_vec2(w, *point);
             write_time(w, *fire_at);
             w.write_u32(*seq);
         }
         SimEvent::MissileSpawned(m) => {
-            w.write(1, 2);
+            w.write(1, 4);
             w.write_u32(m.id);
             w.write_u32(m.owner.0);
-            w.write_bool(m.team == Team::Red);
+            write_team(w, m.team);
             write_vec2(w, m.origin);
             write_vec2(w, m.dir);
-            w.write_u32(m.spec.windup.0 as u32);
-            w.write_u32(m.spec.cooldown.0 as u32);
-            w.write_f32(m.spec.speed);
-            w.write_f32(m.spec.radius);
-            w.write_f32(m.spec.range);
-            w.write_u32(m.spec.stun.0 as u32);
+            write_line_spec(w, &m.spec);
             write_time(w, m.spawn_at);
             w.write_u32(m.cast_seq);
+            w.write_f32(m.power);
         }
         SimEvent::MissileHit { id, target, at } => {
-            w.write(2, 2);
+            w.write(2, 4);
             w.write_u32(*id);
             w.write_u32(target.0);
             write_time(w, *at);
         }
         SimEvent::MissileExpired { id, at } => {
-            w.write(3, 2);
+            w.write(3, 4);
             w.write_u32(*id);
             write_time(w, *at);
+        }
+        SimEvent::AreaSpawned(a) => {
+            w.write(4, 4);
+            w.write_u32(a.id);
+            w.write_u32(a.owner.0);
+            write_team(w, a.team);
+            write_vec2(w, a.center);
+            w.write_f32(a.radius);
+            write_time(w, a.spawn_at);
+            write_time(w, a.detonate_at);
+            write_damage_kind(w, a.kind);
+            w.write_f32(a.power);
+            w.write_u32(a.cast_seq);
+        }
+        SimEvent::AreaDetonated { id, at } => {
+            w.write(5, 4);
+            w.write_u32(*id);
+            write_time(w, *at);
+        }
+        SimEvent::AttackLaunched(b) => {
+            w.write(6, 4);
+            w.write_u32(b.id);
+            w.write_u32(b.owner.0);
+            write_team(w, b.team);
+            w.write_u32(b.target.0);
+            write_vec2(w, b.origin);
+            write_vec2(w, b.pos);
+            w.write_f32(b.speed);
+            write_time(w, b.launched_at);
+            w.write_f32(b.power);
+        }
+        SimEvent::AttackLanded { id, target, at, hit } => {
+            w.write(7, 4);
+            w.write_u32(*id);
+            w.write_u32(target.0);
+            write_time(w, *at);
+            w.write_bool(*hit);
+        }
+        SimEvent::Damage { source, target, kind, amount, absorbed, at } => {
+            w.write(8, 4);
+            w.write_u32(source.0);
+            w.write_u32(target.0);
+            write_damage_kind(w, *kind);
+            w.write_f32(*amount);
+            w.write_f32(*absorbed);
+            write_time(w, *at);
+        }
+        SimEvent::Died { unit, killer, at, respawn_at } => {
+            w.write(9, 4);
+            w.write_u32(unit.0);
+            w.write_u32(killer.0);
+            write_time(w, *at);
+            write_time(w, *respawn_at);
+        }
+        SimEvent::Respawned { unit, pos, at } => {
+            w.write(10, 4);
+            w.write_u32(unit.0);
+            write_vec2(w, *pos);
+            write_time(w, *at);
+        }
+        SimEvent::Blinked { unit, from, to, at } => {
+            w.write(11, 4);
+            w.write_u32(unit.0);
+            write_vec2(w, *from);
+            write_vec2(w, *to);
+            write_time(w, *at);
+        }
+        SimEvent::Dashed { unit, from, to, at, end_at } => {
+            w.write(12, 4);
+            w.write_u32(unit.0);
+            write_vec2(w, *from);
+            write_vec2(w, *to);
+            write_time(w, *at);
+            write_time(w, *end_at);
+        }
+        SimEvent::Shielded { unit, amount, at, until } => {
+            w.write(13, 4);
+            w.write_u32(unit.0);
+            w.write_f32(*amount);
+            write_time(w, *at);
+            write_time(w, *until);
         }
     }
 }
 
 fn read_event(r: &mut BitReader) -> Result<SimEvent, DecodeError> {
-    Ok(match r.read(2)? {
+    let unit = |r: &mut BitReader| -> Result<UnitId, DecodeError> { Ok(UnitId(r.read_u32()?)) };
+    Ok(match r.read(4)? {
         0 => SimEvent::CastStarted {
-            unit: UnitId(r.read_u32()?),
+            unit: unit(r)?,
+            slot: r.read(3)? as u8,
             at: read_time(r)?,
             dir: read_vec2(r)?,
+            point: read_vec2(r)?,
             fire_at: read_time(r)?,
             seq: r.read_u32()?,
         },
-        1 => {
-            let id = r.read_u32()?;
-            let owner = UnitId(r.read_u32()?);
-            let team = if r.read_bool()? { Team::Red } else { Team::Blue };
-            let origin = read_vec2(r)?;
-            let dir = read_vec2(r)?;
-            let windup = SimDuration(r.read_u32()? as u64);
-            let cooldown = SimDuration(r.read_u32()? as u64);
-            let (speed, radius, range) = (r.read_f32()?, r.read_f32()?, r.read_f32()?);
-            let stun = SimDuration(r.read_u32()? as u64);
-            if !(speed > 0.0 && speed.is_finite() && radius.is_finite() && range.is_finite()) {
-                return Err(DecodeError::Invalid("missile spec"));
-            }
-            let spec = LineSkillshot { windup, cooldown, speed, radius, range, stun };
-            let spawn_at = read_time(r)?;
-            let cast_seq = r.read_u32()?;
-            SimEvent::MissileSpawned(Missile { id, owner, team, origin, dir, spec, spawn_at, cast_seq })
+        1 => SimEvent::MissileSpawned(Missile {
+            id: r.read_u32()?,
+            owner: unit(r)?,
+            team: read_team(r)?,
+            origin: read_vec2(r)?,
+            dir: read_vec2(r)?,
+            spec: read_line_spec(r)?,
+            spawn_at: read_time(r)?,
+            cast_seq: r.read_u32()?,
+            power: read_finite(r)?,
+        }),
+        2 => SimEvent::MissileHit { id: r.read_u32()?, target: unit(r)?, at: read_time(r)? },
+        3 => SimEvent::MissileExpired { id: r.read_u32()?, at: read_time(r)? },
+        4 => SimEvent::AreaSpawned(Area {
+            id: r.read_u32()?,
+            owner: unit(r)?,
+            team: read_team(r)?,
+            center: read_vec2(r)?,
+            radius: read_finite(r)?,
+            spawn_at: read_time(r)?,
+            detonate_at: read_time(r)?,
+            kind: read_damage_kind(r)?,
+            power: read_finite(r)?,
+            cast_seq: r.read_u32()?,
+        }),
+        5 => SimEvent::AreaDetonated { id: r.read_u32()?, at: read_time(r)? },
+        6 => SimEvent::AttackLaunched(Bolt {
+            id: r.read_u32()?,
+            owner: unit(r)?,
+            team: read_team(r)?,
+            target: unit(r)?,
+            origin: read_vec2(r)?,
+            pos: read_vec2(r)?,
+            speed: read_finite(r)?,
+            launched_at: read_time(r)?,
+            power: read_finite(r)?,
+        }),
+        7 => SimEvent::AttackLanded { id: r.read_u32()?, target: unit(r)?, at: read_time(r)?, hit: r.read_bool()? },
+        8 => SimEvent::Damage {
+            source: unit(r)?,
+            target: unit(r)?,
+            kind: read_damage_kind(r)?,
+            amount: read_finite(r)?,
+            absorbed: read_finite(r)?,
+            at: read_time(r)?,
+        },
+        9 => SimEvent::Died { unit: unit(r)?, killer: unit(r)?, at: read_time(r)?, respawn_at: read_time(r)? },
+        10 => SimEvent::Respawned { unit: unit(r)?, pos: read_vec2(r)?, at: read_time(r)? },
+        11 => SimEvent::Blinked { unit: unit(r)?, from: read_vec2(r)?, to: read_vec2(r)?, at: read_time(r)? },
+        12 => SimEvent::Dashed {
+            unit: unit(r)?,
+            from: read_vec2(r)?,
+            to: read_vec2(r)?,
+            at: read_time(r)?,
+            end_at: read_time(r)?,
+        },
+        13 => SimEvent::Shielded { unit: unit(r)?, amount: read_finite(r)?, at: read_time(r)?, until: read_time(r)? },
+        _ => return Err(DecodeError::Invalid("event kind")),
+    })
+}
+
+fn write_order(w: &mut BitWriter, o: Order) {
+    match o {
+        Order::Idle => w.write(0, 2),
+        Order::MoveTo(q) => {
+            w.write(1, 2);
+            write_qpoint(w, q);
         }
-        2 => SimEvent::MissileHit { id: r.read_u32()?, target: UnitId(r.read_u32()?), at: read_time(r)? },
-        _ => SimEvent::MissileExpired { id: r.read_u32()?, at: read_time(r)? },
+        Order::Attack(id) => {
+            w.write(2, 2);
+            w.write_u32(id.0);
+        }
+        Order::AttackMove(q) => {
+            w.write(3, 2);
+            write_qpoint(w, q);
+        }
+    }
+}
+
+fn read_order(r: &mut BitReader) -> Result<Order, DecodeError> {
+    Ok(match r.read(2)? {
+        0 => Order::Idle,
+        1 => Order::MoveTo(read_qpoint(r)?),
+        2 => Order::Attack(UnitId(r.read_u32()?)),
+        _ => Order::AttackMove(read_qpoint(r)?),
     })
 }
 
 fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
-    w.write_f32(s.pos.x);
-    w.write_f32(s.pos.y);
+    write_vec2(w, s.pos);
     w.write_f32(s.move_speed);
-    match s.order {
-        Order::Idle => w.write_bool(false),
-        Order::MoveTo(q) => {
-            w.write_bool(true);
-            write_qpoint(w, q);
-        }
-    }
+    write_order(w, s.order);
     w.write(s.path.len as u64, 4);
     w.write(s.path.next as u64, 4);
     w.write_bool(s.path.complete);
@@ -270,24 +525,45 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     }
     w.write_bool(s.detour.is_some());
     if let Some(d) = s.detour {
-        w.write_f32(d.x);
-        w.write_f32(d.y);
+        write_vec2(w, d);
     }
     w.write_u8(s.stuck);
     w.write_bool(s.cast.is_some());
     if let Some(c) = s.cast {
+        w.write(c.slot as u64, 3);
         write_vec2(w, c.dir);
+        write_vec2(w, c.point);
         write_time(w, c.fire_at);
         w.write_u32(c.seq);
     }
+    w.write_bool(s.attack.is_some());
+    if let Some(a) = s.attack {
+        w.write_u32(a.target.0);
+        write_time(w, a.fire_at);
+    }
+    write_time(w, s.attack_ready_at);
+    w.write_bool(s.dash.is_some());
+    if let Some(d) = s.dash {
+        write_vec2(w, d.dir);
+        write_vec2(w, d.to);
+        w.write_f32(d.speed);
+        write_time(w, d.end_at);
+    }
     write_time(w, s.stunned_until);
-    write_time(w, s.q_ready_at);
+    write_time(w, s.rooted_until);
+    for c in s.cooldowns {
+        write_time(w, c);
+    }
+    w.write_f32(s.health);
+    w.write_f32(s.shield);
+    write_time(w, s.shield_until);
+    write_opt_time(w, s.respawn_at);
 }
 
 fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let pos = read_vec2(r)?;
-    let move_speed = r.read_f32()?;
-    let order = if r.read_bool()? { Order::MoveTo(read_qpoint(r)?) } else { Order::Idle };
+    let move_speed = read_finite(r)?;
+    let order = read_order(r)?;
     let mut path = Path::EMPTY;
     path.len = r.read(4)? as u8;
     path.next = r.read(4)? as u8;
@@ -301,16 +577,67 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let detour = if r.read_bool()? { Some(read_vec2(r)?) } else { None };
     let stuck = r.read_u8()?;
     let cast = if r.read_bool()? {
-        Some(Cast { dir: read_vec2(r)?, fire_at: read_time(r)?, seq: r.read_u32()? })
+        Some(Cast {
+            slot: r.read(3)? as u8,
+            dir: read_vec2(r)?,
+            point: read_vec2(r)?,
+            fire_at: read_time(r)?,
+            seq: r.read_u32()?,
+        })
+    } else {
+        None
+    };
+    let attack = if r.read_bool()? {
+        Some(AttackWindup { target: UnitId(r.read_u32()?), fire_at: read_time(r)? })
+    } else {
+        None
+    };
+    let attack_ready_at = read_time(r)?;
+    let dash = if r.read_bool()? {
+        Some(DashMove { dir: read_vec2(r)?, to: read_vec2(r)?, speed: read_finite(r)?, end_at: read_time(r)? })
     } else {
         None
     };
     let stunned_until = read_time(r)?;
-    let q_ready_at = read_time(r)?;
-    if !move_speed.is_finite() {
-        return Err(DecodeError::Invalid("unit state"));
+    let rooted_until = read_time(r)?;
+    let mut cooldowns = [SimTime(0); SLOTS];
+    for c in cooldowns.iter_mut() {
+        *c = read_time(r)?;
     }
-    Ok(UnitState { pos, order, move_speed, path, detour, stuck, cast, stunned_until, q_ready_at })
+    let health = read_finite(r)?;
+    let shield = read_finite(r)?;
+    let shield_until = read_time(r)?;
+    let respawn_at = read_opt_time(r)?;
+    Ok(UnitState {
+        pos,
+        order,
+        move_speed,
+        path,
+        detour,
+        stuck,
+        cast,
+        attack,
+        attack_ready_at,
+        dash,
+        stunned_until,
+        rooted_until,
+        cooldowns,
+        health,
+        shield,
+        shield_until,
+        respawn_at,
+    })
+}
+
+fn write_champion(w: &mut BitWriter, c: Option<ChampionId>) {
+    w.write(c.map_or(7, |c| c as u64), 3);
+}
+
+fn read_champion(r: &mut BitReader) -> Result<Option<ChampionId>, DecodeError> {
+    match r.read(3)? {
+        7 => Ok(None),
+        v => ChampionId::from_u8(v as u8).map(Some).ok_or(DecodeError::Invalid("champion")),
+    }
 }
 
 fn write_remote(w: &mut BitWriter, o: &RemoteUnit) {
@@ -323,7 +650,7 @@ fn write_remote(w: &mut BitWriter, o: &RemoteUnit) {
         },
         2,
     );
-    w.write_bool(o.team == Team::Red);
+    write_team(w, o.team);
     write_qpoint(w, o.pos);
     w.write_bool(o.target.is_some());
     if let Some(t) = o.target {
@@ -331,8 +658,13 @@ fn write_remote(w: &mut BitWriter, o: &RemoteUnit) {
     }
     w.write(o.speed.min(1023) as u64, 10);
     w.write_u8(o.collision_radius);
-    w.write_bool(o.casting);
-    w.write_bool(o.stunned);
+    write_champion(w, o.champion);
+    w.write_u16(o.health);
+    w.write_u16(o.max_health);
+    w.write_u16(o.shield);
+    for f in [o.casting, o.attacking, o.stunned, o.rooted, o.dashing] {
+        w.write_bool(f);
+    }
 }
 
 fn read_remote(r: &mut BitReader) -> Result<RemoteUnit, DecodeError> {
@@ -343,14 +675,36 @@ fn read_remote(r: &mut BitReader) -> Result<RemoteUnit, DecodeError> {
         2 => UnitKind::Turret,
         _ => return Err(DecodeError::Invalid("unit kind")),
     };
-    let team = if r.read_bool()? { Team::Red } else { Team::Blue };
+    let team = read_team(r)?;
     let pos = read_qpoint(r)?;
     let target = if r.read_bool()? { Some(read_qpoint(r)?) } else { None };
     let speed = r.read(10)? as u16;
     let collision_radius = r.read_u8()?;
-    let casting = r.read_bool()?;
-    let stunned = r.read_bool()?;
-    Ok(RemoteUnit { id, kind, team, pos, target, speed, collision_radius, casting, stunned })
+    let champion = read_champion(r)?;
+    let (health, max_health, shield) = (r.read_u16()?, r.read_u16()?, r.read_u16()?);
+    let mut flags = [false; 5];
+    for f in flags.iter_mut() {
+        *f = r.read_bool()?;
+    }
+    let [casting, attacking, stunned, rooted, dashing] = flags;
+    Ok(RemoteUnit {
+        id,
+        kind,
+        team,
+        pos,
+        target,
+        speed,
+        collision_radius,
+        champion,
+        health,
+        max_health,
+        shield,
+        casting,
+        attacking,
+        stunned,
+        rooted,
+        dashing,
+    })
 }
 
 fn write_echo(w: &mut BitWriter, e: &TimeEcho) {
@@ -384,10 +738,11 @@ fn open(bytes: &[u8]) -> Result<(BitReader<'_>, PacketHeader, u64), DecodeError>
 
 pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
     match msg {
-        ClientMessage::Hello { protocol, client_time_us } => {
+        ClientMessage::Hello { protocol, client_time_us, champion } => {
             let mut w = begin(header, 0);
             w.write_u16(*protocol);
             w.write_u32(*client_time_us);
+            write_champion(&mut w, *champion);
             w.finish()
         }
         ClientMessage::Input { client_time_us, event_ack, commands } => {
@@ -408,7 +763,13 @@ pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
 pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), DecodeError> {
     let (mut r, header, kind) = open(bytes)?;
     let msg = match kind {
-        0 => ClientMessage::Hello { protocol: r.read_u16()?, client_time_us: r.read_u32()? },
+        0 => {
+            let protocol = r.read_u16()?;
+            let client_time_us = r.read_u32()?;
+            // An older client stops after the clock: no champion preference.
+            let champion = if protocol == crate::PROTOCOL_VERSION { read_champion(&mut r)? } else { None };
+            ClientMessage::Hello { protocol, client_time_us, champion }
+        }
         1 => {
             let client_time_us = r.read_u32()?;
             let event_ack = r.read_u32()?;
@@ -429,12 +790,14 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
 
 pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
     match msg {
-        ServerMessage::Welcome { player, unit, team, map, tick, tick_hz, since_tick_us, time_echo } => {
+        ServerMessage::Welcome { player, unit, team, map, champion, home, tick, tick_hz, since_tick_us, time_echo } => {
             let mut w = begin(header, 0);
             w.write_u8(player.0);
             w.write_u32(unit.0);
             w.write_bool(*team == Team::Red);
             w.write_u8(*map as u8);
+            write_champion(&mut w, Some(*champion));
+            write_vec2(&mut w, *home);
             w.write_u32(tick.0);
             w.write_u8(*tick_hz);
             w.write_u32(*since_tick_us);
@@ -492,6 +855,8 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             unit: UnitId(r.read_u32()?),
             team: if r.read_bool()? { Team::Red } else { Team::Blue },
             map: MapId::from_u8(r.read_u8()?).ok_or(DecodeError::Invalid("map id"))?,
+            champion: read_champion(&mut r)?.ok_or(DecodeError::Invalid("champion"))?,
+            home: read_vec2(&mut r)?,
             tick: Tick(r.read_u32()?),
             tick_hz: r.read_u8()?,
             since_tick_us: r.read_u32()?,
@@ -562,33 +927,30 @@ mod tests {
 
     #[test]
     fn input_round_trip() {
+        let c =
+            |seq: u32, kind| Command { player: PlayerId(0), seq, tick: Tick(1234 + seq), sub: SubTick::new(17), kind };
         let commands = vec![
-            Command {
-                player: PlayerId(0),
-                seq: 41,
-                tick: Tick(1234),
-                sub: SubTick::new(17),
-                kind: CommandKind::MoveTo(QPoint { x: 4000, y: 60000 }),
-            },
-            Command { player: PlayerId(0), seq: 42, tick: Tick(1235), sub: SubTick::new(63), kind: CommandKind::Stop },
-            Command {
-                player: PlayerId(0),
-                seq: 43,
-                tick: Tick(1236),
-                sub: SubTick::new(5),
-                kind: CommandKind::CastQ(QPoint { x: 7, y: 9 }),
-            },
+            c(41, CommandKind::MoveTo(QPoint { x: 4000, y: 60000 })),
+            c(42, CommandKind::Stop),
+            c(43, CommandKind::Cast { slot: 5, target: QPoint { x: 7, y: 9 } }),
+            c(44, CommandKind::Attack(UnitId(812))),
+            c(45, CommandKind::AttackMove(QPoint { x: 1, y: 65535 })),
         ];
         let msg = ClientMessage::Input { client_time_us: 0xABCD_1234, event_ack: 99, commands };
         let bytes = encode_client(&hdr(), &msg);
         assert_eq!(decode_client(&bytes).unwrap(), (hdr(), msg));
+        let hello = ClientMessage::Hello {
+            protocol: crate::PROTOCOL_VERSION,
+            client_time_us: 5,
+            champion: Some(ChampionId::Vesper),
+        };
+        assert_eq!(decode_client(&encode_client(&hdr(), &hello)).unwrap().1, hello);
     }
 
-    #[test]
-    fn snapshot_round_trip_is_lossless_for_own_state() {
-        let own_state = UnitState {
+    fn sample_state() -> UnitState {
+        UnitState {
             pos: Vec2::new(1_234.567_9, 9_876.543),
-            order: Order::MoveTo(QPoint { x: 1, y: 2 }),
+            order: Order::Attack(UnitId(17)),
             move_speed: 325.0,
             detour: Some(Vec2::new(1_300.125, 9_800.5)),
             stuck: 2,
@@ -600,9 +962,37 @@ mod tests {
                 p.complete = false;
                 p
             },
-            cast: Some(Cast { dir: Vec2::new(0.6, -0.8), fire_at: SimTime(123_457), seq: 41 }),
+            cast: Some(Cast {
+                slot: 3,
+                dir: Vec2::new(0.6, -0.8),
+                point: Vec2::new(10.1, 20.2),
+                fire_at: SimTime(123_457),
+                seq: 41,
+            }),
+            attack: Some(AttackWindup { target: UnitId(17), fire_at: SimTime(123_460) }),
+            attack_ready_at: SimTime(124_000),
+            dash: Some(DashMove {
+                dir: Vec2::new(0.0, 1.0),
+                to: Vec2::new(5.0, 330.0),
+                speed: 1000.0,
+                end_at: SimTime(124_100),
+            }),
             stunned_until: SimTime(99_999),
-            q_ready_at: SimTime(124_000),
+            rooted_until: SimTime(99_998),
+            cooldowns: [1, 2, 3, 4, 5, 600_000].map(SimTime),
+            health: 412.333_3,
+            shield: 77.7,
+            shield_until: SimTime(130_000),
+            respawn_at: Some(SimTime(140_000)),
+        }
+    }
+
+    #[test]
+    fn snapshot_round_trip_is_lossless_for_own_state_and_events() {
+        let own_state = sample_state();
+        let spec = match mftr_sim::champion::EMBER.abilities[3].effect {
+            mftr_sim::ability::Effect::Line(s) => s,
+            _ => unreachable!(),
         };
         let missile = Missile {
             id: 9,
@@ -610,10 +1000,89 @@ mod tests {
             team: Team::Red,
             origin: Vec2::new(10.5, 20.25),
             dir: Vec2::new(0.0, 1.0),
-            spec: mftr_sim::ability::SANDBOX_LANCE,
+            spec,
             spawn_at: SimTime(5_000),
             cast_seq: 41,
+            power: 140.0,
         };
+        let area = Area {
+            id: 11,
+            owner: UnitId(3),
+            team: Team::Blue,
+            center: Vec2::new(1.5, 2.5),
+            radius: 160.0,
+            spawn_at: SimTime(6_000),
+            detonate_at: SimTime(7_632),
+            kind: DamageKind::Magic,
+            power: 146.0,
+            cast_seq: 42,
+        };
+        let bolt = Bolt {
+            id: 12,
+            owner: UnitId(4),
+            team: Team::Red,
+            target: UnitId(3),
+            origin: Vec2::new(3.0, 4.0),
+            pos: Vec2::new(3.0, 4.0),
+            speed: 2200.0,
+            launched_at: SimTime(6_100),
+            power: 66.0,
+        };
+        let remote = |id, kind, team, champion| RemoteUnit {
+            id: UnitId(id),
+            kind,
+            team,
+            pos: QPoint { x: 10, y: 20 },
+            target: Some(QPoint { x: 50, y: 60 }),
+            speed: 325,
+            collision_radius: 35,
+            champion,
+            health: 512,
+            max_health: 620,
+            shield: 150,
+            casting: true,
+            attacking: false,
+            stunned: true,
+            rooted: false,
+            dashing: true,
+        };
+        let events = vec![
+            SimEvent::CastStarted {
+                unit: UnitId(3),
+                slot: 1,
+                at: SimTime(4_520),
+                dir: Vec2::new(0.0, 1.0),
+                point: Vec2::new(8.0, 9.0),
+                fire_at: SimTime(5_000),
+                seq: 41,
+            },
+            SimEvent::MissileSpawned(missile),
+            SimEvent::MissileHit { id: 9, target: UnitId(4), at: SimTime(5_500) },
+            SimEvent::MissileExpired { id: 10, at: SimTime(6_000) },
+            SimEvent::AreaSpawned(area),
+            SimEvent::AreaDetonated { id: 11, at: SimTime(7_632) },
+            SimEvent::AttackLaunched(bolt),
+            SimEvent::AttackLanded { id: 12, target: UnitId(3), at: SimTime(6_300), hit: true },
+            SimEvent::Damage {
+                source: UnitId(4),
+                target: UnitId(3),
+                kind: DamageKind::Physical,
+                amount: 40.25,
+                absorbed: 11.0,
+                at: SimTime(6_300),
+            },
+            SimEvent::Died { unit: UnitId(3), killer: UnitId(4), at: SimTime(6_300), respawn_at: SimTime(17_820) },
+            SimEvent::Respawned { unit: UnitId(3), pos: Vec2::new(600.0, 2000.0), at: SimTime(17_856) },
+            SimEvent::Blinked { unit: UnitId(4), from: Vec2::new(1.0, 2.0), to: Vec2::new(3.0, 4.0), at: SimTime(1) },
+            SimEvent::Dashed {
+                unit: UnitId(4),
+                from: Vec2::new(1.0, 2.0),
+                to: Vec2::new(3.0, 4.0),
+                at: SimTime(1),
+                end_at: SimTime(625),
+            },
+            SimEvent::Shielded { unit: UnitId(4), amount: 150.0, at: SimTime(2), until: SimTime(4_802) },
+        ];
         let snap = Snapshot {
             tick: Tick(99),
             since_tick_us: 1500,
@@ -627,52 +1096,36 @@ mod tests {
             }],
             own: Some((UnitId(3), own_state)),
             others: vec![
-                RemoteUnit {
-                    id: UnitId(4),
-                    kind: UnitKind::Champion,
-                    team: Team::Blue,
-                    pos: QPoint { x: 10, y: 20 },
-                    target: None,
-                    speed: 325,
-                    collision_radius: 35,
-                    casting: true,
-                    stunned: false,
-                },
-                RemoteUnit {
-                    id: UnitId(5),
-                    kind: UnitKind::Turret,
-                    team: Team::Red,
-                    pos: QPoint { x: 30, y: 40 },
-                    target: Some(QPoint { x: 50, y: 60 }),
-                    speed: 1023,
-                    collision_radius: 25,
-                    casting: false,
-                    stunned: true,
-                },
+                remote(4, UnitKind::Champion, Team::Blue, Some(ChampionId::Vesper)),
+                remote(5, UnitKind::Minion, Team::Red, None),
             ],
-            events: vec![
-                (
-                    1,
-                    SimEvent::CastStarted {
-                        unit: UnitId(3),
-                        at: SimTime(4_520),
-                        dir: Vec2::new(0.0, 1.0),
-                        fire_at: SimTime(5_000),
-                        seq: 41,
-                    },
-                ),
-                (2, SimEvent::MissileSpawned(missile)),
-                (3, SimEvent::MissileHit { id: 9, target: UnitId(4), at: SimTime(5_500) }),
-                (4, SimEvent::MissileExpired { id: 10, at: SimTime(6_000) }),
-            ],
+            events: events.into_iter().enumerate().map(|(i, e)| (i as u32 + 1, e)).collect(),
         };
         let msg = ServerMessage::Snapshot(Box::new(snap));
         let bytes = encode_server(&hdr(), &msg);
+        assert!(bytes.len() <= crate::MAX_PACKET_BYTES, "{} bytes", bytes.len());
         let (_, back) = decode_server(&bytes).unwrap();
         assert_eq!(back, msg);
         if let ServerMessage::Snapshot(s) = back {
             assert!(s.own.unwrap().1.bits_eq(&own_state));
         }
+    }
+
+    #[test]
+    fn welcome_round_trip() {
+        let msg = ServerMessage::Welcome {
+            player: PlayerId(3),
+            unit: UnitId(40),
+            team: Team::Red,
+            map: MapId::Arena,
+            champion: ChampionId::Vesper,
+            home: Vec2::new(3400.0, 2000.0),
+            tick: Tick(77),
+            tick_hz: 30,
+            since_tick_us: 12,
+            time_echo: TimeEcho { client_time_us: 1, hold_us: 2 },
+        };
+        assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
     }
 
     #[test]

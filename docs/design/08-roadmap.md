@@ -110,6 +110,27 @@ Alone (no allies to intercept), 1 player, 1 hour: 0.05% ghost hits at 60 ms, 0.1
 1. **Champion-vs-champion bumps** dominate corrections when many champions crowd together: ~4 per player-minute with 10 click-spamming bots in a 3,000 u arena. Their proxies can't anticipate the other player's next click. Options are recorded as Q12 in DECISIONS.
 2. **Bandwidth** rose to ~23–27 KB/s per player with ~70 units, because every unit's full state is sent every tick. Path-coasting and baseline deltas (03b §6) come next, before the unit count grows.
 
+### Slice 4 status (2026-10-06): ✅ done
+
+- `mftr-sim/champion`: two original placeholder kits (D26). **Ember** (skillshot mage): Ember Lance (line, burst), Cinder Bloom (delayed AoE), Flicker (blink), Binding Sigil (hard-CC stun skillshot). **Vesper** (marksman): Longshot (line, poke), Shrapnel Charge (delayed AoE), Tumble (dash), Snare Net (hard-CC root skillshot). Utility spells: **Blink** (D) and **Barrier** (F). A unit test checks every dodge-intended ability against the D10 reaction budget at its class distance.
+- `mftr-sim/world`: health, the 02 §5 damage pipeline (armor/MR mitigation, shields, death), respawns, stuns and roots. Ranged basic attacks: chase into range, rooted windup, a homing bolt, the attack timer; a new order during the windup cancels it with no damage (orb-walking, 02 §7). Attack-move picks the nearest visible enemy in range (D27). Delayed areas detonate at an exact instant against the units' motion. Dashes ignore units and slide on walls; blinks cross thin walls and never land inside one.
+- Prediction (D28): own casts, attack windups and timers, dashes, blinks and Barrier are predicted bit-exactly (unit test with the whole kit against proxies). Damage, CC and deaths come from the server. Enemy telegraphs are drawn on `T_input`, so the detonation you see is the one the server judges.
+- Protocol v6: Cast (6 slots), Attack and AttackMove commands; area, bolt, damage, death, respawn, blink, dash and shield events, filtered by fog (D29); vitals and status flags for other units; the welcome carries the champion and its home. A snapshot drops events to the next packet rather than exceed 1,200 bytes.
+- Godot client: health and shield bars, the ability bar with cooldowns, area telegraphs that fill toward detonation, bolts, Barrier bubble, stun/root indicators, a hard-CC accent ring on stunning/rooting missiles, floating damage numbers, kill feed, death screen. Right-click an enemy to attack, A + left-click to attack-move, Q W E R D F to cast at the cursor, `--champion ember|vesper`.
+- Server scenario `duel` (now the binary's default) and `mftr-tools bot --duel`: a scripted sparring partner over real UDP.
+
+**Duel in the Netcode Lab** (DuelBots fighting with their whole kits and dodging what their own client shows, 10 min):
+
+| | Kills (each side) | Visible correction (mean) | Corrections > 15 u per min | Ghost hits | Phantom hits | Server tick |
+|---|---|---|---|---|---|---|
+| 1v1, 80 ms / 10 ms / 1% | 22 / 17 | 0.33 u | 4.9 | **0 of 127** near-misses | 0 | 0.016 ms |
+| 1v1, 120 ms / 20 ms / 2% | 22 / 15 | 0.46 u | 8.1 | **0 of 124** | 0 | 0.016 ms |
+| 3v3, 80 ms | 17–32 per player | 0.50 u | 7.8 | **0 of 420** | 5 (1.2%) | **0.038 ms** (M1 target < 1 ms) |
+
+Fog audit: 0 leaks. Downstream ~12–14 KB/s per player. The larger corrections have inherent causes: being stunned or rooted mid-move, dying, and chasing or bumping a champion whose next click can't be predicted (Q12). Missiles that resolve after the server already killed us (the missile passes a corpse) are counted as "died first", not as phantom hits.
+
+**Exit check:** the duel is playable end to end in the lab (test `duel_is_playable_end_to_end`: both sides kill, die and respawn, corrections and ghost hits within the 03 §1 targets) and in the Godot client against a second client or `mftr-tools bot --duel`.
+
 ## M2 — ARAM ("a real game")
 **Goal:** the smallest complete MOBA match.
 - The Bridge map: minions, turrets, Gatehouse, Base, health relics.

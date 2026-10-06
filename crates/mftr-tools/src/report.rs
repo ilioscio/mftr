@@ -130,6 +130,10 @@ pub struct Summary {
     pub down_kbps: f64,
     pub hard_resets: u64,
     pub dodge: mftr_client::DodgeStats,
+    /// Per client (duel): confirmed kills, deaths and damage dealt.
+    pub kills: Vec<u64>,
+    pub deaths: Vec<u64>,
+    pub damage_dealt: Vec<f64>,
 }
 
 impl Summary {
@@ -176,8 +180,12 @@ impl Summary {
                 a.ghost_hits += d.ghost_hits;
                 a.phantom_hits += d.phantom_hits;
                 a.uncertain += d.uncertain;
+                a.died_first += d.died_first;
                 a
             }),
+            kills: sessions.iter().map(|(s, _)| s.stats.kills).collect(),
+            deaths: sessions.iter().map(|(s, _)| s.stats.deaths).collect(),
+            damage_dealt: sessions.iter().map(|(s, _)| s.stats.damage_dealt).collect(),
         }
     }
 
@@ -189,7 +197,7 @@ impl Summary {
     pub fn dodge_row(&self) -> String {
         let d = &self.dodge;
         format!(
-            "{:<10} enemy missiles {:>5}  near-misses {:>5}  server hits {:>5}  shown hits {:>5}  ghost hits {:>4} ({:.2}% of near-misses)  phantom hits {:>4}  unconfirmed {:>4}",
+            "{:<10} enemy missiles {:>5}  near-misses {:>5}  server hits {:>5}  shown hits {:>5}  ghost hits {:>4} ({:.2}% of near-misses)  phantom hits {:>4}  unconfirmed {:>4}  died first {:>4}",
             self.label,
             d.enemy_missiles,
             d.near_misses,
@@ -199,6 +207,17 @@ impl Summary {
             self.ghost_rate() * 100.0,
             d.phantom_hits,
             d.uncertain,
+            d.died_first,
+        )
+    }
+
+    pub fn duel_row(&self) -> String {
+        format!(
+            "{:<10} kills {:?}  deaths {:?}  damage dealt {:?}",
+            self.label,
+            self.kills,
+            self.deaths,
+            self.damage_dealt.iter().map(|d| d.round() as i64).collect::<Vec<_>>()
         )
     }
 
@@ -248,5 +267,109 @@ impl Summary {
             self.down_kbps,
             self.hard_resets,
         )
+    }
+}
+
+/// Duel Sandbox player (M1 slice 4): fights the nearest visible enemy champion with its whole
+/// kit, the way a scripted human might. Skillshots and areas aim at the enemy as drawn; it
+/// attacks, kites, dashes, blinks, shields when low, and dodges enemy skillshots exactly like
+/// [`DodgeBot`] (reacting to what its own client shows).
+pub struct DuelBot {
+    rng: mftr_sim::rng::Pcg32,
+    reaction: f64,
+    next_think: f64,
+    dodged: std::collections::BTreeSet<u32>,
+}
+
+impl DuelBot {
+    pub fn new(seed: u64, reaction: f64) -> Self {
+        Self {
+            rng: mftr_sim::rng::Pcg32::new(seed, 0x6475_656c),
+            reaction,
+            next_think: 0.5,
+            dodged: Default::default(),
+        }
+    }
+
+    fn clamp(p: mftr_sim::Vec2) -> mftr_sim::Vec2 {
+        mftr_sim::Vec2::new(p.x.clamp(300.0, 3700.0), p.y.clamp(300.0, 3700.0))
+    }
+
+    pub fn act(&mut self, session: &mut ClientSession, now: f64, elapsed: f64) -> bool {
+        use mftr_sim::Vec2;
+        use mftr_sim::ability::Effect;
+        let (Some(st), Some(t), Some(own)) =
+            (session.own_state_now(), session.input_sim_time(now), session.own_render_position(now))
+        else {
+            return false;
+        };
+        if !st.alive() {
+            return false;
+        }
+        for th in session.threats(now) {
+            if th.predicted_hit.is_none() || th.visible_for < self.reaction || !self.dodged.insert(th.id) {
+                continue;
+            }
+            let perp = Vec2::new(-th.dir.y, th.dir.x);
+            let side = if (own - th.pos).dot(perp) >= 0.0 { 1.0 } else { -1.0 };
+            let target = Self::clamp(own + perp * (300.0 * side));
+            let ready = |slot: usize| st.cooldowns[slot] <= t;
+            self.next_think = elapsed + 0.5;
+            return if ready(2) && self.rng.next_f32() < 0.3 {
+                session.cast(2, target, now).is_some() // dash or blink out of the way
+            } else {
+                session.move_to(target, now).is_some()
+            };
+        }
+        if elapsed < self.next_think {
+            return false;
+        }
+        self.next_think = elapsed + self.rng.range_f32(0.15, 0.45) as f64;
+        let team = session.team();
+        let enemy = session
+            .remote_render_units(now)
+            .into_iter()
+            .filter(|r| r.team != team && r.kind == mftr_sim::UnitKind::Champion)
+            .min_by(|a, b| a.pos.distance(own).total_cmp(&b.pos.distance(own)));
+        let Some(e) = enemy else {
+            // Go looking for the enemy champion, through the middle of the arena.
+            let p = Vec2::new(self.rng.range_f32(1300.0, 2700.0), self.rng.range_f32(1300.0, 2700.0));
+            return if self.rng.next_u32() % 4 == 0 {
+                session.attack_move(p, now).is_some()
+            } else {
+                session.move_to(p, now).is_some()
+            };
+        };
+        let champ = session.champion();
+        let ready = |slot: u8| st.cooldowns[slot as usize] <= t && st.cast.is_none();
+        let d = e.pos.distance(own);
+        let to = (e.pos - own).normalize_or_zero();
+        let perp = Vec2::new(-to.y, to.x) * if self.rng.next_u32() % 2 == 0 { 1.0 } else { -1.0 };
+        let max_hp = champ.def().stats.max_health;
+        if st.health < 0.35 * max_hp && ready(5) {
+            return session.cast(5, own, now).is_some();
+        }
+        let r = self.rng.next_f32();
+        // Skillshots and areas the enemy is in range of.
+        let in_range = |slot: u8| match champ.ability(slot).map(|a| a.effect) {
+            Some(Effect::Line(s)) => d <= s.range * 0.9,
+            Some(Effect::Area(a)) => d <= a.range,
+            _ => false,
+        };
+        let shots: Vec<u8> = [0u8, 1, 3].into_iter().filter(|s| ready(*s) && in_range(*s)).collect();
+        if !shots.is_empty() && r < 0.45 {
+            let slot = shots[self.rng.next_u32() as usize % shots.len()];
+            return session.cast(slot, e.pos, now).is_some();
+        }
+        if r < 0.52 && ready(2) {
+            return session.cast(2, Self::clamp(own + perp * 300.0 - to * 100.0), now).is_some();
+        }
+        if r < 0.53 && ready(4) {
+            return session.cast(4, Self::clamp(own + to * 400.0), now).is_some();
+        }
+        if r < 0.85 {
+            return session.attack(e.id, now).is_some();
+        }
+        session.move_to(Self::clamp(own + perp * 250.0), now).is_some()
     }
 }
