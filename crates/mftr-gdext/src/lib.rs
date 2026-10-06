@@ -31,6 +31,9 @@ pub struct MatchClient {
     next_hello: f64,
     last_error: GString,
     champion_request: Option<ChampionId>,
+    /// Reconnect token and spectate wish for the next connection.
+    resume: u64,
+    spectate: bool,
     /// Added latency on top of the real network (blind playtests): (up, down) links.
     links: Option<(SimLink, SimLink)>,
     blind: Option<BlindSession>,
@@ -64,6 +67,8 @@ impl INode for MatchClient {
             next_hello: 0.0,
             last_error: GString::new(),
             champion_request: None,
+            resume: 0,
+            spectate: false,
             links: None,
             blind: None,
         }
@@ -94,6 +99,8 @@ impl MatchClient {
                 self.socket = Some(s);
                 self.session = ClientSession::new();
                 self.session.set_champion_request(self.champion_request);
+                self.session.set_resume(self.resume);
+                self.session.set_spectate(self.spectate);
                 self.next_hello = 0.0;
                 self.last_error = GString::new();
                 true
@@ -120,6 +127,7 @@ impl MatchClient {
         }
         GString::from(match self.session.phase() {
             Phase::Connecting => "connecting",
+            Phase::Lobby => "lobby",
             Phase::Joining => "joining",
             Phase::Playing => "playing",
         })
@@ -218,6 +226,82 @@ impl MatchClient {
         let name = name.to_string();
         self.champion_request = ChampionId::by_name(&name);
         name.is_empty() || self.champion_request.is_some()
+    }
+
+    /// Reconnect: the token (hex, from `session_token` of an earlier session) to present when
+    /// connecting. Empty = a new player.
+    #[func]
+    fn set_resume_token(&mut self, token: GString) {
+        self.resume = u64::from_str_radix(&token.to_string(), 16).unwrap_or(0);
+    }
+
+    /// This session's token (hex; empty before the Welcome): save it to reconnect later.
+    #[func]
+    fn session_token(&self) -> GString {
+        match self.session.token() {
+            0 => GString::new(),
+            t => GString::from(&format!("{t:016x}")),
+        }
+    }
+
+    /// Watch instead of play (set before connecting).
+    #[func]
+    fn set_spectate(&mut self, spectate: bool) {
+        self.spectate = spectate;
+    }
+
+    #[func]
+    fn is_spectator(&self) -> bool {
+        self.session.is_spectator()
+    }
+
+    /// Champion select: `{ you, starts_in, bench: [names], slots: [{ player, team, ally, you,
+    /// champion, rerolls, ready, bot }] }`, or an empty dictionary outside it.
+    #[func]
+    fn lobby_state(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let Some(l) = self.session.lobby() else { return d };
+        let my_team = l.slots.iter().find(|s| s.player == l.you).map(|s| s.team);
+        d.set("you", l.you.0 as i64);
+        d.set("starts_in", l.starts_in_ms as f64 / 1000.0);
+        let mut bench = VarArray::new();
+        for c in &l.bench {
+            bench.push(&c.def().name.to_variant());
+        }
+        d.set("bench", &bench);
+        let mut slots = VarArray::new();
+        for s in &l.slots {
+            let mut e = VarDictionary::new();
+            e.set("player", s.player.0 as i64);
+            e.set("team", if s.team == Team::Blue { "blue" } else { "red" });
+            e.set("ally", Some(s.team) == my_team);
+            e.set("you", s.player == l.you);
+            e.set("champion", s.champion.def().name);
+            e.set("rerolls", s.rerolls as i64);
+            e.set("ready", s.ready);
+            e.set("bot", s.bot);
+            slots.push(&e.to_variant());
+        }
+        d.set("slots", &slots);
+        d
+    }
+
+    #[func]
+    fn lobby_reroll(&mut self) {
+        self.lobby_action(mftr_net::msg::LobbyAction::Reroll);
+    }
+
+    /// Take a champion from the team bench (by name).
+    #[func]
+    fn lobby_take(&mut self, name: GString) {
+        if let Some(c) = ChampionId::by_name(&name.to_string()) {
+            self.lobby_action(mftr_net::msg::LobbyAction::Take(c));
+        }
+    }
+
+    #[func]
+    fn lobby_ready(&mut self, ready: bool) {
+        self.lobby_action(mftr_net::msg::LobbyAction::Ready(ready));
     }
 
     /// Cast the ability in `slot` (0–5 = Q W E R D F) toward a ground point (game units).
@@ -699,6 +783,12 @@ impl MatchClient {
     }
 
     /// Send a packet now, or into the simulated uplink.
+    fn lobby_action(&mut self, action: mftr_net::msg::LobbyAction) {
+        let now = self.now();
+        let p = self.session.lobby_packet(action);
+        self.transmit(p, now);
+    }
+
     fn transmit(&mut self, packet: Vec<u8>, now: f64) {
         match (&mut self.links, &self.socket) {
             (Some((up, _)), _) => up.send(packet, now),
@@ -750,7 +840,7 @@ impl MatchClient {
         }
         self.session.update(now);
         match self.session.phase() {
-            Phase::Connecting if now >= self.next_hello => {
+            Phase::Connecting | Phase::Lobby if now >= self.next_hello => {
                 let hello = self.session.hello_packet(now);
                 self.transmit(hello, now);
                 self.next_hello = now + 0.25;

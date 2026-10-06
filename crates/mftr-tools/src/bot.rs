@@ -61,6 +61,13 @@ pub fn run(cfg: &BotConfig) -> std::io::Result<Summary> {
             next_frame = t + frame_dt;
             session.update(t);
             match session.phase() {
+                // In champion select a bot just readies up (and keeps the session alive).
+                Phase::Lobby if t >= next_hello => {
+                    let ready = session.lobby_packet(mftr_net::msg::LobbyAction::Ready(true));
+                    up.send(ready, t);
+                    up.send(session.hello_packet(t), t);
+                    next_hello = t + 0.5;
+                }
                 Phase::Connecting if t >= next_hello => {
                     up.send(session.hello_packet(t), t);
                     next_hello = t + 0.25;

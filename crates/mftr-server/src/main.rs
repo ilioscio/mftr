@@ -1,9 +1,10 @@
 //! `mftr-server`: dedicated UDP match server (M0 prototype, unencrypted).
 //!
-//! Usage: mftr-server [--bind 0.0.0.0:7777] [--seed N] [--max-players N] [--bots N] [--replay FILE]
-//!                    [--scenario duel|aram|minions|dodge|empty]
+//! Usage: mftr-server [--bind 0.0.0.0:7777] [--seed N] [--max-players N] [--bots N] [--lobby]
+//!                    [--replay FILE] [--scenario duel|aram|minions|dodge|empty]
 //!
-//! `--bots N` adds N server bots at start (they count toward the player limit). `--replay FILE`
+//! `--bots N` adds N server bots at start (they count toward the player limit). `--lobby` starts
+//! with champion select (ARAM all-random with rerolls and a bench; humans replace bots). `--replay FILE`
 //! records the session and rewrites FILE every minute and whenever a match ends; check it with
 //! `mftr-tools replay FILE`.
 
@@ -12,7 +13,7 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--seed N] [--max-players N] [--bots N] [--replay FILE] [--scenario duel|aram|minions|dodge|empty]";
+const USAGE: &str = "mftr-server [--bind ADDR] [--seed N] [--max-players N] [--bots N] [--lobby] [--replay FILE] [--scenario duel|aram|minions|dodge|empty]";
 
 fn main() -> std::io::Result<()> {
     let mut bind = "0.0.0.0:7777".to_string();
@@ -28,6 +29,7 @@ fn main() -> std::io::Result<()> {
                 cfg.max_players = args.next().and_then(|v| v.parse().ok()).expect("--max-players needs a number")
             }
             "--bots" => cfg.bots = args.next().and_then(|v| v.parse().ok()).expect("--bots needs a number"),
+            "--lobby" => cfg.lobby = true,
             "--replay" => replay_path = Some(args.next().expect("--replay needs a file")),
             "--scenario" => {
                 let name = args.next().expect("--scenario needs a name");

@@ -20,6 +20,8 @@ const MAGIC: u8 = 0x4D; // 'M'
 
 /// Max commands carried per input packet (redundancy window, 03b §4).
 pub const MAX_COMMANDS_PER_PACKET: usize = 8;
+/// Champion select lists at most this many players (and bench champions).
+pub const MAX_LOBBY_SLOTS: usize = 31;
 /// Max command reports repeated per snapshot.
 pub const MAX_REPORTS_PER_SNAPSHOT: usize = 8;
 /// Max reliable events carried per snapshot; the rest wait for the next one (03b §7).
@@ -34,6 +36,11 @@ pub enum ClientMessage {
         client_time_us: u32,
         /// Preferred champion (the server may assign another when none is asked for).
         champion: Option<ChampionId>,
+        /// A session token from an earlier Welcome: take that champion back (reconnect).
+        /// 0 = a new player.
+        resume: u64,
+        /// Watch instead of play: full vision, no unit.
+        spectate: bool,
     },
     /// The `player` field of each command is ignored by the server (taken from the connection).
     Input {
@@ -46,6 +53,40 @@ pub enum ClientMessage {
         commands: Vec<Command>,
     },
     Bye,
+    /// Champion select (M2 slice 5).
+    Lobby(LobbyAction),
+}
+
+/// What a player can do in champion select (ARAM all-random, 06 §2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LobbyAction {
+    /// Trade the current champion for a random unused one; it goes to the team bench.
+    Reroll,
+    /// Swap with a champion on the team bench.
+    Take(ChampionId),
+    Ready(bool),
+}
+
+/// One player in champion select.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LobbySlot {
+    pub player: PlayerId,
+    pub team: Team,
+    pub champion: ChampionId,
+    pub rerolls: u8,
+    pub ready: bool,
+    pub bot: bool,
+}
+
+/// Champion select as the receiving player sees it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LobbyState {
+    pub you: PlayerId,
+    pub slots: Vec<LobbySlot>,
+    /// Each team's bench of rerolled champions (only the own team's is sent).
+    pub bench: Vec<ChampionId>,
+    /// Milliseconds until the match starts.
+    pub starts_in_ms: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -138,11 +179,17 @@ pub enum ServerMessage {
         tick_hz: u8,
         since_tick_us: u32,
         time_echo: TimeEcho,
+        /// Present this token in a later Hello to take the champion back (reconnect).
+        token: u64,
+        /// Watching: no own unit, full vision.
+        spectator: bool,
     },
     Snapshot(Box<Snapshot>),
     Reject {
         reason: RejectReason,
     },
+    /// Champion select, sent a few times a second until the match starts.
+    Lobby(Box<LobbyState>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -907,11 +954,13 @@ fn open(bytes: &[u8]) -> Result<(BitReader<'_>, PacketHeader, u64), DecodeError>
 
 pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
     match msg {
-        ClientMessage::Hello { protocol, client_time_us, champion } => {
+        ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate } => {
             let mut w = begin(header, 0);
             w.write_u16(*protocol);
             w.write_u32(*client_time_us);
             write_champion(&mut w, *champion);
+            w.write_u64(*resume);
+            w.write_bool(*spectate);
             w.finish()
         }
         ClientMessage::Input { client_time_us, event_ack, snapshot_ack, commands } => {
@@ -927,6 +976,21 @@ pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
             w.finish()
         }
         ClientMessage::Bye => begin(header, 2).finish(),
+        ClientMessage::Lobby(a) => {
+            let mut w = begin(header, 3);
+            match a {
+                LobbyAction::Reroll => w.write(0, 2),
+                LobbyAction::Take(c) => {
+                    w.write(1, 2);
+                    write_champion(&mut w, Some(*c));
+                }
+                LobbyAction::Ready(r) => {
+                    w.write(2, 2);
+                    w.write_bool(*r);
+                }
+            }
+            w.finish()
+        }
     }
 }
 
@@ -936,9 +1000,12 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
         0 => {
             let protocol = r.read_u16()?;
             let client_time_us = r.read_u32()?;
-            // An older client stops after the clock: no champion preference.
-            let champion = if protocol == crate::PROTOCOL_VERSION { read_champion(&mut r)? } else { None };
-            ClientMessage::Hello { protocol, client_time_us, champion }
+            // An older client stops after the clock: nothing more to read (it gets a reject).
+            let current = protocol == crate::PROTOCOL_VERSION;
+            let champion = if current { read_champion(&mut r)? } else { None };
+            let resume = if current { r.read_u64()? } else { 0 };
+            let spectate = current && r.read_bool()?;
+            ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate }
         }
         1 => {
             let client_time_us = r.read_u32()?;
@@ -952,7 +1019,13 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
             ClientMessage::Input { client_time_us, event_ack, snapshot_ack, commands }
         }
         2 => ClientMessage::Bye,
-        _ => return Err(DecodeError::Invalid("client message kind")),
+        3 => ClientMessage::Lobby(match r.read(2)? {
+            0 => LobbyAction::Reroll,
+            1 => LobbyAction::Take(read_champion(&mut r)?.ok_or(DecodeError::Invalid("champion"))?),
+            2 => LobbyAction::Ready(r.read_bool()?),
+            _ => return Err(DecodeError::Invalid("lobby action")),
+        }),
+        _ => unreachable!("two-bit message kind"),
     };
     Ok((header, msg))
 }
@@ -973,6 +1046,8 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             tick_hz,
             since_tick_us,
             time_echo,
+            token,
+            spectator,
         } => {
             let mut w = begin(header, 0);
             w.write_u8(player.0);
@@ -989,6 +1064,8 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             w.write_u8(*tick_hz);
             w.write_u32(*since_tick_us);
             write_echo(&mut w, time_echo);
+            w.write_u64(*token);
+            w.write_bool(*spectator);
             w.finish()
         }
         ServerMessage::Snapshot(s) => {
@@ -1041,6 +1118,25 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             w.write_u8(*reason as u8);
             w.finish()
         }
+        ServerMessage::Lobby(l) => {
+            let mut w = begin(header, 3);
+            w.write_u8(l.you.0);
+            w.write(l.slots.len().min(MAX_LOBBY_SLOTS) as u64, 5);
+            for s in l.slots.iter().take(MAX_LOBBY_SLOTS) {
+                w.write_u8(s.player.0);
+                w.write_bool(s.team == Team::Red);
+                write_champion(&mut w, Some(s.champion));
+                w.write(s.rerolls as u64, 3);
+                w.write_bool(s.ready);
+                w.write_bool(s.bot);
+            }
+            w.write(l.bench.len().min(MAX_LOBBY_SLOTS) as u64, 5);
+            for c in l.bench.iter().take(MAX_LOBBY_SLOTS) {
+                write_champion(&mut w, Some(*c));
+            }
+            w.write_u32(l.starts_in_ms);
+            w.finish()
+        }
     }
 }
 
@@ -1064,6 +1160,8 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             tick_hz: r.read_u8()?,
             since_tick_us: r.read_u32()?,
             time_echo: read_echo(&mut r)?,
+            token: r.read_u64()?,
+            spectator: r.read_bool()?,
         },
         1 => {
             let tick = Tick(r.read_u32()?);
@@ -1129,7 +1227,27 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 _ => return Err(DecodeError::Invalid("reject reason")),
             },
         },
-        _ => return Err(DecodeError::Invalid("server message kind")),
+        3 => {
+            let you = PlayerId(r.read_u8()?);
+            let n = r.read(5)? as usize;
+            let mut slots = Vec::with_capacity(n);
+            for _ in 0..n {
+                slots.push(LobbySlot {
+                    player: PlayerId(r.read_u8()?),
+                    team: if r.read_bool()? { Team::Red } else { Team::Blue },
+                    champion: read_champion(&mut r)?.ok_or(DecodeError::Invalid("champion"))?,
+                    rerolls: r.read(3)? as u8,
+                    ready: r.read_bool()?,
+                    bot: r.read_bool()?,
+                });
+            }
+            let n = r.read(5)? as usize;
+            let bench = (0..n)
+                .map(|_| read_champion(&mut r)?.ok_or(DecodeError::Invalid("champion")))
+                .collect::<Result<_, _>>()?;
+            ServerMessage::Lobby(Box::new(LobbyState { you, slots, bench, starts_in_ms: r.read_u32()? }))
+        }
+        _ => unreachable!("two-bit message kind"),
     };
     Ok((header, msg))
 }
@@ -1167,8 +1285,33 @@ mod tests {
             protocol: crate::PROTOCOL_VERSION,
             client_time_us: 5,
             champion: Some(ChampionId::Vesper),
+            resume: 0xdead_beef_0123_4567,
+            spectate: true,
         };
         assert_eq!(decode_client(&encode_client(&hdr(), &hello)).unwrap().1, hello);
+        for a in [LobbyAction::Reroll, LobbyAction::Take(ChampionId::Shade), LobbyAction::Ready(true)] {
+            let msg = ClientMessage::Lobby(a);
+            assert_eq!(decode_client(&encode_client(&hdr(), &msg)).unwrap().1, msg);
+        }
+    }
+
+    #[test]
+    fn lobby_round_trip() {
+        let slot = |p: u8, c: ChampionId| LobbySlot {
+            player: PlayerId(p),
+            team: if p % 2 == 0 { Team::Blue } else { Team::Red },
+            champion: c,
+            rerolls: p % 3,
+            ready: p % 2 == 1,
+            bot: p > 6,
+        };
+        let msg = ServerMessage::Lobby(Box::new(LobbyState {
+            you: PlayerId(4),
+            slots: ChampionId::ALL.iter().enumerate().map(|(i, c)| slot(i as u8 + 2, *c)).collect(),
+            bench: vec![ChampionId::Lumen, ChampionId::Ember],
+            starts_in_ms: 42_000,
+        }));
+        assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
     }
 
     fn sample_state() -> UnitState {
@@ -1418,6 +1561,8 @@ mod tests {
             tick_hz: 30,
             since_tick_us: 12,
             time_echo: TimeEcho { client_time_us: 1, hold_us: 2 },
+            token: u64::MAX - 5,
+            spectator: false,
         };
         assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
     }

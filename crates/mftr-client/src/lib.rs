@@ -225,6 +225,8 @@ pub struct ClientStats {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
     Connecting,
+    /// In champion select (keep sending Hello as a keepalive until the Welcome).
+    Lobby,
     /// Welcomed, waiting for the first snapshot that carries our own unit.
     Joining,
     Playing,
@@ -240,6 +242,13 @@ pub struct ClientSession {
     rules: mftr_sim::world::Rules,
     /// Requested in the hello (the server picks when `None`).
     champion_request: Option<ChampionId>,
+    /// Token to resume a dropped session with (0 = none), and the one from our Welcome.
+    resume: u64,
+    token: u64,
+    /// Ask to watch, and whether we are watching.
+    spectate: bool,
+    spectator: bool,
+    lobby: Option<msg::LobbyState>,
     /// The map from the welcome: prediction runs with the same walls and pathing as the server.
     map: std::sync::Arc<mftr_sim::map::Map>,
     /// Predicted world containing only our own unit.
@@ -303,6 +312,11 @@ impl ClientSession {
             home: Vec2::ZERO,
             rules: mftr_sim::world::Rules::SANDBOX,
             champion_request: None,
+            resume: 0,
+            token: 0,
+            spectate: false,
+            spectator: false,
+            lobby: None,
             map: mftr_sim::map::MapId::Open.shared(),
             world: World::from_units(Tick(0), Vec::new()),
             history: VecDeque::new(),
@@ -341,6 +355,37 @@ impl ClientSession {
     }
 
     /// Ask for a champion in the hello (before connecting).
+    /// Reconnect: present this token (from an earlier session's Welcome) in the Hello.
+    pub fn set_resume(&mut self, token: u64) {
+        self.resume = token;
+    }
+
+    /// The session token from the Welcome (0 before it): keep it to reconnect.
+    pub fn token(&self) -> u64 {
+        self.token
+    }
+
+    /// Ask to watch instead of play.
+    pub fn set_spectate(&mut self, spectate: bool) {
+        self.spectate = spectate;
+    }
+
+    pub fn is_spectator(&self) -> bool {
+        self.spectator
+    }
+
+    /// Champion select, while in it.
+    pub fn lobby(&self) -> Option<&msg::LobbyState> {
+        self.lobby.as_ref()
+    }
+
+    /// A champion-select action, as a packet to send.
+    pub fn lobby_packet(&mut self, action: msg::LobbyAction) -> Vec<u8> {
+        let h = self.header();
+        let bytes = msg::encode_client(&h, &ClientMessage::Lobby(action));
+        self.finish_packet(bytes)
+    }
+
     pub fn set_champion_request(&mut self, champion: Option<ChampionId>) {
         self.champion_request = champion;
     }
@@ -403,6 +448,8 @@ impl ClientSession {
                 protocol: PROTOCOL_VERSION,
                 client_time_us: time_us(now),
                 champion: self.champion_request,
+                resume: self.resume,
+                spectate: self.spectate,
             },
         );
         self.finish_packet(bytes)
@@ -572,6 +619,12 @@ impl ClientSession {
     }
 
     fn step_prediction(&mut self) {
+        if self.spectator {
+            // Nothing to predict: the (empty) world only keeps the clock.
+            self.world.step(&[]);
+            self.world.take_events();
+            return;
+        }
         let k = self.world.tick().next();
         let cmds: Vec<Command> = self.commands.iter().filter(|c| c.tick == k).copied().collect();
         // Proxies at the start of tick k, i.e. extrapolated to the end of tick k-1: blockers
@@ -681,9 +734,14 @@ impl ClientSession {
                 tick,
                 since_tick_us,
                 time_echo,
+                token,
+                spectator,
                 ..
             } => {
-                if self.phase == Phase::Connecting {
+                if matches!(self.phase, Phase::Connecting | Phase::Lobby) {
+                    self.token = token;
+                    self.spectator = spectator;
+                    self.lobby = None;
                     self.rules = rules;
                     self.player = player;
                     self.unit = unit;
@@ -698,6 +756,12 @@ impl ClientSession {
             }
             ServerMessage::Snapshot(s) => self.on_snapshot(*s, now),
             ServerMessage::Reject { .. } => {}
+            ServerMessage::Lobby(l) => {
+                if matches!(self.phase, Phase::Connecting | Phase::Lobby) {
+                    self.phase = Phase::Lobby;
+                    self.lobby = Some(*l);
+                }
+            }
         }
     }
 
@@ -840,12 +904,23 @@ impl ClientSession {
             }
         }
 
+        if self.spectator {
+            // Watching: nothing to predict; just keep the (empty) world on the clock.
+            if self.phase == Phase::Joining {
+                self.world = World::from_units(s.tick, Vec::new());
+                self.world.set_map(self.map.clone());
+                self.world.set_prediction_mode(true);
+                self.phase = Phase::Playing;
+            }
+            self.update(now);
+            return;
+        }
         let Some((id, server_state)) = s.own else { return };
         if id != self.unit {
             return;
         }
         match self.phase {
-            Phase::Connecting => {}
+            Phase::Connecting | Phase::Lobby => {}
             Phase::Joining => {
                 self.start_playing(s.tick, server_state);
                 self.update(now);

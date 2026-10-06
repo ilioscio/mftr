@@ -230,10 +230,11 @@ impl Replay {
     pub fn to_text(&self) -> String {
         let c = &self.cfg;
         let mut s = format!(
-            "mftr-replay 1\nconfig {} {} {} {} {} {}\n",
+            "mftr-replay 1\nconfig {} {} {} {} {} {} {}\n",
             c.seed,
             c.max_players,
             c.bots,
+            c.lobby as u8,
             c.arena_min,
             c.arena_max,
             c.scenario.name()
@@ -276,7 +277,7 @@ impl Replay {
         }
         let cfg_line = lines.next().ok_or("missing config")?;
         let f: Vec<&str> = cfg_line.split_whitespace().collect();
-        if f.len() != 7 || f[0] != "config" {
+        if f.len() != 8 || f[0] != "config" {
             return Err(format!("bad config line: {cfg_line}"));
         }
         let num = |s: &str| s.parse::<f64>().map_err(|e| format!("{s}: {e}"));
@@ -284,9 +285,10 @@ impl Replay {
             seed: f[1].parse().map_err(|e| format!("seed: {e}"))?,
             max_players: f[2].parse().map_err(|e| format!("max players: {e}"))?,
             bots: f[3].parse().map_err(|e| format!("bots: {e}"))?,
-            arena_min: num(f[4])? as f32,
-            arena_max: num(f[5])? as f32,
-            scenario: Scenario::by_name(f[6]).ok_or(format!("scenario {}", f[6]))?,
+            lobby: f[4] == "1",
+            arena_min: num(f[5])? as f32,
+            arena_max: num(f[6])? as f32,
+            scenario: Scenario::by_name(f[7]).ok_or(format!("scenario {}", f[7]))?,
         };
         let mut entries: Vec<ReplayEntry> = Vec::new();
         for (n, line) in lines.enumerate() {

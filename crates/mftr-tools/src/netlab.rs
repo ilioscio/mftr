@@ -151,7 +151,7 @@ pub fn run(cfg: &LabConfig) -> LabResult {
             c.next_frame += frame_dt;
             c.session.update(local);
             match c.session.phase() {
-                Phase::Connecting => {
+                Phase::Connecting | Phase::Lobby => {
                     if t >= c.next_hello {
                         let p = c.session.hello_packet(local);
                         c.up.send(p, t);
@@ -422,6 +422,84 @@ mod tests {
         assert_eq!(check.final_hash, r.server_hash);
     }
 
+    /// M2 slice 5: a real client session goes through champion select over a lossy link
+    /// (rerolls, readies up), gets its Welcome when the match starts, and plays the champion
+    /// it ended up with. A spectator joins too and sees both teams.
+    #[test]
+    fn champion_select_to_playing_end_to_end() {
+        let cfg = ServerConfig { seed: 2, bots: 10, lobby: true, scenario: Scenario::Aram, ..Default::default() };
+        let mut server = ServerCore::new(cfg, 0.0);
+        let mut session = ClientSession::new();
+        let mut watcher = ClientSession::new();
+        watcher.set_spectate(true);
+        let links = |a, b| (SimLink::new(LinkProfile::TYPICAL, a), SimLink::new(LinkProfile::TYPICAL, b));
+        let ((mut up, mut down), (mut wup, mut wdown)) = (links(1, 2), links(3, 4));
+        let (mut t, mut next_hello) = (0.0, 0.0);
+        let (mut rerolled, mut readied, mut picked) = (false, false, None);
+        while t < 12.0 {
+            for (key, link) in [(1, &mut up), (2, &mut wup)] {
+                while let Some(p) = link.recv(t) {
+                    for (to, bytes) in server.handle_packet(key, &p, t) {
+                        if to == 1 { down.send(bytes, t) } else { wdown.send(bytes, t) }
+                    }
+                }
+            }
+            if t >= server.next_tick_due() {
+                for (to, bytes) in server.step(t) {
+                    if to == 1 { down.send(bytes, t) } else { wdown.send(bytes, t) }
+                }
+            }
+            while let Some(p) = down.recv(t) {
+                session.handle_packet(&p, t);
+            }
+            while let Some(p) = wdown.recv(t) {
+                watcher.handle_packet(&p, t);
+            }
+            session.update(t);
+            watcher.update(t);
+            if session.phase() == Phase::Lobby && t >= next_hello {
+                let l = session.lobby().unwrap().clone();
+                let me = *l.slots.iter().find(|s| s.player == l.you).unwrap();
+                if !rerolled {
+                    up.send(session.lobby_packet(mftr_net::msg::LobbyAction::Reroll), t);
+                    rerolled = true;
+                } else if me.rerolls < mftr_server::lobby::REROLLS && !readied {
+                    picked = Some(me.champion);
+                    up.send(session.lobby_packet(mftr_net::msg::LobbyAction::Ready(true)), t);
+                    readied = true;
+                }
+            }
+            if matches!(session.phase(), Phase::Connecting | Phase::Lobby) && t >= next_hello {
+                up.send(session.hello_packet(t), t);
+                wup.send(watcher.hello_packet(t), t);
+                next_hello = t + 0.25;
+            }
+            if session.phase() == Phase::Playing && session.should_send(t) {
+                up.send(session.input_packet(t), t);
+            }
+            if watcher.phase() == Phase::Playing && watcher.should_send(t) {
+                wup.send(watcher.input_packet(t), t);
+            }
+            if matches!(watcher.phase(), Phase::Connecting | Phase::Joining) && t >= next_hello {
+                wup.send(watcher.hello_packet(t), t);
+            }
+            t += 0.001;
+        }
+        assert_eq!(session.phase(), Phase::Playing, "the match started");
+        assert!(readied && t > 4.0);
+        assert_eq!(Some(session.champion()), picked, "the rerolled champion");
+        assert!(session.token() != 0);
+        assert_eq!(server.game().player_count(), 10);
+        assert!(watcher.is_spectator() && watcher.phase() == Phase::Playing);
+        let teams: std::collections::BTreeSet<_> = watcher
+            .remote_render_units(t)
+            .iter()
+            .filter(|u| u.kind == mftr_sim::UnitKind::Champion)
+            .map(|u| u.team as u8)
+            .collect();
+        assert_eq!(teams.len(), 2, "the spectator sees both teams' champions");
+    }
+
     /// Q13: over a lossy, jittery link with moving minions, every snapshot the client
     /// reconstructs from deltas equals, bit for bit, what the server recorded for it.
     #[test]
@@ -453,7 +531,7 @@ mod tests {
             }
             session.update(t);
             match session.phase() {
-                Phase::Connecting if t >= next_hello => {
+                Phase::Connecting | Phase::Lobby if t >= next_hello => {
                     up.send(session.hello_packet(t), t);
                     next_hello = t + 0.25;
                 }

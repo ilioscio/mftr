@@ -2,7 +2,8 @@ extends Node3D
 ## M1 Duel Sandbox client. Builds the scene in code, forwards input to the Rust MatchClient,
 ## and draws what it reports. No gameplay decisions are made here (04 §1).
 ##
-## User args (after `--`): a server address (default 127.0.0.1:7777), `--champion ember|vesper`,
+## User args (after `--`): a server address (default 127.0.0.1:7777), `--champion NAME`,
+## `--spectate` to watch (Tab cycles champions), `--shot-lobby` for a champion-select capture,
 ## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots, and the blind playtest
 ## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`.
 
@@ -68,6 +69,10 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-shop":
 			_shot_shop = true
+		elif args[i] == "--shot-lobby":
+			_shot_lobby = true
+		elif args[i] == "--spectate":
+			client.set_spectate(true)
 		elif args[i] == "--blind-auto":
 			blind_auto = true
 		elif args[i] == "--champion" and i + 1 < args.size():
@@ -77,6 +82,11 @@ func _ready() -> void:
 		else:
 			address = args[i]
 		i += 1
+	_server_address = address
+	# Reconnect: a session to this server from moments ago gets its champion back.
+	var saved := _load_session()
+	if saved.get("address", "") == address and Time.get_unix_time_from_system() - float(saved.get("at", 0.0)) < 55.0:
+		client.set_resume_token(saved.get("token", ""))
 	if not client.connect_to_server(address):
 		push_error("MFTR: could not open socket: %s" % client.last_error())
 
@@ -88,9 +98,19 @@ var _shot_timer := 0.0
 var _shot_moved := false
 var _shot_at := 1.05                     # `--shot-at <seconds>` after joining
 var _shot_shop := false                  # `--shot-shop`: buy from the fountain, show the shop
+var _shot_lobby := false                 # `--shot-lobby`: reroll in champion select, capture it
 
 
 func _update_shot(delta: float) -> void:
+	if _shot_path != "" and _shot_lobby and client.phase() == "lobby":
+		_shot_timer += delta
+		if _shot_timer > 0.6 and _shot_timer - delta <= 0.6:
+			client.lobby_reroll()
+		elif _shot_timer > 1.6:
+			get_viewport().get_texture().get_image().save_png(_shot_path)
+			print("MFTR: saved screenshot to ", _shot_path)
+			get_tree().quit()
+		return
 	if _shot_path == "" or client.phase() != "playing":
 		return
 	_shot_timer += delta
@@ -369,8 +389,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("toggle_proxies"):
 		proxies_enabled = not proxies_enabled
 		client.set_collision_proxies(proxies_enabled)
-	elif event.is_action_pressed("toggle_shop"):
+	elif event.is_action_pressed("toggle_shop") and not client.is_spectator():
 		_toggle_shop()
+	elif event.is_action_pressed("spectate_next") and client.is_spectator():
+		_spectate_next()
 	elif event.is_action_pressed("toggle_net_graph") and not blind_enabled:
 		show_net_graph = not show_net_graph
 
@@ -402,7 +424,12 @@ func _process(delta: float) -> void:
 		_update_blind()
 	own_status = client.own_status() if playing else {}
 	_update_shop(delta)
-	if playing and own_body == null:
+	_update_lobby(delta, phase)
+	_save_session(delta, playing)
+	var spectating: bool = playing and client.is_spectator()
+	if spectating:
+		_update_spectator_camera()
+	if playing and own_body == null and not spectating:
 		own_champion = own_status.get("champion", "")
 		own_body = _make_champion(OWN_COLOR, own_champion)
 		add_child(own_body)
@@ -989,6 +1016,9 @@ func _screen(p: Vector3):
 ## Bar sizes follow the familiarity targets of R01 §6.
 func _draw_overlay() -> void:
 	var font := ThemeDB.fallback_font
+	if client.phase() == "playing" and client.is_spectator():
+		var who: String = remote_info[spectate_target].champion if remote_info.has(spectate_target) else "the map"
+		overlay.draw_string(font, Vector2(0, overlay.size.y - 40), "Spectating %s   —   Tab: next champion" % who, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 22, Color.WHITE)
 	if own_body != null and own_body.visible:
 		var hp: float = own_status.get("health", 0.0)
 		var mx: float = own_status.get("max_health", 1.0)
@@ -1463,3 +1493,153 @@ func _draw_inventory(font: Font, origin: Vector2) -> void:
 		overlay.draw_rect(box, Color(0.85, 0.7, 0.35) if id != 0 else Color(0.3, 0.3, 0.35), false, 1.5)
 		if id != 0:
 			overlay.draw_string(font, p + Vector2(4, 24), item_names.get(id, "?"), HORIZONTAL_ALIGNMENT_LEFT, 80, 12, Color(0.9, 0.9, 0.95))
+
+
+## ---- Session, champion select and spectating (M2 slice 5) --------------------------------------
+
+var _server_address := ""
+var _session_save := 0.0
+
+
+func _session_path() -> String:
+	return "user://session.cfg"
+
+
+func _load_session() -> Dictionary:
+	var cfg := ConfigFile.new()
+	if cfg.load(_session_path()) != OK:
+		return {}
+	return {"address": cfg.get_value("session", "address", ""), "token": cfg.get_value("session", "token", ""), "at": cfg.get_value("session", "at", 0.0)}
+
+
+## While playing, remember the token (and when) so a restarted client can take its champion back.
+func _save_session(delta: float, playing: bool) -> void:
+	_session_save -= delta
+	if not playing or client.is_spectator() or _session_save > 0.0:
+		return
+	_session_save = 2.0
+	var token: String = client.session_token()
+	if token == "":
+		return
+	var cfg := ConfigFile.new()
+	cfg.set_value("session", "address", _server_address)
+	cfg.set_value("session", "token", token)
+	cfg.set_value("session", "at", Time.get_unix_time_from_system())
+	cfg.save(_session_path())
+
+
+var lobby_panel: PanelContainer
+var lobby_box: VBoxContainer
+var _lobby_refresh := 0.0
+var _lobby_ready := false
+
+
+func _update_lobby(delta: float, phase: String) -> void:
+	if phase != "lobby":
+		if lobby_panel != null:
+			lobby_panel.queue_free()
+			lobby_panel = null
+		return
+	if lobby_panel == null:
+		lobby_panel = PanelContainer.new()
+		lobby_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+		lobby_panel.custom_minimum_size = Vector2(760, 0)
+		var margin := MarginContainer.new()
+		for side in ["left", "right", "top", "bottom"]:
+			margin.add_theme_constant_override("margin_" + side, 18)
+		lobby_panel.add_child(margin)
+		lobby_box = VBoxContainer.new()
+		lobby_box.add_theme_constant_override("separation", 10)
+		margin.add_child(lobby_box)
+		overlay.get_parent().add_child(lobby_panel)
+	_lobby_refresh -= delta
+	if _lobby_refresh > 0.0:
+		return
+	_lobby_refresh = 0.2
+	lobby_panel.position = (overlay.size - lobby_panel.size) / 2.0
+	var l: Dictionary = client.lobby_state()
+	if l.is_empty():
+		return
+	for c in lobby_box.get_children():
+		c.queue_free()
+	var title := Label.new()
+	title.text = "Champion select — ARAM all random   (starts in %d s)" % ceili(l.starts_in)
+	title.add_theme_font_size_override("font_size", 22)
+	lobby_box.add_child(title)
+	var cols := HBoxContainer.new()
+	cols.add_theme_constant_override("separation", 40)
+	lobby_box.add_child(cols)
+	var me := {}
+	for team in ["blue", "red"]:
+		var col := VBoxContainer.new()
+		col.custom_minimum_size = Vector2(330, 0)
+		var head := Label.new()
+		head.text = "Blue team" if team == "blue" else "Red team"
+		head.add_theme_color_override("font_color", OWN_COLOR if team == "blue" else ENEMY_COLOR)
+		col.add_child(head)
+		for s in l.slots:
+			if s.team != team:
+				continue
+			if s.you:
+				me = s
+			var row := Label.new()
+			var who := "You" if s.you else ("Bot" if s.bot else "Player %d" % s.player)
+			row.text = "%s  %s  —  %s%s" % ["✔" if s.ready else "  ", s.champion, who, ("  (%d rerolls)" % s.rerolls) if s.you else ""]
+			if s.you:
+				row.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
+			col.add_child(row)
+		cols.add_child(col)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 12)
+	lobby_box.add_child(actions)
+	var reroll := Button.new()
+	reroll.text = "Reroll (%d)" % me.get("rerolls", 0)
+	reroll.disabled = me.get("rerolls", 0) == 0
+	reroll.focus_mode = Control.FOCUS_NONE
+	reroll.pressed.connect(func(): client.lobby_reroll(); _lobby_refresh = 0.0)
+	actions.add_child(reroll)
+	var ready := Button.new()
+	_lobby_ready = me.get("ready", false)
+	ready.text = "Not ready" if _lobby_ready else "Ready"
+	ready.focus_mode = Control.FOCUS_NONE
+	ready.pressed.connect(func(): client.lobby_ready(not _lobby_ready); _lobby_refresh = 0.0)
+	actions.add_child(ready)
+	if l.bench.size() > 0:
+		var bench := HBoxContainer.new()
+		bench.add_theme_constant_override("separation", 8)
+		var label := Label.new()
+		label.text = "Team bench:"
+		bench.add_child(label)
+		for name in l.bench:
+			var b := Button.new()
+			b.text = "Take %s" % name
+			b.focus_mode = Control.FOCUS_NONE
+			b.pressed.connect(func(): client.lobby_take(name); _lobby_refresh = 0.0)
+			bench.add_child(b)
+		lobby_box.add_child(bench)
+
+
+var spectate_target := -1
+
+
+func _spectate_next() -> void:
+	var ids := []
+	for id in remote_info:
+		if remote_info[id].champion != "":
+			ids.append(id)
+	ids.sort()
+	if ids.is_empty():
+		return
+	var i := ids.find(spectate_target)
+	spectate_target = ids[(i + 1) % ids.size()]
+
+
+## Spectators follow a champion (Tab: the next one), or look at the middle of the map.
+func _update_spectator_camera() -> void:
+	if not remote_info.has(spectate_target):
+		spectate_target = -1
+		_spectate_next()
+	var target: Vector2 = client.map_geometry().size / 2.0
+	if remote_info.has(spectate_target):
+		target = remote_info[spectate_target].pos
+	_place_camera(_to_world(target))
