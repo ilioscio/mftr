@@ -43,6 +43,61 @@ impl SubTick {
     }
 }
 
+/// Sub-ticks per second (64 × 30 = 1920).
+pub const SUBTICKS_PER_SECOND: u64 = SUBTICKS as u64 * TICK_HZ as u64;
+
+/// An instant on the exact integer simulation timeline, in sub-ticks (1/1920 s) since the end
+/// of tick 0. Casts, missiles, stuns and cooldowns all use it, so timings are identical on the
+/// server and in client prediction with no float drift (03a §3).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SimTime(pub u64);
+
+impl SimTime {
+    /// The instant of a command at `(tick, sub)`: inside tick `k`'s interval `(t_{k-1}, t_k]`.
+    pub fn at(tick: Tick, sub: SubTick) -> Self {
+        SimTime(tick.0.saturating_sub(1) as u64 * SUBTICKS as u64 + sub.get() as u64)
+    }
+
+    /// The end of tick `k`, i.e. `t_k`.
+    pub fn end_of(tick: Tick) -> Self {
+        SimTime(tick.0 as u64 * SUBTICKS as u64)
+    }
+
+    pub fn plus(self, duration: SimDuration) -> Self {
+        SimTime(self.0 + duration.0)
+    }
+
+    /// Seconds since `earlier` (exact integer difference, then one float conversion).
+    pub fn secs_since(self, earlier: SimTime) -> f32 {
+        self.0.saturating_sub(earlier.0) as f32 / SUBTICKS_PER_SECOND as f32
+    }
+
+    /// In fractional ticks (client display timelines).
+    pub fn as_ticks(self) -> f64 {
+        self.0 as f64 / SUBTICKS as f64
+    }
+
+    /// Wire form: whole ticks (32 bits) and the 6-bit remainder.
+    pub fn split(self) -> (u32, u8) {
+        ((self.0 / SUBTICKS as u64) as u32, (self.0 % SUBTICKS as u64) as u8)
+    }
+
+    pub fn join(ticks: u32, sub: u8) -> Self {
+        SimTime(ticks as u64 * SUBTICKS as u64 + (sub % SUBTICKS) as u64)
+    }
+}
+
+/// A duration in sub-ticks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SimDuration(pub u64);
+
+impl SimDuration {
+    /// From design seconds (exact for multiples of 1/1920 s, e.g. 0.25 s = 480).
+    pub const fn from_millis(ms: u64) -> Self {
+        SimDuration(ms * SUBTICKS_PER_SECOND / 1000)
+    }
+}
+
 /// Map a continuous server time, in fractional ticks, to the tick whose interval contains it
 /// and the sub-tick position inside that interval.
 pub fn tick_at(time_in_ticks: f64) -> (Tick, SubTick) {

@@ -8,7 +8,8 @@ use mftr_net::PROTOCOL_VERSION;
 use mftr_net::msg::{self, ClientMessage, CommandReport, RejectReason, RemoteUnit, ServerMessage, Snapshot, TimeEcho};
 use mftr_net::packet::{PacketHeader, ReceiveTracker, SendTracker};
 use mftr_sim::{
-    Brain, Command, MinionKind, PlayerId, QPoint, SubTick, TICK_DT_F64, TICK_HZ, Team, Tick, UnitId, Vec2, World,
+    Brain, Command, MinionKind, PlayerId, QPoint, SimEvent, SimTime, SubTick, TICK_DT_F64, TICK_HZ, Team, Tick, UnitId,
+    Vec2, World,
 };
 use std::collections::{BTreeMap, VecDeque};
 
@@ -26,6 +27,9 @@ const TIMEOUT: f64 = 10.0;
 pub enum Scenario {
     /// Champions only.
     Empty,
+    /// M1 slice 2: turrets around the arena fire skillshots at the players (the dodge rig,
+    /// 03 §14). All players are on the blue team.
+    DodgeRig,
     /// M1 slice 1: static minion clumps plus two patrolling waves, to exercise minion block
     /// and client collision proxies (03a §5).
     MinionSandbox,
@@ -36,6 +40,7 @@ impl Scenario {
         match name {
             "empty" => Some(Scenario::Empty),
             "minions" => Some(Scenario::MinionSandbox),
+            "dodge" => Some(Scenario::DodgeRig),
             _ => None,
         }
     }
@@ -59,6 +64,15 @@ impl Default for ServerConfig {
 
 /// Populate the M1 minion sandbox (inside the default 0..4000 u arena).
 fn populate(world: &mut World, scenario: Scenario) {
+    if scenario == Scenario::DodgeRig {
+        // Four turrets around the middle; together they cover most of the arena.
+        for pos in
+            [Vec2::new(900.0, 2000.0), Vec2::new(3100.0, 2000.0), Vec2::new(2000.0, 900.0), Vec2::new(2000.0, 3100.0)]
+        {
+            world.spawn_turret(Team::Red, pos, 1100);
+        }
+        return;
+    }
     if scenario != Scenario::MinionSandbox {
         return;
     }
@@ -117,6 +131,9 @@ struct Conn {
     highest_seq: u32,
     reports: VecDeque<(Tick, CommandReport)>,
     echo: Option<(u32, f64)>,
+    /// Reliable events not yet acknowledged, with their sequence numbers (03b §7).
+    events: VecDeque<(u32, SimEvent)>,
+    next_event_seq: u32,
     last_heard: f64,
 }
 
@@ -201,7 +218,7 @@ impl ServerCore {
                     out.push((from, bytes));
                 }
             }
-            ClientMessage::Input { client_time_us, commands } => {
+            ClientMessage::Input { client_time_us, event_ack, commands } => {
                 let world_tick = self.world.tick();
                 let start = self.start;
                 let Some(conn) = self.conns.get_mut(&from) else { return out };
@@ -211,6 +228,9 @@ impl ServerCore {
                 conn.send.on_ack(header.ack, header.ack_bits);
                 conn.last_heard = now;
                 conn.echo = Some((client_time_us, now));
+                while conn.events.front().is_some_and(|(seq, _)| *seq <= event_ack) {
+                    conn.events.pop_front();
+                }
                 let mut fresh: Vec<Command> = commands.into_iter().filter(|c| c.seq > conn.highest_seq).collect();
                 fresh.sort_by_key(|c| c.seq);
                 for mut c in fresh {
@@ -255,7 +275,7 @@ impl ServerCore {
     fn join(&mut self, key: ClientKey, now: f64) {
         let used: Vec<u8> = self.conns.values().map(|c| c.player.0).collect();
         let player = PlayerId((0..=u8::MAX).find(|p| !used.contains(p)).unwrap());
-        let team = if player.0 % 2 == 0 { Team::Blue } else { Team::Red };
+        let team = if player.0 % 2 == 0 || self.cfg.scenario == Scenario::DodgeRig { Team::Blue } else { Team::Red };
         let (lo, hi) = (self.cfg.arena_min, self.cfg.arena_max);
         // A random spot with nothing within 150 u (deterministic: the world RNG).
         let mut pos = Vec2::ZERO;
@@ -277,6 +297,8 @@ impl ServerCore {
                 highest_seq: 0,
                 reports: VecDeque::new(),
                 echo: None,
+                events: VecDeque::new(),
+                next_event_seq: 1,
                 last_heard: now,
             },
         );
@@ -301,6 +323,7 @@ impl ServerCore {
         let (due, later): (Vec<Command>, Vec<Command>) = self.queue.drain(..).partition(|c| c.tick <= k);
         self.queue = later;
         self.world.step(&due);
+        let events = self.world.take_events();
         self.stats.ticks += 1;
 
         let since = ((now - self.tick_time(k)).max(0.0) * 1e6) as u32;
@@ -317,6 +340,8 @@ impl ServerCore {
                     target: u.state.heading().map(QPoint::from_vec2),
                     speed: u.state.move_speed.round().clamp(0.0, 1023.0) as u16,
                     collision_radius: u.collision_radius.round().clamp(0.0, 255.0) as u8,
+                    casting: u.state.cast.is_some(),
+                    stunned: u.state.stunned_until > SimTime::end_of(k),
                 };
                 (u.id, u.state, remote)
             })
@@ -327,6 +352,11 @@ impl ServerCore {
                 conn.reports.pop_front();
             }
             let own = units.iter().find(|(id, _, _)| *id == conn.unit).map(|(id, s, _)| (*id, *s));
+            // No fog of war yet (slice 3): every client gets every event.
+            for e in &events {
+                conn.events.push_back((conn.next_event_seq, *e));
+                conn.next_event_seq += 1;
+            }
             let others = units.iter().filter(|(id, _, _)| *id != conn.unit).map(|(_, _, r)| *r).collect();
             let reports: Vec<CommandReport> =
                 conn.reports.iter().rev().take(msg::MAX_REPORTS_PER_SNAPSHOT).rev().map(|(_, r)| *r).collect();
@@ -340,6 +370,7 @@ impl ServerCore {
                 last_cmd_seq: conn.highest_seq,
                 reports,
                 own,
+                events: conn.events.iter().take(msg::MAX_EVENTS_PER_SNAPSHOT).copied().collect(),
                 others,
             };
             let h = Self::header(conn);

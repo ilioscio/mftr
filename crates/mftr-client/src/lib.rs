@@ -19,9 +19,14 @@ use mftr_net::msg::{self, ClientMessage, CommandReport, RemoteUnit, ServerMessag
 use mftr_net::packet::{PacketHeader, ReceiveTracker, SendTracker};
 use mftr_sim::time::tick_at;
 use mftr_sim::{
-    Command, CommandKind, PlayerId, QPoint, TICK_DT_F64, Team, Tick, Unit, UnitId, UnitKind, UnitState, Vec2, World,
+    Command, CommandKind, PlayerId, QPoint, SUBTICKS, SimEvent, SimTime, TICK_DT_F64, Team, Tick, Unit, UnitId,
+    UnitKind, UnitState, Vec2, World,
 };
 use std::collections::{BTreeMap, VecDeque};
+
+pub mod missiles;
+use missiles::MissileBook;
+pub use missiles::{DodgeStats, MissileRender, Side, Threat};
 
 /// Units farther than this from the own champion can't matter within a prediction horizon.
 const PROXY_RANGE: f32 = 600.0;
@@ -39,6 +44,26 @@ struct RemoteTrack {
 impl RemoteTrack {
     /// Position at `at` (fractional ticks), extrapolated from the latest snapshot along the
     /// replicated heading at constant speed, stopping at the waypoint. Never before the snapshot.
+    /// Best estimate of the unit's position at `at` (fractional ticks): interpolated from
+    /// snapshots where we have them, extrapolated beyond the newest.
+    fn pos_at(&self, at: f64) -> Vec2 {
+        if at <= self.latest_tick.0 as f64 {
+            interpolate(&self.samples, at).unwrap_or(self.latest.pos.to_vec2())
+        } else {
+            self.extrapolate(at)
+        }
+    }
+
+    /// Gameplay (hitbox) radius, from the replicated kind and collision radius (01 §4).
+    fn gameplay_radius(&self) -> f32 {
+        match self.latest.kind {
+            UnitKind::Champion => mftr_sim::world::CHAMPION_GAMEPLAY_RADIUS,
+            UnitKind::Minion if self.latest.collision_radius >= 35 => 65.0,
+            UnitKind::Minion => 48.0,
+            UnitKind::Turret => mftr_sim::world::TURRET_GAMEPLAY_RADIUS,
+        }
+    }
+
     fn extrapolate(&self, at: f64) -> Vec2 {
         let p = self.latest.pos.to_vec2();
         let Some(target) = self.latest.target.map(QPoint::to_vec2) else { return p };
@@ -74,6 +99,10 @@ pub struct RemoteRender {
     pub team: Team,
     pub collision_radius: f32,
     pub pos: Vec2,
+    /// Cast windup in progress: `(progress 0..1, aim direction)`. Enemy windups are shown on
+    /// `T_input` so they line up with their missiles (03a §7).
+    pub windup: Option<(f32, Vec2)>,
+    pub stunned: bool,
 }
 
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
@@ -147,6 +176,8 @@ pub struct ClientSession {
     clock: ClockSync,
     margin: f64,
     margin_target: f64,
+    /// Test knob: force the input margin (fault injection in the Netcode Lab).
+    margin_override: Option<f64>,
     leads: VecDeque<f64>,
     last_send: Option<f64>,
     last_command_at: Option<f64>,
@@ -158,6 +189,10 @@ pub struct ClientSession {
     send: SendTracker,
     recv: ReceiveTracker,
     pub stats: ClientStats,
+    book: MissileBook,
+    last_event_seq: u32,
+    /// Remote cast windups from `CastStarted` events: `(start, fire, aim)`.
+    remote_casts: BTreeMap<UnitId, (SimTime, SimTime, Vec2)>,
 }
 
 impl Default for ClientSession {
@@ -184,6 +219,7 @@ impl ClientSession {
             clock: ClockSync::default(),
             margin: 0.030,
             margin_target: 0.030,
+            margin_override: None,
             leads: VecDeque::new(),
             last_send: None,
             last_command_at: None,
@@ -195,6 +231,9 @@ impl ClientSession {
             send: SendTracker::default(),
             recv: ReceiveTracker::default(),
             stats: ClientStats::default(),
+            book: MissileBook::default(),
+            last_event_seq: 0,
+            remote_casts: BTreeMap::new(),
         }
     }
 
@@ -204,6 +243,10 @@ impl ClientSession {
 
     pub fn player(&self) -> PlayerId {
         self.player
+    }
+
+    pub fn team(&self) -> Team {
+        self.team
     }
 
     pub fn unit(&self) -> UnitId {
@@ -260,7 +303,9 @@ impl ClientSession {
         self.unsent_command = false;
         let unacked: Vec<Command> = self.commands.iter().filter(|c| c.seq > self.acked_seq).copied().collect();
         let h = self.header();
-        let bytes = msg::encode_client(&h, &ClientMessage::Input { client_time_us: time_us(now), commands: unacked });
+        let input =
+            ClientMessage::Input { client_time_us: time_us(now), event_ack: self.last_event_seq, commands: unacked };
+        let bytes = msg::encode_client(&h, &input);
         self.finish_packet(bytes)
     }
 
@@ -279,7 +324,8 @@ impl ClientSession {
 
     /// `T_input`: the server time at which a command sent now takes effect.
     pub fn input_time(&self, now: f64) -> Option<f64> {
-        self.now_ticks(now).map(|t| t + (self.clock.rtt() / 2.0 + self.margin) / TICK_DT_F64)
+        let margin = self.margin_override.unwrap_or(self.margin);
+        self.now_ticks(now).map(|t| t + (self.clock.rtt() / 2.0 + margin) / TICK_DT_F64)
     }
 
     /// `T_interp`: the server time remote units are drawn at.
@@ -292,6 +338,11 @@ impl ClientSession {
     /// Issue a move order. Applied to the prediction immediately (03a §4).
     pub fn move_to(&mut self, target: Vec2, now: f64) -> Option<Command> {
         self.issue(CommandKind::MoveTo(QPoint::from_vec2(target)), now)
+    }
+
+    /// Cast the line skillshot toward a ground point. Windup and missile are predicted at once.
+    pub fn cast_q(&mut self, target: Vec2, now: f64) -> Option<Command> {
+        self.issue(CommandKind::CastQ(QPoint::from_vec2(target)), now)
     }
 
     pub fn stop(&mut self, now: f64) -> Option<Command> {
@@ -336,6 +387,17 @@ impl ClientSession {
         while self.world.tick() < target {
             self.step_prediction();
         }
+        // Freeze what we showed for enemy missiles and compare with the server (ghost hits);
+        // forget own-cast predictions the server never confirmed within a second.
+        let icpt = self.interceptions();
+        let mut book = std::mem::take(&mut self.book);
+        let last = self.world.tick();
+        book.update_outcomes(t, self.unit, OWN_GAMEPLAY_RADIUS, &|k| self.history_at(k), last, &icpt);
+        if let Some(t_now) = self.now_ticks(now) {
+            let stale = SimTime(((t_now - 30.0).max(0.0) * SUBTICKS as f64) as u64);
+            book.prune_predicted(SimTime(u64::MAX), stale);
+        }
+        self.book = book;
     }
 
     fn step_prediction(&mut self) {
@@ -355,6 +417,13 @@ impl ClientSession {
             self.world.replace_others(self.unit, proxies);
         }
         self.world.step(&cmds);
+        for e in self.world.take_events() {
+            if let SimEvent::MissileSpawned(m) = e
+                && m.owner == self.unit
+            {
+                self.book.predicted_own.insert(m.cast_seq, m);
+            }
+        }
         let st = self.own_state();
         self.history.push_back((k, st));
         while self.history.len() > HISTORY_TICKS {
@@ -386,6 +455,8 @@ impl ClientSession {
         if let Some(u) = self.world.unit_mut(self.unit) {
             u.state = base;
         }
+        // Own missiles predicted after the base tick are re-created by the re-simulation.
+        self.book.prune_predicted(SimTime::end_of(base_tick), SimTime(0));
         while self.world.tick() < end {
             self.step_prediction();
         }
@@ -433,6 +504,26 @@ impl ClientSession {
             self.clock.add_sample(now, rtt, s.tick.end_seconds() + s.since_tick_us as f64 * 1e-6);
         }
         self.acked_seq = self.acked_seq.max(s.last_cmd_seq);
+
+        // Reliable events, strictly in order; anything after a gap is resent by the server.
+        for (seq, e) in &s.events {
+            if *seq != self.last_event_seq + 1 {
+                if *seq > self.last_event_seq + 1 {
+                    break;
+                }
+                continue;
+            }
+            self.last_event_seq = *seq;
+            match *e {
+                SimEvent::CastStarted { unit, at, dir, fire_at, .. } if unit != self.unit => {
+                    self.remote_casts.insert(unit, (at, fire_at, dir));
+                }
+                SimEvent::MissileSpawned(m) => self.book.on_spawn(m, self.unit, self.team, now),
+                SimEvent::MissileHit { id, target, at } => self.book.on_end(id, at, Some(target)),
+                SimEvent::MissileExpired { id, at } => self.book.on_end(id, at, None),
+                _ => {}
+            }
+        }
 
         for o in &s.others {
             let track = self.remote.entry(o.id).or_insert_with(|| RemoteTrack {
@@ -603,6 +694,7 @@ impl ClientSession {
             brain: None,
         };
         self.world = World::from_units(tick, vec![unit]);
+        self.world.set_missiles_enabled(false);
         self.history.clear();
         self.history.push_back((tick, state));
         self.render_offset = Vec2::ZERO;
@@ -635,6 +727,12 @@ impl ClientSession {
         self.history_at(tick).map(|s| s.pos)
     }
 
+    /// Fault injection for the Netcode Lab: pin the input margin (e.g. to 0) instead of
+    /// letting the control loop steer it.
+    pub fn set_margin_override(&mut self, margin: Option<f64>) {
+        self.margin_override = margin;
+    }
+
     pub fn set_collision_proxies(&mut self, enabled: bool) {
         self.collision_proxies = enabled;
     }
@@ -658,17 +756,90 @@ impl ClientSession {
                         pos = interp.lerp(track.extrapolate(t_input), w);
                     }
                 }
+                let windup = self.remote_casts.get(&track.latest.id).and_then(|&(at, fire, dir)| {
+                    let t = if track.latest.team == self.team { t_interp } else { t_input } * SUBTICKS as f64;
+                    let p = (t - at.0 as f64) / (fire.0 - at.0).max(1) as f64;
+                    (0.0..1.0).contains(&p).then_some((p as f32, dir))
+                });
                 Some(RemoteRender {
                     id: track.latest.id,
                     kind: track.latest.kind,
                     team: track.latest.team,
                     collision_radius: track.latest.collision_radius as f32,
                     pos,
+                    windup,
+                    stunned: track.latest.stunned,
                 })
             })
             .collect()
     }
+
+    /// Missiles to draw this frame, each on its display timeline (03a §7).
+    pub fn missiles_render(&self, now: f64) -> Vec<MissileRender> {
+        let (Some(t_input), Some(t_interp)) = (self.input_time(now), self.interp_time(now)) else {
+            return Vec::new();
+        };
+        let icpt = self.interceptions();
+        self.book.render(t_input, t_interp, OWN_GAMEPLAY_RADIUS, &|k| self.history_at(k), self.world.tick(), &icpt)
+    }
+
+    /// For each enemy missile, the earliest predicted contact with another unit of our team
+    /// (allied champions and minions as proxies, 03a §7), over the ticks we have predicted.
+    fn interceptions(&self) -> BTreeMap<u32, SimTime> {
+        let mut out = BTreeMap::new();
+        let last = self.world.tick();
+        for (id, t) in self.book.tracked.iter().filter(|(_, t)| t.side == Side::Enemy) {
+            let m = &t.m;
+            let end = m.end_at();
+            let mut k = Tick((m.spawn_at.0 / SUBTICKS as u64) as u32 + 1);
+            'ticks: while k <= last {
+                let s0 = SimTime::end_of(Tick(k.0 - 1));
+                if s0 >= end {
+                    break;
+                }
+                let (a, b) = (m.spawn_at.max(s0), end.min(SimTime::end_of(k)));
+                let mut best: Option<SimTime> = None;
+                for track in self.remote.values() {
+                    if track.latest.team != self.team || track.latest.kind == UnitKind::Turret {
+                        continue;
+                    }
+                    let (q0, q1) = (track.pos_at((k.0 - 1) as f64), track.pos_at(k.0 as f64));
+                    if let Some(at) = m.first_hit(a, b, s0, q0, q1, track.gameplay_radius()) {
+                        best = Some(best.map_or(at, |b: SimTime| b.min(at)));
+                    }
+                }
+                if let Some(at) = best {
+                    out.insert(*id, at);
+                    break 'ticks;
+                }
+                k = k.next();
+            }
+        }
+        out
+    }
+
+    /// Enemy missiles still in flight, as the player sees them (scripted dodgers).
+    pub fn threats(&self, now: f64) -> Vec<Threat> {
+        let Some(t_input) = self.input_time(now) else { return Vec::new() };
+        self.book.threats(t_input, now, OWN_GAMEPLAY_RADIUS, &|k| self.history_at(k), self.world.tick())
+    }
+
+    pub fn dodge_stats(&self) -> &DodgeStats {
+        &self.book.stats
+    }
+
+    /// Own state on the input timeline (cooldowns, cast, stun) for HUD display.
+    pub fn own_state_now(&self) -> Option<UnitState> {
+        self.history.back().map(|(_, s)| *s)
+    }
+
+    /// The input timeline as a `SimTime` (for comparing against cooldown/stun instants).
+    pub fn input_sim_time(&self, now: f64) -> Option<SimTime> {
+        self.input_time(now).map(|t| SimTime((t * SUBTICKS as f64) as u64))
+    }
 }
+
+const OWN_GAMEPLAY_RADIUS: f32 = mftr_sim::world::CHAMPION_GAMEPLAY_RADIUS;
 
 /// Interpolate between buffered snapshots; hold at the newest, never extrapolate (03a §10.3).
 fn interpolate(buf: &VecDeque<(Tick, Vec2)>, t: f64) -> Option<Vec2> {

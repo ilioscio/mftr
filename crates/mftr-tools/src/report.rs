@@ -35,6 +35,43 @@ impl ClickBot {
     }
 }
 
+/// Dodge-rig player (03 §14): wanders like `ClickBot`, but reacts to enemy missiles exactly as
+/// its own client displays them. When a missile shown on the input timeline is predicted to
+/// hit, it steps sideways after a human-like reaction delay. Ghost hits are then counted by
+/// the client: shown as a dodge, but hit on the server.
+pub struct DodgeBot {
+    wander: ClickBot,
+    reaction: f64,
+    dodged: std::collections::BTreeSet<u32>,
+    quiet_until: f64,
+}
+
+impl DodgeBot {
+    pub fn new(seed: u64, reaction: f64) -> Self {
+        Self { wander: ClickBot::new(seed), reaction, dodged: Default::default(), quiet_until: 0.0 }
+    }
+
+    pub fn act(&mut self, session: &mut ClientSession, now: f64, elapsed: f64) -> bool {
+        for th in session.threats(now) {
+            if th.predicted_hit.is_none() || th.visible_for < self.reaction || !self.dodged.insert(th.id) {
+                continue;
+            }
+            let Some(own) = session.own_render_position(now) else { continue };
+            let perp = mftr_sim::Vec2::new(-th.dir.y, th.dir.x);
+            let side = if (own - th.pos).dot(perp) >= 0.0 { 1.0 } else { -1.0 };
+            let mut target = own + perp * (300.0 * side);
+            target.x = target.x.clamp(300.0, 3700.0);
+            target.y = target.y.clamp(300.0, 3700.0);
+            self.quiet_until = elapsed + 0.6;
+            return session.move_to(target, now).is_some();
+        }
+        if elapsed < self.quiet_until {
+            return false;
+        }
+        self.wander.act(session, now, elapsed)
+    }
+}
+
 /// Tracks visible jumps in a rendered position: movement beyond what speed allows in one frame.
 /// Also integrates the visible correction offset over time (03 §1 "mean visible position
 /// correction during normal play").
@@ -92,6 +129,7 @@ pub struct Summary {
     pub up_kbps: f64,
     pub down_kbps: f64,
     pub hard_resets: u64,
+    pub dodge: mftr_client::DodgeStats,
 }
 
 impl Summary {
@@ -129,7 +167,39 @@ impl Summary {
             up_kbps: sessions.iter().map(|(s, _)| s.stats.bytes_up).sum::<u64>() as f64 / 1024.0 / seconds / n,
             down_kbps: sessions.iter().map(|(s, _)| s.stats.bytes_down).sum::<u64>() as f64 / 1024.0 / seconds / n,
             hard_resets: sessions.iter().map(|(s, _)| s.stats.hard_resets).sum(),
+            dodge: sessions.iter().fold(mftr_client::DodgeStats::default(), |mut a, (s, _)| {
+                let d = s.dodge_stats();
+                a.enemy_missiles += d.enemy_missiles;
+                a.near_misses += d.near_misses;
+                a.server_hits += d.server_hits;
+                a.shown_hits += d.shown_hits;
+                a.ghost_hits += d.ghost_hits;
+                a.phantom_hits += d.phantom_hits;
+                a.uncertain += d.uncertain;
+                a
+            }),
         }
+    }
+
+    /// Ghost hits per near-miss (03 §1 target: < 0.5% at 60 ms, < 2% at 120 ms).
+    pub fn ghost_rate(&self) -> f64 {
+        self.dodge.ghost_hits as f64 / self.dodge.near_misses.max(1) as f64
+    }
+
+    pub fn dodge_row(&self) -> String {
+        let d = &self.dodge;
+        format!(
+            "{:<10} enemy missiles {:>5}  near-misses {:>5}  server hits {:>5}  shown hits {:>5}  ghost hits {:>4} ({:.2}% of near-misses)  phantom hits {:>4}  unconfirmed {:>4}",
+            self.label,
+            d.enemy_missiles,
+            d.near_misses,
+            d.server_hits,
+            d.shown_hits,
+            d.ghost_hits,
+            self.ghost_rate() * 100.0,
+            d.phantom_hits,
+            d.uncertain,
+        )
     }
 
     pub fn header() -> String {

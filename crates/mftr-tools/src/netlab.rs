@@ -1,7 +1,7 @@
 //! Headless Netcode Lab (03 §14): one server and N scripted clients over link-conditioned
 //! links, in deterministic virtual time. Same seed → same result, so it's usable in CI.
 
-use crate::report::{ClickBot, JumpMeter, Summary};
+use crate::report::{ClickBot, DodgeBot, JumpMeter, Summary};
 use mftr_client::{ClientSession, Phase};
 use mftr_net::conditioner::{LinkProfile, SimLink};
 use mftr_server::{Scenario, ServerConfig, ServerCore};
@@ -20,13 +20,22 @@ pub struct LabConfig {
     pub scenario: Scenario,
     /// Client collision proxies and the minion bubble (03a §5); off = naive prediction.
     pub proxies: bool,
+    /// Dodge-rig reaction time in seconds (scenario `dodge`).
+    pub reaction: f64,
+    /// Fault injection: force every client's input margin (validates the ghost-hit detector).
+    pub margin_override: Option<f64>,
+}
+
+enum Bot {
+    Click(ClickBot),
+    Dodge(DodgeBot),
 }
 
 struct LabClient {
     session: ClientSession,
     up: SimLink,
     down: SimLink,
-    bot: ClickBot,
+    bot: Bot,
     jumps: JumpMeter,
     /// Client clocks are deliberately offset from the server's, to exercise clock sync.
     clock_offset: f64,
@@ -51,11 +60,16 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                 session: {
                     let mut s = ClientSession::new();
                     s.set_collision_proxies(cfg.proxies);
+                    s.set_margin_override(cfg.margin_override);
                     s
                 },
                 up: SimLink::new(cfg.profile, s * 2 + 1),
                 down: SimLink::new(cfg.profile, s * 2 + 2),
-                bot: ClickBot::new(s),
+                bot: if cfg.scenario == Scenario::DodgeRig {
+                    Bot::Dodge(DodgeBot::new(s, cfg.reaction))
+                } else {
+                    Bot::Click(ClickBot::new(s))
+                },
                 jumps: JumpMeter::default(),
                 clock_offset: 1000.0 + 37.0 * i as f64,
                 next_frame: 0.001 * i as f64,
@@ -111,7 +125,10 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                 }
                 Phase::Joining => {}
                 Phase::Playing => {
-                    c.bot.act(&mut c.session, local, t);
+                    match &mut c.bot {
+                        Bot::Click(b) => b.act(&mut c.session, local, t),
+                        Bot::Dodge(b) => b.act(&mut c.session, local, t),
+                    };
                     if c.session.should_send(local) {
                         let p = c.session.input_packet(local);
                         c.up.send(p, t);
@@ -142,7 +159,18 @@ mod tests {
     }
 
     fn lab_in(profile: LinkProfile, seconds: f64, scenario: Scenario, proxies: bool) -> LabResult {
-        run(&LabConfig { profile, clients: 6, seconds, seed: 42, fps: 144.0, warmup: 10.0, scenario, proxies })
+        run(&LabConfig {
+            profile,
+            clients: 6,
+            seconds,
+            seed: 42,
+            fps: 144.0,
+            warmup: 10.0,
+            scenario,
+            proxies,
+            reaction: 0.25,
+            margin_override: None,
+        })
     }
 
     /// Alone on a perfect link, prediction is exact with nothing to collide with. Among minions
@@ -161,6 +189,8 @@ mod tests {
                 warmup: 10.0,
                 scenario,
                 proxies: true,
+                reaction: 0.25,
+                margin_override: None,
             })
             .summary
         };
@@ -206,6 +236,8 @@ mod tests {
             warmup: 10.0,
             scenario,
             proxies,
+            reaction: 0.25,
+            margin_override: None,
         })
     }
 
@@ -221,5 +253,43 @@ mod tests {
         assert!(proxied.visible_mean < 0.2, "{}", proxied.row());
         assert!(proxied.visible_mean < naive.visible_mean / 3.0, "proxies {} vs naive {}", proxied.row(), naive.row());
         assert!(proxied.jumps_per_min < naive.jumps_per_min, "proxies {} vs naive {}", proxied.row(), naive.row());
+    }
+
+    fn dodge_rig(profile: LinkProfile, reaction: f64, margin_override: Option<f64>) -> Summary {
+        run(&LabConfig {
+            profile,
+            clients: 6,
+            seconds: 600.0,
+            seed: 11,
+            fps: 144.0,
+            warmup: 10.0,
+            scenario: Scenario::DodgeRig,
+            proxies: true,
+            reaction,
+            margin_override,
+        })
+        .summary
+    }
+
+    /// M1 slice 2 exit (03 §1): ghost hits (shown as a dodge, hit on the server) stay below
+    /// 0.5% of near-misses at 60 ms and 2% at 120 ms / 20 ms jitter / 2% loss.
+    #[test]
+    fn dodge_rig_meets_ghost_hit_targets() {
+        for (profile, limit) in [(LinkProfile::TYPICAL, 0.005), (LinkProfile::ROUGH, 0.02)] {
+            let s = dodge_rig(profile, 0.30, None);
+            assert!(s.dodge.near_misses > 50, "too few near-misses to judge: {}", s.dodge_row());
+            assert!(s.ghost_rate() < limit, "{}", s.dodge_row());
+            // Phantom hits (shown hit, server miss) stay rare once interceptions by allies are
+            // predicted and drawn as unconfirmed (03a §7).
+            assert!((s.dodge.phantom_hits as f64) < 0.02 * s.dodge.near_misses as f64, "{}", s.dodge_row());
+        }
+    }
+
+    /// The detector itself must work: with the input margin forced negative (nearly every
+    /// command late), ghost hits must show up.
+    #[test]
+    fn ghost_hit_detector_fires_under_fault_injection() {
+        let s = dodge_rig(LinkProfile::AWFUL, 0.40, Some(-0.06));
+        assert!(s.dodge.ghost_hits > 0, "{}", s.dodge_row());
     }
 }

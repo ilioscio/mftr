@@ -5,7 +5,7 @@
 //! command entry points to GDScript.
 
 use godot::prelude::*;
-use mftr_client::{ClientSession, Phase};
+use mftr_client::{ClientSession, Phase, Side};
 use mftr_sim::{Team, UnitKind, Vec2};
 use std::net::UdpSocket;
 use std::time::Instant;
@@ -110,6 +110,53 @@ impl MatchClient {
         }
     }
 
+    /// Cast Q toward a ground point (game units). Windup and missile are predicted at once.
+    #[func]
+    fn cast_q(&mut self, target: Vector2) {
+        let now = self.now();
+        if self.session.cast_q(Vec2::new(target.x, target.y), now).is_some() {
+            self.send_input(now);
+        }
+    }
+
+    /// Missiles to draw: `{ key, pos, dir, radius, side: "own"|"ally"|"enemy", impact }`.
+    #[func]
+    fn missiles(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for m in self.session.missiles_render(self.now()) {
+            let mut d = VarDictionary::new();
+            d.set("key", m.key as i64);
+            d.set("pos", Vector2::new(m.pos.x, m.pos.y));
+            d.set("dir", Vector2::new(m.dir.x, m.dir.y));
+            d.set("radius", m.radius);
+            d.set(
+                "side",
+                match m.side {
+                    Side::Own => "own",
+                    Side::Ally => "ally",
+                    Side::Enemy => "enemy",
+                },
+            );
+            d.set("impact", m.impact);
+            d.set("unconfirmed", m.unconfirmed);
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// Own champion status on the input timeline: `{ stunned, casting, q_cooldown }` (seconds).
+    #[func]
+    fn own_status(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let now = self.now();
+        if let (Some(s), Some(t)) = (self.session.own_state_now(), self.session.input_sim_time(now)) {
+            d.set("stunned", s.stunned_until > t);
+            d.set("casting", s.cast.is_some());
+            d.set("q_cooldown", s.q_ready_at.secs_since(t));
+        }
+        d
+    }
+
     #[func]
     fn stop(&mut self) {
         let now = self.now();
@@ -140,7 +187,14 @@ impl MatchClient {
             d.set("id", u.id.0 as i64);
             d.set("pos", Vector2::new(u.pos.x, u.pos.y));
             d.set("minion", u.kind == UnitKind::Minion);
+            d.set("turret", u.kind == UnitKind::Turret);
+            d.set("stunned", u.stunned);
+            if let Some((p, dir)) = u.windup {
+                d.set("windup", p);
+                d.set("windup_dir", Vector2::new(dir.x, dir.y));
+            }
             d.set("red", u.team == Team::Red);
+            d.set("ally", u.team == self.session.team());
             d.set("radius", u.collision_radius);
             out.push(&d.to_variant());
         }
@@ -170,6 +224,11 @@ impl MatchClient {
         d.set("visible_correction", s.visible_correction());
         d.set("kb_up", st.bytes_up as f64 / 1024.0);
         d.set("kb_down", st.bytes_down as f64 / 1024.0);
+        let dodge = s.dodge_stats();
+        d.set("enemy_missiles", dodge.enemy_missiles as i64);
+        d.set("near_misses", dodge.near_misses as i64);
+        d.set("ghost_hits", dodge.ghost_hits as i64);
+        d.set("phantom_hits", dodge.phantom_hits as i64);
         d
     }
 }

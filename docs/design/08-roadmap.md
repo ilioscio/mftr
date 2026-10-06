@@ -78,6 +78,23 @@ With no unit collision yet, the only source of corrections is a command that arr
 | minions, proxies off (naive) | 1.90 | 0.43 u | 0.80 |
 | **minions, proxies on** | **0.87** (≈0.27 caused by minions) | **0.05 u** | **0** |
 
+### Slice 2 status (2026-10-05): ✅ done
+
+- `mftr-sim`: an exact integer timeline (`SimTime`, 1/1920 s, D21). Line skillshots have rooted windups at exact sub-tick instants and cooldowns. Analytic missiles use exact swept hits against units' motion, so the first enemy unit in the path takes it: minions body-block skillshots. Hard CC stun interrupts casts. Dodge-rig turrets aim directly or with lead.
+- Protocol v4: a reliable, ordered events channel (cumulative ack, resend until acked); lossless cast, stun and cooldown own state; remote casting and stunned flags.
+- `mftr-client`: own casts predicted (windup plus missile at once, Option B display). Enemy missiles are on `T_input` with predicted self-hits, enemy windups on `T_input`. Predicted interceptions by allies or minions are shown **unconfirmed** (dimmed, never hidden). The ghost/phantom measurement freezes what was shown and compares it with the server.
+- Server scenario `dodge`: 4 turrets firing at the players. The Godot client draws missiles per D14 (slim core plus full-width sheath), windup aim lines and stun rings; **Q** casts.
+- Validation: under fault injection (input margin forced negative), the detector does report ghost hits (2% at 200 ms), so the zeros below are real.
+
+**Dodge rig, 6 scripted dodgers reacting to what their own client shows (0.25 s human reaction), 10 min:**
+
+| Profile | Enemy missiles | Near-misses | Ghost hits (target) | Phantom hits |
+|---|---|---|---|---|
+| typical (60 ms / 5 / 0.5%) | 12,024 | 1,778 | **0 (0.00%)** (< 0.5%) | 8 |
+| rough (120 ms / 20 / 2%) | 11,952 | 1,731 | **1 (0.06%)** (< 2%) | 9 |
+
+Alone (no allies to intercept), 1 player, 1 hour: 0.05% ghost hits at 60 ms, 0.10% at 120 ms.
+
 **Open issues found:**
 1. **Champion-vs-champion bumps** dominate corrections when many champions crowd together: ~4 per player-minute with 10 click-spamming bots in a 3,000 u arena. Their proxies can't anticipate the other player's next click. Options are recorded as Q12 in DECISIONS.
 2. **Bandwidth** rose to ~23–27 KB/s per player with ~70 units, because every unit's full state is sent every tick. Path-coasting and baseline deltas (03b §6) come next, before the unit count grows.

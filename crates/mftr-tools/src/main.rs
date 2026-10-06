@@ -38,9 +38,14 @@ fn main() {
                         .map(|s| Scenario::by_name(&s).unwrap_or_else(|| panic!("unknown scenario {s}")))
                         .unwrap_or(Scenario::Empty),
                     proxies: !args.iter().any(|a| a == "--no-proxies"),
+                    reaction: num("--reaction", 0.25),
+                    margin_override: get("--margin-override").map(|v| v.parse::<f64>().expect("seconds")),
                 };
                 let r = netlab::run(&cfg);
                 println!("{}   ticks {} hash {:#018x}", r.summary.row(), r.server_ticks, r.server_hash);
+                if cfg.scenario == Scenario::DodgeRig {
+                    println!("{}", r.summary.dodge_row());
+                }
             }
         }
         Some("bot") => {

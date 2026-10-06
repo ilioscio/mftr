@@ -1,14 +1,22 @@
 //! The simulation world: units, commands and the fixed-tick step.
 //!
-//! Tick phases: (1) AI decisions for server-driven units, (2) movement with unit collision
-//! against start-of-tick positions (`collision.rs`), including sub-tick command application.
-//! Abilities, projectiles and vision land in later M1 slices on top of this structure.
+//! Tick phases:
+//! 1. AI decisions for server-driven units (patrols, turrets).
+//! 2. A per-unit timeline on the exact [`SimTime`] axis: movement with unit collision against
+//!    start-of-tick positions (`collision.rs`), sub-tick commands, cast windups (rooted) and
+//!    stuns, each taking effect at its exact instant.
+//! 3. Missiles: spawn at their fire instant, exact swept hits against units' motion this tick
+//!    (`projectile::first_contact`), expiry.
+//!
+//! Vision lands in slice 3 on top of this structure.
 
+use crate::ability::{LineSkillshot, SANDBOX_LANCE, TURRET_SHOT};
 use crate::collision::{Obstacle, choose_detour, constrained_move};
 use crate::hash::StateHasher;
 use crate::math::{QPoint, Vec2};
+use crate::projectile::first_contact;
 use crate::rng::Pcg32;
-use crate::time::{SubTick, TICK_DT, Tick};
+use crate::time::{SUBTICKS, SUBTICKS_PER_SECOND, SimTime, SubTick, Tick};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PlayerId(pub u8);
@@ -26,6 +34,8 @@ pub enum Team {
 pub enum UnitKind {
     Champion,
     Minion,
+    /// Static structure (the dodge rig's shooters for now). Immune to skillshots.
+    Turret,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -49,7 +59,16 @@ const BROADPHASE: f32 = 300.0;
 /// A blocked unit this close to its goal counts as arrived.
 const GIVE_UP_DISTANCE: f32 = 80.0;
 
-/// Everything client prediction needs to reproduce a unit's movement bit-exactly.
+/// A cast in progress: the caster is rooted until the missile fires.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cast {
+    pub dir: Vec2,
+    pub fire_at: SimTime,
+    /// Sequence number of the command that started it (0 for AI casts).
+    pub seq: u32,
+}
+
+/// Everything client prediction needs to reproduce a unit bit-exactly.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UnitState {
     pub pos: Vec2,
@@ -59,11 +78,23 @@ pub struct UnitState {
     pub detour: Option<Vec2>,
     /// Consecutive ticks of poor progress while moving.
     pub stuck: u8,
+    pub cast: Option<Cast>,
+    pub stunned_until: SimTime,
+    pub q_ready_at: SimTime,
 }
 
 impl UnitState {
     pub fn new(pos: Vec2, move_speed: f32) -> Self {
-        Self { pos, order: Order::Idle, move_speed, detour: None, stuck: 0 }
+        Self {
+            pos,
+            order: Order::Idle,
+            move_speed,
+            detour: None,
+            stuck: 0,
+            cast: None,
+            stunned_until: SimTime(0),
+            q_ready_at: SimTime(0),
+        }
     }
 
     /// Where the unit is currently heading (detour first), if anywhere.
@@ -80,6 +111,14 @@ impl UnitState {
         self.order = order;
         self.detour = None;
         self.stuck = 0;
+    }
+
+    pub fn can_move(&self, at: SimTime) -> bool {
+        self.cast.is_none() && self.stunned_until <= at
+    }
+
+    pub fn can_cast(&self, at: SimTime) -> bool {
+        self.cast.is_none() && self.stunned_until <= at && self.q_ready_at <= at
     }
 
     /// Advance by `dt` seconds toward the current heading at constant speed (instant turns,
@@ -109,11 +148,15 @@ impl UnitState {
 
     /// Bit-exact equality: what prediction reconciliation compares.
     pub fn bits_eq(&self, other: &Self) -> bool {
+        let cast_bits = |c: &Option<Cast>| c.map(|c| (c.dir.to_bits(), c.fire_at, c.seq));
         self.pos.to_bits() == other.pos.to_bits()
             && self.order == other.order
             && self.move_speed.to_bits() == other.move_speed.to_bits()
             && self.detour.map(Vec2::to_bits) == other.detour.map(Vec2::to_bits)
             && self.stuck == other.stuck
+            && cast_bits(&self.cast) == cast_bits(&other.cast)
+            && self.stunned_until == other.stunned_until
+            && self.q_ready_at == other.q_ready_at
     }
 
     pub fn hash_into(&self, h: &mut StateHasher) {
@@ -137,6 +180,18 @@ impl UnitState {
             }
         }
         h.write_u8(self.stuck);
+        match self.cast {
+            None => h.write_u8(0),
+            Some(c) => {
+                h.write_u8(1);
+                h.write_f32(c.dir.x);
+                h.write_f32(c.dir.y);
+                h.write_u64(c.fire_at.0);
+                h.write_u32(c.seq);
+            }
+        }
+        h.write_u64(self.stunned_until.0);
+        h.write_u64(self.q_ready_at.0);
     }
 }
 
@@ -145,6 +200,9 @@ impl UnitState {
 pub enum Brain {
     /// Walk back and forth between two points (minion-dummy waves, M1 sandbox).
     Patrol { a: QPoint, b: QPoint, toward_b: bool },
+    /// Fire the turret shot at the nearest enemy champion in range (the dodge rig, 03 §14).
+    /// Half the shots aim at the target's position, half lead its movement.
+    Turret { range: u16 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -161,10 +219,22 @@ pub struct Unit {
     pub brain: Option<Brain>,
 }
 
+impl Unit {
+    /// The unit's Q (the only ability in the sandbox).
+    pub fn skillshot(&self) -> LineSkillshot {
+        match self.kind {
+            UnitKind::Turret => TURRET_SHOT,
+            _ => SANDBOX_LANCE,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CommandKind {
     MoveTo(QPoint),
     Stop,
+    /// Cast the line skillshot toward a ground point.
+    CastQ(QPoint),
 }
 
 /// A player command, applied at `tick` at sub-tick position `sub` (03a §3).
@@ -177,10 +247,73 @@ pub struct Command {
     pub kind: CommandKind,
 }
 
+/// An analytic line missile (03a §6): position is a closed-form function of these fields.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Missile {
+    pub id: u32,
+    pub owner: UnitId,
+    pub team: Team,
+    pub origin: Vec2,
+    pub dir: Vec2,
+    pub spec: LineSkillshot,
+    pub spawn_at: SimTime,
+    /// Sequence number of the cast command (lets the caster's client match its prediction).
+    pub cast_seq: u32,
+}
+
+impl Missile {
+    pub fn end_at(&self) -> SimTime {
+        let life = (self.spec.range / self.spec.speed * SUBTICKS_PER_SECOND as f32) as u64;
+        SimTime(self.spawn_at.0 + life)
+    }
+
+    /// Center position at `t`, clamped to the missile's lifetime.
+    pub fn position_at(&self, t: SimTime) -> Vec2 {
+        let s = t.secs_since(self.spawn_at).min(self.spec.range / self.spec.speed);
+        self.origin + self.dir * (self.spec.speed * s)
+    }
+
+    /// Earliest contact in `[a, b]` with a target moving linearly from `q0` (at `s0`) to `q1`
+    /// (at `s0 + 1 tick`). The exact rule the server uses, shared with client display code.
+    pub fn first_hit(&self, a: SimTime, b: SimTime, s0: SimTime, q0: Vec2, q1: Vec2, radius: f32) -> Option<SimTime> {
+        if a > b {
+            return None;
+        }
+        let at = |t: SimTime| q0.lerp(q1, (t.0 - s0.0) as f32 / SUBTICKS as f32);
+        let tau = first_contact(self.position_at(a), self.position_at(b), at(a), at(b), self.spec.radius + radius)?;
+        Some(SimTime(a.0 + (tau * (b.0 - a.0) as f32) as u64))
+    }
+}
+
+/// Things that happened during a step, for the network layer and the client display.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SimEvent {
+    CastStarted {
+        unit: UnitId,
+        at: SimTime,
+        dir: Vec2,
+        fire_at: SimTime,
+        seq: u32,
+    },
+    /// In a world with missiles disabled (client prediction) the id is 0.
+    MissileSpawned(Missile),
+    MissileHit {
+        id: u32,
+        target: UnitId,
+        at: SimTime,
+    },
+    MissileExpired {
+        id: u32,
+        at: SimTime,
+    },
+}
+
 pub const CHAMPION_MOVE_SPEED: f32 = 325.0;
 pub const CHAMPION_COLLISION_RADIUS: f32 = 35.0;
 pub const CHAMPION_GAMEPLAY_RADIUS: f32 = 65.0;
 pub const MINION_MOVE_SPEED: f32 = 325.0;
+pub const TURRET_COLLISION_RADIUS: f32 = 60.0;
+pub const TURRET_GAMEPLAY_RADIUS: f32 = 80.0;
 
 impl MinionKind {
     /// (collision radius, gameplay radius), 01 §4 *(start)* values.
@@ -198,11 +331,24 @@ pub struct World {
     units: Vec<Unit>,
     next_unit: u32,
     rng: Pcg32,
+    missiles: Vec<Missile>,
+    next_missile: u32,
+    missiles_enabled: bool,
+    events: Vec<SimEvent>,
 }
 
 impl World {
     pub fn new(seed: u64) -> Self {
-        Self { tick: Tick(0), units: Vec::new(), next_unit: 1, rng: Pcg32::new(seed, 0x4d46_5452) }
+        Self {
+            tick: Tick(0),
+            units: Vec::new(),
+            next_unit: 1,
+            rng: Pcg32::new(seed, 0x4d46_5452),
+            missiles: Vec::new(),
+            next_missile: 1,
+            missiles_enabled: true,
+            events: Vec::new(),
+        }
     }
 
     /// The last simulated tick.
@@ -224,6 +370,24 @@ impl World {
 
     pub fn unit_mut(&mut self, id: UnitId) -> Option<&mut Unit> {
         self.units.iter_mut().find(|u| u.id == id)
+    }
+
+    pub fn missiles(&self) -> &[Missile] {
+        &self.missiles
+    }
+
+    /// Client prediction runs without missiles: hits on others are never predicted (03a §7),
+    /// but own casts still emit `MissileSpawned` (id 0) so the client can draw them at once.
+    pub fn set_missiles_enabled(&mut self, enabled: bool) {
+        self.missiles_enabled = enabled;
+        if !enabled {
+            self.missiles.clear();
+        }
+    }
+
+    /// Events produced since the last call.
+    pub fn take_events(&mut self) -> Vec<SimEvent> {
+        std::mem::take(&mut self.events)
     }
 
     fn next_id(&mut self) -> UnitId {
@@ -263,6 +427,21 @@ impl World {
         id
     }
 
+    pub fn spawn_turret(&mut self, team: Team, pos: Vec2, range: u16) -> UnitId {
+        let id = self.next_id();
+        self.units.push(Unit {
+            id,
+            kind: UnitKind::Turret,
+            owner: None,
+            team,
+            state: UnitState::new(pos, 0.0),
+            collision_radius: TURRET_COLLISION_RADIUS,
+            gameplay_radius: TURRET_GAMEPLAY_RADIUS,
+            brain: Some(Brain::Turret { range }),
+        });
+        id
+    }
+
     pub fn despawn(&mut self, id: UnitId) {
         self.units.retain(|u| u.id != id);
     }
@@ -270,7 +449,7 @@ impl World {
     /// Build a partial world, as client prediction does (own unit plus collision proxies).
     pub fn from_units(tick: Tick, units: Vec<Unit>) -> Self {
         let next_unit = units.iter().map(|u| u.id.0 + 1).max().unwrap_or(1);
-        Self { tick, units, next_unit, rng: Pcg32::new(0, 0) }
+        Self { tick, units, next_unit, ..World::new(0) }
     }
 
     /// Replace every unit except `keep` (client prediction refreshes its collision proxies).
@@ -286,31 +465,65 @@ impl World {
     }
 
     /// Simulate the next tick. Only commands whose `tick` equals the new tick are applied, in
-    /// `(sub, player, seq)` order. Each unit integrates piecewise between its commands' sub-tick
-    /// times, so a 30 Hz tick adds no input quantization.
+    /// `(sub, player, seq)` order, each at its exact sub-tick instant.
     pub fn step(&mut self, commands: &[Command]) {
         let k = self.tick.next();
+        let s0 = SimTime::end_of(self.tick);
+        let s1 = SimTime::end_of(k);
         let mut cmds: Vec<&Command> = commands.iter().filter(|c| c.tick == k).collect();
         cmds.sort_by_key(|c| (c.sub, c.player, c.seq));
+        let World { units, rng, missiles, next_missile, missiles_enabled, events, .. } = self;
 
         // Phase 1: AI.
-        for unit in &mut self.units {
-            if let Some(Brain::Patrol { a, b, toward_b }) = unit.brain
-                && unit.state.order == Order::Idle
-            {
-                unit.state.set_order(Order::MoveTo(if toward_b { b } else { a }));
-                unit.brain = Some(Brain::Patrol { a, b, toward_b: !toward_b });
+        let champions: Vec<(Team, Vec2, Option<Vec2>, f32)> = units
+            .iter()
+            .filter(|u| u.kind == UnitKind::Champion)
+            .map(|u| (u.team, u.state.pos, u.state.heading(), u.state.move_speed))
+            .collect();
+        for unit in units.iter_mut() {
+            match unit.brain {
+                Some(Brain::Patrol { a, b, toward_b }) if unit.state.order == Order::Idle => {
+                    unit.state.set_order(Order::MoveTo(if toward_b { b } else { a }));
+                    unit.brain = Some(Brain::Patrol { a, b, toward_b: !toward_b });
+                }
+                Some(Brain::Turret { range }) if unit.state.can_cast(s0) => {
+                    let me = unit.state.pos;
+                    let mut best: Option<(f32, Vec2, Option<Vec2>, f32)> = None;
+                    for &(team, pos, heading, speed) in &champions {
+                        let d = pos.distance(me);
+                        if team != unit.team && d <= range as f32 && best.is_none_or(|(bd, ..)| d < bd) {
+                            best = Some((d, pos, heading, speed));
+                        }
+                    }
+                    let Some((d, pos, heading, speed)) = best else { continue };
+                    let spec = unit.skillshot();
+                    let mut aim = pos;
+                    if rng.next_u32() % 2 == 1
+                        && let Some(h) = heading
+                    {
+                        // Lead the target: where it will be when the missile arrives.
+                        let t = spec.windup.0 as f32 / SUBTICKS_PER_SECOND as f32 + d / spec.speed;
+                        let to = h - pos;
+                        let len = to.length();
+                        let travel = (speed * t).min(len);
+                        if len > 0.0 {
+                            aim = pos + to * (travel / len);
+                        }
+                    }
+                    start_cast(&mut unit.state, unit.id, spec, aim, s0, 0, events);
+                }
+                _ => {}
             }
         }
 
-        // Phase 2: movement against start-of-tick positions (order-independent).
-        let starts: Vec<(UnitId, UnitKind, Team, Obstacle)> = self
-            .units
+        // Phase 2: per-unit timelines against start-of-tick positions (order-independent).
+        let starts: Vec<(UnitId, UnitKind, Team, Obstacle)> = units
             .iter()
             .filter(|u| u.collision_radius > 0.0)
             .map(|u| (u.id, u.kind, u.team, Obstacle { pos: u.state.pos, radius: u.collision_radius }))
             .collect();
-        for unit in &mut self.units {
+        let mut fired: Vec<(UnitId, Team, Vec2, Cast, LineSkillshot)> = Vec::new();
+        for unit in units.iter_mut() {
             let here = unit.state.pos;
             let (kind, team) = (unit.kind, unit.team);
             let obstacles: Vec<Obstacle> = starts
@@ -321,26 +534,103 @@ impl World {
                 .map(|(_, _, _, o)| *o)
                 .collect();
             let radius = unit.collision_radius;
+            let spec = unit.skillshot();
+            let mine: Vec<&Command> = match unit.owner {
+                Some(owner) => cmds.iter().copied().filter(|c| c.player == owner).collect(),
+                None => Vec::new(),
+            };
             let (mut desired, mut achieved) = (0.0f32, 0.0f32);
-            let mut elapsed = 0.0f32;
-            if let Some(owner) = unit.owner {
-                for c in cmds.iter().filter(|c| c.player == owner) {
-                    let at = c.sub.fraction();
-                    let (d, a) = unit.state.advance((at - elapsed) * TICK_DT, radius, &obstacles);
+            let mut t = s0;
+            let mut next_cmd = 0;
+            loop {
+                let cmd_at = mine.get(next_cmd).map(|c| SimTime::at(k, c.sub));
+                let fire_at = unit.state.cast.map(|c| c.fire_at).filter(|f| *f > t && *f <= s1);
+                let unstun = Some(unit.state.stunned_until).filter(|u| *u > t && *u <= s1);
+                let next = [cmd_at, fire_at, unstun, Some(s1)].into_iter().flatten().min().unwrap_or(s1);
+                if next > t && unit.state.can_move(t) {
+                    let dt = (next.0 - t.0) as f32 / SUBTICKS_PER_SECOND as f32;
+                    let (d, a) = unit.state.advance(dt, radius, &obstacles);
                     desired += d;
                     achieved += a;
-                    elapsed = at;
-                    unit.state.set_order(match c.kind {
-                        CommandKind::MoveTo(q) => Order::MoveTo(q),
-                        CommandKind::Stop => Order::Idle,
-                    });
+                }
+                t = next;
+                if let Some(c) = unit.state.cast
+                    && c.fire_at == t
+                {
+                    fired.push((unit.id, unit.team, unit.state.pos, c, spec));
+                    unit.state.cast = None;
+                }
+                while let Some(c) = mine.get(next_cmd)
+                    && SimTime::at(k, c.sub) == t
+                {
+                    match c.kind {
+                        CommandKind::MoveTo(q) => unit.state.set_order(Order::MoveTo(q)),
+                        CommandKind::Stop => unit.state.set_order(Order::Idle),
+                        CommandKind::CastQ(q) => {
+                            if unit.state.can_cast(t) {
+                                start_cast(&mut unit.state, unit.id, spec, q.to_vec2(), t, c.seq, events);
+                            }
+                        }
+                    }
+                    next_cmd += 1;
+                }
+                if t >= s1 {
+                    break;
                 }
             }
-            let (d, a) = unit.state.advance((1.0 - elapsed) * TICK_DT, radius, &obstacles);
-            desired += d;
-            achieved += a;
             update_stuck(&mut unit.state, desired, achieved, radius, &obstacles);
         }
+
+        // Phase 3: missiles.
+        for (owner, team, origin, cast, spec) in fired {
+            let id = if *missiles_enabled {
+                *next_missile += 1;
+                *next_missile - 1
+            } else {
+                0
+            };
+            let m =
+                Missile { id, owner, team, origin, dir: cast.dir, spec, spawn_at: cast.fire_at, cast_seq: cast.seq };
+            events.push(SimEvent::MissileSpawned(m));
+            if *missiles_enabled {
+                missiles.push(m);
+            }
+        }
+        let motion: Vec<(UnitId, Team, UnitKind, f32, Vec2, Vec2)> = units
+            .iter()
+            .map(|u| {
+                let start = starts.iter().find(|(id, ..)| *id == u.id).map_or(u.state.pos, |(.., o)| o.pos);
+                (u.id, u.team, u.kind, u.gameplay_radius, start, u.state.pos)
+            })
+            .collect();
+        missiles.retain(|m| {
+            let a = m.spawn_at.max(s0);
+            let b = m.end_at().min(s1);
+            let mut hit: Option<(SimTime, UnitId)> = None;
+            for &(id, team, kind, r, q0, q1) in &motion {
+                if team == m.team || kind == UnitKind::Turret || id == m.owner {
+                    continue;
+                }
+                if let Some(at) = m.first_hit(a, b, s0, q0, q1, r)
+                    && hit.is_none_or(|(best, bid)| (at, id) < (best, bid))
+                {
+                    hit = Some((at, id));
+                }
+            }
+            if let Some((at, target)) = hit {
+                events.push(SimEvent::MissileHit { id: m.id, target, at });
+                if let Some(u) = units.iter_mut().find(|u| u.id == target) {
+                    u.state.stunned_until = u.state.stunned_until.max(at.plus(m.spec.stun));
+                    u.state.cast = None; // hard CC interrupts casts
+                }
+                return false;
+            }
+            if m.end_at() <= s1 {
+                events.push(SimEvent::MissileExpired { id: m.id, at: m.end_at() });
+                return false;
+            }
+            true
+        });
         self.tick = k;
     }
 
@@ -358,15 +648,47 @@ impl World {
             match u.brain {
                 None => h.write_u8(0),
                 Some(Brain::Patrol { toward_b, .. }) => h.write_u8(1 + toward_b as u8),
+                Some(Brain::Turret { range }) => {
+                    h.write_u8(3);
+                    h.write_u16(range);
+                }
             }
+        }
+        h.write_u32(self.next_missile);
+        for m in &self.missiles {
+            h.write_u32(m.id);
+            h.write_f32(m.origin.x);
+            h.write_f32(m.origin.y);
+            h.write_f32(m.dir.x);
+            h.write_f32(m.dir.y);
+            h.write_u64(m.spawn_at.0);
         }
         h.finish()
     }
 }
 
+fn start_cast(
+    state: &mut UnitState,
+    unit: UnitId,
+    spec: LineSkillshot,
+    target: Vec2,
+    at: SimTime,
+    seq: u32,
+    events: &mut Vec<SimEvent>,
+) {
+    let dir = (target - state.pos).normalize_or_zero();
+    if dir == Vec2::ZERO {
+        return;
+    }
+    let fire_at = at.plus(spec.windup);
+    state.cast = Some(Cast { dir, fire_at, seq });
+    state.q_ready_at = at.plus(spec.cooldown);
+    events.push(SimEvent::CastStarted { unit, at, dir, fire_at, seq });
+}
+
 /// Whether a unit of `other_kind`/`other_team` blocks a mover of `kind`/`team` (D11, D20).
 /// Allied champions pass through each other, as measured in the reference game (R02).
-/// Everything else blocks: enemy champions, and all minions regardless of team.
+/// Everything else blocks: enemy champions, all minions regardless of team, turrets.
 pub fn blocks(kind: UnitKind, team: Team, other_kind: UnitKind, other_team: Team) -> bool {
     !(kind == UnitKind::Champion && other_kind == UnitKind::Champion && team == other_team)
 }
@@ -593,6 +915,161 @@ mod tests {
         }
     }
 
+    fn cast(player: u8, seq: u32, tick: u32, sub: u8, target: (f32, f32)) -> Command {
+        Command {
+            player: PlayerId(player),
+            seq,
+            tick: Tick(tick),
+            sub: SubTick::new(sub),
+            kind: CommandKind::CastQ(QPoint::from_vec2(Vec2::new(target.0, target.1))),
+        }
+    }
+
+    fn run_until_quiet(w: &mut World, ticks: u32) -> Vec<SimEvent> {
+        let mut ev = Vec::new();
+        for _ in 0..ticks {
+            w.step(&[]);
+            ev.extend(w.take_events());
+        }
+        ev
+    }
+
+    #[test]
+    fn cast_roots_for_the_windup_then_resumes_the_move() {
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(1000.0, 1000.0));
+        w.step(&[cmd(0, 1, 1, 0, (3000.0, 1000.0)), cast(0, 2, 1, 32, (1000.0, 3000.0))]);
+        let ev = w.take_events();
+        let fire_at = match ev[0] {
+            SimEvent::CastStarted { at, fire_at, .. } => {
+                assert_eq!(at, SimTime(32));
+                fire_at
+            }
+            e => panic!("{e:?}"),
+        };
+        assert_eq!(fire_at, SimTime(32 + 480), "0.25 s windup = 480 sub-ticks");
+        // Moved for half a tick, then rooted.
+        let x_after_first = w.unit(me).unwrap().state.pos.x;
+        assert!((x_after_first - (1000.0 + 325.0 / 60.0)).abs() < 1e-3);
+        for _ in 0..6 {
+            w.step(&[]);
+        }
+        assert_eq!(w.unit(me).unwrap().state.pos.x, x_after_first, "rooted during windup");
+        let ev = run_until_quiet(&mut w, 3);
+        assert!(
+            ev.iter().any(|e| matches!(e, SimEvent::MissileSpawned(m) if m.spawn_at == fire_at && m.cast_seq == 2))
+        );
+        assert!(w.unit(me).unwrap().state.pos.x > x_after_first, "resumes the queued move after firing");
+    }
+
+    #[test]
+    fn missile_hits_and_stuns_a_stationary_enemy() {
+        let mut w = World::new(1);
+        w.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(1000.0, 1000.0));
+        let enemy = w.spawn_champion(PlayerId(1), Team::Red, Vec2::new(1800.0, 1000.0));
+        w.step(&[cast(0, 1, 1, 0, (1800.0, 1000.0))]);
+        let ev = run_until_quiet(&mut w, 40);
+        let hit = ev.iter().find_map(|e| match e {
+            SimEvent::MissileHit { target, at, .. } => Some((*target, *at)),
+            _ => None,
+        });
+        let (target, at) = hit.expect("should hit");
+        assert_eq!(target, enemy);
+        // Contact when the gap is 35 + 65 = 100 u: 700 u at 1600 u/s after the 0.25 s windup.
+        let expected = 480.0 + 700.0 / 1600.0 * 1920.0;
+        assert!((at.0 as f32 - expected).abs() <= 1.0, "{} vs {expected}", at.0);
+        let e = w.unit(enemy).unwrap().state;
+        assert_eq!(e.stunned_until, at.plus(SANDBOX_LANCE.stun));
+    }
+
+    #[test]
+    fn walking_out_in_time_dodges_and_too_late_is_hit() {
+        for (react_tick, expect_hit) in [(6u32, false), (20u32, true)] {
+            let mut w = World::new(1);
+            w.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(1000.0, 1000.0));
+            w.spawn_champion(PlayerId(1), Team::Red, Vec2::new(1800.0, 1000.0));
+            let mut ev = Vec::new();
+            for k in 1..=45u32 {
+                let mut c = Vec::new();
+                if k == 1 {
+                    c.push(cast(0, 1, 1, 0, (1800.0, 1000.0)));
+                }
+                if k == react_tick {
+                    c.push(cmd(1, 2, k, 0, (1800.0, 1400.0)));
+                }
+                w.step(&c);
+                ev.extend(w.take_events());
+            }
+            let hit = ev.iter().any(|e| matches!(e, SimEvent::MissileHit { .. }));
+            assert_eq!(hit, expect_hit, "reacting at tick {react_tick}");
+        }
+    }
+
+    #[test]
+    fn an_enemy_minion_in_the_way_takes_the_skillshot() {
+        let mut w = World::new(1);
+        w.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(1000.0, 1000.0));
+        let minion = w.spawn_minion(MinionKind::Caster, Team::Red, Vec2::new(1400.0, 1010.0), None);
+        w.spawn_minion(MinionKind::Caster, Team::Blue, Vec2::new(1200.0, 1000.0), None); // allied: ignored
+        w.spawn_champion(PlayerId(1), Team::Red, Vec2::new(1800.0, 1000.0));
+        w.step(&[cast(0, 1, 1, 0, (1800.0, 1000.0))]);
+        let ev = run_until_quiet(&mut w, 40);
+        let targets: Vec<UnitId> = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::MissileHit { target, .. } => Some(*target),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(targets, vec![minion]);
+    }
+
+    #[test]
+    fn cooldown_blocks_recast_and_expired_missiles_report() {
+        let mut w = World::new(1);
+        w.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(1000.0, 1000.0));
+        w.step(&[cast(0, 1, 1, 0, (2000.0, 1000.0))]);
+        w.step(&[cast(0, 2, 2, 0, (2000.0, 1000.0))]); // on cooldown (and still casting)
+        let ev = run_until_quiet(&mut w, 60);
+        let mut all = w.take_events();
+        all.extend(ev);
+        let spawned = all.iter().filter(|e| matches!(e, SimEvent::MissileSpawned(_))).count();
+        assert_eq!(spawned, 1);
+        assert!(all.iter().any(|e| matches!(e, SimEvent::MissileExpired { .. })));
+    }
+
+    #[test]
+    fn turret_shoots_the_nearest_enemy_champion() {
+        let mut w = World::new(1);
+        w.spawn_turret(Team::Red, Vec2::new(1000.0, 1000.0), 1100);
+        let target = w.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(1600.0, 1000.0));
+        w.spawn_champion(PlayerId(1), Team::Red, Vec2::new(1300.0, 1000.0)); // ally of the turret
+        let ev = run_until_quiet(&mut w, 40);
+        assert!(ev.iter().any(|e| matches!(e, SimEvent::MissileHit { target: t, .. } if *t == target)));
+    }
+
+    /// Client-style prediction (missiles disabled) must still reproduce the caster exactly.
+    #[test]
+    fn prediction_without_missiles_matches_the_caster() {
+        let mut full = World::new(9);
+        let me = full.spawn_champion(PlayerId(0), Team::Blue, Vec2::new(1000.0, 1000.0));
+        full.spawn_turret(Team::Red, Vec2::new(5000.0, 5000.0), 1100); // out of range
+        let mut predicted = World::from_units(full.tick(), vec![full.unit(me).unwrap().clone()]);
+        predicted.set_missiles_enabled(false);
+        let mut rng = Pcg32::new(3, 3);
+        for k in 1..=900u32 {
+            let mut c = Vec::new();
+            if rng.next_u32() % 7 == 0 {
+                let t = (rng.range_f32(500.0, 2500.0), rng.range_f32(500.0, 2500.0));
+                let sub = (rng.next_u32() % 64) as u8;
+                c.push(if rng.next_u32() % 3 == 0 { cast(0, k, k, sub, t) } else { cmd(0, k, k, sub, t) });
+            }
+            full.step(&c);
+            predicted.step(&c);
+            assert!(predicted.unit(me).unwrap().state.bits_eq(&full.unit(me).unwrap().state), "tick {k}");
+        }
+    }
+
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
     #[test]
@@ -611,6 +1088,7 @@ mod tests {
                 let start = a.to_vec2() + Vec2::new(0.0, 55.0 * j as f32);
                 w.spawn_minion(MinionKind::Caster, Team::Blue, start, Some(Brain::Patrol { a, b, toward_b: true }));
             }
+            w.spawn_turret(Team::Red, Vec2::new(1500.0 + 3500.0 * i as f32, 7600.0), 1100);
         }
         let mut rng = Pcg32::new(2024, 7);
         let mut seq = 0;
@@ -621,15 +1099,17 @@ mod tests {
                     seq += 1;
                     let sub = (rng.next_u32() % SUBTICKS as u32) as u8;
                     let t = (rng.range_f32(0.0, 14_800.0), rng.range_f32(0.0, 14_800.0));
-                    cmds.push(cmd(p, seq, k, sub, t));
+                    // Mostly moves, some skillshots (casts, missiles, hits and stuns in the hash).
+                    cmds.push(if rng.next_u32() % 4 == 0 { cast(p, seq, k, sub, t) } else { cmd(p, seq, k, sub, t) });
                 }
             }
             w.step(&cmds);
+            w.take_events();
         }
         assert_eq!(w.tick(), Tick(9000));
         assert_eq!(w.state_hash(), GOLDEN_HASH, "hash = {:#018x}", w.state_hash());
     }
 
     /// Recorded on x86_64-pc-windows-msvc. CI checks Linux, macOS (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x40e1_8ef0_5619_f2df;
+    const GOLDEN_HASH: u64 = 0x1a6e_4255_939c_b914;
 }

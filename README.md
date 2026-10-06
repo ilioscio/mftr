@@ -32,7 +32,7 @@ Build the Godot extension (once, and after Rust changes):
 cargo build -p mftr-gdext
 ```
 
-Then open `client/project.godot` in Godot (4.5+) and press Play. Right-click moves, S stops, F1 toggles the net graph and F2 toggles client collision proxies (to feel the difference). The server starts in the `minions` sandbox by default (`--scenario empty` for champions only). To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
+Then open `client/project.godot` in Godot (4.5+) and press Play. Right-click moves, S stops, Q casts a skillshot at the cursor, F1 toggles the net graph and F2 toggles client collision proxies (to feel the difference). The server starts in the `minions` sandbox by default. `--scenario dodge` adds turrets that fire skillshots at you, and `--scenario empty` gives champions only. To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
 
 Headless tools:
 
@@ -41,7 +41,7 @@ cargo test --workspace --release
 ```
 
 ```bash
-cargo run --release -p mftr-tools -- netlab --profile all
+cargo run --release -p mftr-tools -- netlab --profile all --scenario dodge
 ```
 
 ```bash
