@@ -588,6 +588,8 @@ func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
 		var champ: String = info.get("champion", "")
 		if e == "foot":
 			_sfx_play(champ, ["unit.foot"], p)
+		elif e.begins_with("fire:"):
+			_fire_effects(champ, e.substr(5), p, rig.yaw)
 		else:
 			_sfx_play(champ, [e + ".cast", "*.cast"], p + Vector3(0, 1.2, 0))
 
@@ -597,6 +599,30 @@ func _flash(id: int) -> void:
 	if body != null:
 		body.set_meta("flash", 1.0)
 		body.set_meta("hit", true)   # minions flinch (10 §5.4)
+
+
+## `<action>.fire` (A6): an animation passed its `fire` marker, the moment a melee blow lands, a
+## slam hits, a nova sweeps or a heal pulses. Where it plays comes from the kit: centered and
+## sized for novas, at reach in front for melee blows and slams, at the chest for the rest.
+var _action_info := {}
+
+
+func _fire_effects(champion: String, action: String, at: Vector3, yaw: float) -> void:
+	if champion == "":
+		return
+	var key := champion + "/" + action
+	if not _action_info.has(key):
+		_action_info[key] = client.action_info(champion, action)
+	var info: Dictionary = _action_info[key]
+	var ground := Vector3(at.x, 0.0, at.z)
+	var fwd := Vector3(sin(yaw), 0.0, cos(yaw)) if not is_nan(yaw) else Vector3.ZERO
+	match info.get("shape", ""):
+		"nova":
+			_vfx_play(champion, action, "fire", ground, Vector3.ZERO, float(info.radius))
+		"melee", "line", "area":
+			_vfx_play(champion, action, "fire", ground + fwd * minf(float(info.reach), 1.6) * 0.8 + Vector3(0, 0.1, 0), fwd)
+		_:
+			_vfx_play(champion, action, "fire", ground + Vector3(0, 1.3, 0), Vector3.UP)
 
 
 ## The effects for a champion's `<action>.<phase>`: its own, its own `*.<phase>`, then the
@@ -845,6 +871,11 @@ func _process(delta: float) -> void:
 		_place_camera(own)
 		_show_statuses(own_body, own_status.get("stunned", false), own_status.get("rooted", false), own_status.get("shield", 0.0), own_status.get("slowed", false))
 		_animate(own_body, own_status, delta)
+	# Casts without a windup (A6): the drive never shows them, so play them on the event.
+	for c in client.take_instant_casts():
+		var caster = _body_of(int(c.unit))
+		if caster != null and _models_shown(caster):
+			caster.get_meta("rig").animator.pulse(int(c.slot))
 	_update_remotes(delta)
 	_update_hover()
 	_update_missiles()
@@ -1362,7 +1393,8 @@ func _update_areas() -> void:
 				for e in _effects(champ, action, "projectile"):
 					if e.kit == "lob" and owner != null:
 						vfx.lob(tag.hash(), e, _socket_world(owner, "socket_projectile"), center, 0.45)
-				if owner != null:
+				# A thrown area's release (a nova around the caster has its cast sound).
+				if owner != null and client.action_info(champ, action).get("shape", "") != "nova":
 					_sfx_play(champ, [action + ".release", "*.release"], owner.global_position)
 		if a.detonated and not area_nodes[key].has_meta("detonated"):
 			area_nodes[key].set_meta("detonated", true)

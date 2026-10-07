@@ -49,10 +49,14 @@ fn assert_error(r: &Report, needle: &str) {
 
 #[test]
 fn committed_exports_are_clean() {
-    let mut files: Vec<String> =
-        ["rigs/export/biped_v1.glb", "library/biped/export/biped_library.glb", "champions/vesper/export/vesper.glb"]
-            .map(String::from)
-            .to_vec();
+    let mut files: Vec<String> = [
+        "rigs/export/biped_v1.glb",
+        "library/biped/export/biped_library.glb",
+        "champions/vesper/export/vesper.glb",
+        "champions/rook/export/rook.glb",
+    ]
+    .map(String::from)
+    .to_vec();
     files.extend(["melee", "caster", "siege", "super"].map(|k| format!("minions/{k}/export/{k}.glb")));
     for f in &files {
         let r = validate_file(&art(f));
@@ -283,6 +287,7 @@ fn generated_sounds_are_built_from_the_current_recipe() {
     for (recipe, binding) in [
         ("library/biped/sounds.ron", "library/biped/export/biped_library.sfx.ron"),
         ("champions/vesper/sounds.ron", "champions/vesper/export/vesper.sfx.ron"),
+        ("champions/rook/sounds.ron", "champions/rook/export/rook.sfx.ron"),
     ] {
         let text = std::fs::read_to_string(art(recipe)).unwrap();
         let file = mftr_pack::sfx::parse(&std::fs::read_to_string(art(binding)).unwrap()).unwrap();

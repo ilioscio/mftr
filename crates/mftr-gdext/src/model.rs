@@ -179,10 +179,19 @@ pub struct MftrAnimator {
 
 #[godot_api]
 impl MftrAnimator {
+    /// An instant cast in `slot` (0 = q … 5 = f) or `-1` for an attack: play its clip from `fire`
+    /// (A6; the drive never shows casts without a windup).
+    #[func]
+    fn pulse(&mut self, slot: i64) {
+        let kind = if slot < 0 { ActionKind::Attack { variant: 1 } } else { ActionKind::Cast { slot: slot as u8 } };
+        self.animator.pulse(&self.pack.library, kind);
+    }
+
     /// Advance `dt` seconds and pose `skeleton`. `unit` is an `own_status()` or
     /// `remote_units()` entry (`dead`, `stunned`, `rooted`, `dashing` and the `anim_*` keys);
     /// `speed` is the displayed ground speed in u/s. Returns what happened, for sounds (A4c):
-    /// `"foot"` for a footstep, `"attack"` or a slot's action (`"q"` … `"f"`) for a windup's start.
+    /// `"foot"` for a footstep, `"attack"` or a slot's action (`"q"` … `"f"`) for a windup's start,
+    /// `"fire:<action>"` when that action passes its `fire` marker.
     #[func]
     fn drive(&mut self, mut skeleton: Gd<Skeleton3D>, unit: VarDictionary, speed: f32, dt: f32) -> PackedStringArray {
         let flag = |k: &str| unit.get(k).and_then(|v| v.try_to::<bool>().ok()).unwrap_or(false);
@@ -215,16 +224,20 @@ impl MftrAnimator {
             skeleton.set_bone_pose_scale(i, Vector3::new(p.s[0], p.s[1], p.s[2]));
         }
         const SLOTS: [&str; 6] = ["q", "w", "e", "r", "d", "f"];
+        let action = |k: &ActionKind| match k {
+            ActionKind::Attack { .. } => Some("attack"),
+            ActionKind::Cast { slot } => SLOTS.get(*slot as usize).copied(),
+            ActionKind::Continue => None,
+        };
         self.animator
             .events
             .iter()
             .filter_map(|e| match e {
-                AnimEvent::Foot => Some("foot"),
-                AnimEvent::Start(ActionKind::Attack { .. }) => Some("attack"),
-                AnimEvent::Start(ActionKind::Cast { slot }) => SLOTS.get(*slot as usize).copied(),
-                AnimEvent::Start(ActionKind::Continue) => None,
+                AnimEvent::Foot => Some("foot".to_string()),
+                AnimEvent::Start(k) => action(k).map(str::to_string),
+                AnimEvent::Fire(k) => action(k).map(|a| format!("fire:{a}")),
             })
-            .map(GString::from)
+            .map(|s| GString::from(s.as_str()))
             .collect()
     }
 }

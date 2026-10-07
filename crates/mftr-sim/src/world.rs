@@ -2457,6 +2457,11 @@ fn try_cast(
             events.push(SimEvent::Shielded { unit: id, amount: s.amount, at: t, until: st.shield_until });
         }
     }
+    // Instant casts (supports, shields) still tell clients a cast happened so they can animate
+    // it (A6); `fire_at == at` marks it instant.
+    if matches!(ability.effect, Effect::Support(_) | Effect::Shield(_)) {
+        events.push(SimEvent::CastStarted { unit: id, slot, at: t, dir, point: target, fire_at: t, seq });
+    }
     // A new cast ends any follow-through still running (10 §4.1).
     st.recovery = None;
     let rank = st.progress.ranks.get(slot as usize).copied().unwrap_or(1);
@@ -3412,11 +3417,16 @@ mod tests {
         w.unit_mut(me).unwrap().state.health = 250.0;
         w.step(&[cast_slot(0, 1, 1, 0, 1, (3000.0, 3000.0))]);
         // Second Wind: 40 + 12% of the 400 missing.
-        let healed = w.take_events().iter().find_map(|e| match e {
+        let ev = w.take_events();
+        let healed = ev.iter().find_map(|e| match e {
             SimEvent::Healed { unit, amount, .. } if *unit == me => Some(*amount),
             _ => None,
         });
         assert!((healed.unwrap() - 88.0).abs() < 1e-3, "{healed:?}");
+        // A6: an instant cast still announces itself (fire_at == at) so clients can animate it.
+        assert!(ev.iter().any(
+            |e| matches!(e, SimEvent::CastStarted { unit, slot: 1, at, fire_at, .. } if *unit == me && at == fire_at)
+        ));
     }
 
     /// Lunges dash to the enemy nearest the cursor and strike on arrival; with no enemy there

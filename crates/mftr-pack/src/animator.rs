@@ -47,6 +47,9 @@ pub enum AnimEvent {
     Foot,
     /// An attack or cast started its windup.
     Start(ActionKind),
+    /// An attack or cast passed its `fire` marker: the moment a melee blow lands, a nova sweeps,
+    /// a heal pulses (A6: effects without a projectile hang off this).
+    Fire(ActionKind),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +89,10 @@ struct Playing {
     weight: f32,
     /// Fading out: the drive no longer asks for it.
     leaving: bool,
+    /// Passed its `fire` marker (its `Fire` event is out).
+    fired: bool,
+    /// An instant cast's `pulse`: plays to its end on its own.
+    pulse: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,6 +139,8 @@ pub struct Animator {
     next_fidget: usize,
     /// This update's events.
     pub events: Vec<AnimEvent>,
+    /// Events raised between updates (a pulse), released by the next one.
+    pending: Vec<AnimEvent>,
 }
 
 impl Animator {
@@ -169,6 +178,7 @@ impl Animator {
             still: 0.0,
             next_fidget: 0,
             events: Vec::new(),
+            pending: Vec::new(),
         }
     }
 
@@ -188,9 +198,28 @@ impl Animator {
     }
 
     /// Advance by `d.dt` and return the pose to show.
+    /// An instant cast (no windup, so the drive never shows it): play its clip from `fire` to the
+    /// end, with its `Fire` event in the next update (A6).
+    pub fn pulse(&mut self, lib: &Library, kind: ActionKind) {
+        if let Some(clip) = Self::action_clip(lib, kind) {
+            let fire = lib.clips[clip].fire().min(lib.clips[clip].end());
+            self.action = Some(Playing {
+                clip,
+                kind: Some(kind),
+                time: fire,
+                weight: 1.0,
+                leaving: false,
+                fired: true,
+                pulse: true,
+            });
+            self.pending.push(AnimEvent::Fire(kind));
+        }
+    }
+
     pub fn update(&mut self, lib: &Library, d: &Drive) -> Pose {
         let dt = d.dt.max(0.0);
         self.events.clear();
+        self.events.append(&mut self.pending);
         self.idle_time += dt;
         let mut pose = self.locomotion(lib, d, dt);
         self.update_action(lib, d, dt);
@@ -291,6 +320,19 @@ impl Animator {
                 _ => None,
             };
         }
+        // A pulse plays to its end unless a new action, a stun or death takes over.
+        if let Some(p) = &mut self.action
+            && p.pulse
+            && !p.leaving
+            && !d.dead
+            && !d.stunned
+            && want.is_none_or(|a| Some(a.kind) == p.kind)
+        {
+            let end = lib.clips[p.clip].end();
+            p.time = (p.time + dt).min(end);
+            p.leaving = p.time >= end;
+            return;
+        }
         match want {
             Some(a) => {
                 let Some(clip) = Self::action_clip(lib, a.kind) else {
@@ -306,7 +348,15 @@ impl Animator {
                     self.events.push(AnimEvent::Start(a.kind));
                 }
                 let mut p = if fresh {
-                    Playing { clip, kind: Some(a.kind), time: start, weight: 1.0, leaving: false }
+                    Playing {
+                        clip,
+                        kind: Some(a.kind),
+                        time: start,
+                        weight: 1.0,
+                        leaving: false,
+                        fired: false,
+                        pulse: false,
+                    }
                 } else {
                     self.action.unwrap_or(Playing {
                         clip,
@@ -314,14 +364,21 @@ impl Animator {
                         time: start,
                         weight: 1.0,
                         leaving: false,
+                        fired: false,
+                        pulse: false,
                     })
                 };
+                let before = if fresh { -1.0 } else { p.time };
                 p.time = match (a.phase, a.progress) {
                     (Phase::Windup, Some(x)) => x.clamp(0.0, 1.0) * c.fire(),
                     (Phase::FollowThrough, Some(x)) => c.fire() + x.clamp(0.0, 1.0) * (c.end() - c.fire()),
                     (Phase::Windup, None) => (p.time + dt).min(c.fire()),
                     (Phase::FollowThrough, None) => (p.time.max(c.fire()) + dt).min(c.end()),
                 };
+                if !p.fired && before < c.fire() && p.time >= c.fire() {
+                    p.fired = true;
+                    self.events.push(AnimEvent::Fire(a.kind));
+                }
                 p.weight = 1.0;
                 self.action = Some(p);
             }
@@ -338,6 +395,16 @@ impl Animator {
                         p.time = (p.time.max(lib.clips[p.clip].fire()) + dt).min(end);
                         return;
                     }
+                    // Ended at the very end of its windup: the action fired, though no
+                    // follow-through showed it (a caster walking on skips it, 10 §4.1).
+                    if !p.leaving
+                        && !p.fired
+                        && p.time >= 0.85 * lib.clips[p.clip].fire()
+                        && let Some(kind) = p.kind
+                    {
+                        p.fired = true;
+                        self.events.push(AnimEvent::Fire(kind));
+                    }
                     // Cut short (a move, a stun) or finished: blend back out quickly.
                     p.leaving = true;
                     p.time = (p.time + dt).min(lib.clips[p.clip].end());
@@ -353,7 +420,15 @@ impl Animator {
     /// Dashes play the kit's start → travel (looping) → land clips; standing still long enough
     /// plays a fidget. Anything else happening cuts a fidget short.
     fn update_flourish(&mut self, lib: &Library, d: &Drive, dt: f32) {
-        let play = |clip: usize| Playing { clip, kind: None, time: 0.0, weight: 1.0, leaving: false };
+        let play = |clip: usize| Playing {
+            clip,
+            kind: None,
+            time: 0.0,
+            weight: 1.0,
+            leaving: false,
+            fired: false,
+            pulse: false,
+        };
         let blocked = d.dead || d.stunned;
         if let Some((start, travel, land)) = self.dash.filter(|_| !blocked) {
             if d.dashing && !self.was_dashing {
@@ -418,7 +493,17 @@ impl Animator {
         };
         match (want, &mut self.over) {
             (Some(c), Some(p)) if p.clip == c && !p.leaving => p.time += dt,
-            (Some(c), _) => self.over = Some(Playing { clip: c, kind: None, time: 0.0, weight: 1.0, leaving: false }),
+            (Some(c), _) => {
+                self.over = Some(Playing {
+                    clip: c,
+                    kind: None,
+                    time: 0.0,
+                    weight: 1.0,
+                    leaving: false,
+                    fired: false,
+                    pulse: false,
+                })
+            }
             (None, Some(p)) => {
                 p.leaving = true;
                 p.time += dt;

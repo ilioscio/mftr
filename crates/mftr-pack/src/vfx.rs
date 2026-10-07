@@ -5,7 +5,8 @@
 //!
 //! Events are `<action>.<phase>`: actions `attack`, `q`, `w`, `e`, `r`, `d`, `f` or `*` (any);
 //! phases `release` (leaving the projectile socket), `projectile` (the projectile's style),
-//! `impact`, `detonate` (delayed areas), `start` and `land` (dashes).
+//! `impact`, `detonate` (delayed areas), `start` and `land` (dashes), and `fire` (the animation
+//! passing its `fire` marker: melee blows, novas, heals; A6).
 
 use nanoserde::DeRon;
 
@@ -21,7 +22,7 @@ pub const PARTICLE_KITS: &[&str] = &["flare", "burst", "ring", "dust", "trail"];
 /// Projectile styles (the `projectile` phase): they decorate the gameplay-sized body.
 pub const PROJECTILE_KITS: &[&str] = &["orb", "arrow", "net", "lob"];
 pub const ACTIONS: &[&str] = &["attack", "q", "w", "e", "r", "d", "f", "*"];
-pub const PHASES: &[&str] = &["release", "projectile", "impact", "detonate", "start", "land"];
+pub const PHASES: &[&str] = &["release", "projectile", "impact", "detonate", "start", "land", "fire"];
 
 #[derive(Clone, Debug, DeRon)]
 pub struct VfxFile {

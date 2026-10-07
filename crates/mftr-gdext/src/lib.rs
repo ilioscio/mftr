@@ -713,6 +713,45 @@ impl MatchClient {
 
     /// The action (`q`…`f`) a champion's dash or lunge sits on, or "" (A4b: dash VFX).
     #[func]
+    fn action_info(&self, champion: GString, action: GString) -> VarDictionary {
+        // A6: where `<action>.fire` effects play: `shape` (`nova`, `line`, `area`, `dash`,
+        // `support`, `melee`, `ranged`), `radius` and `reach` in meters from the kit.
+        use mftr_sim::ability::Effect;
+        let mut d = VarDictionary::new();
+        let Some(c) = ChampionId::by_name(&champion.to_string()) else { return d };
+        let def = c.def();
+        let (shape, radius, reach) = match action.to_string().as_str() {
+            "attack" if def.attack.bolt_speed > 0.0 => ("ranged", 0.0, def.attack.range),
+            "attack" => ("melee", 0.0, def.attack.range),
+            a => match ACTIONS.iter().position(|s| *s == a).and_then(|s| c.ability(s as u8)).map(|ab| ab.effect) {
+                Some(Effect::Line(l)) => ("line", l.radius, l.range),
+                Some(Effect::Area(r)) if r.range == 0.0 => ("nova", r.radius, 0.0),
+                Some(Effect::Area(r)) => ("area", r.radius, r.range),
+                Some(Effect::Dash(_) | Effect::Lunge(_)) => ("dash", 0.0, 0.0),
+                Some(_) => ("support", 0.0, 0.0),
+                None => ("", 0.0, 0.0),
+            },
+        };
+        d.set("shape", shape);
+        d.set("radius", radius * 0.01);
+        d.set("reach", reach * 0.01);
+        d
+    }
+
+    /// Casts with no windup since the last call (A6): `[{ unit, slot }]`, own included.
+    #[func]
+    fn take_instant_casts(&mut self) -> VarArray {
+        let mut out = VarArray::new();
+        for (unit, slot) in self.session.take_instant_casts() {
+            let mut d = VarDictionary::new();
+            d.set("unit", unit.0 as i64);
+            d.set("slot", slot as i64);
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    #[func]
     fn dash_action(&self, champion: GString) -> GString {
         let Some(c) = ChampionId::by_name(&champion.to_string()) else { return GString::new() };
         let slot = (0..SLOTS as u8).find(|s| {
