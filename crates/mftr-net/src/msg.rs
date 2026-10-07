@@ -972,13 +972,14 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     })
 }
 
+/// Five bits: room for 31 champions (31 means none).
 fn write_champion(w: &mut BitWriter, c: Option<ChampionId>) {
-    w.write(c.map_or(7, |c| c as u64), 3);
+    w.write(c.map_or(31, |c| c as u64), 5);
 }
 
 fn read_champion(r: &mut BitReader) -> Result<Option<ChampionId>, DecodeError> {
-    match r.read(3)? {
-        7 => Ok(None),
+    match r.read(5)? {
+        31 => Ok(None),
         v => ChampionId::from_u8(v as u8).map(Some).ok_or(DecodeError::Invalid("champion")),
     }
 }

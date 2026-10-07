@@ -4,7 +4,7 @@ An MFTR server is one small program (under 1 MB) that runs one game. It talks UD
 match authoritative, and needs no database, accounts or other services. This guide gets a match
 running on a fresh Linux machine (a VPS or a spare PC).
 
-> **Status:** M2 (ARAM on The Bridge, six champions, bots). Every packet is encrypted and
+> **Status:** M3 (ARAM and ARAM: Mayhem on The Bridge, ten champions, bots). Every packet is encrypted and
 > authenticated (D40), and the server has a key that players' clients pin (see [The server key](#the-server-key)).
 
 ## Quick start with Docker

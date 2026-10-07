@@ -12,7 +12,7 @@ MFTR aims to deliver the thing players love about the best-known lane-based MOBA
 
 ## Status
 
-**M0 (foundations)** is in place: a deterministic Rust simulation, the netcode core (sub-tick commands, own-champion prediction, reconciliation, clock and margin control loops), a dedicated UDP server, a headless Netcode Lab, and a Godot client. **M1 (Duel Sandbox)** is in progress: unit collision, skillshots and the dodge rig, an arena with walls, brush and fog of war, and placeholder champions you can duel with (slices 1–4; six since M2). Design docs: start with the [design index](docs/design/README.md). Results so far: [roadmap](docs/design/08-roadmap.md).
+**M0 (foundations)** is in place: a deterministic Rust simulation, the netcode core (sub-tick commands, own-champion prediction, reconciliation, clock and margin control loops), a dedicated UDP server, a headless Netcode Lab, and a Godot client. **M1 (Duel Sandbox)** is in progress: unit collision, skillshots and the dodge rig, an arena with walls, brush and fog of war, and placeholder champions you can duel with (slices 1–4; six since M2, ten since M3). Design docs: start with the [design index](docs/design/README.md). Results so far: [roadmap](docs/design/08-roadmap.md).
 
 ## Build & run
 
@@ -32,7 +32,7 @@ Build the Godot extension (once, and after Rust changes):
 cargo build -p mftr-gdext
 ```
 
-Then open `client/project.godot` in Godot (4.5+) and press Play. The start menu asks for a server (`127.0.0.1:7777` for your own; servers you've joined are remembered, with their game type, for one-click joining), how to join (play, spectate or the blind playtest) and, on duel and sandbox servers, a champion. Esc leaves a server. The server starts the **Duel Sandbox** by default: blue spawns west, red east, with minion clumps in between. Six placeholder champions: **Ember** (skillshot mage), **Vesper** (marksman), **Bastion** (tank: pull, knock-up), **Rook** (bruiser: cleave, heal, lunge), **Lumen** (enchanter: heals and shields allies) and **Shade** (assassin: lunges). Duels alternate Ember and Vesper and ARAM hands them out in turn; or pick one in the menu (or with user arguments, which skip the menu: `godot --path client -- 127.0.0.1:7777 --champion shade`).
+Then open `client/project.godot` in Godot (4.5+) and press Play. The start menu asks for a server (`127.0.0.1:7777` for your own; servers you've joined are remembered, with their game type, for one-click joining), how to join (play, spectate or the blind playtest) and, on duel and sandbox servers, a champion. Esc leaves a server. The server starts the **Duel Sandbox** by default: blue spawns west, red east, with minion clumps in between. Ten placeholder champions: **Ember** (skillshot mage), **Vesper** (marksman), **Bastion** (tank: pull, knock-up), **Rook** (bruiser: cleave, heal, lunge), **Lumen** (enchanter: heals and shields allies), **Shade** (assassin: lunges), **Quill** (artillery mage: long-range areas), **Cairn** (warden: ally shield, root, knock-up), **Marrow** (battlemage: drain nova, root, self heal) and **Wren** (skirmisher: poke, caltrops, pounce). Duels alternate Ember and Vesper and ARAM hands them out in turn; or pick one in the menu (or with user arguments, which skip the menu: `godot --path client -- 127.0.0.1:7777 --champion shade`).
 
 | Input | Action |
 |---|---|

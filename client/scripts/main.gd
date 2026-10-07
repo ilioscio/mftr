@@ -236,6 +236,10 @@ const CHAMPION_COLORS := {
 	"Rook": Color(0.55, 0.3, 0.27),
 	"Lumen": Color(0.86, 0.82, 0.62),
 	"Shade": Color(0.32, 0.24, 0.42),
+	"Quill": Color(0.2, 0.5, 0.55),
+	"Cairn": Color(0.45, 0.5, 0.3),
+	"Marrow": Color(0.62, 0.58, 0.5),
+	"Wren": Color(0.6, 0.3, 0.5),
 }
 
 
@@ -315,6 +319,53 @@ func _make_champion(color: Color, champion: String) -> Node3D:
 			var steel := _unshaded(Color(0.8, 0.82, 0.9))
 			_part(body, blade, Vector3(0.32, 0.0, 0.25), steel, Vector3(0, -15, 0))
 			_part(body, blade, Vector3(-0.32, 0.0, 0.25), steel, Vector3(0, 15, 0))
+		"Quill":
+			# Tall and thin, with a long glowing quill raised over the shoulder: artillery.
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 0.14
+			cyl.bottom_radius = 0.3
+			cyl.height = 1.6
+			body.mesh = cyl
+			var spine := CylinderMesh.new()
+			spine.top_radius = 0.0
+			spine.bottom_radius = 0.06
+			spine.height = 1.2
+			_part(body, spine, Vector3(0.3, 0.9, 0), _unshaded(Color(0.6, 0.95, 1.0)), Vector3(0, 0, -30))
+		"Cairn":
+			# Stacked stones, widest at the base: the warden holds ground.
+			var base := BoxMesh.new()
+			base.size = Vector3(1.0, 0.7, 0.8)
+			body.mesh = base
+			var mid := BoxMesh.new()
+			mid.size = Vector3(0.75, 0.5, 0.6)
+			_part(body, mid, Vector3(0, 0.6, 0), m, Vector3(0, 20, 0))
+			var top := BoxMesh.new()
+			top.size = Vector3(0.45, 0.35, 0.4)
+			_part(body, top, Vector3(0, 1.02, 0), m, Vector3(0, -15, 0))
+		"Marrow":
+			# Hunched capsule with two dark horns.
+			var cap := CapsuleMesh.new()
+			cap.radius = 0.38
+			cap.height = 1.45
+			body.mesh = cap
+			var horn := CylinderMesh.new()
+			horn.top_radius = 0.0
+			horn.bottom_radius = 0.07
+			horn.height = 0.45
+			var dark := _unshaded(Color(0.2, 0.16, 0.2))
+			_part(body, horn, Vector3(0.2, 0.8, 0), dark, Vector3(0, 0, -25))
+			_part(body, horn, Vector3(-0.2, 0.8, 0), dark, Vector3(0, 0, 25))
+		"Wren":
+			# Small and light, with swept-back wings.
+			var cone := CylinderMesh.new()
+			cone.top_radius = 0.1
+			cone.bottom_radius = 0.3
+			cone.height = 1.35
+			body.mesh = cone
+			var wing := BoxMesh.new()
+			wing.size = Vector3(0.55, 0.05, 0.28)
+			_part(body, wing, Vector3(0.36, 0.35, -0.1), m, Vector3(0, 25, 20))
+			_part(body, wing, Vector3(-0.36, 0.35, -0.1), m, Vector3(0, -25, -20))
 		_:
 			var capsule := CapsuleMesh.new()
 			capsule.radius = CHAMPION_RADIUS_U * UNITS_TO_METERS * 0.6

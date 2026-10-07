@@ -317,6 +317,19 @@ Four more placeholder champions (original kits, D36), so all six M2 archetypes e
 - **60 augments** (D46): 23 Silver, 20 Gold, 17 Prismatic. Conditionals (Executioner, First Strike, Last Stand, Spellcrit, Fundamentals), after-hit effects (Spellhunger, Spell Vamp, Thorns), rule breakers (Close Quarters, Sharpshooter, Spellblade, Reset), a quest (Champion of Chaos) and F replacements (Vault, Stormcall, Mend).
 - Tests check each mechanic's numbers against an unaugmented baseline. The client shows Spellhunger stacks and quest progress next to the held augment.
 
+### M3 slice 5 status (2026-10-07): ✅ done
+Four more placeholder champions (original kits, D36), built from the existing shapes:
+
+| Champion | Role | Q | W | E | R |
+|---|---|---|---|---|---|
+| **Quill** | Artillery mage | Arc Shot: long-range area | Static Field: slowing area | Recoil: dash | Starfall Lance: 2500 u skillshot |
+| **Cairn** | Warden (melee) | Stone Lash: slowing skillshot | Shelter: ally shield | Rockfall: delayed root area | Monolith: delayed knock-up around itself |
+| **Marrow** | Battlemage | Siphon: nova | Grasping Bones: rooting skillshot | Grave Pact: self heal | Ossuary: large slowing area |
+| **Wren** | Skirmisher | Ricochet: quick poke | Caltrops: slowing area | Pounce: lunge | Hail of Arrows: slowing area |
+
+- All four pass the D10 reaction budget and the hard-CC classification; prediction stays bit-exact through every kit. Bots play them with build paths of their own.
+- The wire's champion field grows to 5 bits (room for 31). Godot client: a silhouette and identity color each; the menu and ARAM pick from all ten.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.
