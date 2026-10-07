@@ -54,7 +54,7 @@ pub enum UnitKind {
     RigTurret,
     /// Lane turret (01 §3): attacks with turret priorities, destroyed in lane order.
     Turret,
-    /// Gatehouse: respawns; while it's down the other team's waves get stronger.
+    /// Gatehouse: respawns; while it's down the other team's waves bring a super minion.
     Gatehouse,
     /// Destroying it wins the match.
     Base,
@@ -91,6 +91,8 @@ pub enum MinionKind {
     Melee,
     Caster,
     Siege,
+    /// Joins its team's waves while an enemy Gatehouse is down (01 §3): tanky, hits hard.
+    Super,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1192,6 +1194,8 @@ impl MinionKind {
             MinionKind::Caster
         } else if range >= 200.0 {
             MinionKind::Siege
+        } else if range >= 150.0 {
+            MinionKind::Super
         } else {
             MinionKind::Melee
         }
@@ -1202,6 +1206,7 @@ impl MinionKind {
         match self {
             MinionKind::Melee | MinionKind::Caster => (25.0, 48.0),
             MinionKind::Siege => (35.0, 65.0),
+            MinionKind::Super => (45.0, 80.0),
         }
     }
 
@@ -1210,6 +1215,7 @@ impl MinionKind {
             MinionKind::Melee => (480.0, 0.0),
             MinionKind::Caster => (300.0, 0.0),
             MinionKind::Siege => (900.0, 15.0),
+            MinionKind::Super => (1500.0, 100.0),
         };
         Stats {
             max_health,
@@ -1475,11 +1481,14 @@ impl World {
         let n = self.game.waves_spawned;
         let layout = self.map.layout.clone();
         for team in [Team::Blue, Team::Red] {
+            // An enemy Gatehouse down (until it respawns): this team's wave brings a super minion.
+            let empowered =
+                self.units.iter().any(|u| u.kind == UnitKind::Gatehouse && u.team != team && !u.state.alive());
             let spawn = layout.wave_spawn[team as usize];
             let ahead =
                 layout.lanes[team as usize].first().map_or(Vec2::new(1.0, 0.0), |&p| (p - spawn).normalize_or_zero());
             let side = Vec2::new(-ahead.y, ahead.x);
-            for (i, kind) in MatchState::wave(n).into_iter().enumerate() {
+            for (i, kind) in MatchState::wave(n, empowered).into_iter().enumerate() {
                 let (row, col) = ((i / 3) as f32, (i % 3) as f32 - 1.0);
                 let pos = spawn - ahead * (row * 80.0) + side * (col * 70.0);
                 self.spawn_minion(kind, team, pos, Some(Brain::Laner { next: 0 }));
@@ -4093,6 +4102,34 @@ mod tests {
         assert_eq!(tiers, vec![1, 2, 3, 4, 5, 5, 6], "structures fall in lane order");
         assert!(matches!(w.game().winner, Some((Team::Blue, _))));
         assert!(ev.iter().any(|e| matches!(e, SimEvent::MatchEnded { winner: Team::Blue, .. })));
+    }
+
+    /// While a red Gatehouse is down, blue waves bring a super minion; red's don't.
+    #[test]
+    fn a_fallen_gatehouse_empowers_the_other_teams_waves() {
+        let mut w = bridge_world();
+        let gate = w.units().iter().find(|u| u.kind == UnitKind::Gatehouse && u.team == Team::Red).unwrap().id;
+        w.unit_mut(gate).unwrap().state.respawn_at = Some(SimTime(u64::MAX));
+        let supers = |w: &World, team: Team| {
+            w.units()
+                .iter()
+                .filter(|u| {
+                    u.kind == UnitKind::Minion
+                        && u.team == team
+                        && u.attack.is_some_and(|a| MinionKind::from_attack_range(a.range) == MinionKind::Super)
+                })
+                .count()
+        };
+        while w.game().waves_spawned == 0 {
+            w.step(&[]);
+        }
+        assert_eq!(supers(&w, Team::Blue), 1);
+        assert_eq!(supers(&w, Team::Red), 0);
+        let s = w.units().iter().find(|u| u.attack.is_some_and(|a| a.range == 170.0)).unwrap();
+        assert_eq!(
+            (s.stats.max_health, s.stats.armor, s.collision_radius, s.gameplay_radius),
+            (1500.0, 100.0, 45.0, 80.0)
+        );
     }
 
     #[test]

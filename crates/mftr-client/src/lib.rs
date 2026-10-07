@@ -116,6 +116,8 @@ pub struct RemoteRender {
     /// The ability slot of that windup (picks the cast animation).
     pub windup_slot: u8,
     pub champion: Option<ChampionId>,
+    /// A minion's kind (which model to draw).
+    pub minion: Option<mftr_sim::MinionKind>,
     /// Held augments (indicators above the health bar).
     pub augments: [u8; mftr_sim::augments::SLOTS],
     pub gameplay_radius: f32,
@@ -1196,6 +1198,7 @@ impl ClientSession {
                     windup,
                     windup_slot,
                     champion: l.champion,
+                    minion: l.minion,
                     augments: l.augments,
                     gameplay_radius: track.gameplay_radius(),
                     health: l.health as f32,

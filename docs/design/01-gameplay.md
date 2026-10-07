@@ -50,16 +50,16 @@ Consecutive shots on a champion ramp up in damage. Turrets take reduced damage w
 - A wave is 3 melee + 3 caster. A **siege** minion joins every 3rd wave (every 2nd later in the game).
 - Minions walk their lane, fight what they meet (target priority mirrors turrets), and **aggro onto enemy champions that attack allied champions** nearby. That aggro rule is what makes trading in lane a decision.
 - Minion stats scale with game time.
-- **Elite minions** (after a Gatehouse falls) are tanky, hit hard, and buff nearby allied minions.
+- **Super minions** (the elite minions; after a Gatehouse falls) are tanky and hit hard. While a team has an enemy Gatehouse down, each of its waves brings one in front until that Gatehouse respawns. *(start, A5)* 1,500 health, 100 armor, 190 damage, 170 range, 0.85 attacks/s; turret shots take 7% of their health; 60 gold. The planned aura that buffs nearby allied minions comes later.
 
 ### Unit collision (decided: like the reference game)
 
 Every unit has **two radii**:
 
-| Radius | Used for | *(start)* champion | *(start)* melee / caster / siege minion |
+| Radius | Used for | *(start)* champion | *(start)* melee / caster / siege / super minion |
 |---|---|---|---|
-| **Gameplay radius** | Hitboxes for abilities, attack range, targeting | 65 u | 48 / 48 / 65 u |
-| **Collision radius** | Unit-vs-unit movement blocking | 35 u | 25 / 25 / 35 u |
+| **Gameplay radius** | Hitboxes for abilities, attack range, targeting | 65 u | 48 / 48 / 65 / 80 u |
+| **Collision radius** | Unit-vs-unit movement blocking | 35 u | 25 / 25 / 35 / 45 u |
 
 - Collision radii are **small**: a single minion is easy to walk around, and units slide past each other when there's a gap.
 - But they are **solid**. When minions clump (fighting in a wave, or bunched in a narrow spot), the gaps close and they **block** champions. Minion-block and body-blocking are intended skill expression.
@@ -77,7 +77,7 @@ Gold is the only currency. It is spent at the shop while in the fountain (or any
 |---|---|
 | Starting gold | 500 |
 | Passive income | ~2 g/s from first wave spawn |
-| Melee / caster / siege minion (last hit) | 21 / 14 / 60→90 (scales with time) |
+| Melee / caster / siege / super minion (last hit) | 21 / 14 / 60→90 (scales with time) / 60 |
 | Champion kill | 300 base. **Bounty** rises with kill streaks and falls with death streaks |
 | Assist | Kill gold split among assisters (50% of the kill value, shared) |
 | Turret plating | 125 per plate to the local damager(s) |

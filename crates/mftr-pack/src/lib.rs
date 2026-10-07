@@ -26,6 +26,8 @@ pub fn sidecar_path(glb: &Path) -> PathBuf {
 
 /// A validated pack, parsed and ready to animate: the model (mesh data) and its clip library.
 pub struct Loaded {
+    /// The sidecar's `kind`: `champion`, `library`, `minion` or `rig`.
+    pub kind: String,
     pub model: glb::Model,
     pub library: pose::Library,
     /// `<id>.vfx.ron`, when the pack ships one (A4b).
@@ -68,7 +70,7 @@ pub fn load_file(glb_path: &Path) -> Result<Loaded, String> {
     } else {
         None
     };
-    Ok(Loaded { model, library, vfx, sounds })
+    Ok(Loaded { kind: side.kind.clone(), model, library, vfx, sounds })
 }
 
 /// Reads and validates `<id>.glb` and its sidecar from disk.

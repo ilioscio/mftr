@@ -89,15 +89,18 @@ pub fn validate_model(model: &Model, glb_len: usize, side: &Sidecar) -> Report {
         glb_len
     ));
     check_header(&mut r, side);
-    check_mesh(&mut r, model, glb_len);
+    check_mesh(&mut r, model, glb_len, side.kind == "minion");
     let joints = check_skeleton(&mut r, model);
     check_clips(&mut r, model, side, &joints);
     r
 }
 
 fn check_header(r: &mut Report, side: &Sidecar) {
-    if !matches!(side.kind.as_str(), "champion" | "library" | "rig") {
-        r.err(format!("sidecar kind `{}` must be champion, library or rig", side.kind));
+    if !matches!(side.kind.as_str(), "champion" | "library" | "minion" | "rig") {
+        r.err(format!("sidecar kind `{}` must be champion, library, minion or rig", side.kind));
+    }
+    if side.kind == "minion" && rules::minion_kind(&side.id).is_none() {
+        r.err(format!("minion `{}` must be one of {}", side.id, rules::MINION_IDS.join(", ")));
     }
     if side.archetype != "biped" {
         r.err(format!("archetype `{}`: only `biped` exists so far (10 §7.1)", side.archetype));
@@ -110,16 +113,13 @@ fn check_header(r: &mut Report, side: &Sidecar) {
     }
 }
 
-fn check_mesh(r: &mut Report, m: &Model, bytes: usize) {
+fn check_mesh(r: &mut Report, m: &Model, bytes: usize, minion: bool) {
     let tris = m.triangles();
+    let target = if minion { rules::MINION_TRIANGLES_TARGET } else { rules::TRIANGLES_TARGET };
     if tris > rules::TRIANGLES_MAX {
         r.err(format!("{tris} triangles, over the {} cap", rules::TRIANGLES_MAX));
-    } else if tris < rules::TRIANGLES_TARGET.0 || tris > rules::TRIANGLES_TARGET.1 {
-        r.warn(format!(
-            "{tris} triangles, outside the {}–{} target",
-            rules::TRIANGLES_TARGET.0,
-            rules::TRIANGLES_TARGET.1
-        ));
+    } else if tris < target.0 || tris > target.1 {
+        r.warn(format!("{tris} triangles, outside the {}–{} target", target.0, target.1));
     }
     if bytes > rules::MODEL_BYTES_BUDGET {
         r.warn(format!("{bytes} bytes, over the {} byte mesh + animation budget", rules::MODEL_BYTES_BUDGET));
@@ -130,7 +130,7 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize) {
     for name in &m.materials {
         if !rules::MATERIAL_SLOTS.contains(&name.as_str()) {
             r.err(format!("material `{name}` is not one of the slots {:?}", rules::MATERIAL_SLOTS));
-        } else if name != "accent" {
+        } else if name != "accent" && name != "accent_glow" {
             non_accent += 1;
         }
     }
@@ -234,6 +234,7 @@ fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
         "library" => {
             required.extend(rules::SHARED_LIBRARY.iter().chain(rules::LIBRARY_FALLBACKS).map(|s| s.to_string()))
         }
+        "minion" => required.extend(rules::REQUIRED_MINION.iter().map(|s| s.to_string())),
         "champion" => {
             required.extend(rules::REQUIRED_CHAMPION.iter().map(|s| s.to_string()));
             match ChampionId::by_name(&side.id) {
@@ -255,6 +256,7 @@ fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
     }
 
     let champion = (side.kind == "champion").then(|| ChampionId::by_name(&side.id)).flatten();
+    let minion = (side.kind == "minion").then(|| rules::minion_kind(&side.id)).flatten();
     let root = m.node_by_name("root");
     for a in &m.animations {
         let Some(clip) = side.clips.iter().find(|c| c.name == a.name) else {
@@ -320,6 +322,14 @@ fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
             && (fire as f32 - want).abs() > 1.0
         {
             r.err(ctx(format!("`fire` at frame {fire}, but the sim fires at {want:.1} (±1 frame)")));
+        }
+        if let Some(kind) = minion
+            && clip.name == "attack_1"
+            && let Some(fire) = clip.marker("fire")
+            && (fire as f32 - rules::minion_fire_frame(kind)).abs() > 1.0
+        {
+            let want = rules::minion_fire_frame(kind);
+            r.err(ctx(format!("`fire` at frame {fire}, but the minion fires at {want:.1} (±1 frame)")));
         }
 
         // No root motion: the sim moves the unit.

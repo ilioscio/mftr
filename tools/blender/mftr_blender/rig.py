@@ -63,9 +63,47 @@ def _mirror(entry):
     return (swap(name), swap(parent), (-head[0], head[1], head[2]), (-tail[0], tail[1], tail[2]), deform, axis)
 
 
+# Proportion shapes (A5): the same bones, names and hierarchy, placed for another body. A shape
+# remaps heights piecewise-linearly (biped height -> shape height) and scales width and depth,
+# then scales the whole thing. Minions are chibi: a big head, short legs, about 1.05 m tall.
+SHAPES = {
+    "standard": None,
+    "minion": {
+        "heights": [(0.0, 0.0), (0.03, 0.02), (0.09, 0.05), (0.54, 0.22), (1.00, 0.40), (1.12, 0.46),
+                    (1.40, 0.60), (1.56, 0.68), (1.64, 0.71), (1.88, 0.98), (2.15, 1.20)],
+        "x": 0.72, "y": 0.75, "scale": 1.0,
+    },
+}
+_shape = None
+
+
+def use_shape(name, scale=1.0, x=1.0):
+    """Place every bone (and everything built from `bone_table`) for shape `name`, scaled by
+    `scale`, `x` widening the body further. `use_shape("standard")` restores the biped."""
+    global _shape
+    base = SHAPES[name]
+    _shape = None if base is None else dict(base, scale=base["scale"] * scale, x=base["x"] * x)
+
+
+def _remap_z(z, table):
+    for (a0, b0), (a1, b1) in zip(table, table[1:]):
+        if z <= a1 or (a1, b1) == table[-1]:
+            return b0 + (z - a0) * (b1 - b0) / (a1 - a0)
+    return z
+
+
+def shaped(p):
+    """A point in biped space placed for the current shape."""
+    if _shape is None:
+        return tuple(p)
+    s = _shape["scale"]
+    return (p[0] * _shape["x"] * s, p[1] * _shape["y"] * s, _remap_z(p[2], _shape["heights"]) * s)
+
+
 def bone_table():
-    """Every bone of the reference skeleton, parents before children."""
-    return _CENTER + _LEFT + [_mirror(b) for b in _LEFT] + _SOCKETS
+    """Every bone of the reference skeleton, parents before children (in the current shape)."""
+    table = _CENTER + _LEFT + [_mirror(b) for b in _LEFT] + _SOCKETS
+    return [(n, par, shaped(h), shaped(t), d, ax) for n, par, h, t, d, ax in table]
 
 
 BONE_NAMES = [b[0] for b in bone_table()]

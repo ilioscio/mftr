@@ -12,8 +12,8 @@ use mftr_sim::ability::LineSkillshot;
 use mftr_sim::map::MapId;
 use mftr_sim::vision::Vision;
 use mftr_sim::{
-    Area, ChampionId, Command, Missile, PlayerId, QPoint, SimEvent, SimTime, SubTick, TICK_DT_F64, TICK_HZ, Team, Tick,
-    UnitId, Vec2, World,
+    Area, ChampionId, Command, MinionKind, Missile, PlayerId, QPoint, SimEvent, SimTime, SubTick, TICK_DT_F64, TICK_HZ,
+    Team, Tick, UnitId, UnitKind, Vec2, World,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -660,6 +660,8 @@ impl ServerCore {
                     gameplay_radius: u.gameplay_radius.round().clamp(0.0, 255.0) as u8,
                     protected: u.protected,
                     champion: u.champion,
+                    minion: (u.kind == UnitKind::Minion)
+                        .then(|| MinionKind::from_attack_range(u.attack.map_or(0.0, |a| a.range))),
                     augments: if u.champion.is_some() { st.progress.augments } else { [0; mftr_sim::augments::SLOTS] },
                     health: hp(st.health.max(if st.alive() { 1.0 } else { 0.0 })),
                     max_health: hp(u.stats.max_health),

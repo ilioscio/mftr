@@ -23,7 +23,7 @@ Decided with the owner (D48). The reference is a reduced-poly reimagining of the
 | Geometry | **2,500–4,000 triangles** per champion including weapons *(start)*, hard cap 6,000. Large forms are blocky and faceted. Detail comes from silhouette and color blocking, not geometry. |
 | Shading | **Faceted** (flat per triangle), computed in the shader from screen-space derivatives so meshes stay smooth-indexed (fewer vertices, smaller files). Toon ramp with 2–3 bands, rim light and object-space detail noise ([05 §2](05-art-and-assets.md#2-procedural-materials)). |
 | Color | **Vertex colors**: RGB = albedo, A = baked cavity/AO. No texture maps. A palette of ≤ 12 colors per champion. |
-| Materials | At most 4 material slots from a fixed set: `skin`, `cloth`, `metal`, `emissive`, plus `accent` (the team-accent region, tinted ally/enemy at runtime, [05 §1.3](05-art-and-assets.md#1-readability-rules-non-negotiable)). Each slot maps to a parameter set of the one champion shader. |
+| Materials | At most 4 material slots from a fixed set: `skin`, `cloth`, `metal`, `emissive`, plus `accent` (the team-accent region, tinted ally/enemy at runtime, [05 §1.3](05-art-and-assets.md#1-readability-rules-non-negotiable)) and `accent_glow` (the team color, glowing: minions' eyes and orbs, A5). Each slot maps to a parameter set of the one champion shader. |
 | Silhouette | Identifiable from silhouette alone at default zoom (05 §1.5). Weapon and head shapes do most of the work. Each champion's `concept.md` states its silhouette class. |
 | Scale | 1 Blender unit = 1 m = 100 u. A standard biped stands **~1.9 m** (190 u) *(start)*. At idle, the model's footprint spans 0.8–1.6× the gameplay hitbox diameter (130 u at the default 65 u radius), so what you see is what can be hit. |
 | VFX | **Pixel style:** particles and sprites snap to a screen-space pixel grid with nearest filtering, use 4–6 color ramps per effect, and animate "on twos" (stepped at 15–20 fps). **Exception:** gameplay-relevant edges (hitbox sheaths, telegraphs) stay smooth, exact and full rate. Readability beats style. |
@@ -224,6 +224,7 @@ Fallbacks: a champion without its own `idle`, `run`, `death`, attack or ability 
 | `biped` | Most champions | The reference skeleton below |
 | `biped_large` | Brutes, golems | Same bone names and proportions profile; shared clips retarget |
 | `biped_small` | Tiny champions | Same names; shared clips retarget with a compressed stride |
+| `biped`, minion shape | Lane minions (A5) | The `biped` bones placed by `rig.use_shape("minion")`: chibi proportions (a big head on short legs, ~1.05 m; the super minion ×1.6). Same names, so the validator, animator and clip tools apply unchanged |
 | `quadruped` | Beasts, mounts | Own shared library |
 | `floater` | Spirits, serpents, constructs | Spine chain plus sockets, no legs |
 | `custom` | Anything else | Must provide the required sockets (§7.2) and every clip itself |

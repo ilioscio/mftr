@@ -12,8 +12,8 @@ use mftr_sim::items::INVENTORY;
 use mftr_sim::map::MapId;
 use mftr_sim::world::{BufferedCast, EchoCast, MAX_PATH, Path, Progress, Recovery, Rules, Trade, UNDO};
 use mftr_sim::{
-    Area, AttackWindup, Bolt, Cast, ChampionId, Command, CommandKind, DashMove, Missile, Order, PlayerId, QPoint,
-    SimDuration, SimEvent, SimTime, SubTick, Team, Tick, UnitId, UnitKind, UnitState, Vec2,
+    Area, AttackWindup, Bolt, Cast, ChampionId, Command, CommandKind, DashMove, MinionKind, Missile, Order, PlayerId,
+    QPoint, SimDuration, SimEvent, SimTime, SubTick, Team, Tick, UnitId, UnitKind, UnitState, Vec2,
 };
 
 const MAGIC: u8 = 0x4D; // 'M'
@@ -125,6 +125,8 @@ pub struct RemoteUnit {
     /// A structure that can't be hurt yet (an earlier one in its lane still stands).
     pub protected: bool,
     pub champion: Option<ChampionId>,
+    /// A minion's kind (2 bits, minions only): which model the client draws (A5).
+    pub minion: Option<MinionKind>,
     /// Held augments (ARAM: Mayhem): shown as indicators above the health bar (06 §3).
     pub augments: [u8; mftr_sim::augments::SLOTS],
     /// Whole health points (16 bits each): confirmed values only (03a §7).
@@ -1029,6 +1031,24 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     })
 }
 
+fn minion_to_wire(k: MinionKind) -> u64 {
+    match k {
+        MinionKind::Melee => 0,
+        MinionKind::Caster => 1,
+        MinionKind::Siege => 2,
+        MinionKind::Super => 3,
+    }
+}
+
+fn minion_from_wire(v: u64) -> MinionKind {
+    match v {
+        0 => MinionKind::Melee,
+        1 => MinionKind::Caster,
+        2 => MinionKind::Siege,
+        _ => MinionKind::Super,
+    }
+}
+
 /// Five bits: room for 31 champions (31 means none).
 fn write_champion(w: &mut BitWriter, c: Option<ChampionId>) {
     w.write(c.map_or(31, |c| c as u64), 5);
@@ -1051,6 +1071,9 @@ fn write_update(w: &mut BitWriter, u: &UnitUpdate) {
         w.write_u8(o.collision_radius);
         w.write_u8(o.gameplay_radius);
         write_champion(w, o.champion);
+        if o.kind == UnitKind::Minion {
+            w.write(minion_to_wire(o.minion.unwrap_or(MinionKind::Melee)), 2);
+        }
         if o.champion.is_some() {
             let held = o.augments != [0; mftr_sim::augments::SLOTS];
             w.write_bool(held);
@@ -1102,6 +1125,7 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         gameplay_radius: 0,
         protected: false,
         champion: None,
+        minion: None,
         augments: [0; mftr_sim::augments::SLOTS],
         health: 0,
         max_health: 0,
@@ -1123,6 +1147,9 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         o.collision_radius = r.read_u8()?;
         o.gameplay_radius = r.read_u8()?;
         o.champion = read_champion(r)?;
+        if o.kind == UnitKind::Minion {
+            o.minion = Some(minion_from_wire(r.read(2)?));
+        }
         if o.champion.is_some() && r.read_bool()? {
             for a in o.augments.iter_mut() {
                 *a = r.read_u8()?;
@@ -1777,6 +1804,7 @@ mod tests {
             gameplay_radius: 220,
             protected: true,
             champion,
+            minion: (kind == UnitKind::Minion).then_some(MinionKind::Super),
             augments: if champion.is_some() { [24, 52, 0, 0] } else { [0; 4] },
             health: 512,
             max_health: 620,

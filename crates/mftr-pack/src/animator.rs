@@ -3,7 +3,7 @@
 //! ```text
 //! locomotion (idle / idle_ready / walk / run / run_fast by speed)  →  action (attack or cast;
 //!   upper body or full)  →  additive (rooted struggle)  →  flourish (dash start / travel / land,
-//!   idle fidgets)  →  override (stunned, dead)
+//!   idle fidgets)  →  flinch (minions, additive)  →  override (stunned, dead)
 //! ```
 //!
 //! Actions are **retimed** to the sim (10 §4.3): a windup's progress maps to `[0, fire]` of
@@ -73,6 +73,8 @@ pub struct Drive {
     pub stunned: bool,
     pub rooted: bool,
     pub dead: bool,
+    /// Took a hit this frame: units with a `flinch` clip (minions, 10 §5.4) play it.
+    pub hit: bool,
     pub action: Option<Action>,
 }
 
@@ -107,6 +109,12 @@ pub struct Animator {
     stunned: Option<usize>,
     rooted: Option<usize>,
     death: Option<usize>,
+    flinch: Option<usize>,
+    /// Seconds into the flinch playing, if one is.
+    flinch_t: Option<f32>,
+    /// Minions (A5): an attack whose windup ended plays its follow-through to the end while the
+    /// unit stands still, instead of being cut. Their attacks repeat with nothing else in between.
+    pub finish_attacks: bool,
     upper: Vec<bool>,
     idle_time: f32,
     /// 0..1 through the locomotion cycle, shared by walk and run so switching keeps the step.
@@ -145,6 +153,9 @@ impl Animator {
             stunned: lib.clip("cc_stunned"),
             rooted: lib.clip("cc_rooted"),
             death: lib.clip("death"),
+            flinch: lib.clip("flinch"),
+            flinch_t: None,
+            finish_attacks: false,
             upper: lib.rig.subtree("spine_01"),
             idle_time: 0.0,
             loco_phase: 0.0,
@@ -200,6 +211,16 @@ impl Animator {
         self.update_flourish(lib, d, dt);
         if let Some((_, f)) = self.flourish {
             blend(&mut pose, &lib.sample(f.clip, f.time), f.weight, None);
+        }
+        if let Some(c) = self.flinch {
+            if d.hit && !d.dead {
+                self.flinch_t = Some(0.0);
+            }
+            if let Some(t) = self.flinch_t {
+                add(&mut pose, &lib.sample(c, t), &lib.rig.rest, 1.0);
+                let t = t + dt;
+                self.flinch_t = (t < lib.clips[c].length).then_some(t);
+            }
         }
         self.update_override(d, dt);
         if let Some(o) = self.over {
@@ -306,6 +327,17 @@ impl Animator {
             }
             None => {
                 if let Some(p) = &mut self.action {
+                    let end = lib.clips[p.clip].end();
+                    let follow = self.finish_attacks
+                        && !p.leaving
+                        && matches!(p.kind, Some(ActionKind::Attack { .. }))
+                        && d.speed < MOVING
+                        && !d.dead
+                        && !d.stunned;
+                    if follow && p.time < end {
+                        p.time = (p.time.max(lib.clips[p.clip].fire()) + dt).min(end);
+                        return;
+                    }
                     // Cut short (a move, a stun) or finished: blend back out quickly.
                     p.leaving = true;
                     p.time = (p.time + dt).min(lib.clips[p.clip].end());

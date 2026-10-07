@@ -897,6 +897,17 @@ impl MatchClient {
             d.set("id", u.id.0 as i64);
             d.set("pos", Vector2::new(u.pos.x, u.pos.y));
             d.set("minion", u.kind == UnitKind::Minion);
+            // A5: which minion model to draw ("" for anything else).
+            d.set(
+                "minion_kind",
+                match u.minion {
+                    Some(mftr_sim::MinionKind::Melee) => "melee",
+                    Some(mftr_sim::MinionKind::Caster) => "caster",
+                    Some(mftr_sim::MinionKind::Siege) => "siege",
+                    Some(mftr_sim::MinionKind::Super) => "super",
+                    None => "",
+                },
+            );
             d.set("turret", matches!(u.kind, UnitKind::RigTurret | UnitKind::Turret));
             d.set(
                 "kind",

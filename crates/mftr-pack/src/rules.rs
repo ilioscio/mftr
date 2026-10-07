@@ -1,6 +1,7 @@
 //! The rig standard, the clip catalogue and the caps (10 §2, §5, §7, §9), as data.
 //! `tools/blender/mftr_blender` mirrors these names; this is the authoritative copy.
 
+use mftr_sim::MinionKind;
 use mftr_sim::ability::Effect;
 use mftr_sim::champion::ChampionDef;
 
@@ -8,11 +9,15 @@ pub const FPS: u32 = 30;
 
 // Caps (10 §2, §7.2, §9).
 pub const TRIANGLES_TARGET: (usize, usize) = (2500, 4000);
+/// Lane minions (A5): many on screen at once, so lighter.
+pub const MINION_TRIANGLES_TARGET: (usize, usize) = (600, 2600);
 pub const TRIANGLES_MAX: usize = 6000;
 pub const BONES_TARGET: usize = 64;
 pub const BONES_MAX: usize = 80;
 pub const INFLUENCES_TARGET: usize = 2;
-pub const MATERIAL_SLOTS: &[&str] = &["skin", "cloth", "metal", "emissive", "accent"];
+/// `accent` is the team color; `accent_glow` is the team color, glowing (A5: minions' eyes and
+/// orbs). Neither counts toward the four other slots.
+pub const MATERIAL_SLOTS: &[&str] = &["skin", "cloth", "metal", "emissive", "accent", "accent_glow"];
 pub const MAX_NON_ACCENT_SLOTS: usize = 4;
 /// Mesh + animations (200 KB + 600 KB, 10 §9).
 pub const MODEL_BYTES_BUDGET: usize = 800 * 1024;
@@ -120,6 +125,26 @@ pub const SHARED_LIBRARY: &[&str] = &[
     "cc_sleep",
     "cc_forced_move",
 ];
+/// A5: every lane minion pack (`art/minions/<kind>`) ships these.
+pub const REQUIRED_MINION: &[&str] = &["idle", "run", "attack_1", "death", "flinch"];
+pub const MINION_IDS: &[&str] = &["melee", "caster", "siege", "super"];
+
+/// The sim's minion kind a minion pack is for.
+pub fn minion_kind(id: &str) -> Option<MinionKind> {
+    match id {
+        "melee" => Some(MinionKind::Melee),
+        "caster" => Some(MinionKind::Caster),
+        "siege" => Some(MinionKind::Siege),
+        "super" => Some(MinionKind::Super),
+        _ => None,
+    }
+}
+
+/// A minion's attack fire time in frames (its windup, 10 §4.3).
+pub fn minion_fire_frame(kind: MinionKind) -> f32 {
+    mftr_sim::lane::minion_attack(kind).windup().0 as f32 * FPS as f32 / 1920.0
+}
+
 /// Fallbacks the library also carries (A3): champions without their own play these.
 pub const LIBRARY_FALLBACKS: &[&str] = &["idle", "run", "death"];
 pub const LOCOMOTION: &[&str] = &["walk", "run", "run_fast"];
