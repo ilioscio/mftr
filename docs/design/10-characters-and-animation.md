@@ -204,6 +204,12 @@ Additive     cc_rooted (and later cc_forced_move, run-lean)
 Override     death (holds its last frame), cc_stunned; later recall and emotes
 ```
 
+**Events** (A4c, A6): the animator reports what happened each update, for sounds and effects:
+- a footstep when the walk or run crosses `foot_l`/`foot_r`;
+- a windup's start;
+- **`fire`** when an action passes its `fire` marker. That is the moment a melee blow lands, a slam hits, a nova sweeps or a heal pulses, so effects with no projectile hang off it as `<action>.fire`. A cast that ends at the very end of its windup (a caster walking on skips the follow-through) still fires.
+- **Instant casts** (supports, shields) have no windup, so the drive never shows them. The sim announces them with a `CastStarted` whose `fire_at` equals its start, and the client **pulses** the animator: the clip plays from `fire` to its end, and fires.
+
 Fallbacks: a champion without its own `idle`, `run`, `death`, attack or ability clips plays the shared library's (`idle`, `run`, `death`, `attack_melee_alt`, `cast_utility`), so a pack with gaps, or the template, still animates. Inputs come from the client's state: the own champion's windup and follow-through progress are exact (predicted sim times); other units' cast windups come from their `CastStarted` events, their follow-throughs from the status flag, and their attacks (no timing on the wire yet) play at the clip's own rate.
 
 | Transition | Blend *(start)* |
@@ -222,7 +228,7 @@ Fallbacks: a champion without its own `idle`, `run`, `death`, attack or ability 
 | Archetype | For | Notes |
 |---|---|---|
 | `biped` | Most champions | The reference skeleton below |
-| `biped_large` | Brutes, golems | Same bone names and proportions profile; shared clips retarget |
+| `biped_large` | Brutes, golems | Same bone names and proportions profile; shared clips retarget. Built as the `biped` bones in the `large` shape (`rig.use_shape("large")`: ~2.05 m, ×1.25 wide, ×1.2 deep), so the sidecar says `biped` (A6, Rook) |
 | `biped_small` | Tiny champions | Same names; shared clips retarget with a compressed stride |
 | `biped`, minion shape | Lane minions (A5) | The `biped` bones placed by `rig.use_shape("minion")`: chibi proportions (a big head on short legs, ~1.05 m; the super minion ×1.6). Same names, so the validator, animator and clip tools apply unchanged |
 | `quadruped` | Beasts, mounts | Own shared library |

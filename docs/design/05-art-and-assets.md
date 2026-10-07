@@ -66,8 +66,8 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 | Kit | Phase | What it draws |
 |---|---|---|
 | `flare` | `release` | A spark at the projectile socket and a spray along the shot |
-| `burst` | `impact`, `detonate` | Sparks that fly out and fall |
-| `ring` | `impact`, `detonate` | Pixels on the area's edge, at the **radius from gameplay data**, drifting outward |
+| `burst` | `impact`, `detonate`, `fire` | Sparks that fly out and fall |
+| `ring` | `impact`, `detonate`, `fire` | Pixels on the area's edge, at the **radius from gameplay data**, drifting outward |
 | `dust` | `start`, `land`, `detonate` | Slow, growing ground puffs |
 | `trail` | `projectile` | Sparks shed behind the projectile |
 | `arrow`, `net`, `orb` | `projectile` | A style *inside* the projectile's gameplay body (a shaft, a spinning frame, nothing) plus a trail behind it |
@@ -75,6 +75,7 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 
 - **Pixel style:** all particles share one MultiMesh of camera-facing squares whose corners snap to a grid of screen pixels (2 px at 1080p). They step at **20 Hz** ("on twos") and walk their 2–6 color ramp in whole steps, with no blending.
 - **Honest sizes:** projectile kits can't set a size. Shafts and frames are fitted inside the body's gameplay width, and trails only fall *behind* it (§1.1). Rings take the area's radius from the render state.
+- **`fire`** (A6): when an action's animation passes its `fire` marker. It is centered and sized for novas, at reach in front for melee blows and slams, and at the chest otherwise; any particle kit plays there (10 §6).
 - **Events:** the client fires `<action>.<phase>`. It finds the action from the kit: an area's or missile's radius is matched against the owner's abilities (augment-widened too), bolts are `attack`, and dashes are the kit's dash slot. A champion's own `action.phase` wins, then its `*.phase`, then the shared library's (`biped_library.vfx.ron`).
 - **Caps:** ≤ 48 particles per effect, ≤ 4 effects per event, ≤ 64 effects per pack, lifetimes ≤ 1.5 s, and 2,048 live particles client-wide.
 
