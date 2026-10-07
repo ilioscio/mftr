@@ -55,10 +55,10 @@ fn main() {
                     r.tick_ms_mean,
                     r.tick_ms_max
                 );
-                if matches!(cfg.scenario, Scenario::DodgeRig | Scenario::Duel | Scenario::Aram) {
+                if matches!(cfg.scenario, Scenario::DodgeRig | Scenario::Duel | Scenario::Aram | Scenario::Mayhem) {
                     println!("{}", r.summary.dodge_row());
                 }
-                if matches!(cfg.scenario, Scenario::Duel | Scenario::Aram) {
+                if matches!(cfg.scenario, Scenario::Duel | Scenario::Aram | Scenario::Mayhem) {
                     println!("{}", r.summary.duel_row());
                 }
             }
@@ -68,7 +68,7 @@ fn main() {
             let cfg = mftr_server::ServerConfig {
                 seed: num("--seed", 1.0) as u64,
                 bots: num("--bots", 10.0) as u8,
-                scenario: Scenario::Aram,
+                scenario: if args.iter().any(|a| a == "--mayhem") { Scenario::Mayhem } else { Scenario::Aram },
                 ..Default::default()
             };
             let minutes = num("--minutes", 40.0);

@@ -1,7 +1,7 @@
 //! `mftr-server`: dedicated UDP match server, encrypted with the secure transport (D40).
 //!
 //! Usage: mftr-server [--bind 0.0.0.0:7777] [--key FILE] [--seed N] [--max-players N] [--bots N]
-//!                    [--lobby] [--replay FILE] [--scenario duel|aram|minions|dodge|empty]
+//!                    [--lobby] [--replay FILE] [--scenario duel|aram|mayhem|minions|dodge|empty]
 //!        mftr-server [--key FILE] --fingerprint
 //!
 //! `--key FILE` (default `server.key`) holds the server's key; it is created on first start.
@@ -19,7 +19,7 @@ use std::net::{SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--max-players N] [--bots N] [--lobby] [--replay FILE] [--scenario duel|aram|minions|dodge|empty]";
+const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--max-players N] [--bots N] [--lobby] [--replay FILE] [--scenario duel|aram|mayhem|minions|dodge|empty]";
 
 /// Client sessions: which core connection each address is, and back.
 #[derive(Default)]

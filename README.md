@@ -53,6 +53,8 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The start menu 
 
 **Releasing:** run `scripts/bump-version.sh X.Y.Z` (it updates `Cargo.toml`, `Cargo.lock` and the macOS export preset together; CI builds with `--locked`, so a hand-edited version fails), merge that to `main`, then tag the merge commit on `main`: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag builds and publishes the release from exactly that commit.
 
+**ARAM: Mayhem** (M3, in progress): `--scenario mayhem` is ARAM with augment drafts. At levels 1, 7, 11 and 15 you're offered three augments; click one to keep it (or reroll once) while you keep playing.
+
 **Champion select, spectating, reconnect:** add `--lobby` to an ARAM server (`--scenario aram --bots 10 --lobby`) for all-random champion select with rerolls and a team bench (humans replace bots). After each match, everyone still connected gets a new champion select. Start the client with `-- --spectate` to watch (Tab cycles champions). If the client crashes or the connection drops, restart it within a minute and you get your champion back.
 
 **Bots and replays:** `--bots N` fills N slots with server bots (e.g. `--scenario aram --bots 9` for a full match against bots), and `--replay match.replay` records the session. `mftr-tools replay match.replay` re-simulates a recording and checks it, and `mftr-tools botmatch --seed 3` plays a 10-bot ARAM match headless in a couple of seconds.

@@ -291,6 +291,19 @@ Four more placeholder champions (original kits, D36), so all six M2 archetypes e
 
 **Exit:** Hyper + Multishot stress scenario stays within bandwidth and tick budgets; playtesters rate Mayhem "fun" (the most important metric we'll ever track).
 
+### M3 slices (in order of dependency)
+1. Augment framework and live draft (D43).
+2. Delivery transformers (Multishot, Echo, wider shots) and batched missile spawns.
+3. Size changes with honest hitboxes (Titan, Pebble, Unstable Experiment).
+4. Augments to ~60: rule breakers, conditionals, quests, utility spell replacements.
+5. Roster to ~10 champions.
+6. Mayhem end to end: augment indicators, Hyper rules, the Hyper + Multishot stress scenario.
+
+### M3 slice 1 status (2026-10-07): ✅ done
+- `--scenario mayhem`: ARAM with augment drafts at levels 1, 7, 11 and 15 (three cards, one reroll each; Silver first, one Prismatic guaranteed). 23 augments so far: stat packages, AD↔AP conversions and percent bonuses through the stat stack.
+- Picks and rerolls are predicted commands (offers are seeded per champion); bots and the lab's duel bots draft too. Lab: 4 clients over the MID link draft with no hard resets, and the recording re-simulates exactly (replays now end with a final state hash, so a check covers every simulated tick).
+- Client: draft cards above the ability bar while play goes on; held augments listed above the inventory.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.

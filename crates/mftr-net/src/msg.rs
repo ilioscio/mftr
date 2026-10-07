@@ -203,6 +203,7 @@ pub enum GameMode {
     Dodge = 2,
     Duel = 3,
     Aram = 4,
+    Mayhem = 5,
 }
 
 impl GameMode {
@@ -213,6 +214,7 @@ impl GameMode {
             2 => GameMode::Dodge,
             3 => GameMode::Duel,
             4 => GameMode::Aram,
+            5 => GameMode::Mayhem,
             _ => return None,
         })
     }
@@ -225,6 +227,7 @@ impl GameMode {
             GameMode::Dodge => "Dodge rig",
             GameMode::Duel => "Duel Sandbox",
             GameMode::Aram => "ARAM",
+            GameMode::Mayhem => "ARAM: Mayhem",
         }
     }
 }
@@ -282,6 +285,11 @@ fn write_command(w: &mut BitWriter, c: &Command) {
             w.write(slot as u64, 3);
         }
         CommandKind::Undo => w.write(8, 4),
+        CommandKind::PickAugment(choice) => {
+            w.write(9, 4);
+            w.write(choice as u64, 2);
+        }
+        CommandKind::RerollAugments => w.write(10, 4),
     }
 }
 
@@ -305,6 +313,8 @@ fn read_command(r: &mut BitReader) -> Result<Command, DecodeError> {
         6 => CommandKind::Buy(r.read_u8()?),
         7 => CommandKind::Sell(r.read(3)? as u8),
         8 => CommandKind::Undo,
+        9 => CommandKind::PickAugment(r.read(2)? as u8),
+        10 => CommandKind::RerollAugments,
         _ => return Err(DecodeError::Invalid("command kind")),
     };
     Ok(Command { player: PlayerId(0), seq, tick, sub, kind })
@@ -756,6 +766,12 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
         }
         w.write_f32(t.gold);
     }
+    for a in p.augments.iter().chain(&p.offer) {
+        w.write_u8(*a);
+    }
+    w.write(p.drafted as u64, 3);
+    w.write_bool(p.rerolled);
+    w.write_u32(p.augment_seed);
 }
 
 fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
@@ -835,7 +851,34 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         }
         t.gold = read_finite(r)?;
     }
-    let progress = Progress { level, xp, gold, ranks, points, streak, items, lifeline_ready, undo, undo_len };
+    let mut augments = [0u8; mftr_sim::augments::SLOTS];
+    for a in augments.iter_mut() {
+        *a = r.read_u8()?;
+    }
+    let mut offer = [0u8; mftr_sim::augments::CHOICES];
+    for a in offer.iter_mut() {
+        *a = r.read_u8()?;
+    }
+    let drafted = r.read(3)? as u8;
+    let rerolled = r.read_bool()?;
+    let augment_seed = r.read_u32()?;
+    let progress = Progress {
+        level,
+        xp,
+        gold,
+        ranks,
+        points,
+        streak,
+        items,
+        lifeline_ready,
+        undo,
+        undo_len,
+        augments,
+        offer,
+        drafted,
+        rerolled,
+        augment_seed,
+    };
     Ok(UnitState {
         pos,
         order,
@@ -1098,6 +1141,7 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             w.write_f32(rules.start_gold);
             w.write_f32(rules.passive_gold);
             w.write_bool(rules.ranked);
+            w.write_bool(rules.augments);
             w.write_u32(tick.0);
             w.write_u8(*tick_hz);
             w.write_u32(*since_tick_us);
@@ -1194,6 +1238,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 start_gold: read_finite(&mut r)?,
                 passive_gold: read_finite(&mut r)?,
                 ranked: r.read_bool()?,
+                augments: r.read_bool()?,
             },
             tick: Tick(r.read_u32()?),
             tick_hz: r.read_u8()?,
@@ -1314,6 +1359,8 @@ mod tests {
             c(47, CommandKind::Buy(25)),
             c(48, CommandKind::Sell(5)),
             c(49, CommandKind::Undo),
+            c(50, CommandKind::PickAugment(2)),
+            c(51, CommandKind::RerollAugments),
         ];
         // At most 8 commands per packet: two packets cover every kind.
         for commands in [commands[..8].to_vec(), commands[8..].to_vec()] {
@@ -1410,6 +1457,11 @@ mod tests {
                     Trade { items: [0; INVENTORY], gold: 0.0 },
                 ],
                 undo_len: 2,
+                augments: [17, 2, 0, 0],
+                offer: [11, 13, 16],
+                drafted: 3,
+                rerolled: true,
+                augment_seed: 0xdead_beef,
             },
         }
     }

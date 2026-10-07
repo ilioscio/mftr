@@ -58,6 +58,8 @@ pub enum Scenario {
     /// M2: an ARAM match on The Bridge: structures, minion waves, relics, a winner. A new
     /// match starts 10 s after a Base falls.
     Aram,
+    /// M3: ARAM: Mayhem, ARAM with augment drafts (06 §3).
+    Mayhem,
 }
 
 impl Scenario {
@@ -66,7 +68,7 @@ impl Scenario {
         match self {
             Scenario::Empty => MapId::Open,
             Scenario::MinionSandbox | Scenario::DodgeRig | Scenario::Duel => MapId::Arena,
-            Scenario::Aram => MapId::Bridge,
+            Scenario::Aram | Scenario::Mayhem => MapId::Bridge,
         }
     }
 
@@ -77,6 +79,7 @@ impl Scenario {
             "dodge" => Some(Scenario::DodgeRig),
             "duel" => Some(Scenario::Duel),
             "aram" => Some(Scenario::Aram),
+            "mayhem" => Some(Scenario::Mayhem),
             _ => None,
         }
     }
@@ -89,6 +92,7 @@ impl Scenario {
             Scenario::DodgeRig => msg::GameMode::Dodge,
             Scenario::Duel => msg::GameMode::Duel,
             Scenario::Aram => msg::GameMode::Aram,
+            Scenario::Mayhem => msg::GameMode::Mayhem,
         }
     }
 
@@ -99,7 +103,13 @@ impl Scenario {
             Scenario::DodgeRig => "dodge",
             Scenario::Duel => "duel",
             Scenario::Aram => "aram",
+            Scenario::Mayhem => "mayhem",
         }
+    }
+
+    /// ARAM and its variants: The Bridge, a full match with champion select.
+    pub fn is_aram(self) -> bool {
+        matches!(self, Scenario::Aram | Scenario::Mayhem)
     }
 }
 
@@ -1278,10 +1288,11 @@ mod tests {
         assert!(text.contains("\nR 399\n"), "the restart is recorded");
         let replay = Replay::from_text(&text).unwrap();
         assert_eq!(replay, m.replay());
-        // Hashes after ticks 300 and 600, before and after the restart.
+        // Hashes after ticks 300 and 600 (before and after the restart) and the final one.
         let check = replay.verify();
         assert_eq!(check.mismatch, None);
-        assert_eq!(check.hashes_checked, 2);
+        assert_eq!(check.hashes_checked, 3);
+        assert_eq!(check.final_hash, m.world().state_hash());
     }
 
     /// After a Base falls, a server with champion select holds it again for everyone still

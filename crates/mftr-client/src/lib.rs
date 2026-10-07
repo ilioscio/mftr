@@ -546,6 +546,16 @@ impl ClientSession {
         self.issue(CommandKind::Undo, now)
     }
 
+    /// Keep choice 0–2 of the open augment draft (ARAM: Mayhem). Predicted.
+    pub fn pick_augment(&mut self, choice: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::PickAugment(choice), now)
+    }
+
+    /// Reroll the open augment draft (once per draft). Predicted.
+    pub fn reroll_augments(&mut self, now: f64) -> Option<Command> {
+        self.issue(CommandKind::RerollAugments, now)
+    }
+
     /// Whether the shop is open for the own champion right now (predicted state).
     pub fn can_shop(&self) -> bool {
         self.world.unit(self.unit).is_some_and(|u| mftr_sim::world::can_shop(u, self.world.map(), &self.rules))

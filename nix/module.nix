@@ -17,6 +17,8 @@
 let
   inherit (lib) mkOption mkEnableOption types;
   cfg = config.services.mftr;
+  # ARAM and its variants: champion select and bots by default.
+  aram = s: lib.elem s.scenario [ "aram" "mayhem" ];
   enabled = lib.filterAttrs (_: s: s.enable) cfg.servers;
 
   server = { name, config, ... }: {
@@ -39,18 +41,19 @@ let
       };
 
       scenario = mkOption {
-        type = types.enum [ "aram" "duel" "minions" "dodge" "empty" ];
+        type = types.enum [ "aram" "mayhem" "duel" "minions" "dodge" "empty" ];
         default = "aram";
         description = ''
-          `aram`: The Bridge, a full match with a winner. `duel`: the Duel Sandbox. `minions`,
+          `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM with augment drafts.
+          `duel`: the Duel Sandbox. `minions`,
           `dodge`, `empty`: test grounds (`dodge` is the blind playtest's dodge rig).
         '';
       };
 
       bots = mkOption {
         type = types.ints.u8;
-        default = if config.scenario == "aram" then 10 else 0;
-        defaultText = lib.literalExpression ''if scenario == "aram" then 10 else 0'';
+        default = if aram config then 10 else 0;
+        defaultText = lib.literalExpression ''if scenario is "aram" or "mayhem" then 10 else 0'';
         description = ''
           Server bots. They count toward `maxPlayers`, and with `lobby` a joining human takes a
           bot's place.
@@ -59,8 +62,8 @@ let
 
       lobby = mkOption {
         type = types.bool;
-        default = config.scenario == "aram";
-        defaultText = lib.literalExpression ''scenario == "aram"'';
+        default = aram config;
+        defaultText = lib.literalExpression ''scenario is "aram" or "mayhem"'';
         description = "Champion select before each match (ARAM all-random with rerolls).";
       };
 

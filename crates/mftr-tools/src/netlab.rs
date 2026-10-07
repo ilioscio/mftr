@@ -81,7 +81,7 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                 down: SimLink::new(cfg.profile, s * 2 + 2),
                 bot: match cfg.scenario {
                     Scenario::DodgeRig => Bot::Dodge(DodgeBot::new(s, cfg.reaction)),
-                    Scenario::Duel | Scenario::Aram => Bot::Duel(DuelBot::new(s, cfg.reaction)),
+                    Scenario::Duel | Scenario::Aram | Scenario::Mayhem => Bot::Duel(DuelBot::new(s, cfg.reaction)),
                     _ => Bot::Click(ClickBot::new(s)),
                 },
                 jumps: JumpMeter::default(),
@@ -389,6 +389,42 @@ mod tests {
         assert!(s.dodge.near_misses >= 20, "the bots should be dodging skillshots: {}", s.dodge_row());
         assert!(s.ghost_rate() < 0.02, "{}", s.dodge_row());
         assert!((s.dodge.phantom_hits as f64) <= 0.03 * s.dodge.near_misses as f64, "{}", s.dodge_row());
+    }
+
+    /// M3 slice 1: ARAM: Mayhem over a lossy link. Every client drafts augments with predicted
+    /// picks, prediction stays stable, and the server's recording re-simulates exactly.
+    #[test]
+    fn mayhem_drafts_are_predicted_and_replayed() {
+        let r = run(&LabConfig {
+            profile: LinkProfile::MID,
+            clients: 4,
+            seconds: 90.0,
+            seed: 4,
+            fps: 60.0,
+            warmup: 5.0,
+            scenario: Scenario::Mayhem,
+            proxies: true,
+            reaction: 0.25,
+            margin_override: None,
+        });
+        let s = &r.summary;
+        assert_eq!(s.hard_resets, 0, "{}", s.row());
+        assert!(s.visible_mean < 15.0, "{}", s.row());
+        let drafted: std::collections::BTreeSet<u8> = r
+            .replay
+            .entries
+            .iter()
+            .flat_map(|e| match e {
+                mftr_server::ReplayEntry::Commands { commands, .. } => commands.clone(),
+                _ => Vec::new(),
+            })
+            .filter(|c| matches!(c.kind, mftr_sim::CommandKind::PickAugment(_)))
+            .map(|c| c.player.0)
+            .collect();
+        assert_eq!(drafted.len(), 4, "every client drafted: {drafted:?}");
+        let check = r.replay.verify();
+        assert_eq!(check.mismatch, None);
+        assert_eq!(check.final_hash, r.server_hash);
     }
 
     /// M2 slice 1: ARAM on The Bridge with 3v3 bots (waves, turrets, relics, fountains): stable

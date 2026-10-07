@@ -456,6 +456,7 @@ func _process(delta: float) -> void:
 		_build_map()
 	if playing:
 		_update_blind()
+	_update_draft(playing)
 	own_status = client.own_status() if playing else {}
 	_update_shop(delta)
 	_update_lobby(delta, phase)
@@ -1528,6 +1529,12 @@ func _draw_inventory(font: Font, origin: Vector2) -> void:
 		overlay.draw_rect(box, Color(0.85, 0.7, 0.35) if id != 0 else Color(0.3, 0.3, 0.35), false, 1.5)
 		if id != 0:
 			overlay.draw_string(font, p + Vector2(4, 24), item_names.get(id, "?"), HORIZONTAL_ALIGNMENT_LEFT, 80, 12, Color(0.9, 0.9, 0.95))
+	# ARAM: Mayhem: the augments held, above the inventory.
+	var held: Array = own_status.get("augments", [])
+	for i in held.size():
+		var a: Dictionary = held[i]
+		var at := origin + Vector2(0, -10 - 18 * (held.size() - 1 - i))
+		overlay.draw_string(font, at, "◆ " + a.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, _tier_color(a.tier))
 
 
 ## ---- Session, champion select and spectating (M2 slice 5) --------------------------------------
@@ -1961,3 +1968,88 @@ func _reset_match_view() -> void:
 	floaters.clear()
 	notices.clear()
 	_lobby_ready = false
+
+
+## ---- Augment draft (ARAM: Mayhem, M3) -------------------------------------------------------------
+## At its draft levels the champion is offered three augments of one tier: click one to keep it
+## (predicted, like shopping), or reroll the offer once. Play goes on while the cards are up.
+
+var draft_panel: PanelContainer
+var draft_box: VBoxContainer
+var _draft_shown := ""                  # the offer on screen (rebuilt when it changes)
+
+
+func _tier_color(tier: String) -> Color:
+	match tier:
+		"Gold":
+			return Color(1.0, 0.8, 0.3)
+		"Prismatic":
+			return Color(0.85, 0.55, 1.0)
+	return Color(0.78, 0.82, 0.88)
+
+
+func _update_draft(playing: bool) -> void:
+	var offer: Array = own_status.get("offer", []) if playing else []
+	if offer.is_empty():
+		if draft_panel != null:
+			draft_panel.queue_free()
+			draft_panel = null
+		_draft_shown = ""
+		return
+	var can_reroll: bool = own_status.get("can_reroll", false)
+	var key := str(offer.map(func(c): return c.id)) + str(can_reroll)
+	if draft_panel == null:
+		var made := _panel(760)
+		draft_panel = made[0]
+		draft_box = made[1]
+	if key != _draft_shown:
+		_draft_shown = key
+		for c in draft_box.get_children():
+			c.queue_free()
+		var title := Label.new()
+		title.text = "Choose a %s augment" % offer[0].tier
+		title.add_theme_font_size_override("font_size", 20)
+		title.add_theme_color_override("font_color", _tier_color(offer[0].tier))
+		draft_box.add_child(title)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		draft_box.add_child(row)
+		for i in offer.size():
+			row.add_child(_augment_card(offer[i], i))
+		var reroll := Button.new()
+		reroll.text = "Reroll" if can_reroll else "Rerolled"
+		reroll.disabled = not can_reroll
+		reroll.focus_mode = Control.FOCUS_NONE
+		reroll.pressed.connect(func(): client.reroll_augments())
+		draft_box.add_child(reroll)
+	# Low on the screen, above the ability bar, so the fight stays visible.
+	draft_panel.position = Vector2((overlay.size.x - draft_panel.size.x) / 2.0, overlay.size.y - draft_panel.size.y - 150.0)
+
+
+func _augment_card(a: Dictionary, choice: int) -> Button:
+	var card := Button.new()
+	card.custom_minimum_size = Vector2(230, 130)
+	card.focus_mode = Control.FOCUS_NONE
+	card.pressed.connect(func(): client.pick_augment(choice))
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 10)
+	card.add_child(margin)
+	var v := VBoxContainer.new()
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_child(v)
+	var name := Label.new()
+	name.text = a.name
+	name.add_theme_font_size_override("font_size", 18)
+	name.add_theme_color_override("font_color", _tier_color(a.tier))
+	name.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(name)
+	var text := Label.new()
+	text.text = a.text
+	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	text.custom_minimum_size = Vector2(205, 0)
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(text)
+	return card

@@ -18,6 +18,7 @@
 //! announced (id 0) so the client can draw them at once.
 
 use crate::ability::{Ability, Cc, DamageKind, Effect, LUNGE_PICK, LineSkillshot, SLOTS, SUPPORT_PICK, TURRET_SHOT};
+use crate::augments;
 use crate::champion::{AttackSpec, ChampionId, Stats};
 use crate::collision::{Obstacle, choose_detour, constrained_move};
 use crate::combat::resist_multiplier;
@@ -164,6 +165,16 @@ pub struct Progress {
     /// shop closes (01 §11: undo until you leave the fountain).
     pub undo: [Trade; UNDO],
     pub undo_len: u8,
+    /// Augments held (ids, 0 = empty slot; ARAM: Mayhem, 06 §3).
+    pub augments: [u8; augments::SLOTS],
+    /// The open draft's choices (all 0 when none is open).
+    pub offer: [u8; augments::CHOICES],
+    /// Drafts opened so far (the open one included).
+    pub drafted: u8,
+    /// The open draft was rerolled.
+    pub rerolled: bool,
+    /// Seeds this champion's offers, so picks and rerolls are predicted exactly.
+    pub augment_seed: u32,
 }
 
 /// One buy or sell: the inventory before it and the gold it changed.
@@ -175,6 +186,9 @@ pub struct Trade {
 
 /// How many trades can be undone.
 pub const UNDO: usize = 4;
+
+/// Level, items and augments: what a champion's stats are computed from.
+pub type StatsKey = (u8, [u8; INVENTORY], [u8; augments::SLOTS]);
 
 impl Progress {
     /// Sandbox default: level 1, every ability at rank 1, nothing to spend.
@@ -189,6 +203,11 @@ impl Progress {
         lifeline_ready: SimTime(0),
         undo: [Trade { items: [0; INVENTORY], gold: 0.0 }; UNDO],
         undo_len: 0,
+        augments: [0; augments::SLOTS],
+        offer: [0; augments::CHOICES],
+        drafted: 0,
+        rerolled: false,
+        augment_seed: 0,
     };
 
     pub fn hash_into(&self, h: &mut impl StateSink) {
@@ -211,6 +230,20 @@ impl Progress {
             }
             h.write_f32(t.gold);
         }
+        for a in self.augments {
+            h.write_u8(a);
+        }
+        for a in self.offer {
+            h.write_u8(a);
+        }
+        h.write_u8(self.drafted);
+        h.write_u8(self.rerolled as u8);
+        h.write_u32(self.augment_seed);
+    }
+
+    /// What a champion's stats are computed from.
+    pub fn stats_key(&self) -> StatsKey {
+        (self.level, self.items, self.augments)
     }
 
     fn push_trade(&mut self, t: Trade) {
@@ -239,13 +272,19 @@ pub struct Rules {
     pub passive_gold: f32,
     /// Ability ranks are learned with points (else every ability is rank 1).
     pub ranked: bool,
+    /// Augment drafts (ARAM: Mayhem, 06 §3).
+    pub augments: bool,
 }
 
 impl Rules {
     /// Sandboxes: level 1, every ability at rank 1, no economy.
-    pub const SANDBOX: Rules = Rules { start_level: 1, start_gold: 0.0, passive_gold: 0.0, ranked: false };
+    pub const SANDBOX: Rules =
+        Rules { start_level: 1, start_gold: 0.0, passive_gold: 0.0, ranked: false, augments: false };
     /// ARAM (06 §2): a quick start and faster gold *(start values)*.
-    pub const ARAM: Rules = Rules { start_level: 3, start_gold: 1400.0, passive_gold: 4.0, ranked: true };
+    pub const ARAM: Rules =
+        Rules { start_level: 3, start_gold: 1400.0, passive_gold: 4.0, ranked: true, augments: false };
+    /// ARAM: Mayhem (06 §2): ARAM with augment drafts.
+    pub const MAYHEM: Rules = Rules { augments: true, ..Rules::ARAM };
 
     pub fn progress(&self) -> Progress {
         if !self.ranked {
@@ -652,9 +691,9 @@ pub struct Unit {
     pub tier: u8,
     /// A structure behind one that still stands: can't be hurt. Recomputed every tick.
     pub protected: bool,
-    /// The level and items `stats` and `attack` were computed for (champions: recomputed when
-    /// either changes).
-    pub stats_for: (u8, [u8; INVENTORY]),
+    /// The level, items and augments `stats` and `attack` were computed for (champions:
+    /// recomputed when any of them changes).
+    pub stats_for: StatsKey,
 }
 
 impl Unit {
@@ -677,7 +716,7 @@ impl Unit {
             attack: None,
             tier: 0,
             protected: false,
-            stats_for: (1, [0; INVENTORY]),
+            stats_for: (1, [0; INVENTORY], [0; augments::SLOTS]),
         }
     }
 
@@ -699,11 +738,11 @@ impl Unit {
     /// is capped by it. Returns whether anything was recomputed.
     pub fn refresh_stats(&mut self) -> bool {
         let Some(c) = self.champion else { return false };
-        let key = (self.state.progress.level, self.state.progress.items);
+        let key = self.state.progress.stats_key();
         if key == self.stats_for {
             return false;
         }
-        let (stats, attack) = items::champion_stats(c.def(), key.0, &key.1);
+        let (stats, attack) = items::champion_stats(c.def(), key.0, &key.1, &key.2);
         if self.state.alive() {
             self.state.health =
                 (self.state.health + (stats.max_health - self.stats.max_health).max(0.0)).min(stats.max_health);
@@ -719,8 +758,8 @@ impl Unit {
     /// re-syncs, spawns).
     pub fn reset_stats(&mut self) {
         let Some(c) = self.champion else { return };
-        let key = (self.state.progress.level, self.state.progress.items);
-        let (stats, attack) = items::champion_stats(c.def(), key.0, &key.1);
+        let key = self.state.progress.stats_key();
+        let (stats, attack) = items::champion_stats(c.def(), key.0, &key.1, &key.2);
         self.stats = stats;
         self.attack = Some(attack);
         self.stats_for = key;
@@ -753,6 +792,10 @@ pub enum CommandKind {
     Sell(u8),
     /// Undo the last buy or sell while the shop is still open.
     Undo,
+    /// Keep choice 0–2 of the open augment draft.
+    PickAugment(u8),
+    /// Replace the open draft's choices (once per draft).
+    RerollAugments,
 }
 
 /// A player command, applied at `tick` at sub-tick position `sub` (03a §3).
@@ -1127,7 +1170,8 @@ impl World {
 
     pub fn spawn_champion(&mut self, owner: PlayerId, team: Team, champion: ChampionId, pos: Vec2) -> UnitId {
         let id = self.next_id();
-        let progress = self.rules.progress();
+        let mut progress = self.rules.progress();
+        progress.augment_seed = self.rng.next_u32();
         let stats = champion.def().stats_at(progress.level);
         let mut u = Unit::champion(id, owner, team, champion, pos, pos, stats);
         u.state.progress = progress;
@@ -1199,8 +1243,9 @@ impl World {
         self.missiles.clear();
         self.areas.clear();
         self.bolts.clear();
-        let progress = self.rules.progress();
         for u in self.units.iter_mut() {
+            let mut progress = self.rules.progress();
+            progress.augment_seed = self.rng.next_u32();
             u.state.progress = progress;
             u.reset_stats();
             u.state = UnitState::new(u.home, u.stats.move_speed);
@@ -1313,7 +1358,10 @@ impl World {
             }
         }
         for u in self.units.iter_mut() {
-            u.refresh_stats(); // level-ups and purchases
+            if self.rules.augments && u.kind == UnitKind::Champion {
+                augments::update_draft(&mut u.state.progress);
+            }
+            u.refresh_stats(); // level-ups, purchases and augments
             if u.state.progress.undo_len > 0 && !can_shop(u, &self.map, &self.rules) {
                 u.state.progress.undo_len = 0; // left the fountain: trades are final
             }
@@ -1841,6 +1889,9 @@ fn apply_command(
             }
         }
         CommandKind::Buy(_) | CommandKind::Sell(_) | CommandKind::Undo => shop(unit, c.kind, map, rules),
+        CommandKind::PickAugment(choice) if rules.augments => augments::pick(&mut st.progress, choice),
+        CommandKind::RerollAugments if rules.augments => augments::reroll(&mut st.progress),
+        CommandKind::PickAugment(_) | CommandKind::RerollAugments => {}
     }
 }
 
@@ -3432,6 +3483,36 @@ mod tests {
         }
     }
 
+    /// M3 slice 1: in ARAM: Mayhem a champion is offered three Silver augments at once (it
+    /// starts at level 3), keeps one with a command, and its stats include it from the next
+    /// tick. Without Mayhem rules nothing is offered and the commands do nothing.
+    #[test]
+    fn mayhem_drafts_augments_into_the_stat_stack() {
+        let mut w = World::new(2);
+        w.set_rules(Rules::MAYHEM);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Bastion, Vec2::new(1000.0, 1000.0));
+        let before = w.unit(me).unwrap().stats;
+        w.step(&[]);
+        let offer = w.unit(me).unwrap().state.progress.offer;
+        assert!(offer.iter().all(|id| augments::augment(*id).is_some_and(|a| a.tier == augments::Tier::Silver)));
+        let pick = |seq, tick, kind| Command { player: PlayerId(0), seq, tick: Tick(tick), sub: SubTick::START, kind };
+        w.step(&[pick(1, 2, CommandKind::PickAugment(2))]);
+        w.step(&[]);
+        let u = w.unit(me).unwrap();
+        assert_eq!(u.state.progress.augments, [offer[2], 0, 0, 0]);
+        assert_eq!(u.state.progress.offer, [0; augments::CHOICES]);
+        let expected = items::champion_stats(ChampionId::Bastion.def(), 3, &[0; INVENTORY], &[offer[2], 0, 0, 0]).0;
+        assert_eq!(u.stats, expected);
+        assert_ne!(u.stats, before, "every Silver augment changes some stat");
+
+        let mut plain = ranked_world();
+        let other = plain.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Bastion, Vec2::new(1000.0, 1000.0));
+        plain.step(&[]);
+        plain.step(&[pick(1, 2, CommandKind::PickAugment(0)), pick(2, 2, CommandKind::RerollAugments)]);
+        let p = plain.unit(other).unwrap().state.progress;
+        assert_eq!((p.offer, p.augments, p.drafted), ([0; 3], [0; 4], 0), "ARAM without Mayhem has no drafts");
+    }
+
     /// M2 slice 2: abilities must be learned; ranks are gated by level (R at 6 / 11 / 16) and
     /// raise damage and cut cooldowns.
     #[test]
@@ -3746,7 +3827,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0x24df_bc72_e447_8dab;
+    const GOLDEN_HASH_ARENA: u64 = 0xb8d4_bdf4_879a_36de;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -3802,7 +3883,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0xc45b_2247_8a7a_b03c;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x6765_da18_e633_4637;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -3873,5 +3954,5 @@ mod tests {
 
     /// Recorded on x86_64-unknown-linux-gnu (debug and release agree). CI checks Linux, macOS
     /// (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x951d_c97b_0131_cea0;
+    const GOLDEN_HASH: u64 = 0x47e0_ff28_b813_3946;
 }

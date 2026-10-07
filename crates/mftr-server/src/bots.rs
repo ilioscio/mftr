@@ -69,6 +69,11 @@ impl Bot {
     fn decide(&mut self, world: &World, me: &Unit, t: SimTime) -> Option<CommandKind> {
         let st = &me.state;
         let p = &st.progress;
+        // An open augment draft (ARAM: Mayhem): take one of the choices.
+        if p.offer[0] != 0 {
+            let choice = self.rng.next_u32() as usize % mftr_sim::augments::CHOICES;
+            return Some(CommandKind::PickAugment(choice as u8));
+        }
         // Shop (dead or in the fountain): the next affordable step of the build path.
         if can_shop(me, world.map(), &world.rules()) {
             let path = mftr_sim::items::build_path(me.champion?);
