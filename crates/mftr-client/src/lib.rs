@@ -19,7 +19,7 @@ use mftr_net::PROTOCOL_VERSION;
 use mftr_net::clock::ClockSync;
 use mftr_net::delta;
 use mftr_net::msg::{self, ClientMessage, CommandReport, RemoteUnit, ServerMessage, Snapshot};
-use mftr_net::packet::{PacketHeader, ReceiveTracker, SendTracker};
+use mftr_net::packet::{PacketHeader, ReceiveTracker, SendTracker, seq_greater};
 use mftr_sim::ability::DamageKind;
 use mftr_sim::time::tick_at;
 use mftr_sim::{
@@ -249,6 +249,10 @@ pub struct ClientSession {
     spectate: bool,
     spectator: bool,
     lobby: Option<msg::LobbyState>,
+    /// What the server runs (from the welcome).
+    mode: msg::GameMode,
+    /// The welcome's packet sequence: champion select sent after it means the match is over.
+    welcome_seq: u16,
     /// The map from the welcome: prediction runs with the same walls and pathing as the server.
     map: std::sync::Arc<mftr_sim::map::Map>,
     /// Predicted world containing only our own unit.
@@ -317,6 +321,8 @@ impl ClientSession {
             spectate: false,
             spectator: false,
             lobby: None,
+            mode: msg::GameMode::Empty,
+            welcome_seq: 0,
             map: mftr_sim::map::MapId::Open.shared(),
             world: World::from_units(Tick(0), Vec::new()),
             history: VecDeque::new(),
@@ -736,9 +742,12 @@ impl ClientSession {
                 time_echo,
                 token,
                 spectator,
+                mode,
                 ..
             } => {
                 if matches!(self.phase, Phase::Connecting | Phase::Lobby) {
+                    self.welcome_seq = header.seq;
+                    self.mode = mode;
                     self.token = token;
                     self.spectator = spectator;
                     self.lobby = None;
@@ -757,12 +766,46 @@ impl ClientSession {
             ServerMessage::Snapshot(s) => self.on_snapshot(*s, now),
             ServerMessage::Reject { .. } => {}
             ServerMessage::Lobby(l) => {
+                // The match ended and the server holds champion select again (packets from the
+                // select before our welcome may still arrive late: those don't count).
+                if matches!(self.phase, Phase::Joining | Phase::Playing) && seq_greater(header.seq, self.welcome_seq) {
+                    self.back_to_lobby();
+                }
                 if matches!(self.phase, Phase::Connecting | Phase::Lobby) {
                     self.phase = Phase::Lobby;
                     self.lobby = Some(*l);
                 }
             }
         }
+    }
+
+    /// Forget the finished match and wait in champion select. The connection (packet
+    /// sequences), settings and cumulative stats stay; clock sync starts over, because the
+    /// server's clock stood still during champion select.
+    fn back_to_lobby(&mut self) {
+        let old = std::mem::take(self);
+        *self = Self {
+            phase: Phase::Lobby,
+            champion_request: old.champion_request,
+            spectate: old.spectate,
+            mode: old.mode,
+            next_seq: old.next_seq,
+            margin: old.margin,
+            margin_target: old.margin_target,
+            margin_override: old.margin_override,
+            collision_proxies: old.collision_proxies,
+            minion_bubble: old.minion_bubble,
+            send: old.send,
+            recv: old.recv,
+            stats: old.stats,
+            book: MissileBook { stats: old.book.stats, own_display: old.book.own_display, ..Default::default() },
+            ..Self::new()
+        };
+    }
+
+    /// What the server runs (known once welcomed).
+    pub fn game_mode(&self) -> msg::GameMode {
+        self.mode
     }
 
     fn on_snapshot(&mut self, s: Snapshot, now: f64) {

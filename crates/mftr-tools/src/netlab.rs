@@ -502,6 +502,147 @@ mod tests {
         assert_eq!(teams.len(), 2, "the spectator sees both teams' champions");
     }
 
+    /// After a Base falls, the same client session goes back to champion select (no
+    /// reconnect), rerolls, and plays the next match with its new champion. A spectator stays
+    /// connected through it all.
+    #[test]
+    fn champion_select_after_each_match_end_to_end() {
+        use mftr_net::msg::LobbyAction;
+        use mftr_sim::{UnitId, UnitKind, Vec2};
+        let cfg = ServerConfig { seed: 5, bots: 10, lobby: true, scenario: Scenario::Aram, ..Default::default() };
+        let mut server = ServerCore::new(cfg, 0.0);
+        let mut session = ClientSession::new();
+        let mut watcher = ClientSession::new();
+        watcher.set_spectate(true);
+        let links = |a, b| (SimLink::new(LinkProfile::TYPICAL, a), SimLink::new(LinkProfile::TYPICAL, b));
+        let ((mut up, mut down), (mut wup, mut wdown)) = (links(5, 6), links(7, 8));
+        let (mut t, mut next_hello, mut next_attack) = (0.0, 0.0, 0.0);
+        // Matches played, the champion of each, and the reroll in the second champion select.
+        let (mut matches, mut champions, mut rerolled) = (0, Vec::new(), None);
+        let (mut base, mut was_playing) = (None, false);
+        while t < 60.0 && champions.len() < 2 {
+            for (key, link) in [(1, &mut up), (2, &mut wup)] {
+                while let Some(p) = link.recv(t) {
+                    for (to, bytes) in server.handle_packet(key, &p, t) {
+                        if to == 1 { down.send(bytes, t) } else { wdown.send(bytes, t) }
+                    }
+                }
+            }
+            if t >= server.next_tick_due() {
+                for (to, bytes) in server.step(t) {
+                    if to == 1 { down.send(bytes, t) } else { wdown.send(bytes, t) }
+                }
+            }
+            while let Some(p) = down.recv(t) {
+                session.handle_packet(&p, t);
+            }
+            while let Some(p) = wdown.recv(t) {
+                watcher.handle_packet(&p, t);
+            }
+            session.update(t);
+            watcher.update(t);
+            let entered = session.phase() == Phase::Playing && !was_playing;
+            was_playing = session.phase() == Phase::Playing;
+            match session.phase() {
+                Phase::Lobby if t >= next_hello => {
+                    let l = session.lobby().unwrap().clone();
+                    let me = *l.slots.iter().find(|s| s.player == l.you).unwrap();
+                    if matches == 1 && rerolled.is_none() && me.rerolls == mftr_server::lobby::REROLLS {
+                        up.send(session.lobby_packet(LobbyAction::Reroll), t);
+                    } else {
+                        if matches == 1 && me.rerolls < mftr_server::lobby::REROLLS {
+                            rerolled = Some(me.champion);
+                        }
+                        up.send(session.lobby_packet(LobbyAction::Ready(true)), t);
+                    }
+                }
+                Phase::Playing if entered => {
+                    champions.push(session.champion());
+                    matches += 1;
+                    if matches == 1 {
+                        // End this match quickly: only the enemy Base is left, and we stand by it.
+                        let team = session.team();
+                        let w = server.world_mut();
+                        let b = w.units().iter().find(|u| u.kind == UnitKind::Base && u.team != team).unwrap();
+                        let (id, pos, tier) = (b.id, b.state.pos, b.tier);
+                        let guards: Vec<UnitId> = w
+                            .units()
+                            .iter()
+                            .filter(|u| u.team != team && u.kind.is_structure() && u.tier > 0 && u.tier < tier)
+                            .map(|u| u.id)
+                            .collect();
+                        for g in guards {
+                            w.despawn(g);
+                        }
+                        w.unit_mut(id).unwrap().state.health = 1.0;
+                        let me = w.unit_mut(session.unit()).unwrap();
+                        me.state.pos = pos + Vec2::new(if team == Team::Blue { -300.0 } else { 300.0 }, 0.0);
+                        base = Some(id);
+                    }
+                }
+                Phase::Playing if matches == 1 && t >= next_attack => {
+                    if let Some(id) = base
+                        && server.world().unit(id).is_some()
+                    {
+                        session.attack(id, t);
+                    }
+                    next_attack = t + 0.5;
+                }
+                _ => {}
+            }
+            if matches!(session.phase(), Phase::Connecting | Phase::Lobby) && t >= next_hello {
+                up.send(session.hello_packet(t), t);
+                next_hello = t + 0.25;
+            }
+            if session.phase() == Phase::Playing && session.should_send(t) {
+                up.send(session.input_packet(t), t);
+            }
+            if matches!(watcher.phase(), Phase::Connecting | Phase::Joining) && t >= next_hello {
+                wup.send(watcher.hello_packet(t), t);
+            }
+            if watcher.phase() == Phase::Playing && watcher.should_send(t) {
+                wup.send(watcher.input_packet(t), t);
+            }
+            t += 0.001;
+        }
+        assert_eq!(champions.len(), 2, "two matches by {t:.1} s");
+        assert!(rerolled.is_some(), "a second champion select, with rerolls");
+        assert_eq!(champions[1], rerolled.unwrap(), "the next match is played with the new champion");
+        assert_eq!(server.game().player_count(), 10);
+        assert!(server.world().game().winner.is_none());
+        assert_eq!(session.game_mode(), mftr_net::msg::GameMode::Aram);
+        // Prediction works in the new match: our champion is where the server has it.
+        for _ in 0..300 {
+            t += 1.0 / 30.0;
+            if t >= server.next_tick_due() {
+                for (to, bytes) in server.step(t) {
+                    if to == 1 {
+                        down.send(bytes, t);
+                    }
+                }
+            }
+            while let Some(p) = down.recv(t) {
+                session.handle_packet(&p, t);
+            }
+            session.update(t);
+            if session.should_send(t) {
+                up.send(session.input_packet(t), t);
+            }
+            while let Some(p) = up.recv(t) {
+                for (to, bytes) in server.handle_packet(1, &p, t) {
+                    if to == 1 {
+                        down.send(bytes, t);
+                    }
+                }
+            }
+        }
+        assert_eq!(session.phase(), Phase::Playing);
+        let server_pos = server.world().unit(session.unit()).unwrap().state.pos;
+        let drawn = session.own_render_position(t).unwrap();
+        assert!(drawn.distance(server_pos) < 50.0, "drawn {drawn:?}, server {server_pos:?}");
+        assert!(watcher.is_spectator(), "the spectator is still watching");
+    }
+
     /// Q13: over a lossy, jittery link with moving minions, every snapshot the client
     /// reconstructs from deltas equals, bit for bit, what the server recorded for it.
     #[test]

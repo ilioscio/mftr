@@ -183,6 +183,8 @@ pub enum ServerMessage {
         token: u64,
         /// Watching: no own unit, full vision.
         spectator: bool,
+        /// What the server runs (shown in the client's server list).
+        mode: GameMode,
     },
     Snapshot(Box<Snapshot>),
     Reject {
@@ -190,6 +192,41 @@ pub enum ServerMessage {
     },
     /// Champion select, sent a few times a second until the match starts.
     Lobby(Box<LobbyState>),
+}
+
+/// The kind of game a server runs (its scenario).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GameMode {
+    #[default]
+    Empty = 0,
+    Minions = 1,
+    Dodge = 2,
+    Duel = 3,
+    Aram = 4,
+}
+
+impl GameMode {
+    pub fn from_u8(v: u8) -> Option<Self> {
+        Some(match v {
+            0 => GameMode::Empty,
+            1 => GameMode::Minions,
+            2 => GameMode::Dodge,
+            3 => GameMode::Duel,
+            4 => GameMode::Aram,
+            _ => return None,
+        })
+    }
+
+    /// For players: "ARAM", "Duel Sandbox", ...
+    pub fn label(self) -> &'static str {
+        match self {
+            GameMode::Empty => "Open sandbox",
+            GameMode::Minions => "Minion sandbox",
+            GameMode::Dodge => "Dodge rig",
+            GameMode::Duel => "Duel Sandbox",
+            GameMode::Aram => "ARAM",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1048,6 +1085,7 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             time_echo,
             token,
             spectator,
+            mode,
         } => {
             let mut w = begin(header, 0);
             w.write_u8(player.0);
@@ -1066,6 +1104,7 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             write_echo(&mut w, time_echo);
             w.write_u64(*token);
             w.write_bool(*spectator);
+            w.write(*mode as u64, 3);
             w.finish()
         }
         ServerMessage::Snapshot(s) => {
@@ -1162,6 +1201,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             time_echo: read_echo(&mut r)?,
             token: r.read_u64()?,
             spectator: r.read_bool()?,
+            mode: GameMode::from_u8(r.read(3)? as u8).ok_or(DecodeError::Invalid("game mode"))?,
         },
         1 => {
             let tick = Tick(r.read_u32()?);
@@ -1563,6 +1603,7 @@ mod tests {
             time_echo: TimeEcho { client_time_us: 1, hold_us: 2 },
             token: u64::MAX - 5,
             spectator: false,
+            mode: GameMode::Aram,
         };
         assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
     }
