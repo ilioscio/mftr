@@ -281,10 +281,10 @@ Claude's MCP session can drive all of steps 2–5, and a human can take over any
 
 ### 8.3 Export
 
-`blender -b art/champions/<id>/<id>.blend --python tools/blender/export.py` (or the add-on button) writes:
-- **`<id>.glb`**: one skinned mesh plus prop meshes, vertex colors, the material-slot names, all actions sampled at 30 fps, and no images. It's deterministic: the same `.blend` gives the same bytes.
-- **`<id>.anims.ron`**: per clip, the frame count, loop flag, markers and authored stride speed (locomotion). glTF has no markers, so they travel in this sidecar.
-- **Key reduction** at export (tolerance 0.1° / 0.5 mm *(start)*). The runtime stores animations in Godot's compressed form.
+`blender -b art/champions/<id>/<id>.blend --python tools/blender/run.py -- export --id <id> --kind champion` (or the add-on button) writes:
+- **`<id>.glb`**: one skinned mesh plus prop meshes, vertex colors, the material-slot names, every clip (one action per NLA track) sampled at 30 fps, and no images, normals or UVs (shading is faceted from screen-space derivatives). It's deterministic: the same `.blend` gives the same bytes.
+- **`<id>.anims.ron`**: per clip, the frame count, loop flag, layer (`full`, `upper`, `additive`), markers and authored stride speed (locomotion). glTF has no markers, so they travel in this sidecar.
+- **Key reduction** at export (tolerance 0.1° / 0.5 mm *(start)*), and channels that never leave rest are dropped: **a missing channel means "at rest"** for the runtime. The runtime stores animations in Godot's compressed form.
 
 ### 8.4 Validation (CI and add-on)
 

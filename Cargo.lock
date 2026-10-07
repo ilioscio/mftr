@@ -291,6 +291,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mftr-pack"
+version = "0.4.0"
+dependencies = [
+ "mftr-sim",
+ "nanoserde",
+]
+
+[[package]]
 name = "mftr-server"
 version = "0.4.0"
 dependencies = [
@@ -308,6 +316,7 @@ version = "0.4.0"
 dependencies = [
  "mftr-client",
  "mftr-net",
+ "mftr-pack",
  "mftr-server",
  "mftr-sim",
 ]

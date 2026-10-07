@@ -7,6 +7,7 @@ members = [
     "crates/mftr-server",
     "crates/mftr-tools",
     "crates/mftr-gdext",
+    "crates/mftr-pack",
 ]
 
 [workspace.package]
@@ -20,6 +21,7 @@ mftr-sim = { path = "crates/mftr-sim" }
 mftr-net = { path = "crates/mftr-net" }
 mftr-client = { path = "crates/mftr-client" }
 mftr-server = { path = "crates/mftr-server" }
+mftr-pack = { path = "crates/mftr-pack" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

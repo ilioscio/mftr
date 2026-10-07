@@ -49,6 +49,8 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The start menu 
 
 **ARAM on The Bridge** (M2, in progress): start the server with `--scenario aram`. You get one lane with turrets, a Gatehouse and a Base per team, minion waves every 30 s, health relics and a fountain; destroy the enemy Base to win. You start at level 3 with 1,400 gold: press **P** in the fountain to shop. Bots (`mftr-tools bot --duel`) also play it, though not well yet.
 
+**Art:** champion models and animations are Blender 5.2 sources in `art/`, built to the rig standard and timing contract of [10](docs/design/10-characters-and-animation.md). See the [art guide](art/README.md) for the add-on, headless export and review renders; `cargo run -p mftr-tools -- pack validate art` checks them.
+
 **Hosting:** see the [hosting guide](docs/hosting.md). The short version: `docker compose -f deploy/compose.yaml up -d` runs an ARAM server (champion select, bots filling empty slots) on UDP 7777 and a duel server on 7778. On NixOS, import the flake's module and set `services.mftr.enable = true` (see the guide).
 
 **Releasing:** run `scripts/bump-version.sh X.Y.Z` (it updates `Cargo.toml`, `Cargo.lock` and the macOS export preset together; CI builds with `--locked`, so a hand-edited version fails), merge that to `main`, then tag the merge commit on `main`: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag builds and publishes the release from exactly that commit.

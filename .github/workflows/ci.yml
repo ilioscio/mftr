@@ -34,6 +34,20 @@ jobs:
       - name: Tests (incl. golden state hash and Netcode Lab targets)
         run: cargo test --workspace --release
 
+      - name: Art packs (rig standard, caps, clips, markers; 10 §8.4)
+        if: matrix.os == 'ubuntu-latest'
+        # `shell: bash` runs with pipefail, so a failing validation fails the step through `tee`.
+        shell: bash
+        run: |
+          {
+            echo '### Art validation'
+            echo '```'
+            cargo run -q --release -p mftr-tools -- pack validate art
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          # The Blender tools need Blender to run; CI at least checks they compile.
+          python3 -m py_compile tools/blender/run.py tools/blender/mftr_blender/*.py
+
       - name: Encrypted UDP smoke test (server and bot, pinned key)
         if: matrix.os == 'ubuntu-latest'
         run: |
