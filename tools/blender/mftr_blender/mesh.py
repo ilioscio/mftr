@@ -15,7 +15,9 @@ from mathutils import Vector
 from . import head, rig
 
 # The fixed material slots (10 §2). `accent` is tinted ally/enemy at runtime.
-MATERIAL_SLOTS = ("skin", "cloth", "metal", "emissive", "accent")
+MATERIAL_SLOTS = ("skin", "cloth", "metal", "emissive", "accent", "accent_glow")
+# Baked occlusion runs from the ground to this height (the figure's height).
+AO_HEIGHT = 1.9
 
 # Template palette: a neutral "trainee". Accent shows the default ally blue in reviews.
 SKIN = (0.86, 0.64, 0.50)
@@ -164,7 +166,7 @@ def _loft(bm, a, b, sides, profile, mat, color, group, layers):
         for vert in ring:
             vert[deform][group] = 1.0
             # Height-based occlusion in alpha: darker toward the ground (05 §2 cavity/AO).
-            ao = max(0.55, min(1.0, 0.55 + 0.45 * vert.co.z / 1.9))
+            ao = max(0.55, min(1.0, 0.55 + 0.45 * vert.co.z / AO_HEIGHT))
             vert[col] = (*color, ao)
 
 
