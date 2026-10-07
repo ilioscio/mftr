@@ -6,8 +6,13 @@
 //! client exactly like shopping. Stat augments join the item stat stack (02 §10): flat bonuses
 //! with the items, then conversions, then percent bonuses, then caps.
 
+use crate::ability::{
+    Ability, Cc, Damage, DamageKind, Dash, DelayedArea, Effect as Shape, RankScaling, ReactionClass, Support,
+    Transforms,
+};
 use crate::items::Bonus;
 use crate::rng::Pcg32;
+use crate::time::SimDuration;
 use crate::world::Progress;
 
 /// Augments a champion can hold.
@@ -58,6 +63,167 @@ pub enum Effect {
     Pebble,
     /// Titan or Pebble, rolled again at every respawn.
     Unstable,
+    /// More damage to targets below a share of their health.
+    Executioner,
+    /// More damage to targets at full health.
+    FirstStrike,
+    /// More damage the lower your own health.
+    LastStand,
+    /// Ability hits can critically strike.
+    Spellcrit,
+    /// Ability hits on champions grant permanent ability power.
+    Spellhunger,
+    /// Abilities heal for a share of the damage they deal.
+    SpellVamp,
+    /// Champions' basic attacks on you take a share back as magic damage.
+    Thorns,
+    /// The next basic attack after an ability hits harder.
+    Spellblade,
+    /// Takedowns refresh Q, W and E.
+    Reset,
+    /// A quest: enough takedowns grant a large stat reward.
+    ChampionOfChaos,
+    /// No ultimate; Q, W and E hit harder.
+    Fundamentals,
+    /// A ranged champion fights in melee, with stats to compensate.
+    CloseQuarters,
+    /// Longer basic-attack range for ranged champions.
+    Sharpshooter,
+    /// The F utility spell is replaced by this ability.
+    Spell(Ability),
+}
+
+/// The mechanic augments' numbers *(start values)*.
+pub const EXECUTE_BELOW: f32 = 0.35;
+pub const EXECUTE_AMP: f32 = 1.2;
+pub const FIRST_STRIKE_AMP: f32 = 1.12;
+/// Last Stand: up to this much more damage, growing as health falls below the threshold.
+pub const LAST_STAND_MAX: f32 = 0.25;
+pub const LAST_STAND_BELOW: f32 = 0.6;
+/// Spellcrit: one ability hit in this many crits, for this much more damage.
+pub const SPELLCRIT_ONE_IN: u32 = 4;
+pub const SPELLCRIT_AMP: f32 = 1.6;
+/// Spellhunger: ability power per ability hit on a champion, up to a cap.
+pub const SPELLHUNGER_CAP: u16 = 80;
+pub const SPELL_VAMP: f32 = 0.12;
+pub const THORNS: f32 = 0.25;
+/// Spellblade: an ability arms it for this long; the next attack adds the base attack damage.
+pub const SPELLBLADE_MS: u64 = 4000;
+/// Champion of Chaos: takedowns to complete the quest.
+pub const CHAOS_TAKEDOWNS: u8 = 8;
+pub const FUNDAMENTALS_AMP: f32 = 1.35;
+/// Close Quarters: melee reach; Sharpshooter: extra range.
+pub const CLOSE_QUARTERS_RANGE: f32 = 175.0;
+pub const SHARPSHOOTER_RANGE: f32 = 100.0;
+
+const fn ms(v: u64) -> SimDuration {
+    SimDuration::from_millis(v)
+}
+
+/// Vault (replaces F): a long dash.
+pub const VAULT: Ability = Ability {
+    name: "Vault",
+    cooldown: ms(25_000),
+    effect: Shape::Dash(Dash { range: 550.0, speed: 1400.0 }),
+    reaction: ReactionClass::None,
+    per_rank: RankScaling::NONE,
+    transforms: Transforms::NONE,
+};
+
+/// Stormcall (replaces F): a telegraphed nova that knocks up everyone around you.
+pub const STORMCALL: Ability = Ability {
+    name: "Stormcall",
+    cooldown: ms(40_000),
+    effect: Shape::Area(DelayedArea {
+        windup: ms(0),
+        range: 0.0,
+        radius: 300.0,
+        delay: ms(600),
+        damage: Damage { kind: DamageKind::Magic, base: 80.0, ad_ratio: 0.0, ap_ratio: 0.5 },
+        cc: Cc::Knockup(ms(750)),
+    }),
+    reaction: ReactionClass::None,
+    per_rank: RankScaling::NONE,
+    transforms: Transforms::NONE,
+};
+
+/// Mend (replaces F): heal an ally near the cursor, or yourself.
+pub const MEND: Ability = Ability {
+    name: "Mend",
+    cooldown: ms(60_000),
+    effect: Shape::Support(Support {
+        range: 800.0,
+        heal: 150.0,
+        heal_ap: 0.3,
+        heal_missing: 0.0,
+        shield: 0.0,
+        shield_ap: 0.0,
+        duration: ms(0),
+    }),
+    reaction: ReactionClass::None,
+    per_rank: RankScaling::NONE,
+    transforms: Transforms::NONE,
+};
+
+/// What a champion's augments have built up, for the stat stack: the Unstable roll,
+/// Spellhunger's stacks and Champion of Chaos's completed quest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Growth {
+    pub unstable_tiny: bool,
+    pub stacks: u16,
+    pub chaos_done: bool,
+}
+
+impl Growth {
+    pub const NONE: Growth = Growth { unstable_tiny: false, stacks: 0, chaos_done: false };
+}
+
+/// Champion of Chaos's reward.
+pub const CHAOS_REWARD: Bonus = Bonus { attack_damage: 50.0, ability_power: 80.0, health: 500.0, ..Bonus::NONE };
+
+/// The mechanic flags a set of augments grants.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Mods {
+    pub executioner: bool,
+    pub first_strike: bool,
+    pub last_stand: bool,
+    pub spellcrit: bool,
+    pub spellhunger: bool,
+    pub spell_vamp: bool,
+    pub thorns: bool,
+    pub spellblade: bool,
+    pub reset: bool,
+    pub chaos: bool,
+    pub fundamentals: bool,
+}
+
+pub fn mods(slots: &[u8; SLOTS]) -> Mods {
+    let mut m = Mods::default();
+    for a in held(slots) {
+        match a.effect {
+            Effect::Executioner => m.executioner = true,
+            Effect::FirstStrike => m.first_strike = true,
+            Effect::LastStand => m.last_stand = true,
+            Effect::Spellcrit => m.spellcrit = true,
+            Effect::Spellhunger => m.spellhunger = true,
+            Effect::SpellVamp => m.spell_vamp = true,
+            Effect::Thorns => m.thorns = true,
+            Effect::Spellblade => m.spellblade = true,
+            Effect::Reset => m.reset = true,
+            Effect::ChampionOfChaos => m.chaos = true,
+            Effect::Fundamentals => m.fundamentals = true,
+            _ => {}
+        }
+    }
+    m
+}
+
+/// The ability replacing the F utility spell, if an augment grants one.
+pub fn spell(slots: &[u8; SLOTS]) -> Option<Ability> {
+    held(slots).find_map(|a| match a.effect {
+        Effect::Spell(ability) => Some(ability),
+        _ => None,
+    })
 }
 
 /// A champion's size form (06 §3 physical transformations).
@@ -313,6 +479,168 @@ pub const CATALOG: &[Augment] = &[
         b(),
         Effect::Echo
     ),
+    // M3 slice 4: more stats, conditionals, rule breakers, quests and spell replacements.
+    aug!(30, Silver, "Fleetfoot", "+30 movement speed.", Bonus { move_speed: 30.0, ..b() }),
+    aug!(
+        31,
+        Silver,
+        "Arcane Battery",
+        "+200 health and +20 ability power.",
+        Bonus { health: 200.0, ability_power: 20.0, ..b() }
+    ),
+    aug!(
+        32,
+        Silver,
+        "Duelist's Edge",
+        "+15 attack damage and +15% attack speed.",
+        Bonus { attack_damage: 15.0, attack_speed: 0.15, ..b() }
+    ),
+    aug!(33, Silver, "Warded", "+45 magic resist.", Bonus { magic_resist: 45.0, ..b() }),
+    aug!(34, Silver, "Stoneskin", "+45 armor.", Bonus { armor: 45.0, ..b() }),
+    aug!(35, Silver, "Recovery", "+6 health regeneration per second.", Bonus { health_regen: 6.0, ..b() }),
+    aug!(
+        36,
+        Silver,
+        "Scholar",
+        "+20 ability power and +10 ability haste.",
+        Bonus { ability_power: 20.0, ability_haste: 10.0, ..b() }
+    ),
+    aug!(
+        37,
+        Silver,
+        "Toughness",
+        "+150 health and +15 armor and magic resist.",
+        Bonus { health: 150.0, armor: 15.0, magic_resist: 15.0, ..b() }
+    ),
+    aug!(38, Silver, "Executioner", "+20% damage to enemies below 35% health.", b(), Effect::Executioner),
+    aug!(39, Silver, "First Strike", "+12% damage to enemies at full health.", b(), Effect::FirstStrike),
+    aug!(
+        40,
+        Silver,
+        "Mend",
+        "Your F spell becomes Mend: heal an ally near the cursor, or yourself, for 150 (+30% AP).",
+        b(),
+        Effect::Spell(MEND)
+    ),
+    aug!(
+        41,
+        Gold,
+        "Spellhunger",
+        "Each ability hit on a champion grants 1 ability power, up to 80.",
+        b(),
+        Effect::Spellhunger
+    ),
+    aug!(
+        42,
+        Gold,
+        "Spellblade",
+        "After you cast an ability, your next basic attack within 4 s deals bonus damage equal to your base attack damage.",
+        b(),
+        Effect::Spellblade
+    ),
+    aug!(43, Gold, "Last Stand", "Deal up to 25% more damage as your health falls below 60%.", b(), Effect::LastStand),
+    aug!(44, Gold, "Spell Vamp", "Your abilities heal you for 12% of the damage they deal.", b(), Effect::SpellVamp),
+    aug!(45, Gold, "Reset", "Takedowns refresh your Q, W and E.", b(), Effect::Reset),
+    aug!(
+        46,
+        Gold,
+        "Thorns",
+        "Champions that basic-attack you take 25% of the damage back as magic damage.",
+        Bonus { armor: 20.0, ..b() },
+        Effect::Thorns
+    ),
+    aug!(
+        47,
+        Gold,
+        "Sharpshooter",
+        "Ranged champions: +100 attack range and +10% attack speed.",
+        Bonus { attack_speed: 0.10, ..b() },
+        Effect::Sharpshooter
+    ),
+    aug!(48, Gold, "Vault", "Your F spell becomes Vault: a 550 u dash.", b(), Effect::Spell(VAULT)),
+    aug!(49, Gold, "Iron Heart", "+400 health and +10% health.", Bonus { health: 400.0, health_pct: 0.10, ..b() }),
+    aug!(
+        50,
+        Gold,
+        "Battle Trance",
+        "+25 attack damage and +25% attack speed.",
+        Bonus { attack_damage: 25.0, attack_speed: 0.25, ..b() }
+    ),
+    aug!(
+        51,
+        Gold,
+        "Mind Over Matter",
+        "+50 ability power and +30 magic resist.",
+        Bonus { ability_power: 50.0, magic_resist: 30.0, ..b() }
+    ),
+    aug!(
+        52,
+        Prismatic,
+        "Spellcrit",
+        "Your ability hits can critically strike: one in four deals 60% more damage.",
+        b(),
+        Effect::Spellcrit
+    ),
+    aug!(
+        53,
+        Prismatic,
+        "Close Quarters",
+        "A ranged champion fights in melee, with +400 health, +40 armor and magic resist and +25% attack speed.",
+        Bonus { health: 400.0, armor: 40.0, magic_resist: 40.0, attack_speed: 0.25, ..b() },
+        Effect::CloseQuarters
+    ),
+    aug!(
+        54,
+        Prismatic,
+        "Fundamentals",
+        "Your ultimate is disabled; Q, W and E deal 35% more damage, and +40 ability haste.",
+        Bonus { ability_haste: 40.0, ..b() },
+        Effect::Fundamentals
+    ),
+    aug!(
+        55,
+        Prismatic,
+        "Champion of Chaos",
+        "Quest: score 8 takedowns. Reward: +50 attack damage, +80 ability power and +500 health.",
+        b(),
+        Effect::ChampionOfChaos
+    ),
+    aug!(
+        56,
+        Prismatic,
+        "Stormcall",
+        "Your F spell becomes Stormcall: after 0.6 s, a 300 u nova around you knocks up enemies and deals 80 (+50% AP) magic damage.",
+        b(),
+        Effect::Spell(STORMCALL)
+    ),
+    aug!(
+        57,
+        Silver,
+        "Light Armor",
+        "+25 armor and +4% movement speed.",
+        Bonus { armor: 25.0, move_speed_pct: 0.04, ..b() }
+    ),
+    aug!(
+        58,
+        Silver,
+        "Glint",
+        "+12 attack damage and +12 ability power.",
+        Bonus { attack_damage: 12.0, ability_power: 12.0, ..b() }
+    ),
+    aug!(
+        59,
+        Gold,
+        "Heavy Hitter",
+        "+40 attack damage, then +8% attack damage.",
+        Bonus { attack_damage: 40.0, attack_damage_pct: 0.08, ..b() }
+    ),
+    aug!(
+        60,
+        Prismatic,
+        "Eternal Engine",
+        "+800 health, +60 ability power and +30 ability haste.",
+        Bonus { health: 800.0, ability_power: 60.0, ability_haste: 30.0, ..b() }
+    ),
 ];
 
 pub fn augment(id: u8) -> Option<&'static Augment> {
@@ -405,6 +733,17 @@ mod tests {
         for (tier, need) in [(Tier::Silver, 6), (Tier::Gold, 7), (Tier::Prismatic, 6)] {
             let n = CATALOG.iter().filter(|a| a.tier == tier).count();
             assert!(n >= need, "{tier:?} has {n}");
+        }
+    }
+
+    /// M3 slice 4: sixty augments, every id from 1 to 60 once, spread over the tiers.
+    #[test]
+    fn catalog_has_sixty_augments() {
+        let mut ids: Vec<u8> = CATALOG.iter().map(|a| a.id).collect();
+        ids.sort();
+        assert_eq!(ids, (1..=60).collect::<Vec<u8>>());
+        for tier in [Tier::Silver, Tier::Gold, Tier::Prismatic] {
+            assert!(CATALOG.iter().filter(|a| a.tier == tier).count() >= 15, "{tier:?}");
         }
     }
 

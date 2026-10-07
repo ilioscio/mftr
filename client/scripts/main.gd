@@ -1538,7 +1538,10 @@ func _draw_inventory(font: Font, origin: Vector2) -> void:
 	for i in held.size():
 		var a: Dictionary = held[i]
 		var at := origin + Vector2(0, -10 - 18 * (held.size() - 1 - i))
-		overlay.draw_string(font, at, "◆ " + a.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, _tier_color(a.tier))
+		var label: String = "◆ " + a.name
+		if a.has("progress"):
+			label += "  " + a.progress
+		overlay.draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, _tier_color(a.tier))
 
 
 ## ---- Session, champion select and spectating (M2 slice 5) --------------------------------------

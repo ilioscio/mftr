@@ -313,6 +313,10 @@ Four more placeholder champions (original kits, D36), so all six M2 archetypes e
 - **Titan**, **Pebble** and **Unstable Experiment** (D45): the hitbox and the model change together; collision stays champion-sized. Tests: a skillshot 110 u beside a champion misses a normal hitbox and hits a Titan's; 80 u beside hits a normal one and misses a Pebble's; Pebble deals exactly 20% more to larger targets; Unstable re-rolls on every respawn (both forms come up).
 - The client checks missile outcomes against its predicted hitbox; the lab Titan's hitbox grows on both ends with no corrections. 29 augments.
 
+### M3 slice 4 status (2026-10-07): ✅ done
+- **60 augments** (D46): 23 Silver, 20 Gold, 17 Prismatic. Conditionals (Executioner, First Strike, Last Stand, Spellcrit, Fundamentals), after-hit effects (Spellhunger, Spell Vamp, Thorns), rule breakers (Close Quarters, Sharpshooter, Spellblade, Reset), a quest (Champion of Chaos) and F replacements (Vault, Stormcall, Mend).
+- Tests check each mechanic's numbers against an unaugmented baseline. The client shows Spellhunger stacks and quest progress next to the held augment.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.

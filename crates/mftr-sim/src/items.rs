@@ -313,8 +313,9 @@ pub fn apply_items(
     base_attack_speed: f32,
     inventory: &[u8; INVENTORY],
     augments: &[u8; crate::augments::SLOTS],
-    form: crate::augments::Form,
+    growth: crate::augments::Growth,
 ) -> (Stats, f32) {
+    let form = crate::augments::form(augments, growth.unstable_tiny);
     let mut s = level_stats;
     let mut pct = Percents::default();
     let mut boots_counted = false;
@@ -338,6 +339,13 @@ pub fn apply_items(
         pct.attack_speed += a.bonus.attack_speed;
         pct.move_speed_flat += a.bonus.move_speed;
         add_percents(&mut pct, &a.bonus);
+        match a.effect {
+            crate::augments::Effect::Spellhunger => s.ability_power += growth.stacks as f32,
+            crate::augments::Effect::ChampionOfChaos if growth.chaos_done => {
+                add_flat(&mut s, &crate::augments::CHAOS_REWARD)
+            }
+            _ => {}
+        }
     }
     for a in crate::augments::held(augments) {
         match a.effect {
@@ -381,10 +389,23 @@ pub fn apply_items(
 
 /// A champion's stats and basic attack for its level, items and augments.
 pub fn champion_stats(def: &ChampionDef, key: &crate::world::StatsKey) -> (Stats, AttackSpec) {
-    let (level, inventory, augments, unstable_tiny) = key;
-    let form = crate::augments::form(augments, *unstable_tiny);
-    let (stats, attack_speed) = apply_items(def.stats_at(*level), def.attack.attack_speed, inventory, augments, form);
-    (stats, AttackSpec { attack_speed, ..def.attack })
+    let (level, inventory, augments, growth) = key;
+    let (stats, attack_speed) =
+        apply_items(def.stats_at(*level), def.attack.attack_speed, inventory, augments, *growth);
+    let mut attack = AttackSpec { attack_speed, ..def.attack };
+    let ranged = attack.bolt_speed > 0.0;
+    for a in crate::augments::held(augments) {
+        match a.effect {
+            // Close Quarters: the ranged attack becomes a melee strike.
+            crate::augments::Effect::CloseQuarters if ranged => {
+                attack.range = crate::augments::CLOSE_QUARTERS_RANGE;
+                attack.bolt_speed = 0.0;
+            }
+            crate::augments::Effect::Sharpshooter if ranged => attack.range += crate::augments::SHARPSHOOTER_RANGE,
+            _ => {}
+        }
+    }
+    (stats, attack)
 }
 
 /// Bot build paths (components first, so recipes discount them).
@@ -501,7 +522,7 @@ mod tests {
     #[test]
     fn stat_stack_applies_flat_then_percent() {
         let inv = [SPARK_SHARD, GRAND_GRIMOIRE, 0, 0, 0, 0];
-        let (s, _) = apply_items(EMBER.stats, EMBER.attack.attack_speed, &inv, &[0; 4], crate::augments::Form::Normal);
+        let (s, _) = apply_items(EMBER.stats, EMBER.attack.attack_speed, &inv, &[0; 4], crate::augments::Growth::NONE);
         assert!((s.ability_power - 220.0 * 1.35).abs() < 1e-3, "{}", s.ability_power);
     }
 
@@ -510,13 +531,13 @@ mod tests {
         let inv = [ARC_TEMPEST, ARC_TEMPEST, GALE_SABER, BATTLE_BOOTS, ARC_BOW, ARC_BOW];
         // +180% attack speed: 0.8 → 2.24; from a 1.0 base it would be 2.8, capped at 2.5.
         let (s, attack_speed) =
-            apply_items(VESPER.stats, VESPER.attack.attack_speed, &inv, &[0; 4], crate::augments::Form::Normal);
+            apply_items(VESPER.stats, VESPER.attack.attack_speed, &inv, &[0; 4], crate::augments::Growth::NONE);
         assert!((attack_speed - 2.24).abs() < 1e-4, "{attack_speed}");
-        assert_eq!(apply_items(VESPER.stats, 1.0, &inv, &[0; 4], crate::augments::Form::Normal).1, ATTACK_SPEED_CAP);
+        assert_eq!(apply_items(VESPER.stats, 1.0, &inv, &[0; 4], crate::augments::Growth::NONE).1, ATTACK_SPEED_CAP);
         // One pair of boots (+45) and the Gale Saber's 7%: (325 + 45) × 1.07 = 395.9.
         assert!((s.move_speed - 395.9).abs() < 1e-3, "{}", s.move_speed);
         let two_boots = [SWIFT_BOOTS, BOOTS, 0, 0, 0, 0];
-        let (s, _) = apply_items(VESPER.stats, 0.8, &two_boots, &[0; 4], crate::augments::Form::Normal);
+        let (s, _) = apply_items(VESPER.stats, 0.8, &two_boots, &[0; 4], crate::augments::Growth::NONE);
         assert_eq!(s.move_speed, 385.0, "only the first pair counts");
     }
 
@@ -526,7 +547,7 @@ mod tests {
         // Whetstone (+20 AD) and a Long Knife (+10 AD), then Conversion: the 30 bonus AD
         // becomes 33 AP.
         let (s, _) =
-            apply_items(VESPER.stats, 0.8, &[LONG_KNIFE, 0, 0, 0, 0, 0], &[2, 9, 0, 0], crate::augments::Form::Normal);
+            apply_items(VESPER.stats, 0.8, &[LONG_KNIFE, 0, 0, 0, 0, 0], &[2, 9, 0, 0], crate::augments::Growth::NONE);
         assert!((s.attack_damage - VESPER.stats.attack_damage).abs() < 1e-4);
         assert!((s.ability_power - (VESPER.stats.ability_power + 33.0)).abs() < 1e-3, "{}", s.ability_power);
         // Apex Form: +25% health, AD, AP, armor and magic resist, after flat bonuses.
@@ -535,7 +556,7 @@ mod tests {
             0.8,
             &[VITAL_CRYSTAL, 0, 0, 0, 0, 0],
             &[17, 0, 0, 0],
-            crate::augments::Form::Normal,
+            crate::augments::Growth::NONE,
         );
         assert!((s.max_health - (EMBER.stats.max_health + 150.0) * 1.25).abs() < 1e-2);
         assert!((s.armor - EMBER.stats.armor * 1.25).abs() < 1e-4);
@@ -545,7 +566,7 @@ mod tests {
             0.8,
             &[QUICK_DAGGER, 0, 0, 0, 0, 0],
             &[6, 0, 0, 0],
-            crate::augments::Form::Normal,
+            crate::augments::Growth::NONE,
         );
         assert!((attack_speed - 0.8 * 1.42).abs() < 1e-5, "{attack_speed}");
     }

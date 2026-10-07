@@ -818,6 +818,9 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     w.write_bool(p.rerolled);
     w.write_u32(p.augment_seed);
     w.write_bool(p.unstable_tiny);
+    w.write(p.stacks as u64, 16);
+    w.write_u8(p.takedowns);
+    write_time(w, s.spellblade_until);
 }
 
 fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
@@ -920,6 +923,9 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let rerolled = r.read_bool()?;
     let augment_seed = r.read_u32()?;
     let unstable_tiny = r.read_bool()?;
+    let stacks = r.read(16)? as u16;
+    let takedowns = r.read_u8()?;
+    let spellblade_until = read_time(r)?;
     let progress = Progress {
         level,
         xp,
@@ -937,6 +943,8 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         rerolled,
         augment_seed,
         unstable_tiny,
+        stacks,
+        takedowns,
     };
     Ok(UnitState {
         pos,
@@ -960,6 +968,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         respawn_at,
         progress,
         echo,
+        spellblade_until,
     })
 }
 
@@ -1566,7 +1575,10 @@ mod tests {
                 rerolled: true,
                 augment_seed: 0xdead_beef,
                 unstable_tiny: true,
+                stacks: 37,
+                takedowns: 5,
             },
+            spellblade_until: SimTime(88_888),
         }
     }
 

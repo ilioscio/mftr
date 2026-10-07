@@ -699,7 +699,24 @@ impl MatchClient {
             };
             let mut held = VarArray::new();
             for id in s.progress.augments.iter().filter(|id| **id != 0) {
-                held.push(&card(*id).to_variant());
+                let mut c = card(*id);
+                // Built-up augments show how far along they are.
+                let p = &s.progress;
+                match augments::augment(*id).map(|a| a.effect) {
+                    Some(augments::Effect::Spellhunger) => {
+                        c.set("progress", format!("{}/{}", p.stacks, augments::SPELLHUNGER_CAP));
+                    }
+                    Some(augments::Effect::ChampionOfChaos) => {
+                        let done = p.takedowns >= augments::CHAOS_TAKEDOWNS;
+                        let n = p.takedowns.min(augments::CHAOS_TAKEDOWNS);
+                        c.set(
+                            "progress",
+                            if done { "done".to_string() } else { format!("{n}/{}", augments::CHAOS_TAKEDOWNS) },
+                        );
+                    }
+                    _ => {}
+                }
+                held.push(&c.to_variant());
             }
             d.set("augments", &held);
             let mut offer = VarArray::new();

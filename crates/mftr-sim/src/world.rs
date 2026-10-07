@@ -179,6 +179,10 @@ pub struct Progress {
     pub augment_seed: u32,
     /// Unstable Experiment's current roll: tiny (else huge).
     pub unstable_tiny: bool,
+    /// Spellhunger's ability power stacks.
+    pub stacks: u16,
+    /// Champion takedowns (kills and assists) this match: Champion of Chaos counts them.
+    pub takedowns: u8,
 }
 
 /// One buy or sell: the inventory before it and the gold it changed.
@@ -191,9 +195,9 @@ pub struct Trade {
 /// How many trades can be undone.
 pub const UNDO: usize = 4;
 
-/// Level, items, augments and the Unstable Experiment roll: what a champion's stats (and size)
+/// Level, items, augments and what augments have built up: what a champion's stats (and size)
 /// are computed from.
-pub type StatsKey = (u8, [u8; INVENTORY], [u8; augments::SLOTS], bool);
+pub type StatsKey = (u8, [u8; INVENTORY], [u8; augments::SLOTS], augments::Growth);
 
 impl Progress {
     /// Sandbox default: level 1, every ability at rank 1, nothing to spend.
@@ -214,6 +218,8 @@ impl Progress {
         rerolled: false,
         augment_seed: 0,
         unstable_tiny: false,
+        stacks: 0,
+        takedowns: 0,
     };
 
     pub fn hash_into(&self, h: &mut impl StateSink) {
@@ -246,11 +252,18 @@ impl Progress {
         h.write_u8(self.rerolled as u8);
         h.write_u32(self.augment_seed);
         h.write_u8(self.unstable_tiny as u8);
+        h.write_u32(self.stacks as u32);
+        h.write_u8(self.takedowns);
     }
 
     /// What a champion's stats are computed from.
     pub fn stats_key(&self) -> StatsKey {
-        (self.level, self.items, self.augments, self.unstable_tiny)
+        let growth = augments::Growth {
+            unstable_tiny: self.unstable_tiny,
+            stacks: self.stacks,
+            chaos_done: self.takedowns >= augments::CHAOS_TAKEDOWNS,
+        };
+        (self.level, self.items, self.augments, growth)
     }
 
     fn push_trade(&mut self, t: Trade) {
@@ -375,6 +388,8 @@ pub struct UnitState {
     pub progress: Progress,
     /// A cast that repeats at `at` (the Echo augment, M3).
     pub echo: Option<EchoCast>,
+    /// Spellblade is armed until this instant.
+    pub spellblade_until: SimTime,
 }
 
 /// A cast waiting to repeat (Echo): lines fly again from the caster's position then, areas land
@@ -412,6 +427,7 @@ impl UnitState {
             respawn_at: None,
             progress: Progress::SANDBOX,
             echo: None,
+            spellblade_until: SimTime(0),
         }
     }
 
@@ -685,6 +701,7 @@ impl UnitState {
                 h.write_u32(e.seq);
             }
         }
+        h.write_u64(self.spellblade_until.0);
     }
 }
 
@@ -750,12 +767,18 @@ impl Unit {
             attack: None,
             tier: 0,
             protected: false,
-            stats_for: (1, [0; INVENTORY], [0; augments::SLOTS], false),
+            stats_for: (1, [0; INVENTORY], [0; augments::SLOTS], augments::Growth::NONE),
         }
     }
 
     /// The ability in `slot`: a champion's kit and utility spells, or the turret's shot.
     pub fn ability(&self, slot: u8) -> Option<Ability> {
+        if slot == 5
+            && self.champion.is_some()
+            && let Some(spell) = augments::spell(&self.state.progress.augments)
+        {
+            return Some(spell);
+        }
         match (self.champion, self.kind) {
             (Some(c), _) => c.ability(slot),
             (None, UnitKind::RigTurret) if slot == 0 => Some(TURRET_SHOT),
@@ -777,7 +800,7 @@ impl Unit {
             return false;
         }
         let (stats, attack) = items::champion_stats(c.def(), &key);
-        self.gameplay_radius = CHAMPION_GAMEPLAY_RADIUS * augments::scale(augments::form(&key.2, key.3));
+        self.gameplay_radius = CHAMPION_GAMEPLAY_RADIUS * augments::scale(augments::form(&key.2, key.3.unstable_tiny));
         if self.state.alive() {
             self.state.health =
                 (self.state.health + (stats.max_health - self.stats.max_health).max(0.0)).min(stats.max_health);
@@ -795,7 +818,7 @@ impl Unit {
         let Some(c) = self.champion else { return };
         let key = self.state.progress.stats_key();
         let (stats, attack) = items::champion_stats(c.def(), &key);
-        self.gameplay_radius = CHAMPION_GAMEPLAY_RADIUS * augments::scale(augments::form(&key.2, key.3));
+        self.gameplay_radius = CHAMPION_GAMEPLAY_RADIUS * augments::scale(augments::form(&key.2, key.3.unstable_tiny));
         self.stats = stats;
         self.attack = Some(attack);
         self.stats_for = key;
@@ -1642,15 +1665,15 @@ impl World {
             melee.sort_by_key(|m| (m.3, m.0));
             let mut landed = Vec::new();
             for (owner, target, power, at) in melee {
-                let amp = size_amp(units, owner, target);
+                let amp = damage_amp(units, owner, target, false, rng);
                 if let Some(u) = units.iter_mut().find(|u| u.id == target) {
                     let dealt = deal_damage(u, owner, power * amp, DamageKind::Physical, at, events);
                     landed.push((owner, target, dealt, at));
                 }
             }
             on_hit(units, &landed, events);
-            resolve_direct(units, &mut direct, s1, events);
-            resolve_effects(units, missiles, areas, bolts, struck, &start_pos, s0, s1, events);
+            resolve_direct(units, &mut direct, rng, s1, events);
+            resolve_effects(units, missiles, areas, bolts, struck, rng, &start_pos, s0, s1, events);
             let had_winner = game.winner.is_some();
             note_outcomes(units, game, &events[first_event..], s1);
             if rules.ranked {
@@ -1833,7 +1856,9 @@ fn deliver(unit: &Unit, c: EchoCast, t: SimTime, echo: bool, fired: &mut Vec<Fir
     let d = augments::delivery(&unit.state.progress.augments);
     let tf = ability.transforms;
     let wide = d.wide && tf.accepts(Transforms::WIDE.0);
-    let scale = if echo { augments::ECHO_POWER } else { 1.0 };
+    let fundamentals = c.slot < 3 && augments::mods(&unit.state.progress.augments).fundamentals;
+    let scale =
+        if echo { augments::ECHO_POWER } else { 1.0 } * if fundamentals { augments::FUNDAMENTALS_AMP } else { 1.0 };
     let first_shot = if echo { augments::ECHO_SHOT } else { 0 };
     match ability.effect {
         Effect::Line(mut spec) => {
@@ -1918,7 +1943,7 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
         if let Some(atk) = unit.attack_spec()
             && let Some(target) = roster.iter().find(|r| r.id == w.target)
         {
-            let (power, share) = lane::turret_shot(
+            let (mut power, share) = lane::turret_shot(
                 &mut unit.brain,
                 stats.attack_damage,
                 target.id,
@@ -1926,6 +1951,13 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
                 target.range,
                 target.max_health,
             );
+            // Spellblade: an armed attack adds the base attack damage, and disarms.
+            if unit.state.spellblade_until > t
+                && let Some(c) = unit.champion
+            {
+                power += c.def().stats_at(unit.state.progress.level).attack_damage;
+                unit.state.spellblade_until = SimTime(0);
+            }
             if atk.bolt_speed <= 0.0 {
                 fired.push(Fired::Melee { owner: id, target: w.target, power, at: t });
             } else {
@@ -1952,7 +1984,10 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
             && let Effect::Lunge(l) = a.effect
         {
             let rank = unit.state.progress.ranks.get(slot as usize).copied().unwrap_or(1);
-            let power = l.damage.raw(stats.attack_damage, stats.ability_power) + a.bonus_damage_at(rank);
+            let mut power = l.damage.raw(stats.attack_damage, stats.ability_power) + a.bonus_damage_at(rank);
+            if slot < 3 && augments::mods(&unit.state.progress.augments).fundamentals {
+                power *= augments::FUNDAMENTALS_AMP;
+            }
             fired.push(Fired::Strike { owner: id, target, power, kind: l.damage.kind, cc: l.cc, at: t });
         }
         unit.state.dash = None;
@@ -2089,6 +2124,10 @@ fn try_cast(
     events: &mut Vec<SimEvent>,
 ) {
     let Some(ability) = unit.ability(slot) else { return };
+    let mods = augments::mods(&unit.state.progress.augments);
+    if slot == 3 && mods.fundamentals {
+        return; // Fundamentals: no ultimate
+    }
     let (id, team, radius, haste) = (unit.id, unit.team, unit.collision_radius, unit.stats.ability_haste);
     let (stats, gameplay_radius) = (unit.stats, unit.gameplay_radius);
     let st = &mut unit.state;
@@ -2233,6 +2272,9 @@ fn try_cast(
         cooldown = SimDuration((cooldown.0 as f64 * 100.0 / (100.0 + haste as f64)).round() as u64);
     }
     st.cooldowns[slot as usize] = t.plus(cooldown);
+    if mods.spellblade && slot < 4 {
+        st.spellblade_until = t.plus(SimDuration::from_millis(augments::SPELLBLADE_MS));
+    }
 }
 
 /// Where a blink toward `dir` lands: the farthest walkable, in-bounds point on the line, so a
@@ -2259,6 +2301,7 @@ fn resolve_effects(
     areas: &mut Vec<Area>,
     bolts: &mut Vec<Bolt>,
     struck: &mut Vec<VolleyHit>,
+    rng: &mut Pcg32,
     start_pos: &[(UnitId, Vec2)],
     s0: SimTime,
     s1: SimTime,
@@ -2293,10 +2336,11 @@ fn resolve_effects(
             struck.push(VolleyHit { owner: volley.0, cast_seq: volley.1, echo: volley.2, target });
             events.push(SimEvent::MissileHit { id: m.id, target, at });
             let from = pos_of(m.owner).unwrap_or(m.origin);
-            let amp = size_amp(units, m.owner, target);
+            let amp = damage_amp(units, m.owner, target, true, rng);
             if let Some(u) = units.iter_mut().find(|u| u.id == target) {
                 apply_cc(u, m.spec.cc, at, from, s1, events);
-                deal_damage(u, m.owner, m.power * amp, m.spec.damage.kind, at, events);
+                let dealt = deal_damage(u, m.owner, m.power * amp, m.spec.damage.kind, at, events);
+                after_ability_hit(units, m.owner, target, dealt, at, events);
             }
             return false;
         }
@@ -2317,17 +2361,18 @@ fn resolve_effects(
         for &(id, team, r, q0, q1) in &motion {
             let reach = a.radius + r;
             if team != a.team && (q0.lerp(q1, frac) - a.center).length_sq() <= reach * reach {
-                let amp = size_amp(units, a.owner, id);
+                let amp = damage_amp(units, a.owner, id, true, rng);
                 let Some(u) = units.iter_mut().find(|u| u.id == id) else { continue };
                 apply_cc(u, a.cc, a.detonate_at, a.center, s1, events);
-                deal_damage(u, a.owner, a.power * amp, a.kind, a.detonate_at, events);
+                let dealt = deal_damage(u, a.owner, a.power * amp, a.kind, a.detonate_at, events);
+                after_ability_hit(units, a.owner, id, dealt, a.detonate_at, events);
             }
         }
         false
     });
     let mut landed: Vec<(UnitId, UnitId, f32, SimTime)> = Vec::new();
     bolts.retain_mut(|b| {
-        let amp = size_amp(units, b.owner, b.target);
+        let amp = damage_amp(units, b.owner, b.target, false, rng);
         let Some(target) = units.iter_mut().find(|u| u.id == b.target && u.targetable()) else {
             events.push(SimEvent::AttackLanded { id: b.id, target: b.target, at: s1, hit: false });
             return false;
@@ -2371,6 +2416,48 @@ fn on_hit(units: &mut [Unit], landed: &[(UnitId, UnitId, f32, SimTime)], events:
                 events.push(SimEvent::Healed { unit: owner, amount, at });
             }
         }
+        // Thorns: the attacked champion returns a share as magic damage.
+        let thorns = units
+            .iter()
+            .find(|u| u.id == target && u.kind == UnitKind::Champion && u.state.alive())
+            .is_some_and(|t| augments::mods(&t.state.progress.augments).thorns);
+        if thorns
+            && dealt > 0.0
+            && let Some(o) = units.iter_mut().find(|u| u.id == owner)
+        {
+            deal_damage(o, target, augments::THORNS * dealt, DamageKind::Magic, at, events);
+        }
+    }
+}
+
+/// Augment effects of an ability's damage (server only): Spellhunger stacks on champion hits,
+/// then Spell Vamp heals.
+fn after_ability_hit(
+    units: &mut [Unit],
+    owner: UnitId,
+    target: UnitId,
+    dealt: f32,
+    at: SimTime,
+    events: &mut Vec<SimEvent>,
+) {
+    if dealt <= 0.0 {
+        return;
+    }
+    let on_champion = units.iter().any(|u| u.id == target && u.kind == UnitKind::Champion);
+    let Some(o) = units.iter_mut().find(|u| u.id == owner && u.kind == UnitKind::Champion && u.state.alive()) else {
+        return;
+    };
+    let m = augments::mods(&o.state.progress.augments);
+    let p = &mut o.state.progress;
+    if m.spellhunger && on_champion {
+        p.stacks = (p.stacks + 1).min(augments::SPELLHUNGER_CAP);
+    }
+    if m.spell_vamp {
+        let amount = (augments::SPELL_VAMP * dealt).min(o.stats.max_health - o.state.health);
+        if amount > 0.0 {
+            o.state.health += amount;
+            events.push(SimEvent::Healed { unit: owner, amount, at });
+        }
     }
 }
 
@@ -2410,20 +2497,42 @@ fn apply_cc(u: &mut Unit, cc: Cc, at: SimTime, from: Vec2, s1: SimTime, events: 
     }
 }
 
-/// Pebble (a tiny champion) deals more damage to targets with a larger hitbox (06 §3).
-fn size_amp(units: &[Unit], owner: UnitId, target: UnitId) -> f32 {
-    let radius = |id: UnitId| units.iter().find(|u| u.id == id).map(|u| (u.kind, u.gameplay_radius));
-    match (radius(owner), radius(target)) {
-        (Some((UnitKind::Champion, r)), Some((_, t))) if r < CHAMPION_GAMEPLAY_RADIUS && t > r => augments::PEBBLE_AMP,
-        _ => 1.0,
+/// Augment damage modifiers of `owner`'s hit on `target` (06 §3), multiplied: Pebble against
+/// larger hitboxes, Executioner, First Strike, Last Stand, and Spellcrit on abilities (server
+/// only: the crit draws from the world rng).
+fn damage_amp(units: &[Unit], owner: UnitId, target: UnitId, ability: bool, rng: &mut Pcg32) -> f32 {
+    let find = |id: UnitId| units.iter().find(|u| u.id == id);
+    let (Some(o), Some(t)) = (find(owner), find(target)) else { return 1.0 };
+    if o.kind != UnitKind::Champion {
+        return 1.0;
     }
+    let mut amp = 1.0;
+    if o.gameplay_radius < CHAMPION_GAMEPLAY_RADIUS && t.gameplay_radius > o.gameplay_radius {
+        amp *= augments::PEBBLE_AMP;
+    }
+    let m = augments::mods(&o.state.progress.augments);
+    let share = |u: &Unit| u.state.health / u.stats.max_health.max(1.0);
+    if m.executioner && share(t) < augments::EXECUTE_BELOW {
+        amp *= augments::EXECUTE_AMP;
+    }
+    if m.first_strike && share(t) >= 1.0 {
+        amp *= augments::FIRST_STRIKE_AMP;
+    }
+    if m.last_stand {
+        let low = ((augments::LAST_STAND_BELOW - share(o)) / augments::LAST_STAND_BELOW).clamp(0.0, 1.0);
+        amp *= 1.0 + augments::LAST_STAND_MAX * low;
+    }
+    if m.spellcrit && ability && rng.next_u32().is_multiple_of(augments::SPELLCRIT_ONE_IN) {
+        amp *= augments::SPELLCRIT_AMP;
+    }
+    amp
 }
 
 /// How fast a pull drags its target.
 pub const PULL_SPEED: f32 = 1800.0;
 
 /// Lunge strikes and ally heals/shields, in time order (server only).
-fn resolve_direct(units: &mut [Unit], direct: &mut [Fired], s1: SimTime, events: &mut Vec<SimEvent>) {
+fn resolve_direct(units: &mut [Unit], direct: &mut [Fired], rng: &mut Pcg32, s1: SimTime, events: &mut Vec<SimEvent>) {
     let at_of = |f: &Fired| match f {
         Fired::Strike { at, owner, .. } | Fired::Support { at, owner, .. } => (*at, *owner),
         _ => (SimTime(0), UnitId(0)),
@@ -2432,13 +2541,14 @@ fn resolve_direct(units: &mut [Unit], direct: &mut [Fired], s1: SimTime, events:
     for f in direct.iter() {
         match *f {
             Fired::Strike { owner, target, power, kind, cc, at } => {
-                let power = power * size_amp(units, owner, target);
+                let power = power * damage_amp(units, owner, target, true, rng);
                 let from = units.iter().find(|u| u.id == owner).map(|u| (u.state.pos, u.gameplay_radius));
                 if let (Some((p, r)), Some(u)) = (from, units.iter_mut().find(|u| u.id == target)) {
                     // Still within reach on arrival (it may have dashed or blinked away).
                     if (u.state.pos - p).length() <= r + u.gameplay_radius + STRIKE_SLACK {
                         apply_cc(u, cc, at, p, s1, events);
-                        deal_damage(u, owner, power, kind, at, events);
+                        let dealt = deal_damage(u, owner, power, kind, at, events);
+                        after_ability_hit(units, owner, target, dealt, at, events);
                     }
                 }
             }
@@ -2592,6 +2702,16 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
                     pay.push((k, gold, 0, at));
                     if let Some(u) = units.iter_mut().find(|u| u.id == k) {
                         u.state.progress.streak = u.state.progress.streak.max(0).saturating_add(1);
+                    }
+                }
+                // Takedowns: Champion of Chaos counts them, Reset refreshes Q, W and E.
+                for id in credit.iter().chain(&assists) {
+                    let Some(u) = units.iter_mut().find(|u| u.id == *id) else { continue };
+                    u.state.progress.takedowns = u.state.progress.takedowns.saturating_add(1);
+                    if augments::mods(&u.state.progress.augments).reset {
+                        for c in &mut u.state.cooldowns[..3] {
+                            *c = (*c).min(at);
+                        }
                     }
                 }
                 if !assists.is_empty() {
@@ -3644,8 +3764,11 @@ mod tests {
         let u = w.unit(me).unwrap();
         assert_eq!(u.state.progress.augments, [offer[2], 0, 0, 0]);
         assert_eq!(u.state.progress.offer, [0; augments::CHOICES]);
-        let expected =
-            items::champion_stats(ChampionId::Bastion.def(), &(3, [0; INVENTORY], [offer[2], 0, 0, 0], false)).0;
+        let expected = items::champion_stats(
+            ChampionId::Bastion.def(),
+            &(3, [0; INVENTORY], [offer[2], 0, 0, 0], augments::Growth::NONE),
+        )
+        .0;
         assert_eq!(u.stats, expected);
         assert_ne!(u.stats, before, "every Silver augment changes some stat");
 
@@ -3739,6 +3862,16 @@ mod tests {
     /// 1000) that holds `target_augments`; the Ember holds `shooter_augments`. Returns the
     /// damage the Bastion took (0 for a miss).
     fn lance_past(offset: f32, target_augments: [u8; 4], shooter_augments: [u8; 4]) -> f32 {
+        lance_with(offset, target_augments, shooter_augments, |_, _, _| {})
+    }
+
+    /// `lance_past` with `setup(world, target, shooter)` run just before the cast.
+    fn lance_with(
+        offset: f32,
+        target_augments: [u8; 4],
+        shooter_augments: [u8; 4],
+        setup: impl FnOnce(&mut World, UnitId, UnitId),
+    ) -> f32 {
         let mut w = World::new(9);
         w.set_rules(Rules::MAYHEM);
         let target = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Bastion, Vec2::new(2000.0, 1000.0));
@@ -3750,6 +3883,7 @@ mod tests {
             p.drafted = augments::SLOTS as u8;
         }
         w.step(&[]);
+        setup(&mut w, target, shooter);
         w.step(&[cast(1, 1, 2, 0, (3000.0, 1000.0 + offset))]);
         run_until_quiet(&mut w, 60)
             .iter()
@@ -3760,13 +3894,201 @@ mod tests {
             .sum()
     }
 
+    /// M3 slice 4: conditional damage augments multiply onto the hit (server side).
+    #[test]
+    fn conditional_augments_amp_damage() {
+        let normal = lance_past(0.0, [0; 4], [0; 4]);
+        let ratio = |d: f32| d / normal;
+        // First Strike: the Bastion is at full health.
+        assert!((ratio(lance_past(0.0, [0; 4], [39, 0, 0, 0])) - augments::FIRST_STRIKE_AMP).abs() < 1e-4);
+        // Executioner: below 35% health, and only then.
+        let low = |w: &mut World, t: UnitId, _: UnitId| {
+            let u = w.unit_mut(t).unwrap();
+            u.state.health = u.stats.max_health * 0.3;
+        };
+        let (plain_low, exec_low) = (lance_with(0.0, [0; 4], [0; 4], low), lance_with(0.0, [0; 4], [38, 0, 0, 0], low));
+        assert!((exec_low / plain_low - augments::EXECUTE_AMP).abs() < 1e-4);
+        assert!((ratio(lance_past(0.0, [0; 4], [38, 0, 0, 0])) - 1.0).abs() < 1e-4);
+        // Last Stand: at 30% health, halfway below 60%.
+        let hurt = |w: &mut World, _: UnitId, s: UnitId| {
+            let u = w.unit_mut(s).unwrap();
+            u.state.health = u.stats.max_health * 0.3;
+        };
+        let stand = lance_with(0.0, [0; 4], [43, 0, 0, 0], hurt);
+        assert!((ratio(stand) - (1.0 + augments::LAST_STAND_MAX * 0.5)).abs() < 1e-3, "{}", ratio(stand));
+        // Fundamentals: Q, W and E hit harder.
+        assert!((ratio(lance_past(0.0, [0; 4], [54, 0, 0, 0])) - augments::FUNDAMENTALS_AMP).abs() < 1e-4);
+    }
+
+    /// Spellcrit crits about one ability hit in four, and never a basic attack.
+    #[test]
+    fn spellcrit_crits_abilities_only() {
+        let (w, me, them) = augmented([52, 0, 0, 0], ChampionId::Ember, Vec2::new(1400.0, 1000.0));
+        let mut rng = Pcg32::new(1, 2);
+        let amps: Vec<f32> = (0..400).map(|_| damage_amp(&w.units, me, them, true, &mut rng)).collect();
+        assert!(amps.iter().all(|a| *a == 1.0 || *a == augments::SPELLCRIT_AMP));
+        let crits = amps.iter().filter(|a| **a > 1.0).count();
+        assert!((60..140).contains(&crits), "{crits}");
+        assert!((0..100).all(|_| damage_amp(&w.units, me, them, false, &mut rng) == 1.0));
+    }
+
+    /// Fundamentals has no ultimate; an augment spell replaces F.
+    #[test]
+    fn fundamentals_refuses_r_and_spells_replace_f() {
+        let (mut w, me, _) = augmented([54, 0, 0, 0], ChampionId::Ember, Vec2::new(4000.0, 4000.0));
+        w.step(&[cast_slot(0, 1, 1, 0, 3, (1500.0, 1000.0))]);
+        let u = w.unit(me).unwrap();
+        assert!(u.state.cast.is_none() && u.state.cooldowns[3] == SimTime(0), "R is refused");
+
+        let (mut w, me, _) = augmented([48, 0, 0, 0], ChampionId::Ember, Vec2::new(4000.0, 4000.0));
+        assert_eq!(w.unit(me).unwrap().ability(5), Some(augments::VAULT));
+        w.step(&[cast_slot(0, 1, 1, 0, 5, (1500.0, 1000.0))]);
+        let ev = run_until_quiet(&mut w, 30);
+        assert!(ev.iter().any(|e| matches!(e, SimEvent::Dashed { unit, .. } if *unit == me)), "Vault dashes");
+    }
+
+    /// The power of the first bolt `champion` (holding `augments`) attacks with, after its Q.
+    fn bolt_after_q(augments: [u8; 4]) -> f32 {
+        let (mut w, _, them) = augmented(augments, ChampionId::Ember, Vec2::new(1400.0, 1000.0));
+        w.step(&[cast(0, 1, 1, 0, (1000.0, 2000.0))]);
+        run_until_quiet(&mut w, 20);
+        let tick = w.tick().0 + 1;
+        w.step(&[attack(0, 2, tick, them)]);
+        run_until_quiet(&mut w, 40)
+            .iter()
+            .find_map(|e| match e {
+                SimEvent::AttackLaunched(b) => Some(b.power),
+                _ => None,
+            })
+            .expect("an attack")
+    }
+
+    /// Spellblade: the attack after an ability adds the base attack damage.
+    #[test]
+    fn spellblade_charges_the_next_attack() {
+        let (plain, blade) = (bolt_after_q([0; 4]), bolt_after_q([42, 0, 0, 0]));
+        let base = ChampionId::Ember.def().stats_at(11).attack_damage;
+        assert!((blade - plain - base).abs() < 1e-3, "{plain} → {blade} (base {base})");
+    }
+
+    /// Close Quarters turns a ranged attack into a melee strike; Sharpshooter adds range.
+    #[test]
+    fn close_quarters_and_sharpshooter_change_the_attack() {
+        let ranged = ChampionId::Ember.def().attack;
+        let (mut w, me, _) = augmented([53, 0, 0, 0], ChampionId::Ember, Vec2::new(4000.0, 4000.0));
+        w.step(&[]);
+        let a = w.unit(me).unwrap().attack.unwrap();
+        assert_eq!((a.range, a.bolt_speed), (augments::CLOSE_QUARTERS_RANGE, 0.0));
+        let (mut w, me, _) = augmented([47, 0, 0, 0], ChampionId::Ember, Vec2::new(4000.0, 4000.0));
+        w.step(&[]);
+        assert_eq!(w.unit(me).unwrap().attack.unwrap().range, ranged.range + augments::SHARPSHOOTER_RANGE);
+
+        let (mut w, me, them) = augmented([53, 0, 0, 0], ChampionId::Ember, Vec2::new(1150.0, 1000.0));
+        w.step(&[]);
+        w.step(&[attack(0, 1, 2, them)]);
+        let ev = run_until_quiet(&mut w, 40);
+        assert!(!ev.iter().any(|e| matches!(e, SimEvent::AttackLaunched(_))), "no bolt");
+        assert!(
+            ev.iter().any(|e| matches!(e, SimEvent::Damage { source, target, .. } if (*source, *target) == (me, them)))
+        );
+    }
+
+    /// Spellhunger stacks ability power on champion hits; Spell Vamp heals from ability damage.
+    #[test]
+    fn spellhunger_and_spell_vamp_feed_on_ability_hits() {
+        let (mut w, me, them) = augmented([41, 44, 0, 0], ChampionId::Ember, Vec2::new(1400.0, 1000.0));
+        let ap = w.unit(me).unwrap().stats.ability_power;
+        let half = w.unit(me).unwrap().stats.max_health * 0.5;
+        w.unit_mut(me).unwrap().state.health = half;
+        w.step(&[cast(0, 1, 1, 0, (2000.0, 1000.0))]);
+        let ev = run_until_quiet(&mut w, 40);
+        let dealt: f32 = ev
+            .iter()
+            .map(|e| match e {
+                SimEvent::Damage { source, target, amount, absorbed, .. } if (*source, *target) == (me, them) => {
+                    amount + absorbed
+                }
+                _ => 0.0,
+            })
+            .sum();
+        let healed: f32 = ev
+            .iter()
+            .map(|e| match e {
+                SimEvent::Healed { unit, amount, .. } if *unit == me => *amount,
+                _ => 0.0,
+            })
+            .sum();
+        assert!(dealt > 0.0);
+        assert!((healed - augments::SPELL_VAMP * dealt).abs() < 1e-2, "{healed} of {dealt}");
+        let u = w.unit(me).unwrap();
+        assert_eq!(u.state.progress.stacks, 1);
+        assert!((u.stats.ability_power - ap - 1.0).abs() < 1e-3, "{ap} → {}", u.stats.ability_power);
+    }
+
+    /// Thorns returns a share of a champion's attack damage as magic damage.
+    #[test]
+    fn thorns_reflect_attacks() {
+        let (mut w, me, them) = augmented([0; 4], ChampionId::Ember, Vec2::new(1400.0, 1000.0));
+        w.unit_mut(them).unwrap().state.progress.augments = [46, 0, 0, 0];
+        w.step(&[attack(0, 1, 1, them)]);
+        let ev = run_until_quiet(&mut w, 60);
+        let hit = ev
+            .iter()
+            .find_map(|e| match e {
+                SimEvent::Damage { source, target, amount, absorbed, .. } if (*source, *target) == (me, them) => {
+                    Some(amount + absorbed)
+                }
+                _ => None,
+            })
+            .expect("the attack lands");
+        let back = ev
+            .iter()
+            .find_map(|e| match e {
+                SimEvent::Damage { source, target, kind: DamageKind::Magic, amount, .. }
+                    if (*source, *target) == (them, me) =>
+                {
+                    Some(*amount)
+                }
+                _ => None,
+            })
+            .expect("thorns");
+        let mr = w.unit(me).unwrap().stats.magic_resist;
+        assert!((back - augments::THORNS * hit * resist_multiplier(mr)).abs() < 1e-2, "{back} of {hit}");
+    }
+
+    /// Takedowns count toward Champion of Chaos (its reward lands at eight) and Reset refreshes
+    /// Q, W and E.
+    #[test]
+    fn takedowns_reset_cooldowns_and_complete_chaos() {
+        let (mut w, me, them) = augmented([45, 55, 0, 0], ChampionId::Ember, Vec2::new(1400.0, 1000.0));
+        w.step(&[]);
+        let before = w.unit(me).unwrap().stats;
+        {
+            let u = w.unit_mut(me).unwrap();
+            u.state.cooldowns = [SimTime(u64::MAX / 4); SLOTS];
+            u.state.progress.takedowns = augments::CHAOS_TAKEDOWNS - 1;
+        }
+        w.unit_mut(them).unwrap().state.health = 1.0;
+        w.step(&[attack(0, 1, 2, them)]);
+        let ev = run_until_quiet(&mut w, 60);
+        assert!(ev.iter().any(|e| matches!(e, SimEvent::Died { unit, .. } if *unit == them)));
+        w.step(&[]);
+        let u = w.unit(me).unwrap();
+        assert_eq!(u.state.progress.takedowns, augments::CHAOS_TAKEDOWNS);
+        assert!(u.state.cooldowns[..3].iter().all(|c| *c <= SimTime::end_of(w.tick())), "Q, W and E are ready");
+        assert_eq!(u.state.cooldowns[3], SimTime(u64::MAX / 4), "R is not");
+        assert!((u.stats.attack_damage - before.attack_damage - augments::CHAOS_REWARD.attack_damage).abs() < 1e-2);
+        assert!((u.stats.max_health - before.max_health - augments::CHAOS_REWARD.health).abs() < 1.0);
+    }
+
     /// M3 slice 3: Titan and Pebble change the hitbox the sim judges hits against, along with
     /// the stats; collision with walls and units keeps the champion size.
     #[test]
     fn titan_and_pebble_change_hitboxes_honestly() {
         let (mut w, titan, pebble) = augmented([27, 0, 0, 0], ChampionId::Bastion, Vec2::new(3000.0, 3000.0));
         w.unit_mut(pebble).unwrap().state.progress.augments = [28, 0, 0, 0];
-        let plain = items::champion_stats(ChampionId::Bastion.def(), &(11, [0; INVENTORY], [0; 4], false)).0;
+        let plain =
+            items::champion_stats(ChampionId::Bastion.def(), &(11, [0; INVENTORY], [0; 4], augments::Growth::NONE)).0;
         w.step(&[]);
         let (t, p) = (w.unit(titan).unwrap(), w.unit(pebble).unwrap());
         assert_eq!(t.gameplay_radius, CHAMPION_GAMEPLAY_RADIUS * augments::TITAN_SCALE);
@@ -4135,7 +4457,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0xd145_d569_bd91_9dbe;
+    const GOLDEN_HASH_ARENA: u64 = 0xe0ff_038c_b640_ffba;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -4191,7 +4513,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x7282_39aa_4eb4_bb1b;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x524f_82f7_c5d7_b02b;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -4262,5 +4584,5 @@ mod tests {
 
     /// Recorded on x86_64-unknown-linux-gnu (debug and release agree). CI checks Linux, macOS
     /// (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x6a51_8c99_bc59_ad7d;
+    const GOLDEN_HASH: u64 = 0x0bd8_38a3_d146_c77d;
 }
