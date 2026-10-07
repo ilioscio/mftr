@@ -41,6 +41,10 @@ pub struct Primitive {
     pub triangles: usize,
     pub has_color: bool,
     pub positions: Vec<[f32; 3]>,
+    /// COLOR_0 as RGBA (alpha 1 when the attribute is RGB); empty without one.
+    pub colors: Vec<[f32; 4]>,
+    /// Triangle list indices (0..n when the primitive isn't indexed).
+    pub indices: Vec<u32>,
     pub joints: Vec<[u32; 4]>,
     pub weights: Vec<[f32; 4]>,
 }
@@ -284,28 +288,41 @@ pub fn parse(bytes: &[u8]) -> Result<Model, String> {
                 Some(a) => r.normalized4(a)?,
                 None => Vec::new(),
             };
-            let has_color = match attr("COLOR_0") {
-                Some(a) => r.read(a)?.0 == count,
-                None => false,
+            let colors: Vec<[f32; 4]> = match attr("COLOR_0") {
+                Some(a) => {
+                    let (n, flat) = r.read(a)?;
+                    let width = if n == 0 { 4 } else { flat.len() / n };
+                    if n != count || !(width == 3 || width == 4) {
+                        return Err(format!("mesh {mi}: COLOR_0 must be RGB or RGBA per vertex"));
+                    }
+                    flat.chunks(width)
+                        .map(|c| [c[0] as f32, c[1] as f32, c[2] as f32, c.get(3).map_or(1.0, |a| *a as f32)])
+                        .collect()
+                }
+                None => Vec::new(),
             };
+            let has_color = !colors.is_empty();
             if (!joints.is_empty() && joints.len() != count) || (!weights.is_empty() && weights.len() != count) {
                 return Err(format!("mesh {mi}: attribute counts differ"));
             }
-            let triangles = match p.get("indices").and_then(Json::as_index) {
+            let indices: Vec<u32> = match p.get("indices").and_then(Json::as_index) {
                 Some(a) => {
-                    let (n, idx) = r.read(a)?;
+                    let (_, idx) = r.read(a)?;
                     if idx.iter().any(|&i| i < 0.0 || i as usize >= count) {
                         return Err(format!("mesh {mi}: index out of range"));
                     }
-                    n / 3
+                    idx.iter().map(|&i| i as u32).collect()
                 }
-                None => count / 3,
+                None => (0..count as u32).collect(),
             };
+            let triangles = indices.len() / 3;
             prims.push(Primitive {
                 material: opt_index(p.get("material"))?,
                 triangles,
                 has_color,
                 positions,
+                colors,
+                indices,
                 joints,
                 weights,
             });

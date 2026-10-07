@@ -141,7 +141,9 @@ fn champion_packs_need_the_full_set_and_their_kit() {
     let s = side.replace("id: \"biped_library\"", "id: \"vesper\"").replace("kind: \"library\"", "kind: \"champion\"");
     let r = validate(&glb, &s);
     let missing = errors(&r).into_iter().find(|e| e.starts_with("missing clips")).expect("missing clips");
-    for clip in ["idle", "run", "attack_1", "recall", "emote_dance", "q", "w", "e_start", "e_travel", "e_land", "r"] {
+    for clip in
+        ["idle_ready", "run_fast", "attack_1", "recall", "emote_dance", "q", "w", "e_start", "e_travel", "e_land", "r"]
+    {
         assert!(missing.split(", ").any(|c| c.ends_with(clip)), "{clip} not required: {missing}");
     }
 }

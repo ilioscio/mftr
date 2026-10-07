@@ -21,6 +21,8 @@ use mftr_sim::{ChampionId, Team, UnitId, UnitKind, Vec2};
 use std::net::UdpSocket;
 use std::time::Instant;
 
+mod model;
+
 struct MftrExtension;
 
 #[gdextension]
@@ -756,6 +758,34 @@ impl MatchClient {
             d.set("attack_variant", (s.attacks & 3) as i64);
             d.set("recovering", s.recovering(t));
             d.set("buffered_slot", s.buffered.map_or(-1, |b| b.slot as i64));
+            // A3: what the animator shows, retimed to the predicted sim times (10 §4.3).
+            let walking = s.can_move(t) && s.heading().is_some();
+            let windup_of = |slot: u8| match champ.ability(slot).map(|a| a.effect) {
+                Some(mftr_sim::ability::Effect::Line(l)) => l.windup,
+                Some(mftr_sim::ability::Effect::Area(a)) => a.windup,
+                _ => mftr_sim::SimDuration(0),
+            };
+            let progress = |end: mftr_sim::SimTime, len: mftr_sim::SimDuration| {
+                if len.0 == 0 { 1.0 } else { (1.0 - end.secs_since(t) / (len.0 as f32 / 1920.0)).clamp(0.0, 1.0) }
+            };
+            let fired = mftr_sim::SimTime(s.attack_ready_at.0.saturating_sub(attack.period().0 - attack.windup().0));
+            let (action, phase, prog) = if let Some(c) = s.cast {
+                d.set("anim_slot", c.slot as i64);
+                ("cast", "windup", progress(c.fire_at, windup_of(c.slot)))
+            } else if let Some(w) = s.attack {
+                ("attack", "windup", progress(w.fire_at, attack.windup()))
+            } else if s.recovering(t) {
+                ("continue", "follow", -1.0)
+            } else if !walking && t >= fired && t < s.attack_ready_at && s.attacks > 0 {
+                // An attack's follow-through runs until the attack timer (cut by walking).
+                ("attack", "follow", progress(s.attack_ready_at, mftr_sim::SimDuration(s.attack_ready_at.0 - fired.0)))
+            } else {
+                ("", "", -1.0)
+            };
+            d.set("anim_action", action);
+            d.set("anim_phase", phase);
+            d.set("anim_progress", prog);
+            d.set("anim_variant", s.attacks as i64);
             d.set("slowed", s.slow > 0 && s.slowed_until > t);
             let mut cds = VarArray::new();
             for c in s.cooldowns {
@@ -829,6 +859,22 @@ impl MatchClient {
             d.set("attacking", u.attacking);
             d.set("attack_variant", u.attack_variant as i64);
             d.set("recovering", u.recovering);
+            // A3: the animator's inputs (10 §6). Remote attacks have no timing on the wire:
+            // they play at the clip's own rate.
+            let (action, phase, prog) = if let Some((p, _)) = u.windup {
+                d.set("anim_slot", u.windup_slot as i64);
+                ("cast", "windup", p)
+            } else if u.attacking {
+                ("attack", "windup", -1.0)
+            } else if u.recovering {
+                ("continue", "follow", -1.0)
+            } else {
+                ("", "", -1.0)
+            };
+            d.set("anim_action", action);
+            d.set("anim_phase", phase);
+            d.set("anim_progress", prog);
+            d.set("anim_variant", u.attack_variant as i64);
             d.set("facing", u.facing);
             d.set("rooted", u.rooted);
             d.set("dashing", u.dashing);

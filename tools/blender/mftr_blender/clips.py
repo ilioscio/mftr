@@ -34,6 +34,8 @@ SHARED_LIBRARY = [
 ]
 
 MARKERS = ["fire", "end", "loop_in", "loop_out", "foot_l", "foot_r"]  # plus hit_<n>, fx_<name>, sfx_<name>
+# Fallbacks the library also carries (A3): played by champions that lack their own.
+LIBRARY_FALLBACKS = ["idle", "run", "death"]
 LAYERS = ("full", "upper", "additive")
 
 
