@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools", "blender"))
 import bpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
-from mftr_blender import clips, mesh, rig  # noqa: E402
+from mftr_blender import clips, head, mesh, rig  # noqa: E402
 from mftr_blender.clips import merge, sym  # noqa: E402
 from mftr_blender.library import _clip, arms, cycle, run_half  # noqa: E402
 
@@ -35,7 +35,7 @@ WOOD = (0.36, 0.21, 0.10)
 SILVER = (0.74, 0.76, 0.80)
 STRING = (0.82, 0.78, 0.66)
 ACCENT = (0.18, 0.52, 0.95)
-EYES = (0.08, 0.08, 0.10)
+HAIR = (0.50, 0.22, 0.12)
 
 CAPE = [(0, 0.15, 1.50), (0, 0.19, 1.18), (0, 0.22, 0.86), (0, 0.24, 0.56)]
 
@@ -44,19 +44,20 @@ CAPE = [(0, 0.15, 1.50), (0, 0.19, 1.18), (0, 0.22, 0.86), (0, 0.24, 0.56)]
 
 def _center():
     return [
-        ("pelvis", (0, 0, 0.92), (0, 0, 1.12), 12, [(0, .12, .09), (.4, .145, .10), (.8, .15, .105), (1, .14, .10)], "cloth", SLATE),
-        ("pelvis", (0, 0, 1.055), (0, 0, 1.115), 12, [(0, .158, .112), (1, .158, .112)], "cloth", LEATHER),
+        # Hourglass (feminine silhouette): fuller hips, a narrow waist, a shaped bust.
+        ("pelvis", (0, 0, 0.92), (0, 0, 1.12), 12, [(0, .13, .095), (.4, .168, .11), (.8, .172, .11), (1, .15, .10)], "cloth", SLATE),
+        ("pelvis", (0, 0, 1.06), (0, 0, 1.115), 12, [(0, .158, .108), (1, .14, .1)], "cloth", LEATHER),
         ("pelvis", (0, -0.11, 1.07), (0, -0.135, 1.10), 4, [(0, .03, .018), (1, .03, .018)], "metal", SILVER),
-        ("spine_01", (0, 0, 1.10), (0, 0, 1.28), 12, [(0, .138, .098), (.5, .142, .10), (1, .15, .105)], "cloth", LEATHER),
-        ("spine_02", (0, 0, 1.26), (0, 0, 1.42), 12, [(0, .15, .105), (1, .165, .112)], "cloth", LEATHER),
-        ("chest", (0, 0, 1.40), (0, 0, 1.60), 12, [(0, .165, .112), (.35, .175, .118), (.7, .163, .11), (1, .09, .075)], "cloth", LEATHER),
+        ("spine_01", (0, 0, 1.10), (0, 0, 1.28), 12, [(0, .132, .094), (.5, .116, .086), (1, .124, .09)], "cloth", LEATHER),
+        ("spine_02", (0, 0, 1.26), (0, 0, 1.42), 12, [(0, .126, .09), (1, .15, .104)], "cloth", LEATHER),
+        ("chest", (0, 0, 1.40), (0, 0, 1.60), 12, [(0, .15, .104), (.35, .158, .11), (.7, .15, .104), (1, .085, .072)], "cloth", LEATHER),
+        ("chest", (0, -0.03, 1.415), (0, -0.036, 1.53), 10, [(0, .11, .055), (.5, .135, .072), (1, .105, .048)], "cloth", LEATHER),
         # The mantle over the shoulders, part of the cloak.
-        ("chest", (0, 0.015, 1.47), (0, 0.005, 1.63), 14, [(0, .20, .14), (.55, .17, .125), (1, .075, .068)], "cloth", TEAL),
+        ("chest", (0, 0.015, 1.47), (0, 0.005, 1.60), 14, [(0, .185, .135), (.55, .16, .12), (1, .1, .085)], "cloth", TEAL),
+        # The hood, down: a cowl around the neck and the fabric draped over her upper back.
+        ("chest", (0, 0.02, 1.535), (0, 0.025, 1.62), 12, [(0, .112, .098), (1, .082, .074)], "cloth", TEAL),
+        ("chest", (0, 0.075, 1.635), (0, 0.15, 1.44), 8, [(0, .085, .03), (.45, .125, .045), (1, .095, .028)], "cloth", TEAL),
         ("neck", (0, 0, 1.55), (0, -0.01, 1.66), 8, [(0, .05, .05), (1, .045, .045)], "skin", SKIN),
-        ("head", (0, -0.01, 1.62), (0, -0.01, 1.88), 12, [(0, .055, .065), (.15, .085, .095), (.45, .097, .105), (.75, .094, .10), (.92, .07, .075), (1, 0, 0)], "skin", SKIN),
-        # The hood: set back so the face shows, swept to a point behind the head.
-        ("head", (0, 0.055, 1.63), (0, 0.16, 2.03), 14, [(0, .118, .125), (.25, .122, .13), (.55, .105, .11), (.8, .06, .065), (1, 0, 0)], "cloth", TEAL),
-        ("head", (0, -0.095, 1.73), (0, -0.122, 1.718), 4, [(0, .014, .018), (1, 0, 0)], "skin", SKIN),
         # Quiver on the back, its fletching in the team accent.
         ("spine_02", (0.07, 0.13, 1.18), (-0.05, 0.15, 1.60), 6, [(0, .048, .038), (1, .054, .042)], "cloth", LEATHER),
         ("spine_02", (-0.05, 0.15, 1.60), (-0.075, 0.16, 1.72), 6, [(0, .044, .034), (1, .008, .008)], "accent", ACCENT),
@@ -64,10 +65,15 @@ def _center():
         ("extra_cape_1", CAPE[0], CAPE[1], 6, [(0, .17, .022), (1, .20, .022)], "cloth", TEAL),
         ("extra_cape_2", CAPE[1], CAPE[2], 6, [(0, .20, .022), (1, .215, .022)], "cloth", TEAL),
         ("extra_cape_3", CAPE[2], CAPE[3], 6, [(0, .215, .022), (.7, .20, .02), (1, .12, .016)], "cloth", TEAL),
-    ] + [
-        ("head", (x, -0.093, 1.762), (x, -0.108, 1.762), 4, [(0, .014, .007), (1, .014, .007)], "cloth", EYES)
-        for x in (0.034, -0.034)
     ]
+
+
+def _head(bm, layers, groups, mats):
+    # The shared sculpted head (head.py), feminine: slimmer, a narrower jaw and smaller chin,
+    # larger eyes; auburn hair with side-swept bangs and a ponytail.
+    head.build(bm, layers, groups, mats, head.Head(
+        base=(0, -0.008, 1.64), height=0.25, scale=0.93, jaw=0.48, chin=0.85, eye=1.2,
+        skin=SKIN, hair=HAIR, hair_style="ponytail", eye_color=(0.2, 0.32, 0.26), lips=(0.72, 0.38, 0.38)))
 
 
 def _left():
@@ -80,7 +86,7 @@ def _left():
         ("hand_l", ("hand_l", 0), ("hand_l", 1), 6, [(0, .038, .024), (1, .042, .021)], "cloth", GLOVE),
         ("fingers_l", ("fingers_l", 0), ("fingers_l", 1), 6, [(0, .042, .021), (1, .028, .015)], "cloth", GLOVE),
         ("thumb_l", ("thumb_l", 0), ("thumb_l", 1), 5, [(0, .017, .017), (1, .011, .011)], "cloth", GLOVE),
-        (th, (0.10, 0, 1.02), (th, 1), 10, [(0, .08, .08), (.5, .072, .072), (1, .056, .056)], "cloth", SLATE),
+        (th, (0.10, 0, 1.02), (th, 1), 10, [(0, .088, .086), (.5, .074, .074), (1, .056, .056)], "cloth", SLATE),
         (ca, (ca, 0), (ca, .45), 10, [(0, .056, .056), (1, .052, .052)], "cloth", SLATE),
         (ca, (ca, .38), (ca, 1), 10, [(0, .064, .064), (.12, .06, .06), (1, .05, .054)], "cloth", BOOT),
         (ca, (ca, .36), (ca, .44), 10, [(0, .07, .07), (1, .07, .07)], "cloth", BOOT),
@@ -119,7 +125,7 @@ def parts(axis, back):
     left = _left()
     out = _center() + left + [mesh._mirror_part(p) for p in left]
     out = [(b, a, e, s + 2 if s >= 8 else s, mesh._smooth(prof) if s >= 8 else prof, slot, col) for b, a, e, s, prof, slot, col in out]
-    return out + _bow(axis, back)
+    return out + _bow(axis, back) + [_head]
 
 
 def bow_frame(arm):

@@ -12,7 +12,7 @@ import bmesh
 import bpy
 from mathutils import Vector
 
-from . import rig
+from . import head, rig
 
 # The fixed material slots (10 §2). `accent` is tinted ally/enemy at runtime.
 MATERIAL_SLOTS = ("skin", "cloth", "metal", "emissive", "accent")
@@ -55,10 +55,6 @@ def _center_parts():
         ("pelvis", (0, 0.112, 1.10), (0, 0.14, 0.72), 6, [(0, .10, .014), (.6, .11, .014), (1, .12, .014)], "accent", ACCENT),
         ("chest", (0, 0, 1.535), (0, 0, 1.585), 14, [(0, .15, .11), (1, .125, .095)], "metal", METAL),
         ("neck", (0, 0, 1.55), (0, -0.01, 1.67), 10, [(0, .065, .065), (1, .055, .055)], "skin", SKIN),
-        ("head", (0, -0.01, 1.62), (0, -0.01, 1.91), 14, [(0, .06, .07), (.15, .095, .10), (.45, .108, .115), (.75, .104, .11), (.92, .075, .08), (1, 0, 0)], "skin", SKIN),
-        ("head", (0, 0.012, 1.765), (0, 0.016, 1.935), 14, [(0, .116, .124), (.45, .108, .116), (.8, .07, .075), (1, 0, 0)], "cloth", HAIR),
-        ("head", (0, 0, 1.795), (0, 0, 1.83), 14, [(0, .117, .124), (1, .113, .12)], "accent", ACCENT),
-        ("head", (0, -0.105, 1.735), (0, -0.135, 1.72), 4, [(0, .016, .02), (1, 0, 0)], "skin", SKIN),
     ]
 
 
@@ -84,12 +80,9 @@ def _left_parts():
     ]
 
 
-def _eyes():
-    # Two dark slits so the facing reads at the gameplay camera.
-    return [
-        ("head", (x, -0.103, 1.772), (x, -0.118, 1.772), 4, [(0, .016, .008), (1, .016, .008)], "cloth", EYES)
-        for x in (0.038, -0.038)
-    ]
+def _head(bm, layers, groups, mats):
+    # The sculpted head with short hair (head.py): a face, not an egg.
+    head.build(bm, layers, groups, mats, head.Head(base=(0, -0.01, 1.63), height=0.255))
 
 
 def _mirror_part(p):
@@ -106,10 +99,11 @@ def _mirror_part(p):
 
 def parts():
     left = _left_parts()
-    out = _center_parts() + _eyes() + left + [_mirror_part(p) for p in left]
+    out = _center_parts() + left + [_mirror_part(p) for p in left]
     # Round parts get two more sides and smoothed in-between rings: rounder silhouettes at the
     # gameplay camera.
-    return [(b, a, e, s + 2 if s >= 8 else s, _smooth(prof) if s >= 8 else prof, slot, col) for b, a, e, s, prof, slot, col in out]
+    out = [(b, a, e, s + 2 if s >= 8 else s, _smooth(prof) if s >= 8 else prof, slot, col) for b, a, e, s, prof, slot, col in out]
+    return out + [_head]
 
 
 def _smooth(profile):
@@ -190,7 +184,12 @@ def build_mannequin(armature, name="biped_v1_mannequin", collection=None, part_l
 
     bm = bmesh.new()
     layers = (bm.verts.layers.deform.verify(), bm.verts.layers.float_color.new("Col"))
-    for bone, a, b, sides, prof, slot, color in (part_list if part_list is not None else parts()):
+    mats = {slot: i for i, slot in enumerate(MATERIAL_SLOTS)}
+    for part in (part_list if part_list is not None else parts()):
+        if callable(part):
+            part(bm, layers, groups, mats)  # a custom builder (heads)
+            continue
+        bone, a, b, sides, prof, slot, color = part
         _loft(bm, _resolve(a), _resolve(b), sides, prof, MATERIAL_SLOTS.index(slot), color, groups[bone], layers)
     bm.to_mesh(me)
     bm.free()

@@ -10,7 +10,8 @@ Status: **draft** (awaiting the owner's approval, 10 §10)
   - **E Tumble:** a short roll (dash).
   - **R Snare Net:** a wide thrown net that roots (hard CC line, ultimate).
 - **Personality in three words:** patient, precise, wry.
-- **Silhouette class:** *hooded archer*. A pointed hood swept back, a long recurve bow taller than her shoulders, a cloak tail that trails her movement. Slim: narrower than the template everywhere.
+- **Silhouette class:** *ranger archer*. A long recurve bow taller than her shoulders, a cloak tail that trails her movement, an auburn ponytail. Her hood is **down**, a cowl around her neck and over her upper back (a hood standing up read as confusing). A feminine hourglass build: a shaped bust, a narrow waist, fuller hips. Slim overall.
+- **Head:** the shared sculpted head (`tools/blender/mftr_blender/head.py`) with feminine settings: slimmer, a narrower jaw and smaller chin, larger green eyes; side-swept bangs and a ponytail.
 - **Archetype:** `biped` v1, plus an `extra_cape` chain (3 bones) for the cloak.
 
 ## Palette (10 §2)
@@ -18,7 +19,7 @@ Status: **draft** (awaiting the owner's approval, 10 §10)
 | Slot | Colors |
 |---|---|
 | skin | warm pale (0.84, 0.66, 0.54) |
-| cloth | dusk teal cloak and hood (0.14, 0.32, 0.30), dark slate trousers (0.16, 0.17, 0.20), sleeves (0.20, 0.24, 0.22), leather jerkin, belt, quiver and boots (0.42, 0.27, 0.16 / 0.30, 0.19, 0.11), gloves (0.25, 0.16, 0.10), bow wood (0.36, 0.21, 0.10) |
+| cloth | auburn hair (0.50, 0.22, 0.12), dusk teal cloak and hood (0.14, 0.32, 0.30), dark slate trousers (0.16, 0.17, 0.20), sleeves (0.20, 0.24, 0.22), leather jerkin, belt, quiver and boots (0.42, 0.27, 0.16 / 0.30, 0.19, 0.11), gloves (0.25, 0.16, 0.10), bow wood (0.36, 0.21, 0.10) |
 | metal | bow tips and buckle, worn silver (0.74, 0.76, 0.80) |
 | emissive | none (she reads by shape, not glow) |
 | accent | bracers, quiver fletching and the bow grip's band. Bracers and fletching read from above |
