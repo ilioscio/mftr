@@ -113,6 +113,8 @@ pub struct RemoteRender {
     /// Cast windup in progress: `(progress 0..1, aim direction)`. Enemy windups are shown on
     /// `T_input` so they line up with their missiles (03a §7).
     pub windup: Option<(f32, Vec2)>,
+    /// The ability slot of that windup (picks the cast animation).
+    pub windup_slot: u8,
     pub champion: Option<ChampionId>,
     /// Held augments (indicators above the health bar).
     pub augments: [u8; mftr_sim::augments::SLOTS],
@@ -299,7 +301,7 @@ pub struct ClientSession {
     /// Newest of those, reported to the server in every input packet.
     snapshot_ack: Tick,
     /// Remote cast windups from `CastStarted` events: `(start, fire, aim)`.
-    remote_casts: BTreeMap<UnitId, (SimTime, SimTime, Vec2)>,
+    remote_casts: BTreeMap<UnitId, (SimTime, SimTime, Vec2, u8)>,
     effects: EffectBook,
     combat_text: Vec<CombatText>,
     notices: Vec<Notice>,
@@ -847,8 +849,8 @@ impl ClientSession {
             }
             self.last_event_seq = *seq;
             match *e {
-                SimEvent::CastStarted { unit, at, dir, fire_at, .. } if unit != self.unit => {
-                    self.remote_casts.insert(unit, (at, fire_at, dir));
+                SimEvent::CastStarted { unit, at, dir, fire_at, slot, .. } if unit != self.unit => {
+                    self.remote_casts.insert(unit, (at, fire_at, dir, slot));
                 }
                 SimEvent::MissileSpawned(m) => self.book.on_spawn(m, self.unit, self.team, now),
                 SimEvent::MissileHit { id, target, at } => self.book.on_end(id, at, Some(target)),
@@ -1178,7 +1180,8 @@ impl ClientSession {
                         pos = interp.lerp(track.extrapolate(t_input), w);
                     }
                 }
-                let windup = self.remote_casts.get(&track.latest.id).and_then(|&(at, fire, dir)| {
+                let windup_slot = self.remote_casts.get(&track.latest.id).map_or(0, |c| c.3);
+                let windup = self.remote_casts.get(&track.latest.id).and_then(|&(at, fire, dir, _)| {
                     let t = if track.latest.team == self.team { t_interp } else { t_input } * SUBTICKS as f64;
                     let p = (t - at.0 as f64) / (fire.0 - at.0).max(1) as f64;
                     (0.0..1.0).contains(&p).then_some((p as f32, dir))
@@ -1191,6 +1194,7 @@ impl ClientSession {
                     collision_radius: l.collision_radius as f32,
                     pos,
                     windup,
+                    windup_slot,
                     champion: l.champion,
                     augments: l.augments,
                     gameplay_radius: track.gameplay_radius(),

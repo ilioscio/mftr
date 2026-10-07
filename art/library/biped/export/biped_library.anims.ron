@@ -15,6 +15,9 @@
         (name: "cc_sleep", frames: 60, looping: true, layer: "full", stride_speed: None, markers: []),
         (name: "cc_stunned", frames: 40, looping: true, layer: "full", stride_speed: None, markers: []),
         (name: "cc_suppressed", frames: 30, looping: true, layer: "full", stride_speed: None, markers: []),
+        (name: "death", frames: 30, looping: false, layer: "full", stride_speed: None, markers: [(name: "end", frame: 30)]),
+        (name: "idle", frames: 60, looping: true, layer: "full", stride_speed: None, markers: []),
+        (name: "run", frames: 20, looping: true, layer: "full", stride_speed: 330.0, markers: [(name: "foot_l", frame: 0), (name: "foot_r", frame: 10)]),
         (name: "walk", frames: 32, looping: true, layer: "full", stride_speed: 140.0, markers: [(name: "foot_l", frame: 0), (name: "foot_r", frame: 16)]),
     ],
 )

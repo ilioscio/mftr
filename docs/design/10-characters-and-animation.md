@@ -191,16 +191,20 @@ CC poses are gameplay information: "that champion can't act" must read at a glan
 
 **Count:** ≈ 35–45 clips per champion, of which ~10 come from the shared library by default. That's in line with what the genre's leader ships, and it's what this section exists to protect.
 
-## 6. Runtime blending (Godot)
+## 6. Runtime blending
+
+The layer stack is evaluated in Rust (`mftr-pack`'s `animator`), not by a Godot AnimationTree: the pose is a pure function of sim state and time, testable without the engine, and the same code will serve tools and replays. The Godot extension only copies the resulting local transforms into the model's `Skeleton3D` (A3).
 
 ```
-AnimationTree
-├─ Locomotion        BlendSpace1D by speed: idle ─ walk ─ run ─ run_fast (phase-synced via foot markers)
-├─ Action            one-shot; time driven by the sim phase (§4.3), not by AnimationPlayer playback
-├─ UpperBody         masked layer (spine_01 and up) for `mobile` casts over locomotion
-├─ Additive          cc_rooted, cc_forced_move, run-lean
-└─ Override          death, recall, emotes, cc loops (full body)
+Locomotion   idle ─ walk ─ run by displayed speed; playback rate = speed ÷ stride speed, one
+             shared cycle phase so switching walk ↔ run keeps the step
+Action       attack or cast; clip time from the sim phase (§4.3), never free-running playback
+             (upper-layer clips masked to spine_01 and below it; full clips over everything)
+Additive     cc_rooted (and later cc_forced_move, run-lean)
+Override     death (holds its last frame), cc_stunned; later recall and emotes
 ```
+
+Fallbacks: a champion without its own `idle`, `run`, `death`, attack or ability clips plays the shared library's (`idle`, `run`, `death`, `attack_melee_alt`, `cast_utility`), so a pack with gaps, or the template, still animates. Inputs come from the client's state: the own champion's windup and follow-through progress are exact (predicted sim times); other units' cast windups come from their `CastStarted` events, their follow-throughs from the status flag, and their attacks (no timing on the wire yet) play at the clip's own rate.
 
 | Transition | Blend *(start)* |
 |---|---|

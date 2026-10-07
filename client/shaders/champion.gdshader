@@ -6,6 +6,8 @@ render_mode diffuse_toon, specular_disabled;
 uniform vec3 base_color : source_color = vec3(0.6, 0.6, 0.65);
 uniform vec3 team_accent : source_color = vec3(0.25, 0.55, 1.0);
 uniform float accent_height = -0.45;
+// Impact flash (10 §4.4): 1 when a hit lands, fading within ~3 frames.
+uniform float flash = 0.0;
 
 varying vec3 obj_pos;
 
@@ -37,4 +39,5 @@ void fragment() {
 	ROUGHNESS = 0.9;
 	RIM = 0.7;
 	RIM_TINT = 0.4;
+	EMISSION = vec3(flash);
 }

@@ -120,6 +120,8 @@ pub const SHARED_LIBRARY: &[&str] = &[
     "cc_sleep",
     "cc_forced_move",
 ];
+/// Fallbacks the library also carries (A3): champions without their own play these.
+pub const LIBRARY_FALLBACKS: &[&str] = &["idle", "run", "death"];
 pub const LOCOMOTION: &[&str] = &["walk", "run", "run_fast"];
 pub const LAYERS: &[&str] = &["full", "upper", "additive"];
 const SLOTS: [&str; 4] = ["q", "w", "e", "r"];

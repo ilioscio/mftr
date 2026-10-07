@@ -231,7 +231,9 @@ fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
     let names: Vec<&str> = m.animations.iter().map(|a| a.name.as_str()).collect();
     let mut required: Vec<String> = Vec::new();
     match side.kind.as_str() {
-        "library" => required.extend(rules::SHARED_LIBRARY.iter().map(|s| s.to_string())),
+        "library" => {
+            required.extend(rules::SHARED_LIBRARY.iter().chain(rules::LIBRARY_FALLBACKS).map(|s| s.to_string()))
+        }
         "champion" => {
             required.extend(rules::REQUIRED_CHAMPION.iter().map(|s| s.to_string()));
             match ChampionId::by_name(&side.id) {

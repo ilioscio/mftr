@@ -276,6 +276,7 @@ dependencies = [
  "godot",
  "mftr-client",
  "mftr-net",
+ "mftr-pack",
  "mftr-sim",
 ]
 

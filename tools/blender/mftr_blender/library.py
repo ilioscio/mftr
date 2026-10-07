@@ -192,8 +192,54 @@ def cc_forced_move(arm):
     return _clip(arm, "cc_forced_move", 32, keys, loop=True, layer="additive", bones=rig.UPPER_BODY)
 
 
+# Fallbacks (A3): what a champion without its own idle, run or death plays, so a pack missing
+# them (or the template) still animates.
+def idle(arm):
+    stand = merge(arms((0.27, 0.04, -1), (0.2, 0.22, -1)), sym("thigh", -3, 0, 0), sym("calf", 6, 0, 0),
+                  sym("foot", -3, 0, 0), {"spine_01": (2, 0, 0), "head": (-2, 0, 0)})
+    inhale = merge(stand, arms((0.29, 0.03, -1), (0.22, 0.2, -1)), sym("clavicle", 0, -3, 0),
+                   {"spine_01": (0, 0, 0), "chest": (-2, 0, 0), "head": (-3, 0, 2)})
+    return _clip(arm, "idle", 60, [(0, stand, {"pelvis": (0, 0, -0.01)}), (30, inhale, {"pelvis": (0, 0, 0.0)})], loop=True)
+
+
+def run(arm):
+    # Champion speed (330 u/s): two 1.1 m strides in 20 frames, leaning in, arms pumping.
+    half = [
+        (0, merge(arms((0.18, -0.55, -1), (0.1, 0.4, -0.3), (0.18, 0.7, -0.6), (0.0, 1, 0.5)), {
+            "thigh_l": (-38, 0, 0), "calf_l": (14, 0, 0), "foot_l": (-10, 0, 0),
+            "thigh_r": (24, 0, 0), "calf_r": (40, 0, 0), "foot_r": (22, 0, 0),
+            "pelvis": (0, 0, -7), "spine_01": (10, 0, 4), "spine_02": (4, 0, 6), "head": (-10, 0, -4)}), {"pelvis": (0, 0, -0.03)}),
+        (3, merge(arms((0.18, -0.4, -1), (0.1, 0.5, -0.2), (0.18, 0.55, -0.7), (0.0, 1, 0.35)), {
+            "thigh_l": (-24, 0, 0), "calf_l": (34, 0, 0), "foot_l": (4, 0, 0),
+            "thigh_r": (18, 0, 0), "calf_r": (70, 0, 0), "foot_r": (20, 0, 0),
+            "pelvis": (0, 0, -5), "spine_01": (11, 0, 3), "spine_02": (4, 0, 4), "head": (-11, 0, -3)}), {"pelvis": (0, 0, -0.06)}),
+        (6, merge(arms((0.18, 0.0, -1), (0.1, 0.7, -0.3)), {
+            "thigh_l": (-2, 0, 0), "calf_l": (12, 0, 0), "foot_l": (-2, 0, 0),
+            "thigh_r": (-30, 0, 0), "calf_r": (95, 0, 0), "foot_r": (10, 0, 0),
+            "pelvis": (0, 0, 0), "spine_01": (10, 0, 0), "spine_02": (4, 0, 0), "head": (-10, 0, 0)}), {"pelvis": (0, 0, 0.02)}),
+    ]
+    keys = half + [(f + 10, mirror(p), _mirror_locs(l)) for f, p, l in half]
+    return _clip(arm, "run", 20, keys, loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=330.0)
+
+
+def death(arm):
+    # Staggers, buckles and falls backward; the last frame holds (the body lies where it fell).
+    keys = [
+        (0, RELAXED, None),
+        (5, merge(arms((0.7, -0.2, 0.2), (0.6, 0.3, 0.5)), {"spine_01": (-14, 0, 0), "spine_02": (-8, 0, 0), "head": (-22, 0, 0)}),
+         {"pelvis": (0, 0.05, 0)}),
+        (13, merge(arms((0.6, 0.3, -0.4), (0.4, 0.6, -0.4)), sym("thigh", -45, 0, 0), sym("calf", 85, 0, 0), sym("foot", -30, 0, 0),
+                   {"spine_01": (12, 0, 0), "spine_02": (6, 0, 0), "head": (10, 0, 0)}), {"pelvis": (0, 0.08, -0.38)}),
+        (21, merge(arms((0.8, -0.4, 0.2), (0.7, -0.2, 0.4)), sym("thigh", -55, 0, 0), sym("calf", 60, 0, 0),
+                   {"pelvis": (-60, 0, 0), "spine_01": (-6, 0, 0), "head": (-10, 0, 0)}), {"pelvis": (0, 0.4, -0.72)}),
+        (30, merge(arms((0.9, -0.5, 0.1), (0.9, -0.3, 0.0)), sym("thigh", -12, 0, 0), sym("calf", 14, 0, 0), sym("foot", 10, 0, 0),
+                   {"pelvis": (-86, 0, 0), "spine_01": (-4, 0, 0), "head": (-8, 0, 12)}), {"pelvis": (0, 0.55, -0.86)}),
+    ]
+    return _clip(arm, "death", 30, keys)
+
+
 ALL = [walk, cast_utility, attack_melee_alt, cc_stunned, cc_rooted, cc_airborne, cc_knockback, cc_suppressed,
-       cc_sleep, cc_forced_move]
+       cc_sleep, cc_forced_move, idle, run, death]
 
 
 def blockout(arm):

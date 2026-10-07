@@ -7,7 +7,7 @@ extends Node3D
 ## User args (after `--`) skip the menu: a server address (`host:port#fingerprint` pins the
 ## server's key, otherwise it is trusted on first use), `--champion NAME`,
 ## `--spectate` to watch (Tab cycles champions), `--shot-lobby` for a champion-select capture,
-## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots, and the blind playtest
+## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots (`--zoom <factor>` brings the camera closer), and the blind playtest
 ## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`. `--menu-join`
 ## (scripted checks) opens the menu and joins the first remembered server through it.
 
@@ -44,10 +44,20 @@ var floaters := []                      # damage numbers: { pos: Vector3, text, 
 var match_banner := ""                  # "VICTORY" / "DEFEAT" when a Base falls
 var match_banner_age := 0.0
 var notices := []                       # kill feed: { text, age }
+# A3 (10 §6): champion models from content packs. Until champions ship their own, they all wear
+# the shared template (tinted with their identity color). F3 toggles the placeholder shapes.
+var champion_model: MftrModel = null
+var use_models := true
+var hovered_body: Node3D = null
+const TURN_RATE := deg_to_rad(4500.0)    # 10 §3: a 180° turn in ~40 ms
+const FLASH_TIME := 0.05                 # 10 §4.4: 2-3 frames of white on the target
+const OUTLINE_WIDTH := 0.025
+const MODEL_LIFT := -0.85                # bodies sit at y 0.85 (the placeholder's center)
 
 
 func _ready() -> void:
 	_build_world()
+	_load_champion_model()
 	client = MatchClient.new()
 	add_child(client)
 	var address := ""
@@ -71,6 +81,9 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--blind-seconds" and i + 1 < args.size():
 			blind_seconds = float(args[i + 1])
+			i += 1
+		elif args[i] == "--zoom" and i + 1 < args.size():
+			camera_zoom = maxf(0.05, float(args[i + 1]))
 			i += 1
 		elif args[i] == "--shot-shop":
 			_shot_shop = true
@@ -100,6 +113,17 @@ func _ready() -> void:
 		_connect(address)
 
 
+## The shared template from `art/` (A3), validated by `mftr-pack` on load (11 §4). Missing or
+## refused: champions keep their placeholder shapes.
+func _load_champion_model() -> void:
+	var path := ProjectSettings.globalize_path("res://").path_join("../art/library/biped/export/biped_library.glb").simplify_path()
+	if FileAccess.file_exists(path):
+		champion_model = MftrModel.load(path)
+	if champion_model == null:
+		use_models = false
+		print("MFTR: no champion model (%s): placeholder shapes" % path)
+
+
 ## Join `address` (as set up: spectating, champion, blind playtest).
 func _connect(address: String) -> void:
 	_server_address = address
@@ -121,6 +145,7 @@ var _shot_at := 1.05                     # `--shot-at <seconds>` after joining
 var _shot_shop := false                  # `--shot-shop`: buy from the fountain, show the shop
 var _shot_lobby := false                 # `--shot-lobby`: reroll in champion select, capture it
 var _menu_auto_join := false             # `--menu-join`: join the first remembered server from the menu
+var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
 
 
 func _update_shot(delta: float) -> void:
@@ -245,6 +270,7 @@ const CHAMPION_COLORS := {
 
 func _part(parent: Node3D, mesh: Mesh, pos: Vector3, mat: Material, rot := Vector3.ZERO) -> MeshInstance3D:
 	var n := MeshInstance3D.new()
+	n.set_meta("placeholder", true)
 	n.mesh = mesh
 	n.position = pos
 	n.rotation_degrees = rot
@@ -376,6 +402,11 @@ func _make_champion(color: Color, champion: String) -> Node3D:
 			sphere.height = 0.28
 			_part(body, sphere, Vector3(0.45, 0.55, 0), _unshaded(Color(1.0, 0.7, 0.3)))
 	body.material_override = m
+	var outline := _outline_material(color)
+	m.next_pass = outline
+	body.set_meta("outline", outline)
+	body.set_meta("flash_mats", [m])
+	body.set_meta("placeholder_mesh", body.mesh)
 	var ring := MeshInstance3D.new()
 	var torus := TorusMesh.new()
 	torus.outer_radius = CHAMPION_RADIUS_U * UNITS_TO_METERS
@@ -388,7 +419,125 @@ func _make_champion(color: Color, champion: String) -> Node3D:
 	body.add_child(_make_stun_indicator())
 	body.add_child(_make_root_indicator())
 	body.add_child(_make_slow_indicator())
+	if champion_model != null:
+		_attach_model(body, color, champion)
+	_apply_model_mode(body)
 	return body
+
+
+func _outline_material(team: Color) -> ShaderMaterial:
+	var o := ShaderMaterial.new()
+	o.shader = load("res://shaders/outline.gdshader")
+	o.set_shader_parameter("color", ENEMY_COLOR if team == ENEMY_COLOR else team.lerp(Color.WHITE, 0.3))
+	return o
+
+
+## The template model under `body`: one material per surface by slot, the team accent, the
+## champion's identity color on cloth, the outline as a second pass, and its animator.
+func _attach_model(body: MeshInstance3D, team: Color, champion: String) -> void:
+	var model: Node3D = champion_model.instantiate()
+	model.position = Vector3(0, MODEL_LIFT, 0)
+	body.add_child(model)
+	var mesh: MeshInstance3D = model.get_node("Skeleton/Mesh")
+	var outline: ShaderMaterial = body.get_meta("outline")
+	var mats := []
+	var slots := champion_model.surface_slots()
+	for i in slots.size():
+		var m := ShaderMaterial.new()
+		m.shader = load("res://shaders/champion_model.gdshader")
+		m.set_shader_parameter("slot", ["skin", "cloth", "metal", "emissive", "accent"].find(slots[i]))
+		m.set_shader_parameter("team_accent", team)
+		m.set_shader_parameter("identity", CHAMPION_COLORS.get(champion, Color(0.5, 0.5, 0.5)))
+		m.set_shader_parameter("identity_mix", 0.6)
+		m.next_pass = outline
+		mesh.set_surface_override_material(i, m)
+		mats.append(m)
+	body.set_meta("flash_mats", body.get_meta("flash_mats", []) + mats)
+	body.set_meta("rig", {
+		"model": model,
+		"skeleton": model.get_node("Skeleton"),
+		"animator": champion_model.new_animator(),
+		"yaw": NAN,
+		"last": Vector3.INF,
+		"speed": 0.0,
+	})
+
+
+## Model or placeholder shapes (F3).
+func _apply_model_mode(body: MeshInstance3D) -> void:
+	var on := use_models and body.has_meta("rig")
+	body.mesh = null if on else body.get_meta("placeholder_mesh", body.mesh)
+	for c in body.get_children():
+		if c.has_meta("placeholder"):
+			c.visible = not on
+	if body.has_meta("rig"):
+		body.get_meta("rig").model.visible = on
+
+
+func _models_shown(body: Node3D) -> bool:
+	return use_models and body != null and body.has_meta("rig")
+
+
+## Facing, locomotion speed, the animator and the impact flash, every frame (10 §3, §6).
+## `info` is the unit's `own_status()` or `remote_units()` entry.
+func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
+	if body == null:
+		return
+	var flash := maxf(0.0, float(body.get_meta("flash", 0.0)) - delta / FLASH_TIME)
+	body.set_meta("flash", flash)
+	for m in body.get_meta("flash_mats", []):
+		m.set_shader_parameter("flash", flash)
+	if not _models_shown(body) or delta <= 0.0:
+		return
+	var rig: Dictionary = body.get_meta("rig")
+	# Displayed ground speed in u/s, lightly smoothed (positions arrive interpolated).
+	var p := body.global_position
+	if rig.last != Vector3.INF:
+		var flat := Vector2(p.x - rig.last.x, p.z - rig.last.z)
+		var v := flat.length() / delta / UNITS_TO_METERS
+		rig.speed = lerpf(rig.speed, v, clampf(delta / 0.05, 0.0, 1.0))
+	rig.last = p
+	# Facing: the model's front (+Z) turns toward the sim's facing at TURN_RATE.
+	if info.has("facing"):
+		var target: float = PI / 2.0 - float(info.facing)
+		if is_nan(rig.yaw):
+			rig.yaw = target
+		var diff := wrapf(target - rig.yaw, -PI, PI)
+		rig.yaw += clampf(diff, -TURN_RATE * delta, TURN_RATE * delta)
+		rig.model.rotation.y = rig.yaw
+	rig.animator.drive(rig.skeleton, info, rig.speed, delta)
+
+
+func _flash(id: int) -> void:
+	var body = own_body if id == client.own_unit_id() else remote_bodies.get(id)
+	if body != null:
+		body.set_meta("flash", 1.0)
+
+
+## A bone's world position (sockets: where projectiles leave from), or the body's.
+func _socket_world(body: Node3D, bone: String) -> Vector3:
+	if _models_shown(body):
+		var skel: Skeleton3D = body.get_meta("rig").skeleton
+		var i := skel.find_bone(bone)
+		if i >= 0:
+			return skel.global_transform * skel.get_bone_global_pose(i).origin
+	return body.position
+
+
+## The attackable target under the cursor gets an outline (red for enemies, R04 §2).
+func _update_hover() -> void:
+	var target: Node3D = null
+	var p = _cursor_ground() if client.phase() == "playing" else null
+	if p != null:
+		var id: int = client.pick_enemy(p, 30.0)
+		if id >= 0 and remote_bodies.has(id):
+			target = remote_bodies[id]
+	if target == hovered_body:
+		return
+	for b in [hovered_body, target]:
+		if b != null and is_instance_valid(b) and b.has_meta("outline"):
+			b.get_meta("outline").set_shader_parameter("width", OUTLINE_WIDTH if b == target else 0.0)
+	hovered_body = target
 
 
 func _make_shield_bubble() -> MeshInstance3D:
@@ -474,6 +623,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		_spectate_next()
 	elif event.is_action_pressed("toggle_net_graph") and not blind_enabled:
 		show_net_graph = not show_net_graph
+	elif event is InputEventKey and event.is_pressed() and not event.is_echo() and (event as InputEventKey).keycode == KEY_F3 and champion_model != null:
+		use_models = not use_models
+		for b in [own_body] + remote_bodies.values():
+			if b != null and b.has_meta("placeholder_mesh"):
+				_apply_model_mode(b)
 
 
 ## Ray-cast the mouse onto the ground plane (y = 0). Never assume a fixed px/u (R01 §1).
@@ -521,14 +675,16 @@ func _process(delta: float) -> void:
 		add_child(own_body)
 	if own_body != null:
 		var dead: bool = own_status.get("dead", false)
-		own_body.visible = playing and not dead
+		own_body.visible = playing and (not dead or _models_shown(own_body))
 		var own := _to_world(client.own_position())
 		own_body.position = own
 		# Titan and Pebble: the model grows and shrinks with the hitbox (honest hitboxes).
 		own_body.scale = Vector3.ONE * (float(own_status.get("hitbox", CHAMPION_RADIUS_U)) / CHAMPION_RADIUS_U)
 		_place_camera(own)
 		_show_statuses(own_body, own_status.get("stunned", false), own_status.get("rooted", false), own_status.get("shield", 0.0), own_status.get("slowed", false))
-	_update_remotes()
+		_animate(own_body, own_status, delta)
+	_update_remotes(delta)
+	_update_hover()
 	_update_missiles()
 	_update_areas()
 	_update_bolts()
@@ -542,7 +698,7 @@ func _process(delta: float) -> void:
 
 func _place_camera(target: Vector3) -> void:
 	var pitch := deg_to_rad(CAMERA_PITCH_DEG)
-	var dist := CAMERA_DISTANCE_U * UNITS_TO_METERS
+	var dist := CAMERA_DISTANCE_U * UNITS_TO_METERS / camera_zoom
 	var look := Vector3(target.x, 0.0, target.z)
 	camera.position = look + Vector3(0, sin(pitch) * dist, cos(pitch) * dist)
 	camera.look_at(look, Vector3.UP)
@@ -558,7 +714,7 @@ func _show_statuses(body: Node3D, stunned: bool, rooted: bool, shield: float, sl
 var remote_info := {}                   # unit_id -> latest dictionary (for bars and numbers)
 
 
-func _update_remotes() -> void:
+func _update_remotes(delta: float) -> void:
 	var seen := {}
 	remote_info.clear()
 	for u in client.remote_units():
@@ -604,6 +760,8 @@ func _update_remotes() -> void:
 			body.get_node("Protected").visible = u.protected
 		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO))
 		_show_statuses(body, u.stunned, u.rooted, u.shield, u.get("slowed", false))
+		if u.champion != "":
+			_animate(body, u, delta)
 	for id in remote_bodies.keys():
 		if not seen.has(id):
 			remote_bodies[id].queue_free()
@@ -932,9 +1090,12 @@ func _update_missiles() -> void:
 			add_child(node)
 			missile_nodes[key] = node
 			# Spawn streak (03a §7): enemy missiles are on T_input, their caster on T_interp; a
-			# brief smear from the caster's drawn hand to the missile ties the two together.
+			# brief smear from the caster's hand (its projectile socket, 10 §4.4) to the missile
+			# ties the two together. Our own leave from our socket the same way.
 			if m.side == "enemy" and remote_bodies.has(m.owner):
-				_spawn_streak(remote_bodies[m.owner].position, world + Vector3(0, 0.3, 0), ENEMY_COLOR)
+				_spawn_streak(_socket_world(remote_bodies[m.owner], "socket_projectile"), world + Vector3(0, 0.3, 0), ENEMY_COLOR)
+			elif m.side == "own" and _models_shown(own_body):
+				_spawn_streak(_socket_world(own_body, "socket_projectile"), world + Vector3(0, 0.3, 0), OWN_COLOR)
 		var node: Node3D = missile_nodes[key]
 		var dir: Vector2 = m.dir
 		node.position = world
@@ -1045,6 +1206,8 @@ func _update_combat_text(delta: float) -> void:
 		if c.target == client.own_unit_id():
 			color = Color(1.0, 0.3, 0.3)
 		var text := "%d" % roundi(total)
+		if not c.heal:
+			_flash(c.target)
 		if c.heal:
 			color = Color(0.4, 1.0, 0.45)
 			text = "+" + text
