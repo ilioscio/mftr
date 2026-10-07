@@ -114,6 +114,8 @@ pub struct RemoteRender {
     /// `T_input` so they line up with their missiles (03a §7).
     pub windup: Option<(f32, Vec2)>,
     pub champion: Option<ChampionId>,
+    /// Held augments (indicators above the health bar).
+    pub augments: [u8; mftr_sim::augments::SLOTS],
     pub gameplay_radius: f32,
     /// Confirmed health (03a §7: never predicted for others).
     pub health: f32,
@@ -546,6 +548,16 @@ impl ClientSession {
         self.issue(CommandKind::Undo, now)
     }
 
+    /// Keep choice 0–2 of the open augment draft (ARAM: Mayhem). Predicted.
+    pub fn pick_augment(&mut self, choice: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::PickAugment(choice), now)
+    }
+
+    /// Reroll the open augment draft (once per draft). Predicted.
+    pub fn reroll_augments(&mut self, now: f64) -> Option<Command> {
+        self.issue(CommandKind::RerollAugments, now)
+    }
+
     /// Whether the shop is open for the own champion right now (predicted state).
     pub fn can_shop(&self) -> bool {
         self.world.unit(self.unit).is_some_and(|u| mftr_sim::world::can_shop(u, self.world.map(), &self.rules))
@@ -613,7 +625,7 @@ impl ClientSession {
         let icpt = self.interceptions();
         let mut book = std::mem::take(&mut self.book);
         let last = self.world.tick();
-        book.update_outcomes(t, self.unit, OWN_GAMEPLAY_RADIUS, &|k| self.history_at(k), last, &icpt);
+        book.update_outcomes(t, self.unit, self.own_radius(), &|k| self.history_at(k), last, &icpt);
         if let Some(t_now) = self.now_ticks(now) {
             let stale = SimTime(((t_now - 30.0).max(0.0) * SUBTICKS as f64) as u64);
             book.prune_predicted(SimTime(u64::MAX), stale);
@@ -659,7 +671,7 @@ impl ClientSession {
         for e in self.world.take_events() {
             match e {
                 SimEvent::MissileSpawned(m) if m.owner == self.unit => {
-                    self.book.predicted_own.insert(m.cast_seq, m);
+                    self.book.predicted_own.insert((m.cast_seq, m.shot), m);
                 }
                 SimEvent::AreaSpawned(a) if a.owner == self.unit => self.effects.predict_area(a),
                 SimEvent::AttackLaunched(b) if b.owner == self.unit => self.effects.predict_bolt(b),
@@ -1174,6 +1186,7 @@ impl ClientSession {
                     pos,
                     windup,
                     champion: l.champion,
+                    augments: l.augments,
                     gameplay_radius: track.gameplay_radius(),
                     health: l.health as f32,
                     max_health: l.max_health as f32,
@@ -1196,7 +1209,7 @@ impl ClientSession {
             return Vec::new();
         };
         let icpt = self.interceptions();
-        self.book.render(t_input, t_interp, OWN_GAMEPLAY_RADIUS, &|k| self.history_at(k), self.world.tick(), &icpt)
+        self.book.render(t_input, t_interp, self.own_radius(), &|k| self.history_at(k), self.world.tick(), &icpt)
     }
 
     /// Delayed ground areas to draw this frame, each on its display timeline (03a §7).
@@ -1285,7 +1298,17 @@ impl ClientSession {
     /// Enemy missiles still in flight, as the player sees them (scripted dodgers).
     pub fn threats(&self, now: f64) -> Vec<Threat> {
         let Some(t_input) = self.input_time(now) else { return Vec::new() };
-        self.book.threats(t_input, now, OWN_GAMEPLAY_RADIUS, &|k| self.history_at(k), self.world.tick())
+        self.book.threats(t_input, now, self.own_radius(), &|k| self.history_at(k), self.world.tick())
+    }
+
+    /// No own missile or area is still waiting for the server's confirmation.
+    pub fn book_is_settled(&self) -> bool {
+        self.book.predicted_own.is_empty() && self.effects.predicted_area_count() == 0
+    }
+
+    /// The own champion's hitbox (augments can grow or shrink it).
+    pub fn own_radius(&self) -> f32 {
+        self.world.unit(self.unit).map_or(mftr_sim::world::CHAMPION_GAMEPLAY_RADIUS, |u| u.gameplay_radius)
     }
 
     pub fn dodge_stats(&self) -> &DodgeStats {
@@ -1302,8 +1325,6 @@ impl ClientSession {
         self.input_time(now).map(|t| SimTime((t * SUBTICKS as f64) as u64))
     }
 }
-
-const OWN_GAMEPLAY_RADIUS: f32 = mftr_sim::world::CHAMPION_GAMEPLAY_RADIUS;
 
 /// Interpolate between buffered snapshots; hold at the newest, never extrapolate (03a §10.3).
 fn interpolate(buf: &VecDeque<(Tick, Vec2)>, t: f64) -> Option<Vec2> {

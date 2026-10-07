@@ -33,6 +33,10 @@ pub struct Bonus {
     pub move_speed_pct: f32,
     /// Fraction of total ability power (applied after flat bonuses).
     pub ability_power_pct: f32,
+    /// Fractions of total health, attack damage and armor plus magic resist (augments).
+    pub health_pct: f32,
+    pub attack_damage_pct: f32,
+    pub resist_pct: f32,
 }
 
 impl Bonus {
@@ -49,6 +53,9 @@ impl Bonus {
         move_speed: 0.0,
         move_speed_pct: 0.0,
         ability_power_pct: 0.0,
+        health_pct: 0.0,
+        attack_damage_pct: 0.0,
+        resist_pct: 0.0,
     };
 }
 
@@ -267,45 +274,141 @@ pub fn passives(inventory: &[u8; INVENTORY]) -> Passives {
     p
 }
 
-/// The stat stack (02 §10): level stats, then flat item bonuses, then percent bonuses, then
-/// caps. Returns the stats and the attack speed (attacks per second) for `base_attack_speed`.
-pub fn apply_items(level_stats: Stats, base_attack_speed: f32, inventory: &[u8; INVENTORY]) -> (Stats, f32) {
+/// Percent bonuses collected on the way through the flat stage.
+#[derive(Default)]
+struct Percents {
+    attack_speed: f32,
+    ability_power: f32,
+    move_speed_flat: f32,
+    move_speed: f32,
+    health: f32,
+    attack_damage: f32,
+    resist: f32,
+}
+
+fn add_flat(s: &mut Stats, x: &Bonus) {
+    s.max_health += x.health;
+    s.health_regen += x.health_regen;
+    s.armor += x.armor;
+    s.magic_resist += x.magic_resist;
+    s.attack_damage += x.attack_damage;
+    s.ability_power += x.ability_power;
+    s.ability_haste += x.ability_haste;
+    s.life_steal += x.life_steal;
+}
+
+fn add_percents(p: &mut Percents, x: &Bonus) {
+    p.ability_power += x.ability_power_pct;
+    p.move_speed += x.move_speed_pct;
+    p.health += x.health_pct;
+    p.attack_damage += x.attack_damage_pct;
+    p.resist += x.resist_pct;
+}
+
+/// The stat stack (02 §10): level stats, then flat item and augment bonuses, then augment
+/// conversions, then percent bonuses, then caps. Returns the stats and the attack speed
+/// (attacks per second) for `base_attack_speed`.
+pub fn apply_items(
+    level_stats: Stats,
+    base_attack_speed: f32,
+    inventory: &[u8; INVENTORY],
+    augments: &[u8; crate::augments::SLOTS],
+    growth: crate::augments::Growth,
+) -> (Stats, f32) {
+    let form = crate::augments::form(augments, growth.unstable_tiny);
     let mut s = level_stats;
-    let (mut as_bonus, mut ap_pct, mut ms_flat, mut ms_pct) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let mut pct = Percents::default();
     let mut boots_counted = false;
     let mut seen: Vec<u8> = Vec::new();
     for it in inventory.iter().filter_map(|id| item(*id)) {
         let x = &it.bonus;
-        s.max_health += x.health;
-        s.health_regen += x.health_regen;
-        s.armor += x.armor;
-        s.magic_resist += x.magic_resist;
-        s.attack_damage += x.attack_damage;
-        s.ability_power += x.ability_power;
-        s.ability_haste += x.ability_haste;
-        s.life_steal += x.life_steal;
-        as_bonus += x.attack_speed;
+        add_flat(&mut s, x);
+        pct.attack_speed += x.attack_speed;
         // Only one pair of boots, and a legendary's percent bonus once (unique).
         if !(it.boots && boots_counted) {
-            ms_flat += x.move_speed;
+            pct.move_speed_flat += x.move_speed;
         }
         boots_counted |= it.boots;
         if !seen.contains(&it.id) {
-            ap_pct += x.ability_power_pct;
-            ms_pct += x.move_speed_pct;
+            add_percents(&mut pct, x);
         }
         seen.push(it.id);
     }
-    s.ability_power *= 1.0 + ap_pct;
-    s.move_speed = crate::combat::soft_capped_move_speed((s.move_speed + ms_flat) * (1.0 + ms_pct));
-    let attack_speed = (base_attack_speed * (1.0 + as_bonus)).min(ATTACK_SPEED_CAP);
+    for a in crate::augments::held(augments) {
+        add_flat(&mut s, &a.bonus);
+        pct.attack_speed += a.bonus.attack_speed;
+        pct.move_speed_flat += a.bonus.move_speed;
+        add_percents(&mut pct, &a.bonus);
+        match a.effect {
+            crate::augments::Effect::Spellhunger => s.ability_power += growth.stacks as f32,
+            crate::augments::Effect::ChampionOfChaos if growth.chaos_done => {
+                add_flat(&mut s, &crate::augments::CHAOS_REWARD)
+            }
+            _ => {}
+        }
+    }
+    for a in crate::augments::held(augments) {
+        match a.effect {
+            crate::augments::Effect::AdToAp(rate) => {
+                let bonus = (s.attack_damage - level_stats.attack_damage).max(0.0);
+                s.attack_damage -= bonus;
+                s.ability_power += bonus * rate;
+            }
+            crate::augments::Effect::ApToAd(rate) => {
+                let bonus = (s.ability_power - level_stats.ability_power).max(0.0);
+                s.ability_power -= bonus;
+                s.attack_damage += bonus * rate;
+            }
+            _ => {}
+        }
+    }
+    if growth.hyper {
+        pct.attack_speed += crate::world::HYPER_ATTACK_SPEED;
+    }
+    // Size forms (Titan, Pebble, Unstable Experiment).
+    match form {
+        crate::augments::Form::Huge => {
+            pct.health += crate::augments::TITAN_HEALTH;
+            // Adaptive force: ability power for champions building it, else attack damage.
+            let force = crate::augments::TITAN_FORCE;
+            if s.ability_power - level_stats.ability_power > s.attack_damage - level_stats.attack_damage {
+                s.ability_power += force;
+            } else {
+                s.attack_damage += force * 0.6;
+            }
+        }
+        crate::augments::Form::Tiny => pct.move_speed += crate::augments::PEBBLE_SPEED,
+        crate::augments::Form::Normal => {}
+    }
+    s.ability_power *= 1.0 + pct.ability_power;
+    s.attack_damage *= 1.0 + pct.attack_damage;
+    s.max_health *= (1.0 + pct.health).max(0.1);
+    s.armor *= 1.0 + pct.resist;
+    s.magic_resist *= 1.0 + pct.resist;
+    s.move_speed = crate::combat::soft_capped_move_speed((s.move_speed + pct.move_speed_flat) * (1.0 + pct.move_speed));
+    let attack_speed = (base_attack_speed * (1.0 + pct.attack_speed)).min(ATTACK_SPEED_CAP);
     (s, attack_speed)
 }
 
-/// A champion's stats and basic attack at `level` with `inventory`.
-pub fn champion_stats(def: &ChampionDef, level: u8, inventory: &[u8; INVENTORY]) -> (Stats, AttackSpec) {
-    let (stats, attack_speed) = apply_items(def.stats_at(level), def.attack.attack_speed, inventory);
-    (stats, AttackSpec { attack_speed, ..def.attack })
+/// A champion's stats and basic attack for its level, items and augments.
+pub fn champion_stats(def: &ChampionDef, key: &crate::world::StatsKey) -> (Stats, AttackSpec) {
+    let (level, inventory, augments, growth) = key;
+    let (stats, attack_speed) =
+        apply_items(def.stats_at(*level), def.attack.attack_speed, inventory, augments, *growth);
+    let mut attack = AttackSpec { attack_speed, ..def.attack };
+    let ranged = attack.bolt_speed > 0.0;
+    for a in crate::augments::held(augments) {
+        match a.effect {
+            // Close Quarters: the ranged attack becomes a melee strike.
+            crate::augments::Effect::CloseQuarters if ranged => {
+                attack.range = crate::augments::CLOSE_QUARTERS_RANGE;
+                attack.bolt_speed = 0.0;
+            }
+            crate::augments::Effect::Sharpshooter if ranged => attack.range += crate::augments::SHARPSHOOTER_RANGE,
+            _ => {}
+        }
+    }
+    (stats, attack)
 }
 
 /// Bot build paths (components first, so recipes discount them).
@@ -399,6 +502,48 @@ pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
             ARC_BOW,
             GALE_SABER,
         ],
+        ChampionId::Quill | ChampionId::Marrow => &[
+            BOOTS,
+            CHARGED_WAND,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            INFERNO_DIADEM,
+            SAGE_BOOTS,
+            CHARGED_WAND,
+            CHARGED_WAND,
+            GRAND_GRIMOIRE,
+            WARDING_CLOAK,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            WARDSTONE_MANTLE,
+        ],
+        ChampionId::Cairn => &[
+            BOOTS,
+            VITAL_CRYSTAL,
+            PADDED_VEST,
+            CHAIN_COAT,
+            BRAMBLE_PLATE,
+            SWIFT_BOOTS,
+            WARDING_CLOAK,
+            VITAL_CRYSTAL,
+            FOCUS_CHARM,
+            WARDSTONE_MANTLE,
+            VITAL_CRYSTAL,
+            TITAN_BELT,
+        ],
+        ChampionId::Wren => &[
+            BOOTS,
+            LONG_KNIFE,
+            LEECH_FANG,
+            HEAVY_PICK,
+            CRIMSON_FANG,
+            QUICK_DAGGER,
+            BATTLE_BOOTS,
+            HEAVY_PICK,
+            QUICK_DAGGER,
+            ARC_BOW,
+            GALE_SABER,
+        ],
     }
 }
 
@@ -422,7 +567,7 @@ mod tests {
     #[test]
     fn stat_stack_applies_flat_then_percent() {
         let inv = [SPARK_SHARD, GRAND_GRIMOIRE, 0, 0, 0, 0];
-        let (s, _) = apply_items(EMBER.stats, EMBER.attack.attack_speed, &inv);
+        let (s, _) = apply_items(EMBER.stats, EMBER.attack.attack_speed, &inv, &[0; 4], crate::augments::Growth::NONE);
         assert!((s.ability_power - 220.0 * 1.35).abs() < 1e-3, "{}", s.ability_power);
     }
 
@@ -430,14 +575,45 @@ mod tests {
     fn attack_speed_caps_and_boots_dont_stack() {
         let inv = [ARC_TEMPEST, ARC_TEMPEST, GALE_SABER, BATTLE_BOOTS, ARC_BOW, ARC_BOW];
         // +180% attack speed: 0.8 → 2.24; from a 1.0 base it would be 2.8, capped at 2.5.
-        let (s, attack_speed) = apply_items(VESPER.stats, VESPER.attack.attack_speed, &inv);
+        let (s, attack_speed) =
+            apply_items(VESPER.stats, VESPER.attack.attack_speed, &inv, &[0; 4], crate::augments::Growth::NONE);
         assert!((attack_speed - 2.24).abs() < 1e-4, "{attack_speed}");
-        assert_eq!(apply_items(VESPER.stats, 1.0, &inv).1, ATTACK_SPEED_CAP);
+        assert_eq!(apply_items(VESPER.stats, 1.0, &inv, &[0; 4], crate::augments::Growth::NONE).1, ATTACK_SPEED_CAP);
         // One pair of boots (+45) and the Gale Saber's 7%: (325 + 45) × 1.07 = 395.9.
         assert!((s.move_speed - 395.9).abs() < 1e-3, "{}", s.move_speed);
         let two_boots = [SWIFT_BOOTS, BOOTS, 0, 0, 0, 0];
-        let (s, _) = apply_items(VESPER.stats, 0.8, &two_boots);
+        let (s, _) = apply_items(VESPER.stats, 0.8, &two_boots, &[0; 4], crate::augments::Growth::NONE);
         assert_eq!(s.move_speed, 385.0, "only the first pair counts");
+    }
+
+    /// Augments join the stack: flat with the items, then conversions, then percents.
+    #[test]
+    fn augments_add_flat_then_convert_then_scale() {
+        // Whetstone (+20 AD) and a Long Knife (+10 AD), then Conversion: the 30 bonus AD
+        // becomes 33 AP.
+        let (s, _) =
+            apply_items(VESPER.stats, 0.8, &[LONG_KNIFE, 0, 0, 0, 0, 0], &[2, 9, 0, 0], crate::augments::Growth::NONE);
+        assert!((s.attack_damage - VESPER.stats.attack_damage).abs() < 1e-4);
+        assert!((s.ability_power - (VESPER.stats.ability_power + 33.0)).abs() < 1e-3, "{}", s.ability_power);
+        // Apex Form: +25% health, AD, AP, armor and magic resist, after flat bonuses.
+        let (s, _) = apply_items(
+            EMBER.stats,
+            0.8,
+            &[VITAL_CRYSTAL, 0, 0, 0, 0, 0],
+            &[17, 0, 0, 0],
+            crate::augments::Growth::NONE,
+        );
+        assert!((s.max_health - (EMBER.stats.max_health + 150.0) * 1.25).abs() < 1e-2);
+        assert!((s.armor - EMBER.stats.armor * 1.25).abs() < 1e-4);
+        // Swift Hands adds to the item attack speed bonus: 0.8 × (1 + 0.12 + 0.30).
+        let (_, attack_speed) = apply_items(
+            VESPER.stats,
+            0.8,
+            &[QUICK_DAGGER, 0, 0, 0, 0, 0],
+            &[6, 0, 0, 0],
+            crate::augments::Growth::NONE,
+        );
+        assert!((attack_speed - 0.8 * 1.42).abs() < 1e-5, "{attack_speed}");
     }
 
     #[test]

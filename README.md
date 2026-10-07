@@ -12,7 +12,7 @@ MFTR aims to deliver the thing players love about the best-known lane-based MOBA
 
 ## Status
 
-**M0 (foundations)** is in place: a deterministic Rust simulation, the netcode core (sub-tick commands, own-champion prediction, reconciliation, clock and margin control loops), a dedicated UDP server, a headless Netcode Lab, and a Godot client. **M1 (Duel Sandbox)** is in progress: unit collision, skillshots and the dodge rig, an arena with walls, brush and fog of war, and placeholder champions you can duel with (slices 1–4; six since M2). Design docs: start with the [design index](docs/design/README.md). Results so far: [roadmap](docs/design/08-roadmap.md).
+**M0 (foundations)** is in place: a deterministic Rust simulation, the netcode core (sub-tick commands, own-champion prediction, reconciliation, clock and margin control loops), a dedicated UDP server, a headless Netcode Lab, and a Godot client. **M1 (Duel Sandbox)** is in progress: unit collision, skillshots and the dodge rig, an arena with walls, brush and fog of war, and placeholder champions you can duel with (slices 1–4; six since M2, ten since M3). Design docs: start with the [design index](docs/design/README.md). Results so far: [roadmap](docs/design/08-roadmap.md).
 
 ## Build & run
 
@@ -32,7 +32,7 @@ Build the Godot extension (once, and after Rust changes):
 cargo build -p mftr-gdext
 ```
 
-Then open `client/project.godot` in Godot (4.5+) and press Play. The start menu asks for a server (`127.0.0.1:7777` for your own; servers you've joined are remembered, with their game type, for one-click joining), how to join (play, spectate or the blind playtest) and, on duel and sandbox servers, a champion. Esc leaves a server. The server starts the **Duel Sandbox** by default: blue spawns west, red east, with minion clumps in between. Six placeholder champions: **Ember** (skillshot mage), **Vesper** (marksman), **Bastion** (tank: pull, knock-up), **Rook** (bruiser: cleave, heal, lunge), **Lumen** (enchanter: heals and shields allies) and **Shade** (assassin: lunges). Duels alternate Ember and Vesper and ARAM hands them out in turn; or pick one in the menu (or with user arguments, which skip the menu: `godot --path client -- 127.0.0.1:7777 --champion shade`).
+Then open `client/project.godot` in Godot (4.5+) and press Play. The start menu asks for a server (`127.0.0.1:7777` for your own; servers you've joined are remembered, with their game type, for one-click joining), how to join (play, spectate or the blind playtest) and, on duel and sandbox servers, a champion. Esc leaves a server. The server starts the **Duel Sandbox** by default: blue spawns west, red east, with minion clumps in between. Ten placeholder champions: **Ember** (skillshot mage), **Vesper** (marksman), **Bastion** (tank: pull, knock-up), **Rook** (bruiser: cleave, heal, lunge), **Lumen** (enchanter: heals and shields allies), **Shade** (assassin: lunges), **Quill** (artillery mage: long-range areas), **Cairn** (warden: ally shield, root, knock-up), **Marrow** (battlemage: drain nova, root, self heal) and **Wren** (skirmisher: poke, caltrops, pounce). Duels alternate Ember and Vesper and ARAM hands them out in turn; or pick one in the menu (or with user arguments, which skip the menu: `godot --path client -- 127.0.0.1:7777 --champion shade`).
 
 | Input | Action |
 |---|---|
@@ -52,6 +52,8 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The start menu 
 **Hosting:** see the [hosting guide](docs/hosting.md). The short version: `docker compose -f deploy/compose.yaml up -d` runs an ARAM server (champion select, bots filling empty slots) on UDP 7777 and a duel server on 7778. On NixOS, import the flake's module and set `services.mftr.enable = true` (see the guide).
 
 **Releasing:** run `scripts/bump-version.sh X.Y.Z` (it updates `Cargo.toml`, `Cargo.lock` and the macOS export preset together; CI builds with `--locked`, so a hand-edited version fails), merge that to `main`, then tag the merge commit on `main`: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag builds and publishes the release from exactly that commit.
+
+**ARAM: Mayhem** (M3): `--scenario mayhem` is ARAM with augment drafts. At levels 1, 7, 11 and 15 you're offered three augments (60 in all) and click one to keep it (or reroll once) while you keep playing. Every champion's augments show as diamonds above its health bar. `--scenario hyper` plays Mayhem under Hyper rules: Q, W and E recharge four times as fast and attacks are 50% faster.
 
 **Champion select, spectating, reconnect:** add `--lobby` to an ARAM server (`--scenario aram --bots 10 --lobby`) for all-random champion select with rerolls and a team bench (humans replace bots). After each match, everyone still connected gets a new champion select. Start the client with `-- --spectate` to watch (Tab cycles champions). If the client crashes or the connection drops, restart it within a minute and you get your champion back.
 

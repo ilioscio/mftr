@@ -236,6 +236,10 @@ const CHAMPION_COLORS := {
 	"Rook": Color(0.55, 0.3, 0.27),
 	"Lumen": Color(0.86, 0.82, 0.62),
 	"Shade": Color(0.32, 0.24, 0.42),
+	"Quill": Color(0.2, 0.5, 0.55),
+	"Cairn": Color(0.45, 0.5, 0.3),
+	"Marrow": Color(0.62, 0.58, 0.5),
+	"Wren": Color(0.6, 0.3, 0.5),
 }
 
 
@@ -315,6 +319,53 @@ func _make_champion(color: Color, champion: String) -> Node3D:
 			var steel := _unshaded(Color(0.8, 0.82, 0.9))
 			_part(body, blade, Vector3(0.32, 0.0, 0.25), steel, Vector3(0, -15, 0))
 			_part(body, blade, Vector3(-0.32, 0.0, 0.25), steel, Vector3(0, 15, 0))
+		"Quill":
+			# Tall and thin, with a long glowing quill raised over the shoulder: artillery.
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 0.14
+			cyl.bottom_radius = 0.3
+			cyl.height = 1.6
+			body.mesh = cyl
+			var spine := CylinderMesh.new()
+			spine.top_radius = 0.0
+			spine.bottom_radius = 0.06
+			spine.height = 1.2
+			_part(body, spine, Vector3(0.3, 0.9, 0), _unshaded(Color(0.6, 0.95, 1.0)), Vector3(0, 0, -30))
+		"Cairn":
+			# Stacked stones, widest at the base: the warden holds ground.
+			var base := BoxMesh.new()
+			base.size = Vector3(1.0, 0.7, 0.8)
+			body.mesh = base
+			var mid := BoxMesh.new()
+			mid.size = Vector3(0.75, 0.5, 0.6)
+			_part(body, mid, Vector3(0, 0.6, 0), m, Vector3(0, 20, 0))
+			var top := BoxMesh.new()
+			top.size = Vector3(0.45, 0.35, 0.4)
+			_part(body, top, Vector3(0, 1.02, 0), m, Vector3(0, -15, 0))
+		"Marrow":
+			# Hunched capsule with two dark horns.
+			var cap := CapsuleMesh.new()
+			cap.radius = 0.38
+			cap.height = 1.45
+			body.mesh = cap
+			var horn := CylinderMesh.new()
+			horn.top_radius = 0.0
+			horn.bottom_radius = 0.07
+			horn.height = 0.45
+			var dark := _unshaded(Color(0.2, 0.16, 0.2))
+			_part(body, horn, Vector3(0.2, 0.8, 0), dark, Vector3(0, 0, -25))
+			_part(body, horn, Vector3(-0.2, 0.8, 0), dark, Vector3(0, 0, 25))
+		"Wren":
+			# Small and light, with swept-back wings.
+			var cone := CylinderMesh.new()
+			cone.top_radius = 0.1
+			cone.bottom_radius = 0.3
+			cone.height = 1.35
+			body.mesh = cone
+			var wing := BoxMesh.new()
+			wing.size = Vector3(0.55, 0.05, 0.28)
+			_part(body, wing, Vector3(0.36, 0.35, -0.1), m, Vector3(0, 25, 20))
+			_part(body, wing, Vector3(-0.36, 0.35, -0.1), m, Vector3(0, -25, -20))
 		_:
 			var capsule := CapsuleMesh.new()
 			capsule.radius = CHAMPION_RADIUS_U * UNITS_TO_METERS * 0.6
@@ -456,6 +507,7 @@ func _process(delta: float) -> void:
 		_build_map()
 	if playing:
 		_update_blind()
+	_update_draft(playing)
 	own_status = client.own_status() if playing else {}
 	_update_shop(delta)
 	_update_lobby(delta, phase)
@@ -472,6 +524,8 @@ func _process(delta: float) -> void:
 		own_body.visible = playing and not dead
 		var own := _to_world(client.own_position())
 		own_body.position = own
+		# Titan and Pebble: the model grows and shrinks with the hitbox (honest hitboxes).
+		own_body.scale = Vector3.ONE * (float(own_status.get("hitbox", CHAMPION_RADIUS_U)) / CHAMPION_RADIUS_U)
 		_place_camera(own)
 		_show_statuses(own_body, own_status.get("stunned", false), own_status.get("rooted", false), own_status.get("shield", 0.0), own_status.get("slowed", false))
 	_update_remotes()
@@ -544,6 +598,8 @@ func _update_remotes() -> void:
 		elif u.kind in ["gatehouse", "base", "relic"]:
 			p.y = 0.0
 		body.position = p
+		if u.champion != "":
+			body.scale = Vector3.ONE * (float(u.gameplay_radius) / CHAMPION_RADIUS_U)
 		if body.has_node("Protected"):
 			body.get_node("Protected").visible = u.protected
 		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO))
@@ -1057,6 +1113,7 @@ func _draw_overlay() -> void:
 		var hp: float = own_status.get("health", 0.0)
 		var mx: float = own_status.get("max_health", 1.0)
 		_draw_bar(own_body.position + Vector3(0, 1.25, 0), Vector2(104, 11), hp, mx, own_status.get("shield", 0.0), Color(0.3, 0.85, 0.35))
+		_draw_augment_pips(font, own_body.position + Vector3(0, 1.25, 0), own_status.get("augments", []))
 	for id in remote_info:
 		var u: Dictionary = remote_info[id]
 		if u.kind == "relic" or not remote_bodies.has(id):
@@ -1067,6 +1124,8 @@ func _draw_overlay() -> void:
 		var size := Vector2(104, 11) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
 		var lift := 1.25 if champ else (2.6 if structure else 0.6)
 		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color)
+		if champ:
+			_draw_augment_pips(font, remote_bodies[id].position + Vector3(0, lift, 0), u.get("augments", []))
 		if champ and u.level > 0:
 			var sp = _screen(remote_bodies[id].position + Vector3(0, lift, 0))
 			if sp != null:
@@ -1082,6 +1141,28 @@ func _draw_overlay() -> void:
 	for n in notices:
 		overlay.draw_string(font, Vector2(overlay.size.x - 420, y), n.text, HORIZONTAL_ALIGNMENT_RIGHT, 400, 18, Color(1, 1, 1, clampf(4.0 - n.age, 0.0, 1.0)))
 		y += 24.0
+
+
+## Augment indicators (06 §3: no invisible power): one tier-colored diamond per held augment,
+## marked with its initial, in a row above a champion's health bar.
+func _draw_augment_pips(font: Font, world: Vector3, held: Array) -> void:
+	if held.is_empty():
+		return
+	var s = _screen(world)
+	if s == null:
+		return
+	var step := 18.0
+	var x0: float = s.x - step * (held.size() - 1) / 2.0
+	for i in held.size():
+		var a: Dictionary = held[i]
+		var c := Vector2(x0 + step * i, s.y - 20)
+		var r := 8.0
+		var pts := PackedVector2Array([c + Vector2(0, -r), c + Vector2(r, 0), c + Vector2(0, r), c + Vector2(-r, 0)])
+		overlay.draw_colored_polygon(pts, _tier_color(a.get("tier", "")).darkened(0.35))
+		pts.append(pts[0])
+		overlay.draw_polyline(pts, _tier_color(a.get("tier", "")), 1.5)
+		var initial: String = String(a.get("name", "?")).left(1)
+		overlay.draw_string(font, c + Vector2(-6, 4), initial, HORIZONTAL_ALIGNMENT_CENTER, 12, 10, Color.WHITE)
 
 
 func _draw_bar(world: Vector3, size: Vector2, hp: float, max_hp: float, shield: float, color: Color) -> void:
@@ -1528,6 +1609,15 @@ func _draw_inventory(font: Font, origin: Vector2) -> void:
 		overlay.draw_rect(box, Color(0.85, 0.7, 0.35) if id != 0 else Color(0.3, 0.3, 0.35), false, 1.5)
 		if id != 0:
 			overlay.draw_string(font, p + Vector2(4, 24), item_names.get(id, "?"), HORIZONTAL_ALIGNMENT_LEFT, 80, 12, Color(0.9, 0.9, 0.95))
+	# ARAM: Mayhem: the augments held, above the inventory.
+	var held: Array = own_status.get("augments", [])
+	for i in held.size():
+		var a: Dictionary = held[i]
+		var at := origin + Vector2(0, -10 - 18 * (held.size() - 1 - i))
+		var label: String = "◆ " + a.name
+		if a.has("progress"):
+			label += "  " + a.progress
+		overlay.draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, _tier_color(a.tier))
 
 
 ## ---- Session, champion select and spectating (M2 slice 5) --------------------------------------
@@ -1961,3 +2051,88 @@ func _reset_match_view() -> void:
 	floaters.clear()
 	notices.clear()
 	_lobby_ready = false
+
+
+## ---- Augment draft (ARAM: Mayhem, M3) -------------------------------------------------------------
+## At its draft levels the champion is offered three augments of one tier: click one to keep it
+## (predicted, like shopping), or reroll the offer once. Play goes on while the cards are up.
+
+var draft_panel: PanelContainer
+var draft_box: VBoxContainer
+var _draft_shown := ""                  # the offer on screen (rebuilt when it changes)
+
+
+func _tier_color(tier: String) -> Color:
+	match tier:
+		"Gold":
+			return Color(1.0, 0.8, 0.3)
+		"Prismatic":
+			return Color(0.85, 0.55, 1.0)
+	return Color(0.78, 0.82, 0.88)
+
+
+func _update_draft(playing: bool) -> void:
+	var offer: Array = own_status.get("offer", []) if playing else []
+	if offer.is_empty():
+		if draft_panel != null:
+			draft_panel.queue_free()
+			draft_panel = null
+		_draft_shown = ""
+		return
+	var can_reroll: bool = own_status.get("can_reroll", false)
+	var key := str(offer.map(func(c): return c.id)) + str(can_reroll)
+	if draft_panel == null:
+		var made := _panel(760)
+		draft_panel = made[0]
+		draft_box = made[1]
+	if key != _draft_shown:
+		_draft_shown = key
+		for c in draft_box.get_children():
+			c.queue_free()
+		var title := Label.new()
+		title.text = "Choose a %s augment" % offer[0].tier
+		title.add_theme_font_size_override("font_size", 20)
+		title.add_theme_color_override("font_color", _tier_color(offer[0].tier))
+		draft_box.add_child(title)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		draft_box.add_child(row)
+		for i in offer.size():
+			row.add_child(_augment_card(offer[i], i))
+		var reroll := Button.new()
+		reroll.text = "Reroll" if can_reroll else "Rerolled"
+		reroll.disabled = not can_reroll
+		reroll.focus_mode = Control.FOCUS_NONE
+		reroll.pressed.connect(func(): client.reroll_augments())
+		draft_box.add_child(reroll)
+	# Low on the screen, above the ability bar, so the fight stays visible.
+	draft_panel.position = Vector2((overlay.size.x - draft_panel.size.x) / 2.0, overlay.size.y - draft_panel.size.y - 150.0)
+
+
+func _augment_card(a: Dictionary, choice: int) -> Button:
+	var card := Button.new()
+	card.custom_minimum_size = Vector2(230, 130)
+	card.focus_mode = Control.FOCUS_NONE
+	card.pressed.connect(func(): client.pick_augment(choice))
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 10)
+	card.add_child(margin)
+	var v := VBoxContainer.new()
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_child(v)
+	var name := Label.new()
+	name.text = a.name
+	name.add_theme_font_size_override("font_size", 18)
+	name.add_theme_color_override("font_color", _tier_color(a.tier))
+	name.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(name)
+	var text := Label.new()
+	text.text = a.text
+	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	text.custom_minimum_size = Vector2(205, 0)
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(text)
+	return card

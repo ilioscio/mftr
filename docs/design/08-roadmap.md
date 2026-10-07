@@ -291,6 +291,64 @@ Four more placeholder champions (original kits, D36), so all six M2 archetypes e
 
 **Exit:** Hyper + Multishot stress scenario stays within bandwidth and tick budgets; playtesters rate Mayhem "fun" (the most important metric we'll ever track).
 
+### M3 slices (in order of dependency)
+1. Augment framework and live draft (D43).
+2. Delivery transformers (Multishot, Echo, wider shots) and batched missile spawns.
+3. Size changes with honest hitboxes (Titan, Pebble, Unstable Experiment).
+4. Augments to ~60: rule breakers, conditionals, quests, utility spell replacements.
+5. Roster to ~10 champions.
+6. Mayhem end to end: augment indicators, Hyper rules, the Hyper + Multishot stress scenario.
+
+### M3 slice 1 status (2026-10-07): ✅ done
+- `--scenario mayhem`: ARAM with augment drafts at levels 1, 7, 11 and 15 (three cards, one reroll each; Silver first, one Prismatic guaranteed). 23 augments so far: stat packages, AD↔AP conversions and percent bonuses through the stat stack.
+- Picks and rerolls are predicted commands (offers are seeded per champion); bots and the lab's duel bots draft too. Lab: 4 clients over the MID link draft with no hard resets, and the recording re-simulates exactly (replays now end with a final state hash, so a check covers every simulated tick).
+- Client: draft cards above the ability bar while play goes on; held augments listed above the inventory.
+
+### M3 slice 2 status (2026-10-07): ✅ done
+- Delivery transformers (D44): **Multishot** (three projectiles 15° apart, each enemy hit once per volley), **Echo** (repeat after 0.75 s at 40% power), **Broadside** (wider lines, larger areas). Abilities declare which they accept.
+- Batched spawns: a volley is one event record on the wire (about 9 bytes per extra missile).
+- Lab: a Multishot + Echo + Broadside champion casting over the MID link has every missile predicted at once, confirmed by the server, and no corrections. 26 augments.
+
+### M3 slice 3 status (2026-10-07): ✅ done
+- **Titan**, **Pebble** and **Unstable Experiment** (D45): the hitbox and the model change together; collision stays champion-sized. Tests: a skillshot 110 u beside a champion misses a normal hitbox and hits a Titan's; 80 u beside hits a normal one and misses a Pebble's; Pebble deals exactly 20% more to larger targets; Unstable re-rolls on every respawn (both forms come up).
+- The client checks missile outcomes against its predicted hitbox; the lab Titan's hitbox grows on both ends with no corrections. 29 augments.
+
+### M3 slice 4 status (2026-10-07): ✅ done
+- **60 augments** (D46): 23 Silver, 20 Gold, 17 Prismatic. Conditionals (Executioner, First Strike, Last Stand, Spellcrit, Fundamentals), after-hit effects (Spellhunger, Spell Vamp, Thorns), rule breakers (Close Quarters, Sharpshooter, Spellblade, Reset), a quest (Champion of Chaos) and F replacements (Vault, Stormcall, Mend).
+- Tests check each mechanic's numbers against an unaugmented baseline. The client shows Spellhunger stacks and quest progress next to the held augment.
+
+### M3 slice 5 status (2026-10-07): ✅ done
+Four more placeholder champions (original kits, D36), built from the existing shapes:
+
+| Champion | Role | Q | W | E | R |
+|---|---|---|---|---|---|
+| **Quill** | Artillery mage | Arc Shot: long-range area | Static Field: slowing area | Recoil: dash | Starfall Lance: 2500 u skillshot |
+| **Cairn** | Warden (melee) | Stone Lash: slowing skillshot | Shelter: ally shield | Rockfall: delayed root area | Monolith: delayed knock-up around itself |
+| **Marrow** | Battlemage | Siphon: nova | Grasping Bones: rooting skillshot | Grave Pact: self heal | Ossuary: large slowing area |
+| **Wren** | Skirmisher | Ricochet: quick poke | Caltrops: slowing area | Pounce: lunge | Hail of Arrows: slowing area |
+
+- All four pass the D10 reaction budget and the hard-CC classification; prediction stays bit-exact through every kit. Bots play them with build paths of their own.
+- The wire's champion field grows to 5 bits (room for 31). Godot client: a silhouette and identity color each; the menu and ARAM pick from all ten.
+
+### M3 slice 6 status (2026-10-07): ✅ done
+- **Hyper** (D47): `--scenario hyper` is Mayhem with +300 ability haste on Q, W and E and +50% attack speed.
+- **Augment indicators:** every champion's augments show as tier-colored diamonds above its health bar; the client also shows Spellhunger stacks and quest progress.
+- **Volley rule on the client:** the display predicts one hit on us per enemy volley, as the server rules. Before, Multishot made every missile of a volley look like a hit.
+
+**Stress exit (Netcode Lab, release build, MID link, 10 clients under Hyper, every champion with Multishot + Echo + Broadside, 60 s):**
+
+| Metric | Result | Budget |
+|---|---|---|
+| Download per client | 11.0 KB/s | 32 KB/s |
+| Upload per client | 1.1 KB/s | — |
+| Server tick (mean / max) | 0.18 ms / 1.6 ms | 3 ms |
+| Enemy missiles judged | 1,635 | — |
+| Ghost hits | 0 on seeds 1–3 | < 2% of near-misses |
+| Phantom hits | 2–5% of near-misses (2% without Multishot) | — |
+| Hard resets, fog leaks | 0, 0 | 0 |
+
+The same check runs in CI as a 40 s lab test. **Left for the M3 exit:** playtesters rating Mayhem fun.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.

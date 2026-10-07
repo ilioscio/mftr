@@ -70,8 +70,11 @@ impl Match {
     pub fn new(cfg: ServerConfig) -> Self {
         let mut world = World::new(cfg.seed);
         world.set_map(cfg.scenario.map().shared());
-        if cfg.scenario == Scenario::Aram {
-            world.set_rules(mftr_sim::world::Rules::ARAM);
+        match cfg.scenario {
+            Scenario::Aram => world.set_rules(mftr_sim::world::Rules::ARAM),
+            Scenario::Mayhem => world.set_rules(mftr_sim::world::Rules::MAYHEM),
+            Scenario::Hyper => world.set_rules(mftr_sim::world::Rules::HYPER),
+            _ => {}
         }
         populate(&mut world, cfg.scenario);
         Self { world, cfg, players: BTreeSet::new(), log: Vec::new() }
@@ -103,7 +106,7 @@ impl Match {
         let team = if player.0.is_multiple_of(2) || scenario == Scenario::DodgeRig { Team::Blue } else { Team::Red };
         // Without a preference: in ARAM, each of the six in turn; elsewhere alternate, so the
         // first duel is mage vs. marksman.
-        let champion = champion.unwrap_or(if scenario == Scenario::Aram {
+        let champion = champion.unwrap_or(if scenario.is_aram() {
             ChampionId::ALL[player.0 as usize % ChampionId::ALL.len()]
         } else {
             ChampionId::ALL[((player.0 / 2) as usize % 2) ^ (team == Team::Red) as usize]
@@ -123,7 +126,7 @@ impl Match {
         if scenario == Scenario::Duel {
             pos = duel_spawn(team, player);
         }
-        if scenario == Scenario::Aram {
+        if scenario.is_aram() {
             // In the fountain, spread out in a small arc per player.
             let base = self.world.map().layout.champion_spawn[team as usize];
             let k = (player.0 / 2) as f32;
@@ -197,9 +200,17 @@ impl Match {
         }
     }
 
-    /// Everything recorded so far (nothing unless `ServerConfig::record`).
+    /// Everything recorded so far (nothing unless `ServerConfig::record`), ending with the
+    /// current state hash so a check covers every tick simulated.
     pub fn replay(&self) -> Replay {
-        Replay { cfg: self.cfg.clone(), entries: self.log.clone() }
+        let mut entries = self.log.clone();
+        let tick = self.world.tick();
+        if self.cfg.record
+            && !entries.last().is_some_and(|e| matches!(e, ReplayEntry::Hash { tick: t, .. } if *t == tick))
+        {
+            entries.push(ReplayEntry::Hash { tick, hash: self.world.state_hash() });
+        }
+        Replay { cfg: self.cfg.clone(), entries }
     }
 }
 
@@ -388,6 +399,8 @@ fn kind_text(k: CommandKind) -> String {
         CommandKind::Buy(item) => format!("buy {item}"),
         CommandKind::Sell(slot) => format!("sell {slot}"),
         CommandKind::Undo => "undo".into(),
+        CommandKind::PickAugment(choice) => format!("augment {choice}"),
+        CommandKind::RerollAugments => "reroll".into(),
     }
 }
 
@@ -404,6 +417,8 @@ fn parse_kind(f: &[&str]) -> Option<CommandKind> {
         "buy" => CommandKind::Buy(n(1)? as u8),
         "sell" => CommandKind::Sell(n(1)? as u8),
         "undo" => CommandKind::Undo,
+        "augment" => CommandKind::PickAugment(n(1)? as u8),
+        "reroll" => CommandKind::RerollAugments,
         _ => return None,
     })
 }
@@ -419,7 +434,7 @@ fn populate(world: &mut World, scenario: Scenario) {
         }
         return;
     }
-    if scenario == Scenario::Aram {
+    if scenario.is_aram() {
         world.start_match();
         return;
     }

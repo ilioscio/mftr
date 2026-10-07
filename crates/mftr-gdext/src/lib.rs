@@ -15,6 +15,7 @@ use mftr_client::{ClientSession, Notice, OwnMissileDisplay, Phase, Side};
 use mftr_net::conditioner::{LinkProfile, SimLink};
 use mftr_net::secure::{Identity, KnownServers, SecureClient, SecureError, parse_address};
 use mftr_sim::ability::{DamageKind, SLOTS};
+use mftr_sim::augments;
 use mftr_sim::items::{self, INVENTORY};
 use mftr_sim::{ChampionId, Team, UnitId, UnitKind, Vec2};
 use std::net::UdpSocket;
@@ -393,6 +394,24 @@ impl MatchClient {
         }
     }
 
+    /// Keep choice 0–2 of the open augment draft (ARAM: Mayhem).
+    #[func]
+    fn pick_augment(&mut self, choice: i64) {
+        let now = self.now();
+        if (0..augments::CHOICES as i64).contains(&choice) && self.session.pick_augment(choice as u8, now).is_some() {
+            self.send_input(now);
+        }
+    }
+
+    /// Reroll the open augment draft (once per draft).
+    #[func]
+    fn reroll_augments(&mut self) {
+        let now = self.now();
+        if self.session.reroll_augments(now).is_some() {
+            self.send_input(now);
+        }
+    }
+
     /// Buy an item by id (see `shop_catalog`).
     #[func]
     fn buy(&mut self, item: i64) {
@@ -651,7 +670,7 @@ impl MatchClient {
         d.set("abilities", &names);
         if let (Some(s), Some(t)) = (self.session.own_state_now(), self.session.input_sim_time(now)) {
             d.set("health", s.health);
-            let (stats, attack) = items::champion_stats(champ.def(), s.progress.level, &s.progress.items);
+            let (stats, attack) = items::champion_stats(champ.def(), &s.progress.stats_key());
             d.set("max_health", stats.max_health);
             d.set("attack_damage", stats.attack_damage);
             d.set("ability_power", stats.ability_power);
@@ -666,6 +685,46 @@ impl MatchClient {
             }
             d.set("items", &inv);
             d.set("can_undo", s.progress.undo_len > 0);
+            d.set("hitbox", self.session.own_radius());
+            // ARAM: Mayhem: held augments and the open draft.
+            let card = |id: u8| {
+                let mut c = VarDictionary::new();
+                if let Some(a) = augments::augment(id) {
+                    c.set("id", id as i64);
+                    c.set("name", a.name);
+                    c.set("tier", a.tier.name());
+                    c.set("text", a.text);
+                }
+                c
+            };
+            let mut held = VarArray::new();
+            for id in s.progress.augments.iter().filter(|id| **id != 0) {
+                let mut c = card(*id);
+                // Built-up augments show how far along they are.
+                let p = &s.progress;
+                match augments::augment(*id).map(|a| a.effect) {
+                    Some(augments::Effect::Spellhunger) => {
+                        c.set("progress", format!("{}/{}", p.stacks, augments::SPELLHUNGER_CAP));
+                    }
+                    Some(augments::Effect::ChampionOfChaos) => {
+                        let done = p.takedowns >= augments::CHAOS_TAKEDOWNS;
+                        let n = p.takedowns.min(augments::CHAOS_TAKEDOWNS);
+                        c.set(
+                            "progress",
+                            if done { "done".to_string() } else { format!("{n}/{}", augments::CHAOS_TAKEDOWNS) },
+                        );
+                    }
+                    _ => {}
+                }
+                held.push(&c.to_variant());
+            }
+            d.set("augments", &held);
+            let mut offer = VarArray::new();
+            for id in s.progress.offer.iter().filter(|id| **id != 0) {
+                offer.push(&card(*id).to_variant());
+            }
+            d.set("offer", &offer);
+            d.set("can_reroll", s.progress.offer[0] != 0 && !s.progress.rerolled);
             d.set("shield", if s.shield_until > t { s.shield } else { 0.0 });
             d.set("dead", !s.alive());
             d.set("respawn_in", s.respawn_at.map_or(0.0, |r| r.secs_since(t)));
@@ -722,8 +781,8 @@ impl MatchClient {
     }
 
     /// Remote units to draw. Each entry: `{ id, pos: Vector2, minion, turret, champion (name or
-    /// ""), red, ally, radius (collision), gameplay_radius, health, max_health, shield,
-    /// stunned, rooted, attacking, dashing, windup?, windup_dir? }`.
+    /// ""), red, ally, radius (collision), gameplay_radius, augments ([{ name, tier }]),
+    /// health, max_health, shield, stunned, rooted, attacking, dashing, windup?, windup_dir? }`.
     /// Champions are on `T_interp`; minions near us blend toward `T_input` (03a §5).
     #[func]
     fn remote_units(&self) -> VarArray {
@@ -752,6 +811,14 @@ impl MatchClient {
             d.set("shield", u.shield);
             d.set("level", u.level as i64);
             d.set("gameplay_radius", u.gameplay_radius);
+            let mut held = VarArray::new();
+            for a in u.augments.iter().filter_map(|id| augments::augment(*id)) {
+                let mut c = VarDictionary::new();
+                c.set("name", a.name);
+                c.set("tier", a.tier.name());
+                held.push(&c.to_variant());
+            }
+            d.set("augments", &held);
             d.set("attacking", u.attacking);
             d.set("rooted", u.rooted);
             d.set("dashing", u.dashing);

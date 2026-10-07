@@ -26,6 +26,9 @@ pub struct LabConfig {
     pub reaction: f64,
     /// Fault injection: force every client's input margin (validates the ghost-hit detector).
     pub margin_override: Option<f64>,
+    /// Stress tests: every champion holds these augments (granted on the server, so the
+    /// recording no longer re-simulates).
+    pub augments: Option<[u8; mftr_sim::augments::SLOTS]>,
 }
 
 enum Bot {
@@ -81,7 +84,9 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                 down: SimLink::new(cfg.profile, s * 2 + 2),
                 bot: match cfg.scenario {
                     Scenario::DodgeRig => Bot::Dodge(DodgeBot::new(s, cfg.reaction)),
-                    Scenario::Duel | Scenario::Aram => Bot::Duel(DuelBot::new(s, cfg.reaction)),
+                    Scenario::Duel | Scenario::Aram | Scenario::Mayhem | Scenario::Hyper => {
+                        Bot::Duel(DuelBot::new(s, cfg.reaction))
+                    }
                     _ => Bot::Click(ClickBot::new(s)),
                 },
                 jumps: JumpMeter::default(),
@@ -116,6 +121,14 @@ pub fn run(cfg: &LabConfig) -> LabResult {
         }
         // Server tick.
         if t >= server.next_tick_due() {
+            if let Some(held) = cfg.augments {
+                let champions: Vec<_> =
+                    server.world().units().iter().filter(|u| u.champion.is_some()).map(|u| u.id).collect();
+                for id in champions {
+                    let p = &mut server.world_mut().unit_mut(id).unwrap().state.progress;
+                    (p.augments, p.drafted, p.offer) = (held, mftr_sim::augments::SLOTS as u8, [0; 3]);
+                }
+            }
             let started = std::time::Instant::now();
             let packets = server.step(t);
             let cost = started.elapsed().as_secs_f64() * 1e3;
@@ -218,6 +231,7 @@ mod tests {
             proxies,
             reaction: 0.25,
             margin_override: None,
+            augments: None,
         })
     }
 
@@ -239,6 +253,7 @@ mod tests {
                 proxies: true,
                 reaction: 0.25,
                 margin_override: None,
+                augments: None,
             })
             .summary
         };
@@ -286,6 +301,7 @@ mod tests {
             proxies,
             reaction: 0.25,
             margin_override: None,
+            augments: None,
         })
     }
 
@@ -315,6 +331,7 @@ mod tests {
             proxies: true,
             reaction,
             margin_override,
+            augments: None,
         })
         .summary
     }
@@ -348,6 +365,7 @@ mod tests {
             proxies: true,
             reaction: 0.25,
             margin_override: None,
+            augments: None,
         });
         assert_eq!(r.fog_violations, 0);
         assert!(r.fog_hidden > 10_000, "fog should be hiding things: {}", r.fog_hidden);
@@ -378,6 +396,7 @@ mod tests {
             proxies: true,
             reaction: 0.25,
             margin_override: None,
+            augments: None,
         });
         let s = &r.summary;
         assert_eq!(s.hard_resets, 0, "{}", s.row());
@@ -389,6 +408,74 @@ mod tests {
         assert!(s.dodge.near_misses >= 20, "the bots should be dodging skillshots: {}", s.dodge_row());
         assert!(s.ghost_rate() < 0.02, "{}", s.dodge_row());
         assert!((s.dodge.phantom_hits as f64) <= 0.03 * s.dodge.near_misses as f64, "{}", s.dodge_row());
+    }
+
+    /// M3 slice 1: ARAM: Mayhem over a lossy link. Every client drafts augments with predicted
+    /// picks, prediction stays stable, and the server's recording re-simulates exactly.
+    #[test]
+    fn mayhem_drafts_are_predicted_and_replayed() {
+        let r = run(&LabConfig {
+            profile: LinkProfile::MID,
+            clients: 4,
+            seconds: 90.0,
+            seed: 4,
+            fps: 60.0,
+            warmup: 5.0,
+            scenario: Scenario::Mayhem,
+            proxies: true,
+            reaction: 0.25,
+            margin_override: None,
+            augments: None,
+        });
+        let s = &r.summary;
+        assert_eq!(s.hard_resets, 0, "{}", s.row());
+        assert!(s.visible_mean < 15.0, "{}", s.row());
+        let drafted: std::collections::BTreeSet<u8> = r
+            .replay
+            .entries
+            .iter()
+            .flat_map(|e| match e {
+                mftr_server::ReplayEntry::Commands { commands, .. } => commands.clone(),
+                _ => Vec::new(),
+            })
+            .filter(|c| matches!(c.kind, mftr_sim::CommandKind::PickAugment(_)))
+            .map(|c| c.player.0)
+            .collect();
+        assert_eq!(drafted.len(), 4, "every client drafted: {drafted:?}");
+        let check = r.replay.verify();
+        assert_eq!(check.mismatch, None);
+        assert_eq!(check.final_hash, r.server_hash);
+    }
+
+    /// M3 exit: ARAM: Mayhem under Hyper rules, every champion with Multishot, Echo and
+    /// Broadside, ten clients over the MID link. Downstream stays within the 32 KB/s per client
+    /// target and the server within its 3 ms tick budget, with no hard resets, no fog leaks,
+    /// and dodges judged as the server judges them (a volley hits each champion once).
+    #[test]
+    fn hyper_multishot_stress_stays_within_budgets() {
+        let r = run(&LabConfig {
+            profile: LinkProfile::MID,
+            clients: 10,
+            seconds: 40.0,
+            seed: 1,
+            fps: 60.0,
+            warmup: 5.0,
+            scenario: Scenario::Hyper,
+            proxies: true,
+            reaction: 0.25,
+            margin_override: None,
+            augments: Some([24, 25, 26, 0]),
+        });
+        let s = &r.summary;
+        assert_eq!(s.hard_resets, 0, "{}", s.row());
+        assert_eq!(r.fog_violations, 0);
+        assert!(s.dodge.enemy_missiles >= 600, "the stress happened: {}", s.dodge_row());
+        assert!(s.down_kbps < 32.0, "{}", s.row());
+        assert!(r.tick_ms_mean < 3.0, "tick {:.3} ms (max {:.3})", r.tick_ms_mean, r.tick_ms_max);
+        assert!(s.ghost_rate() < 0.02, "{}", s.dodge_row());
+        // Phantom hits (shown, not dealt) run near 4% here against 2% without Multishot: three
+        // missiles per cast triple the chances that a proxy misses an interception.
+        assert!((s.dodge.phantom_hits as f64) <= 0.06 * s.dodge.near_misses as f64, "{}", s.dodge_row());
     }
 
     /// M2 slice 1: ARAM on The Bridge with 3v3 bots (waves, turrets, relics, fountains): stable
@@ -406,6 +493,7 @@ mod tests {
             proxies: true,
             reaction: 0.25,
             margin_override: None,
+            augments: None,
         });
         let s = &r.summary;
         assert_eq!(s.hard_resets, 0, "{}", s.row());
@@ -641,6 +729,82 @@ mod tests {
         let drawn = session.own_render_position(t).unwrap();
         assert!(drawn.distance(server_pos) < 50.0, "drawn {drawn:?}, server {server_pos:?}");
         assert!(watcher.is_spectator(), "the spectator is still watching");
+    }
+
+    /// M3 slices 2 and 3: a Titan with Multishot, Echo and Broadside casts over a jittery link.
+    /// The client predicts the whole volley and the echo (keyed by cast and shot), each one is
+    /// confirmed by the server's own, its hitbox grows with the server's, and prediction never
+    /// corrects.
+    #[test]
+    fn transformed_casts_are_predicted() {
+        use mftr_client::missiles::Side;
+        let cfg = ServerConfig { seed: 3, scenario: Scenario::Mayhem, ..Default::default() };
+        let mut server = ServerCore::new(cfg, 0.0);
+        let mut session = ClientSession::new();
+        session.set_champion_request(Some(mftr_sim::ChampionId::Ember));
+        let (mut up, mut down) = (SimLink::new(LinkProfile::MID, 11), SimLink::new(LinkProfile::MID, 12));
+        let (mut t, mut next_hello, mut augmented) = (0.0, 0.0, false);
+        let (mut casts, mut most_predicted, mut most_confirmed) = (0, 0, 0);
+        let mut next_cast = 0.0;
+        while t < 30.0 {
+            while let Some(p) = up.recv(t) {
+                for (_, bytes) in server.handle_packet(1, &p, t) {
+                    down.send(bytes, t);
+                }
+            }
+            if t >= server.next_tick_due() {
+                for (_, bytes) in server.step(t) {
+                    down.send(bytes, t);
+                }
+            }
+            while let Some(p) = down.recv(t) {
+                session.handle_packet(&p, t);
+            }
+            session.update(t);
+            match session.phase() {
+                Phase::Connecting if t >= next_hello => {
+                    up.send(session.hello_packet(t), t);
+                    next_hello = t + 0.25;
+                }
+                Phase::Playing => {
+                    if !augmented {
+                        // Grant the augments on the server; the client learns them from its state.
+                        let u = server.world_mut().unit_mut(session.unit()).unwrap();
+                        u.state.progress.augments = [24, 25, 26, 27];
+                        u.state.progress.drafted = 4;
+                        u.state.progress.offer = [0; 3];
+                        u.state.progress.ranks = [1; 4];
+                        augmented = true;
+                        next_cast = t + 2.0;
+                    }
+                    if t >= next_cast && session.own_state_now().is_some_and(|s| s.progress.augments[0] == 24) {
+                        let own = session.own_render_position(t).unwrap();
+                        if session.cast(0, own + mftr_sim::Vec2::new(0.0, 600.0), t).is_some() {
+                            casts += 1;
+                        }
+                        next_cast = t + 5.0;
+                    }
+                    let own: Vec<_> = session.missiles_render(t).into_iter().filter(|m| m.side == Side::Own).collect();
+                    let predicted = own.iter().filter(|m| m.key > u32::MAX / 2).count();
+                    most_predicted = most_predicted.max(predicted);
+                    most_confirmed = most_confirmed.max(own.len() - predicted);
+                    if session.should_send(t) {
+                        up.send(session.input_packet(t), t);
+                    }
+                }
+                _ => {}
+            }
+            t += 0.002;
+        }
+        assert!(casts >= 4, "{casts} casts");
+        assert_eq!(most_predicted, 3, "the volley is predicted at once");
+        assert!(most_confirmed >= 3, "and confirmed by the server: {most_confirmed}");
+        assert_eq!(session.stats.hard_resets, 0);
+        assert!(session.stats.corrections.iter().all(|c| *c < 1.0), "{:?}", session.stats.corrections);
+        assert!(session.book_is_settled(), "every predicted missile was confirmed");
+        let titan = mftr_sim::world::CHAMPION_GAMEPLAY_RADIUS * mftr_sim::augments::TITAN_SCALE;
+        assert_eq!(session.own_radius(), titan);
+        assert_eq!(server.world().unit(session.unit()).unwrap().gameplay_radius, titan);
     }
 
     /// Q13: over a lossy, jittery link with moving minions, every snapshot the client

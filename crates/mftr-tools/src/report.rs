@@ -355,6 +355,11 @@ impl DuelBot {
         else {
             return false;
         };
+        if st.progress.offer[0] != 0 {
+            // ARAM: Mayhem: keep one of the drafted augments.
+            let choice = self.rng.next_u32() as usize % mftr_sim::augments::CHOICES;
+            return session.pick_augment(choice as u8, now).is_some();
+        }
         if self.shop(session, &st.progress, now, elapsed) {
             return true;
         }
@@ -422,7 +427,7 @@ impl DuelBot {
         let d = e.pos.distance(own);
         let to = (e.pos - own).normalize_or_zero();
         let perp = Vec2::new(-to.y, to.x) * if self.rng.next_u32().is_multiple_of(2) { 1.0 } else { -1.0 };
-        let max_hp = mftr_sim::items::champion_stats(champ.def(), st.progress.level, &st.progress.items).0.max_health;
+        let max_hp = mftr_sim::items::champion_stats(champ.def(), &st.progress.stats_key()).0.max_health;
         if st.health < 0.35 * max_hp && ready(5) {
             return session.cast(5, own, now).is_some();
         }
