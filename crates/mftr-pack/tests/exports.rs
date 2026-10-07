@@ -49,7 +49,9 @@ fn assert_error(r: &Report, needle: &str) {
 
 #[test]
 fn committed_exports_are_clean() {
-    for f in ["rigs/export/biped_v1.glb", "library/biped/export/biped_library.glb"] {
+    for f in
+        ["rigs/export/biped_v1.glb", "library/biped/export/biped_library.glb", "champions/vesper/export/vesper.glb"]
+    {
         let r = validate_file(&art(f));
         assert!(r.findings.is_empty(), "{f}: {:#?}", r.findings);
     }

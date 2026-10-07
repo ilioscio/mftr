@@ -76,7 +76,11 @@ def stash(armature, action):
             ad.nla_tracks.remove(tr)
     tr = ad.nla_tracks.new()
     tr.name = action.name
-    tr.strips.new(action.name, 0, action)
+    strip = tr.strips.new(action.name, 0, action)
+    # Actions appended from another file (the shared library) keep their slot; make sure the
+    # strip uses one (Blender 4.4+ slotted actions).
+    if getattr(strip, "action_slot", None) is None and getattr(action, "slots", None):
+        strip.action_slot = action.slots[0]
     tr.mute = True
     ad.action = None
 
@@ -102,7 +106,8 @@ def key_pose(armature, frame, pose, bones=None, locs=None):
     locs = locs or {}
     # Armature-space rotation each bone has received relative to its rest (parents first).
     delta = {}
-    for name in rig.BONE_NAMES:
+    # Every bone, parents first (the armature's own order: extras are added after the base rig).
+    for name in [b.name for b in armature.data.bones]:
         pb = armature.pose.bones[name]
         parent = pb.parent.name if pb.parent else None
         d_parent = delta.get(parent, Quaternion())
@@ -158,5 +163,8 @@ def reset_pose(armature):
         pb.scale = Vector((1, 1, 1))
 
 
-def full_body():
-    return list(rig.DEFORM_BONES)
+def full_body(armature=None):
+    """Every deforming bone: the base rig's, plus `armature`'s extras (capes, hair) if given."""
+    if armature is None:
+        return list(rig.DEFORM_BONES)
+    return [b.name for b in armature.data.bones if b.use_deform]

@@ -47,7 +47,7 @@ def _mirror_locs(locs):
 def _clip(arm, name, frames, keys, loop=False, layer="full", bones=None, markers=None, stride_speed=None):
     """keys: [(frame, pose, locs)]. Loops get their first key repeated on the last frame."""
     act = clips.new_action(arm, name, frames, loop=loop, layer=layer, stride_speed=stride_speed)
-    bones = bones or clips.full_body()
+    bones = bones or clips.full_body(arm)
     if loop and keys[-1][0] != frames:
         keys = keys + [(frames, keys[0][1], keys[0][2])]
     # A bone with a location on any key gets one on every key (zero by default), so an offset
@@ -64,9 +64,9 @@ def _clip(arm, name, frames, keys, loop=False, layer="full", bones=None, markers
     return act
 
 
-def walk(arm):
-    # Left contact, loading, passing, high point; the second half mirrors the first.
-    half = [
+def walk_half():
+    """Left contact, loading, passing, high point; the second half mirrors the first."""
+    return [
         (0, merge(arms((0.25, -0.35, -1), (0.2, -0.15, -1), (0.25, 0.4, -1), (0.2, 0.8, -1)), {
             "thigh_l": (-24, 0, 0), "calf_l": (4, 0, 0), "foot_l": (-8, 0, 0),
             "thigh_r": (16, 0, 0), "calf_r": (18, 0, 0), "foot_r": (10, 0, 0),
@@ -84,8 +84,15 @@ def walk(arm):
             "thigh_r": (-22, 0, 0), "calf_r": (22, 0, 0), "foot_r": (-10, 0, 0),
             "pelvis": (0, 0, 3), "spine_01": (3, 0, -1), "spine_02": (2, 0, -3), "head": (-3, 0, 0)}), {"pelvis": (0, 0, 0.0)}),
     ]
-    keys = half + [(f + 16, mirror(p), _mirror_locs(l)) for f, p, l in half]
-    return _clip(arm, "walk", 32, keys, loop=True, markers={"foot_l": 0, "foot_r": 16}, stride_speed=140.0)
+
+
+def cycle(half, frames):
+    """A full locomotion cycle: the half-cycle keys, then their mirror."""
+    return half + [(f + frames // 2, mirror(p), _mirror_locs(l)) for f, p, l in half]
+
+
+def walk(arm):
+    return _clip(arm, "walk", 32, cycle(walk_half(), 32), loop=True, markers={"foot_l": 0, "foot_r": 16}, stride_speed=140.0)
 
 
 def cast_utility(arm):
@@ -202,9 +209,9 @@ def idle(arm):
     return _clip(arm, "idle", 60, [(0, stand, {"pelvis": (0, 0, -0.01)}), (30, inhale, {"pelvis": (0, 0, 0.0)})], loop=True)
 
 
-def run(arm):
-    # Champion speed (330 u/s): two 1.1 m strides in 20 frames, leaning in, arms pumping.
-    half = [
+def run_half():
+    """Champion speed (330 u/s): two 1.1 m strides in 20 frames, leaning in, arms pumping."""
+    return [
         (0, merge(arms((0.18, -0.55, -1), (0.1, 0.4, -0.3), (0.18, 0.7, -0.6), (0.0, 1, 0.5)), {
             "thigh_l": (-38, 0, 0), "calf_l": (14, 0, 0), "foot_l": (-10, 0, 0),
             "thigh_r": (24, 0, 0), "calf_r": (40, 0, 0), "foot_r": (22, 0, 0),
@@ -218,8 +225,10 @@ def run(arm):
             "thigh_r": (-30, 0, 0), "calf_r": (95, 0, 0), "foot_r": (10, 0, 0),
             "pelvis": (0, 0, 0), "spine_01": (10, 0, 0), "spine_02": (4, 0, 0), "head": (-10, 0, 0)}), {"pelvis": (0, 0, 0.02)}),
     ]
-    keys = half + [(f + 10, mirror(p), _mirror_locs(l)) for f, p, l in half]
-    return _clip(arm, "run", 20, keys, loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=330.0)
+
+
+def run(arm):
+    return _clip(arm, "run", 20, cycle(run_half(), 20), loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=330.0)
 
 
 def death(arm):
