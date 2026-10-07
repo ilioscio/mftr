@@ -29,3 +29,8 @@ Thumbs.db
 
 # Godot (client project)
 /client/.godot/
+
+# Blender review renders (contact sheets, GIFs): regenerate with tools/blender/run.py review
+/art/**/review/
+*.blend1
+__pycache__/

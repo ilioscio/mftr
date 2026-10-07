@@ -1,0 +1,18 @@
+schema_version = "1.0.0"
+
+id = "mftr_blender"
+version = "0.1.0"
+name = "MFTR Tools"
+tagline = "Rig standard, clip markers, export and review renders for MFTR champions"
+maintainer = "MFTR contributors"
+type = "add-on"
+blender_version_min = "5.2.0"
+
+license = [
+  "SPDX:AGPL-3.0-or-later",
+]
+
+tags = ["Animation", "Import-Export"]
+
+[permissions]
+files = "Writes exported .glb/.anims.ron files and review renders next to the .blend"
