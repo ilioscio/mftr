@@ -32,7 +32,7 @@ Build the Godot extension (once, and after Rust changes):
 cargo build -p mftr-gdext
 ```
 
-Then open `client/project.godot` in Godot (4.5+) and press Play. The server starts the **Duel Sandbox** by default: blue spawns west, red east, with minion clumps in between. Six placeholder champions: **Ember** (skillshot mage), **Vesper** (marksman), **Bastion** (tank: pull, knock-up), **Rook** (bruiser: cleave, heal, lunge), **Lumen** (enchanter: heals and shields allies) and **Shade** (assassin: lunges). Duels alternate Ember and Vesper and ARAM hands them out in turn; or pick one with a user argument: `godot --path client -- --champion shade`.
+Then open `client/project.godot` in Godot (4.5+) and press Play. The start menu asks for a server (`127.0.0.1:7777` for your own; servers you've joined are remembered, with their game type, for one-click joining), how to join (play, spectate or the blind playtest) and, on duel and sandbox servers, a champion. Esc leaves a server. The server starts the **Duel Sandbox** by default: blue spawns west, red east, with minion clumps in between. Six placeholder champions: **Ember** (skillshot mage), **Vesper** (marksman), **Bastion** (tank: pull, knock-up), **Rook** (bruiser: cleave, heal, lunge), **Lumen** (enchanter: heals and shields allies) and **Shade** (assassin: lunges). Duels alternate Ember and Vesper and ARAM hands them out in turn; or pick one in the menu (or with user arguments, which skip the menu: `godot --path client -- 127.0.0.1:7777 --champion shade`).
 
 | Input | Action |
 |---|---|
@@ -45,7 +45,7 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The server star
 | S | Stop |
 | F1 / F2 | Net graph / client collision proxies (to feel the difference) |
 
-**Blind playtest** (helps us tune netcode against how it *feels*): start the client with `godot --path client -- --blind` (add a server address if it isn't local). You'll play 10 one-minute rounds under hidden network conditions and rate each one. Your answers go to `blind_results.tsv` in Godot's user data folder (the path is shown at the end). Send us that file; `mftr-tools blind-report blind_results.tsv` summarizes it. The [playtest guide](docs/playtest.md) has the full steps for testers and organizers.
+**Blind playtest** (helps us tune netcode against how it *feels*): choose **Blind playtest** in the client's start menu (or start it with `godot --path client -- --blind 127.0.0.1:7777`). You'll play 10 one-minute rounds under hidden network conditions and rate each one. Your answers go to `blind_results.tsv` in Godot's user data folder (the path is shown at the end). Send us that file; `mftr-tools blind-report blind_results.tsv` summarizes it. The [playtest guide](docs/playtest.md) has the full steps for testers and organizers.
 
 **ARAM on The Bridge** (M2, in progress): start the server with `--scenario aram`. You get one lane with turrets, a Gatehouse and a Base per team, minion waves every 30 s, health relics and a fountain; destroy the enemy Base to win. You start at level 3 with 1,400 gold: press **P** in the fountain to shop. Bots (`mftr-tools bot --duel`) also play it, though not well yet.
 
@@ -53,11 +53,11 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The server star
 
 **Releasing:** run `scripts/bump-version.sh X.Y.Z` (it updates `Cargo.toml`, `Cargo.lock` and the macOS export preset together; CI builds with `--locked`, so a hand-edited version fails), merge that to `main`, then tag the merge commit on `main`: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag builds and publishes the release from exactly that commit.
 
-**Champion select, spectating, reconnect:** add `--lobby` to an ARAM server (`--scenario aram --bots 10 --lobby`) for all-random champion select with rerolls and a team bench (humans replace bots). Start the client with `-- --spectate` to watch (Tab cycles champions). If the client crashes or the connection drops, restart it within a minute and you get your champion back.
+**Champion select, spectating, reconnect:** add `--lobby` to an ARAM server (`--scenario aram --bots 10 --lobby`) for all-random champion select with rerolls and a team bench (humans replace bots). After each match, everyone still connected gets a new champion select. Start the client with `-- --spectate` to watch (Tab cycles champions). If the client crashes or the connection drops, restart it within a minute and you get your champion back.
 
 **Bots and replays:** `--bots N` fills N slots with server bots (e.g. `--scenario aram --bots 9` for a full match against bots), and `--replay match.replay` records the session. `mftr-tools replay match.replay` re-simulates a recording and checks it, and `mftr-tools botmatch --seed 3` plays a 10-bot ARAM match headless in a couple of seconds.
 
-No one to duel? Start a sparring bot: `cargo run --release -p mftr-tools -- bot --server 127.0.0.1:7777 --duel --seconds 600`. Other scenarios: `--scenario aram` (see above), `--scenario minions` (minion-block sandbox), `--scenario dodge` (turrets that fire skillshots at you) and `--scenario empty`. To join another machine's server, pass its address as a user argument: `godot --path client -- 192.168.1.10:7777`.
+No one to duel? Start a sparring bot: `cargo run --release -p mftr-tools -- bot --server 127.0.0.1:7777 --duel --seconds 600`. Other scenarios: `--scenario aram` (see above), `--scenario minions` (minion-block sandbox), `--scenario dodge` (turrets that fire skillshots at you) and `--scenario empty`. To join another machine's server, type its address in the start menu (or pass it as a user argument: `godot --path client -- 192.168.1.10:7777`).
 
 Headless tools:
 

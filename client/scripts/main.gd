@@ -2,11 +2,14 @@ extends Node3D
 ## M1 Duel Sandbox client. Builds the scene in code, forwards input to the Rust MatchClient,
 ## and draws what it reports. No gameplay decisions are made here (04 §1).
 ##
-## User args (after `--`): a server address (default 127.0.0.1:7777; `host:port#fingerprint` pins
-## the server's key, otherwise it is trusted on first use), `--champion NAME`,
+## Without a server address the client opens its start menu: pick a server (remembered ones are
+## listed with their game type), how to join (play, spectate or the blind playtest) and a champion.
+## User args (after `--`) skip the menu: a server address (`host:port#fingerprint` pins the
+## server's key, otherwise it is trusted on first use), `--champion NAME`,
 ## `--spectate` to watch (Tab cycles champions), `--shot-lobby` for a champion-select capture,
 ## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots, and the blind playtest
-## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`.
+## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`. `--menu-join`
+## (scripted checks) opens the menu and joins the first remembered server through it.
 
 const UNITS_TO_METERS := 0.01           # 1 game unit = 1 cm
 const CAMERA_PITCH_DEG := 56.0          # D13 / R01 §1
@@ -47,7 +50,8 @@ func _ready() -> void:
 	_build_world()
 	client = MatchClient.new()
 	add_child(client)
-	var address := "127.0.0.1:7777"
+	var address := ""
+	_load_menu_choices()  # command-line flags below override them
 	var args := OS.get_cmdline_user_args()
 	var i := 0
 	while i < args.size():
@@ -72,24 +76,40 @@ func _ready() -> void:
 			_shot_shop = true
 		elif args[i] == "--shot-lobby":
 			_shot_lobby = true
+		elif args[i] == "--menu-join":
+			_menu_auto_join = true
 		elif args[i] == "--spectate":
+			_menu_mode = 1
 			client.set_spectate(true)
 		elif args[i] == "--blind-auto":
 			blind_auto = true
 		elif args[i] == "--champion" and i + 1 < args.size():
 			if not client.set_champion(args[i + 1]):
 				push_error("MFTR: unknown champion %s" % args[i + 1])
+			_menu_champion = args[i + 1]
 			i += 1
 		else:
 			address = args[i]
 		i += 1
+	if blind_enabled:
+		_menu_mode = 2
+	if address == "" or _back_to_menu:
+		_back_to_menu = false
+		_show_menu("")
+	else:
+		_connect(address)
+
+
+## Join `address` (as set up: spectating, champion, blind playtest).
+func _connect(address: String) -> void:
 	_server_address = address
+	_remembered = false
 	# Reconnect: a session to this server from moments ago gets its champion back.
 	var saved := _load_session()
-	if saved.get("address", "") == address and Time.get_unix_time_from_system() - float(saved.get("at", 0.0)) < 55.0:
-		client.set_resume_token(saved.get("token", ""))
+	var recent: bool = Time.get_unix_time_from_system() - float(saved.get("at", 0.0)) < 55.0
+	client.set_resume_token(saved.get("token", "") if saved.get("address", "") == address and recent else "")
 	if not client.connect_to_server(address):
-		push_error("MFTR: could not open socket: %s" % client.last_error())
+		_show_menu("Could not connect to %s: %s" % [address, client.last_error()])
 
 
 ## `--shot <file.png>`: scripted capture for automated visual checks. Waits until playing,
@@ -100,6 +120,7 @@ var _shot_moved := false
 var _shot_at := 1.05                     # `--shot-at <seconds>` after joining
 var _shot_shop := false                  # `--shot-shop`: buy from the fountain, show the shop
 var _shot_lobby := false                 # `--shot-lobby`: reroll in champion select, capture it
+var _menu_auto_join := false             # `--menu-join`: join the first remembered server from the menu
 
 
 func _update_shot(delta: float) -> void:
@@ -350,6 +371,12 @@ func _cursor_ground():
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.is_pressed() and not event.is_echo() and (event as InputEventKey).keycode == KEY_ESCAPE:
+		if menu_panel == null:
+			_toggle_pause_menu()
+		return
+	if menu_panel != null or (pause_panel != null and pause_panel.visible):
+		return
 	if blind_panel != null and blind_panel.visible:
 		return  # rating between rounds: the game ignores input
 	if event.is_action_pressed("move"):
@@ -419,6 +446,12 @@ func _process(delta: float) -> void:
 		print("MFTR phase: %s -> %s (unit %d, server key %s)" % [_last_phase, phase, client.own_unit_id(), client.server_fingerprint()])
 		_last_phase = phase
 	var playing := phase == "playing"
+	if phase == "lobby" and _last_phase_seen in ["joining", "playing"]:
+		_reset_match_view()  # the match ended; champion select again
+	_last_phase_seen = phase
+	if phase in ["lobby", "joining", "playing"]:
+		_remember_server()
+	_update_connecting(phase)
 	if playing and not _map_built:
 		_build_map()
 	if playing:
@@ -1128,10 +1161,11 @@ func _draw_ability_bar(font: Font) -> void:
 
 
 func _update_net_graph() -> void:
-	net_label.visible = show_net_graph
-	if not show_net_graph:
-		return
 	var phase := client.phase()
+	# The start menu and the connecting panel say it all.
+	net_label.visible = show_net_graph and phase not in ["", "connecting"]
+	if not net_label.visible:
+		return
 	if phase != "playing":
 		net_label.text = "MFTR — %s…  %s" % [phase if phase != "" else "disconnected", client.last_error()]
 		return
@@ -1644,3 +1678,286 @@ func _update_spectator_camera() -> void:
 	if remote_info.has(spectate_target):
 		target = remote_info[spectate_target].pos
 	_place_camera(_to_world(target))
+
+
+## ---- Start menu, pause menu, remembered servers --------------------------------------------------
+## The start menu picks a server and how to join it. Servers that were joined are remembered in
+## `user://servers.cfg` with their game type, most recent first, so playing again is one click.
+## Esc opens a small menu to leave the server (back to the start menu) at any time.
+
+const SERVERS_PATH := "user://servers.cfg"
+const MAX_SERVERS := 10
+const JOIN_MODES := ["Play", "Spectate", "Blind playtest"]
+
+static var _back_to_menu := false       # leaving a server reloads the scene into the menu
+var menu_panel: PanelContainer
+var menu_address: LineEdit
+var _menu_mode := 0                     # index into JOIN_MODES
+var _menu_champion := ""                # "" = the server picks
+var _remembered := false                # this connection's server is saved in the list
+var _last_phase_seen := ""
+var pause_panel: PanelContainer
+var connecting_panel: PanelContainer
+var connecting_label: Label
+
+
+func _load_servers() -> Array:
+	var cfg := ConfigFile.new()
+	if cfg.load(SERVERS_PATH) != OK:
+		return []
+	return cfg.get_value("servers", "list", [])
+
+
+func _load_menu_choices() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SERVERS_PATH) == OK:
+		_menu_mode = cfg.get_value("menu", "mode", 0)
+		_menu_champion = cfg.get_value("menu", "champion", "")
+
+
+## The list, and with `choices` the menu's join mode and champion too.
+func _save_servers(list: Array, choices := false) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(SERVERS_PATH)
+	cfg.set_value("servers", "list", list.slice(0, MAX_SERVERS))
+	if choices:
+		cfg.set_value("menu", "mode", _menu_mode)
+		cfg.set_value("menu", "champion", _menu_champion)
+	cfg.save(SERVERS_PATH)
+
+
+## Once a server answers (champion select or a welcome), put it first in the list.
+func _remember_server() -> void:
+	if _remembered:
+		return
+	var game: String = client.game_type()
+	if game == "":
+		return
+	_remembered = true
+	var list := _load_servers().filter(func(e): return e.get("address", "") != _server_address)
+	list.push_front({"address": _server_address, "game": game, "at": Time.get_unix_time_from_system()})
+	_save_servers(list)
+
+
+func _forget_server(address: String) -> void:
+	_save_servers(_load_servers().filter(func(e): return e.get("address", "") != address))
+	_show_menu("")
+
+
+func _ago(at: float) -> String:
+	var s := Time.get_unix_time_from_system() - at
+	if s < 120.0:
+		return "just now"
+	if s < 7200.0:
+		return "%d min ago" % int(s / 60.0)
+	if s < 172800.0:
+		return "%d h ago" % int(s / 3600.0)
+	return "%d days ago" % int(s / 86400.0)
+
+
+func _panel(width: float) -> Array:
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(width, 0)
+	var margin := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 20)
+	panel.add_child(margin)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	margin.add_child(v)
+	overlay.get_parent().add_child(panel)
+	return [panel, v]
+
+
+func _center(panel: Control) -> void:
+	panel.position = ((overlay.size - panel.size) / 2.0).max(Vector2.ZERO)
+
+
+func _show_menu(error: String) -> void:
+	print("MFTR: start menu")
+	if menu_panel != null:
+		menu_panel.queue_free()
+	var made := _panel(620)
+	menu_panel = made[0]
+	var v: VBoxContainer = made[1]
+	var title := Label.new()
+	title.text = "MFTR"
+	title.add_theme_font_size_override("font_size", 32)
+	v.add_child(title)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	menu_address = LineEdit.new()
+	menu_address.placeholder_text = "host:port   (host:port#fingerprint pins the server's key)"
+	menu_address.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	menu_address.text_submitted.connect(func(_t): _menu_join(menu_address.text))
+	row.add_child(menu_address)
+	var join := Button.new()
+	join.text = "Join"
+	join.custom_minimum_size = Vector2(90, 0)
+	join.pressed.connect(func(): _menu_join(menu_address.text))
+	row.add_child(join)
+	v.add_child(row)
+
+	var servers := _load_servers()
+	menu_address.text = servers[0].get("address", "") if servers.size() > 0 else "127.0.0.1:7777"
+	if servers.size() > 0:
+		var head := Label.new()
+		head.text = "Recent servers"
+		head.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
+		v.add_child(head)
+		for e in servers:
+			var address: String = e.get("address", "")
+			var line := HBoxContainer.new()
+			line.add_theme_constant_override("separation", 6)
+			var b := Button.new()
+			b.text = "%s   ·   %s   ·   %s" % [address, e.get("game", "?"), _ago(float(e.get("at", 0.0)))]
+			b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			b.tooltip_text = "Join %s" % address
+			b.pressed.connect(func(): _menu_join(address))
+			line.add_child(b)
+			var x := Button.new()
+			x.text = "✕"
+			x.tooltip_text = "Forget this server"
+			x.pressed.connect(func(): _forget_server(address))
+			line.add_child(x)
+			v.add_child(line)
+
+	var opts := GridContainer.new()
+	opts.columns = 2
+	opts.add_theme_constant_override("h_separation", 12)
+	var mode_label := Label.new()
+	mode_label.text = "Join as"
+	opts.add_child(mode_label)
+	var mode := OptionButton.new()
+	for m in JOIN_MODES:
+		mode.add_item(m)
+	mode.selected = clampi(_menu_mode, 0, JOIN_MODES.size() - 1)
+	mode.item_selected.connect(func(i): _menu_mode = i)
+	opts.add_child(mode)
+	var champ_label := Label.new()
+	champ_label.text = "Champion"
+	opts.add_child(champ_label)
+	var champ := OptionButton.new()
+	champ.add_item("Server picks")
+	var names: PackedStringArray = client.champion_names()
+	for n in names:
+		champ.add_item(n)
+	champ.selected = 0
+	for n in names.size():
+		if names[n].to_lower() == _menu_champion.to_lower():
+			champ.selected = n + 1
+	champ.item_selected.connect(func(i): _menu_champion = "" if i == 0 else names[i - 1])
+	champ.tooltip_text = "Duel and sandbox servers. ARAM deals random champions in champion select."
+	opts.add_child(champ)
+	v.add_child(opts)
+
+	var hint := Label.new()
+	hint.text = "ARAM servers deal random champions in champion select. Blind playtest: rounds under hidden network conditions, rated after each (send the results file to the developers)."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_font_size_override("font_size", 13)
+	hint.add_theme_color_override("font_color", Color(0.65, 0.68, 0.72))
+	v.add_child(hint)
+	if error != "":
+		var err := Label.new()
+		err.text = error
+		err.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		err.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4))
+		v.add_child(err)
+	var quit := Button.new()
+	quit.text = "Quit"
+	quit.pressed.connect(func(): get_tree().quit())
+	v.add_child(quit)
+	await get_tree().process_frame
+	if menu_panel != null:
+		_center(menu_panel)
+		menu_address.grab_focus()
+		if _menu_auto_join and servers.size() > 0:
+			_menu_auto_join = false
+			await get_tree().create_timer(1.0).timeout
+			_menu_join(servers[0].get("address", ""))
+
+
+func _menu_join(address: String) -> void:
+	address = address.strip_edges()
+	if address == "":
+		return
+	client.set_spectate(_menu_mode == 1)
+	blind_enabled = _menu_mode == 2
+	client.set_champion(_menu_champion)
+	_save_servers(_load_servers(), true)
+	menu_panel.queue_free()
+	menu_panel = null
+	_connect(address)
+
+
+## While the server hasn't answered: where we're connecting, why it fails, and a way back.
+func _update_connecting(phase: String) -> void:
+	if phase != "connecting":
+		if connecting_panel != null:
+			connecting_panel.queue_free()
+			connecting_panel = null
+		return
+	if connecting_panel == null:
+		var made := _panel(520)
+		connecting_panel = made[0]
+		var v: VBoxContainer = made[1]
+		connecting_label = Label.new()
+		connecting_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		v.add_child(connecting_label)
+		var cancel := Button.new()
+		cancel.text = "Back to the server list"
+		cancel.pressed.connect(_leave)
+		v.add_child(cancel)
+	var err: String = client.last_error()
+	connecting_label.text = "Connecting to %s…%s" % [_server_address, ("\n\n" + err) if err != "" else ""]
+	_center(connecting_panel)
+
+
+func _toggle_pause_menu() -> void:
+	if pause_panel != null:
+		pause_panel.visible = not pause_panel.visible
+		_center(pause_panel)
+		return
+	var made := _panel(320)
+	pause_panel = made[0]
+	var v: VBoxContainer = made[1]
+	var title := Label.new()
+	title.text = _server_address
+	v.add_child(title)
+	var resume := Button.new()
+	resume.text = "Resume"
+	resume.pressed.connect(func(): pause_panel.visible = false)
+	v.add_child(resume)
+	var leave := Button.new()
+	leave.text = "Leave server"
+	leave.pressed.connect(_leave)
+	v.add_child(leave)
+	var quit := Button.new()
+	quit.text = "Quit"
+	quit.pressed.connect(func(): get_tree().quit())
+	v.add_child(quit)
+	await get_tree().process_frame
+	_center(pause_panel)
+
+
+## Disconnect and start over in the menu (a fresh scene: nothing of the match is left).
+func _leave() -> void:
+	client.disconnect_from_server()
+	_back_to_menu = true
+	get_tree().reload_current_scene()
+
+
+## The match ended and the server holds champion select again: drop what belonged to it.
+func _reset_match_view() -> void:
+	if own_body != null:
+		own_body.queue_free()
+		own_body = null
+	own_champion = ""
+	if shop_panel != null:
+		shop_panel.visible = false
+	match_banner = ""
+	floaters.clear()
+	notices.clear()
+	_lobby_ready = false
