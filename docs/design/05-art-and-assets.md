@@ -46,14 +46,17 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
 
 ## 4. Champions
 
-- Low-poly meshes, **~5–10k triangles** at max LOD, with 2 LODs. Vertex colors and material-ID regions; no texture maps by default.
-- Shading: toon ramp + rim light + team-accent mask region + procedural detail noise in object space.
-- Skeletal animation: idle, run, attack ×2–3, cast per ability, death, recall, emotes. Exported as glTF with compressed animation tracks.
+Full specification: **[10 — Characters & Animation](10-characters-and-animation.md)**. In short:
+
+- "Faceted PS1" low-poly meshes, **2,500–4,000 triangles** (cap 6,000), with vertex colors and ≤ 4 material slots including the team accent; no texture maps (D48).
+- Shading: faceted toon ramp + rim light + team-accent region + procedural detail noise in object space.
+- Skeletal animation on a shared rig standard, with the **complete animation set** per champion (~35–45 clips: locomotion, attacks, every ability phase, CC poses, recall, death, emotes), timed by the sim's action contract. Exported as glTF plus a marker sidecar, and shipped inside content packs ([11](11-content-packs-and-mods.md)).
 - Optional **outline** pass (inverted hull or post-process) to strengthen silhouettes. A user setting.
 
 ## 5. VFX
 
 - Mostly **shader-driven meshes**: ribbons, cones, disks and spheres with scrolling noise, dissolves and SDF masks, plus GPU particles for sparks and dust.
+- **Pixel style** (D48): particles snap to a screen-pixel grid with nearest filtering and short color ramps, and animate on twos. Gameplay edges and telegraphs stay smooth and exact.
 - Each ability VFX reads its **gameplay shape from content data** (width, radius, length, duration), so it can't drift from the hitbox.
 - A VFX "kit" library (impact, trail, burst, zone edge, ground warning) gives consistent grammar and saves size.
 

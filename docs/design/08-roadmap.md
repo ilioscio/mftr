@@ -349,6 +349,19 @@ Four more placeholder champions (original kits, D36), built from the existing sh
 
 The same check runs in CI as a 40 s lab test. **Left for the M3 exit:** playtesters rating Mayhem fun.
 
+## A — Characters & Animation (parallel track)
+Runs alongside M3/M4 and replaces the placeholder shapes with real champions ([10](10-characters-and-animation.md), [11](11-content-packs-and-mods.md)).
+
+**Exit:** all ten champions ship their complete animation set as validated first-party packs. In a blind side-by-side at the gameplay camera, playtesters rate facing, attack crispness and readability no worse than the reference game.
+
+### A slices (in order of dependency)
+1. **Pipeline:** `art/` layout, the `mftr_blender` add-on (rig generator for `biped` v1, export, marker sidecar, review renders) and the shared library block-out (CC, `walk`, `cast_utility`, `attack_melee_alt`). Pack format v0 and the `mftr-pack` validator in CI.
+2. **Sim contract (D52):** `facing` state and its wire field, action phases (`follow_through`, `hard_lock`, `windup_cancel`, `mobile`), the input buffer and the attack-variant counter. Unit tests plus a Netcode Lab check that cancelling and buffering survive prediction and reconciliation.
+3. **Client runtime:** pack loading through gdext (no `ResourceLoader`), the AnimationTree layout, piecewise retiming from sim time, facing display, socket-spawned projectiles, impact flash, hover outline.
+4. **Pilot: Vesper** (ranged), complete set, VFX and SFX, in game.
+5. **Pilot: Rook** (melee, `biped_large`), complete set, VFX and SFX, in game.
+6. **The other eight champions**, one slice each, against the definition of done in 10 §10.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.
@@ -361,7 +374,7 @@ The same check runs in CI as a 40 s lab test. **Left for the M3 exit:** playtest
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.
-- Mod and content pipeline (community champions, skins within readability rules, custom modes).
+- Mod and content pipeline (community champions, skins within readability rules, custom modes): server-pushed packs with signatures, the trust prompt, cache and blocklist ([11](11-content-packs-and-mods.md), D51).
 - Localization framework.
 
 ## M6 — Federation
