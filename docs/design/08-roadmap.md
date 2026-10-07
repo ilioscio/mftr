@@ -401,6 +401,30 @@ Runs alongside M3/M4 and replaces the placeholder shapes with real champions ([1
 
 **Left for later:** the owner's approval of her concept; polish (the block-outs' draw hand and run arms); emotes, recall and select have no in-game trigger yet.
 
+### A slice 4b status (2026-10-07): ✅ done
+- **The VFX kit** (05 §5.1):
+  - nine kits: `flare`, `burst`, `ring`, `dust` and `trail`, plus the projectile styles `arrow`, `net`, `orb` and `lob`;
+  - pixel-style particles in one MultiMesh, snapped to screen pixels by `pixel_vfx.gdshader`, stepped at 20 Hz through stepped colour ramps;
+  - projectile styles fitted inside the gameplay body;
+  - detonation rings sized from the area's radius.
+- **Format:**
+  - `<id>.vfx.ron` next to the model (11 §3.1), parsed and checked by `mftr-pack` (kits per phase, ramps, bounded knobs, caps);
+  - loaded with the pack, and exposed to the client as `MftrModel.vfx()`.
+- **Events:** the render state now carries each area's, missile's and bolt's owner, champion and action. The action is resolved by matching radius against the owner's kit, including augment widening; dashes use `MatchClient.dash_action()`. A champion's effects fall back to the library's `biped_library.vfx.ron`.
+- **Vesper:**
+  - gold arrows (flare, shaft and trail, spark burst);
+  - a teal-white Longshot;
+  - a lobbed Shrapnel Charge that sizzles, then detonates in shrapnel, a ring and smoke;
+  - Tumble dust;
+  - a spinning gold Snare Net.
+- **Checked in Godot:** W, Q, E and R were checked against a duel server; the flare core and the smoke were toned down after the first captures.
+
+**Left for later:**
+- crit sparks and the impact flash's spark burst at `socket_chest` (10 §6), which need crit and target info in the render state;
+- the allied-VFX opacity setting (05 §1.6);
+- footstep dust from `foot_l`/`foot_r` markers;
+- the basic-attack path was not captured on screen (no enemy came into range in the scripted duel).
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.
