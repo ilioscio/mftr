@@ -241,3 +241,45 @@ fn running_steps_twice_a_cycle_and_actions_announce_their_start() {
     anim.update(&lib, &Drive { dt: 0.016, action: Some(Action { progress: Some(0.3), ..cast }), ..Default::default() });
     assert!(anim.events.is_empty());
 }
+
+#[test]
+fn minions_flinch_when_hit_and_finish_their_swings() {
+    // A5: a hit plays the additive `flinch`; an attack whose windup ended plays on to its end
+    // while the minion stands (with `finish_attacks`), instead of being cut.
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../art/minions/melee/export/melee.glb");
+    let pack = mftr_pack::load_file(&path).unwrap();
+    assert_eq!(pack.kind, "minion");
+    let lib = pack.library;
+    let mut calm = Animator::new(&lib);
+    let mut hit = Animator::new(&lib);
+    calm.update(&lib, &Drive { dt: 0.016, ..Default::default() });
+    hit.update(&lib, &Drive { dt: 0.016, hit: true, ..Default::default() });
+    let (mut a, mut b) = (Pose::new(), Pose::new());
+    for _ in 0..4 {
+        a = calm.update(&lib, &Drive { dt: 0.016, ..Default::default() });
+        b = hit.update(&lib, &Drive { dt: 0.016, ..Default::default() });
+    }
+    let head = lib.rig.bone("head").unwrap();
+    assert!(rot_diff(&a, &b, head) > 2.0, "the flinch tips the head back");
+
+    let clip = lib.clip("attack_1").unwrap();
+    let end = lib.clips[clip].end();
+    let attack = Action { kind: ActionKind::Attack { variant: 1 }, phase: Phase::Windup, progress: None };
+    for finish in [false, true] {
+        let mut anim = Animator::new(&lib);
+        anim.finish_attacks = finish;
+        for _ in 0..20 {
+            anim.update(&lib, &Drive { dt: 0.016, action: Some(attack), ..Default::default() });
+        }
+        let mut t = 0.0;
+        while anim.action_time().is_some() && t < 2.0 {
+            anim.update(&lib, &Drive { dt: 0.016, ..Default::default() });
+            t += 0.016;
+        }
+        if finish {
+            assert!(t > end - lib.clips[clip].fire() - 0.05, "the swing played out ({t:.2} s)");
+        } else {
+            assert!(t < 0.1, "cut within the 50 ms blend ({t:.2} s)");
+        }
+    }
+}

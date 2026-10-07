@@ -49,9 +49,12 @@ fn assert_error(r: &Report, needle: &str) {
 
 #[test]
 fn committed_exports_are_clean() {
-    for f in
+    let mut files: Vec<String> =
         ["rigs/export/biped_v1.glb", "library/biped/export/biped_library.glb", "champions/vesper/export/vesper.glb"]
-    {
+            .map(String::from)
+            .to_vec();
+    files.extend(["melee", "caster", "siege", "super"].map(|k| format!("minions/{k}/export/{k}.glb")));
+    for f in &files {
         let r = validate_file(&art(f));
         assert!(r.findings.is_empty(), "{f}: {:#?}", r.findings);
     }
@@ -297,4 +300,23 @@ fn stray_or_broken_sounds_fail_the_pack() {
     let (_, _, errs) = mftr_pack::sfx::load(&f, |_| Ok(b"OggS not really".to_vec()), &["a".into(), "b".into()]);
     assert!(errs.iter().any(|e| e.starts_with("sfx/a.ogg")), "{errs:?}");
     assert!(errs.iter().any(|e| e.contains("sfx/b.ogg is not bound")), "{errs:?}");
+}
+
+#[test]
+fn minion_packs_are_checked_against_their_kind() {
+    // A5: the id must be a sim minion kind, and `attack_1` fires on that kind's windup.
+    let glb = std::fs::read(art("minions/melee/export/melee.glb")).unwrap();
+    let side = std::fs::read_to_string(art("minions/melee/export/melee.anims.ron")).unwrap();
+    assert!(errors(&validate(&glb, &side)).is_empty());
+    let late = side.replace(
+        r#"(name: "fire", frame: 7), (name: "end", frame: 24)"#,
+        r#"(name: "fire", frame: 12), (name: "end", frame: 24)"#,
+    );
+    assert_ne!(late, side);
+    assert_error(&validate(&glb, &late), "the minion fires at 7.2");
+    let goblin = side.replace(r#"id: "melee""#, r#"id: "goblin""#);
+    assert_error(&validate(&glb, &goblin), "minion `goblin` must be one of");
+    // The siege cart's extra bones are allowed; its wheels loop seamlessly.
+    let siege = validate_file(&art("minions/siege/export/siege.glb"));
+    assert!(siege.summary[0].contains("38 bones"), "{:?}", siege.summary);
 }

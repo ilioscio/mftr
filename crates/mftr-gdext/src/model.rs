@@ -162,7 +162,8 @@ impl MftrModel {
     /// A new animator for one instance of this model.
     #[func]
     fn new_animator(&self) -> Gd<MftrAnimator> {
-        let animator = Animator::new(&self.pack.library);
+        let mut animator = Animator::new(&self.pack.library);
+        animator.finish_attacks = self.pack.kind == "minion";
         Gd::from_init_fn(|base| MftrAnimator { base, pack: self.pack.clone(), animator })
     }
 }
@@ -203,6 +204,7 @@ impl MftrAnimator {
             stunned: flag("stunned"),
             rooted: flag("rooted"),
             dead: flag("dead"),
+            hit: flag("hit"),
             action: kind.map(|kind| Action { kind, phase, progress: progress.map(|p| p as f32) }),
         };
         let pose = self.animator.update(&self.pack.library, &drive);
