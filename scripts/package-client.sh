@@ -30,6 +30,34 @@ fi
 "$godot" --headless --path client --import >/dev/null 2>&1 || true
 "$godot" --headless --path client --export-release "$preset" "../$out"
 
+# The champion packs (A3, A4): the client reads them from `art/` next to the executable through
+# mftr-pack, never as Godot resources, so they ship as plain files beside the game: every
+# `export/` folder of the shared library and the champions (models, clips, VFX, sounds).
+copy_packs() {
+  local dest="$1"
+  rm -rf "$dest"
+  for d in art/library/*/export art/champions/*/export; do
+    [ -d "$d" ] || continue
+    mkdir -p "$dest/${d#art/}"
+    cp -R "$d/." "$dest/${d#art/}/"
+  done
+  [ -f "$dest/library/biped/export/biped_library.glb" ] || { echo "packs missing from $dest" >&2; exit 1; }
+}
+case "$platform" in
+  macos)
+    # Into the app bundle: unpack the export, add Contents/Resources/art, pack it again.
+    tmp="$(mktemp -d)"
+    (cd "$tmp" && unzip -q "$root/$out")
+    app="$(cd "$tmp" && ls -d ./*.app | head -1)"
+    [ -n "$app" ] || { echo "no .app in $out" >&2; exit 1; }
+    copy_packs "$tmp/$app/Contents/Resources/art"
+    rm -f "$out"
+    (cd "$tmp" && zip -qry "$root/$out" .)
+    rm -rf "$tmp"
+    ;;
+  *) copy_packs "$(dirname "$out")/art" ;;
+esac
+
 version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
 archive="dist/mftr-client-$version-$platform"
 case "$platform" in

@@ -137,10 +137,30 @@ func _load_champion_model() -> void:
 	if champion_model == null:
 		use_models = false
 		print("MFTR: no champion model (%s): placeholder shapes" % path)
+	else:
+		print("MFTR: packs from ", _art_root())
+
+
+var _art_base := ""
+
+
+## Where the packs are: `art/` next to the executable in a release (the app bundle's
+## `Contents/Resources/art` on macOS; scripts/package-client.sh puts them there), else the repo's
+## `art/` beside the project (editor and dev runs). They are plain files read by `mftr-pack`,
+## never Godot resources (11 §4).
+func _art_root() -> String:
+	if _art_base == "":
+		var exe := OS.get_executable_path().get_base_dir()
+		_art_base = ProjectSettings.globalize_path("res://").path_join("../art").simplify_path()
+		for dir in [exe.path_join("art"), exe.path_join("../Resources/art").simplify_path()]:
+			if DirAccess.dir_exists_absolute(dir):
+				_art_base = dir
+				break
+	return _art_base
 
 
 func _art_path(rel: String) -> String:
-	return ProjectSettings.globalize_path("res://").path_join("../art").path_join(rel).simplify_path()
+	return _art_root().path_join(rel).simplify_path()
 
 
 ## A champion's own pack (`art/champions/<id>/export/<id>.glb`, A4) if it ships one and it
