@@ -49,7 +49,7 @@ Godot has the same trap. Its native resources (`.tscn`, `.tres`, `.res`, `.scn`)
 ])
 ```
 
-- `event` is `<action>.<phase>`. The action is `attack`, `q`, `w`, `e`, `r`, `d`, `f` or `*`. The phase is `release`, `projectile`, `impact`, `detonate`, `start` or `land`.
+- `event` is `<action>.<phase>`. The action is `attack`, `q`, `w`, `e`, `r`, `d`, `f` or `*`. The phase is `release`, `projectile`, `impact`, `detonate`, `start`, `land` or `fire` (the animation passing its `fire` marker, A6).
 - `kit` must be one the phase allows ([05 §5.1](05-art-and-assets.md#51-the-kit-a4b)).
 - `ramp` has 2–6 RGB colours in 0–1.
 - The optional knobs are bounded:

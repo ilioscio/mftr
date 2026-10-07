@@ -8,7 +8,9 @@ surface a little outside it, from a hairline that sits higher at the front than 
 Everything is weighted rigidly to the `head` bone.
 
 `Head` holds the knobs: the template uses the defaults, feminine heads narrow the jaw and the
-chin and enlarge the eyes, and hair styles are `short` or `ponytail`.
+chin and enlarge the eyes, and hair styles are `short`, `ponytail` or `bald`. A `beard` (a full
+beard ending in a braid with an iron bead, and a moustache) and a `scar` across the left brow are
+optional (Rook).
 """
 
 import math
@@ -36,7 +38,8 @@ SKULL = [
 class Head:
     def __init__(self, base=(0, -0.01, 1.63), height=0.25, scale=1.0, jaw=0.35, chin=1.0, eye=1.0,
                  skin=(0.86, 0.64, 0.50), hair=(0.24, 0.16, 0.11), hair_style="short",
-                 eye_color=(0.16, 0.11, 0.08), lips=(0.62, 0.36, 0.32)):
+                 eye_color=(0.16, 0.11, 0.08), lips=(0.62, 0.36, 0.32), beard=None, scar=False,
+                 metal=(0.34, 0.35, 0.39)):
         self.base = Vector(base)
         self.height = height * scale
         self.scale = scale
@@ -45,6 +48,7 @@ class Head:
         self.eye = eye        # eye size multiplier
         self.skin, self.hair, self.hair_style = skin, hair, hair_style
         self.eye_color, self.lips = eye_color, lips
+        self.beard, self.scar, self.metal = beard, scar, metal
 
     def _radii(self, t):
         for (t0, w0, f0, b0), (t1, w1, f1, b1) in zip(SKULL, SKULL[1:]):
@@ -158,6 +162,16 @@ def build(bm, layers, groups, mats, head: Head):
         ear = _box(bm, p, Vector((0.012, 0.03, 0.052)) * k, rot=(0, 0, -12 * side))
         _paint(bm, ear, skin, tuple(c * 0.93 for c in head.skin), g, layers)
 
+    if head.scar:
+        # A pale scar from the left brow down across the cheek.
+        p = head.front(0.6, 0.052 * k) + Vector((0, -0.003, 0))
+        scar = _box(bm, p, Vector((0.006, 0.004, 0.07)) * k, rot=(0, -18, 0))
+        _paint(bm, scar, skin, tuple(min(1.0, c * 1.12) for c in head.skin), g, layers)
+    if head.beard:
+        _beard(bm, layers, g, mats, head, angles)
+    if head.hair_style == "bald":
+        return
+
     # Hair: the skull's surface pushed out, from a hairline high at the front, low at the nape.
     def hairline(a):
         front = max(0.0, -math.sin(a))
@@ -225,3 +239,62 @@ def build(bm, layers, groups, mats, head: Head):
             prev = ring
             tail_verts += ring
         _paint(bm, tail_verts, cloth, head.hair, g, layers)
+
+
+def _beard(bm, layers, g, mats, head, angles):
+    """A full beard over the jaw (thicker at the chin), a moustache and a braid with a bead."""
+    cloth, metal = mats["cloth"], mats["metal"]
+    k = head.scale
+
+    def push(a):
+        front = max(0.0, -math.sin(a))
+        return 1.02 + 0.16 * front
+
+    def out(t, a):
+        p = head.surface(t, a)
+        c = head.base + Vector((0, 0.01, (p - head.base).z))
+        return c + (p - c) * push(a)
+
+    rows = [0.36, 0.26, 0.15, 0.05]
+    rings = [[bm.verts.new(out(t, a)) for a in angles] for t in rows]
+    # Below the chin the beard gathers forward into the braid's root.
+    chin = head.surface(0.0, -math.pi / 2)
+    root = bm.verts.new(chin + Vector((0, -0.05 * k, -0.06 * k)))
+    _rings(bm, rings, close_top=False)
+    for i in range(SIDES):
+        bm.faces.new((rings[-1][(i + 1) % SIDES], rings[-1][i], root))
+    bm.faces.new(rings[0])
+    verts = [v for r in rings for v in r] + [root]
+    # Built top-down, so let bmesh point the closed shell's faces outward.
+    bmesh.ops.recalc_face_normals(bm, faces=list({f for v in verts for f in v.link_faces}))
+    _paint(bm, verts, cloth, head.hair, g, layers)
+    # The moustache: two tapering wedges from under the nose out over the corners of the mouth.
+    for x in (1, -1):
+        r0 = head.front(0.36, 0.008 * x * k) + Vector((0, -0.016 * k, 0))
+        tip = head.front(0.25, 0.05 * x * k) + Vector((0, -0.02 * k, 0))
+        _paint(bm, _wedge(bm, r0, tip, 0.016 * k, 0.012 * k), cloth, head.hair, g, layers)
+    # The braid: three tapering segments down from the chin, and an iron bead.
+    top = chin + Vector((0, -0.05 * k, -0.06 * k))
+    pts = [top, top + Vector((0, -0.012, -0.07)) * k, top + Vector((0, -0.006, -0.14)) * k, top + Vector((0, 0.004, -0.2)) * k]
+    radii = [0.03, 0.024, 0.018, 0.0]
+    prev = None
+    braid = []
+    for p, r in zip(pts, radii):
+        if r == 0:
+            apex = bm.verts.new(p)
+            for i in range(6):
+                bm.faces.new((prev[(i + 1) % 6], prev[i], apex))
+            braid.append(apex)
+            break
+        ring = [bm.verts.new(p + Vector((r * k * math.cos(2 * math.pi * j / 6), r * k * 0.8 * math.sin(2 * math.pi * j / 6), 0))) for j in range(6)]
+        if prev is None:
+            bm.faces.new(ring)
+        else:
+            for i in range(6):
+                bm.faces.new((prev[(i + 1) % 6], prev[i], ring[i], ring[(i + 1) % 6]))
+        prev = ring
+        braid += ring
+    bmesh.ops.recalc_face_normals(bm, faces=list({f for v in braid for f in v.link_faces}))
+    _paint(bm, braid, cloth, head.hair, g, layers)
+    bead = _box(bm, pts[1] + Vector((0, 0, -0.035 * k)), Vector((0.034, 0.03, 0.026)) * k)
+    _paint(bm, bead, metal, head.metal, g, layers)

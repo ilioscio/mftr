@@ -306,6 +306,9 @@ pub struct ClientSession {
     remote_casts: BTreeMap<UnitId, (SimTime, SimTime, Vec2, u8)>,
     effects: EffectBook,
     combat_text: Vec<CombatText>,
+    /// Casts with no windup (supports, shields, blinks) since the last take: `(unit, slot)`.
+    /// Their animation can only start on the confirmed event (A6).
+    instant_casts: Vec<(UnitId, u8)>,
     notices: Vec<Notice>,
     /// Latest own blink already announced (re-simulation replays it).
     last_own_blink: SimTime,
@@ -367,6 +370,7 @@ impl ClientSession {
             snapshot_ack: Tick(0),
             effects: EffectBook::default(),
             combat_text: Vec::new(),
+            instant_casts: Vec::new(),
             notices: Vec::new(),
             last_own_blink: SimTime(0),
         }
@@ -851,8 +855,13 @@ impl ClientSession {
             }
             self.last_event_seq = *seq;
             match *e {
-                SimEvent::CastStarted { unit, at, dir, fire_at, slot, .. } if unit != self.unit => {
-                    self.remote_casts.insert(unit, (at, fire_at, dir, slot));
+                SimEvent::CastStarted { unit, at, dir, fire_at, slot, .. } => {
+                    if fire_at <= at {
+                        self.instant_casts.push((unit, slot));
+                    }
+                    if unit != self.unit && fire_at > at {
+                        self.remote_casts.insert(unit, (at, fire_at, dir, slot));
+                    }
                 }
                 SimEvent::MissileSpawned(m) => self.book.on_spawn(m, self.unit, self.team, now),
                 SimEvent::MissileHit { id, target, at } => self.book.on_end(id, at, Some(target)),
@@ -1257,6 +1266,11 @@ impl ClientSession {
     /// Confirmed damage since the last call (floating numbers).
     pub fn take_combat_text(&mut self) -> Vec<CombatText> {
         std::mem::take(&mut self.combat_text)
+    }
+
+    /// Instant casts since the last call (see `instant_casts`).
+    pub fn take_instant_casts(&mut self) -> Vec<(UnitId, u8)> {
+        std::mem::take(&mut self.instant_casts)
     }
 
     /// Kills and respawns since the last call.

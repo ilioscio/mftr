@@ -283,3 +283,52 @@ fn minions_flinch_when_hit_and_finish_their_swings() {
         }
     }
 }
+
+fn rook() -> Library {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/rook/export/rook.glb");
+    mftr_pack::load_file(&path).expect("Rook's pack loads").library
+}
+
+#[test]
+fn actions_announce_their_fire_once_even_when_cut_at_the_windup_or_instant() {
+    // A6: `Fire` when an action passes its `fire` marker: the moment a melee blow lands.
+    let lib = rook();
+    let fires = |anim: &Animator| anim.events.iter().filter(|e| matches!(e, AnimEvent::Fire(_))).count();
+    let attack = ActionKind::Attack { variant: 1 };
+    let mut anim = Animator::new(&lib);
+    let mut n = 0;
+    for i in 0..=10 {
+        let action = Action { kind: attack, phase: Phase::Windup, progress: Some(i as f32 / 10.0) };
+        anim.update(&lib, &Drive { dt: 0.04, action: Some(action), ..Default::default() });
+        n += fires(&anim);
+    }
+    for _ in 0..10 {
+        let action = Action { kind: attack, phase: Phase::FollowThrough, progress: Some(0.5) };
+        anim.update(&lib, &Drive { dt: 0.04, action: Some(action), ..Default::default() });
+        n += fires(&anim);
+    }
+    assert_eq!(n, 1, "one blow, one fire");
+
+    // A cast whose follow-through is skipped (the caster walks on) still fired at its windup's end.
+    let cleave = ActionKind::Cast { slot: 0 };
+    let mut anim = Animator::new(&lib);
+    for i in 0..10 {
+        let action = Action { kind: cleave, phase: Phase::Windup, progress: Some(i as f32 / 10.0 + 0.05) };
+        anim.update(&lib, &Drive { dt: 0.02, action: Some(action), ..Default::default() });
+    }
+    anim.update(&lib, &Drive { dt: 0.02, speed: 340.0, ..Default::default() });
+    assert_eq!(anim.events, vec![AnimEvent::Fire(cleave)]);
+
+    // An instant cast (Second Wind) pulses: its clip plays from `fire` and fires in the next update.
+    let wind = ActionKind::Cast { slot: 1 };
+    let mut anim = Animator::new(&lib);
+    anim.pulse(&lib, wind);
+    anim.update(&lib, &Drive { dt: 0.016, ..Default::default() });
+    assert_eq!(anim.events, vec![AnimEvent::Fire(wind)]);
+    let clip = lib.clip("w").unwrap();
+    assert!(anim.action_time().is_some_and(|(c, t)| c == clip && t >= lib.clips[clip].fire()));
+    for _ in 0..60 {
+        anim.update(&lib, &Drive { dt: 0.016, ..Default::default() });
+    }
+    assert!(anim.action_time().is_none(), "the pulse played out and blended away");
+}

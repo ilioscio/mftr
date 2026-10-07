@@ -1,0 +1,29 @@
+// Rook's VFX (A6): stone and dust. Each blow of the maul cracks the ground where it lands
+// (`attack.fire`, `r.fire`), Cleave's ring sits on its true radius (the area's data), Second
+// Wind pulses gold motes, and Shockwave rolls out as a dusty wave. Instances of the client's VFX
+// kit (05 §5.1); hand-authored next to the export; validated by `mftr-tools pack validate`.
+(
+    effects: [
+        // Basic attack: stone chips and a dust puff where the maul lands.
+        (event: "attack.fire", kit: "burst", ramp: [(0.86, 0.82, 0.74), (0.62, 0.58, 0.52), (0.42, 0.38, 0.34), (0.28, 0.26, 0.24)], count: 14, speed: 3.2, lifetime: 0.35),
+        (event: "attack.fire", kit: "dust", ramp: [(0.58, 0.52, 0.44), (0.46, 0.42, 0.37), (0.34, 0.32, 0.30)], count: 8, speed: 1.0),
+
+        // Q Cleave: a whoosh of dust around him and a ring on the area's edge.
+        (event: "q.detonate", kit: "ring", ramp: [(0.92, 0.86, 0.72), (0.66, 0.58, 0.48), (0.40, 0.36, 0.32)], speed: 1.8),
+        (event: "q.detonate", kit: "dust", ramp: [(0.58, 0.52, 0.44), (0.46, 0.42, 0.37), (0.34, 0.32, 0.30)], count: 14, speed: 2.4, size: 1.2),
+
+        // W Second Wind: gold motes rising from his chest.
+        (event: "w.fire", kit: "flare", ramp: [(1.0, 0.96, 0.72), (1.0, 0.82, 0.36), (0.86, 0.6, 0.2)], count: 16, speed: 2.0, lifetime: 0.6),
+
+        // E Lunge: dust kicked up at takeoff and landing.
+        (event: "e.start", kit: "dust", ramp: [(0.62, 0.56, 0.46), (0.5, 0.46, 0.4), (0.38, 0.36, 0.33)], count: 12, speed: 1.4),
+        (event: "e.land", kit: "dust", ramp: [(0.62, 0.56, 0.46), (0.5, 0.46, 0.4), (0.38, 0.36, 0.33)], count: 16, speed: 2.0, size: 1.3),
+        (event: "e.land", kit: "burst", ramp: [(0.86, 0.82, 0.74), (0.62, 0.58, 0.52), (0.36, 0.33, 0.30)], count: 10, speed: 3.0),
+
+        // R Shockwave: the slam, then a rolling wave of dust and stone along the line.
+        (event: "r.fire", kit: "burst", ramp: [(0.94, 0.9, 0.8), (0.7, 0.64, 0.56), (0.46, 0.42, 0.38), (0.3, 0.28, 0.26)], count: 26, speed: 4.5, lifetime: 0.5),
+        (event: "r.fire", kit: "dust", ramp: [(0.58, 0.52, 0.44), (0.46, 0.42, 0.37), (0.34, 0.32, 0.30)], count: 16, speed: 2.2, size: 1.4),
+        (event: "r.projectile", kit: "orb", ramp: [(0.72, 0.66, 0.56), (0.52, 0.48, 0.42), (0.34, 0.32, 0.30)]),
+        (event: "r.impact", kit: "burst", ramp: [(0.9, 0.86, 0.76), (0.6, 0.56, 0.5), (0.36, 0.33, 0.30)], count: 16, speed: 3.5),
+    ],
+)

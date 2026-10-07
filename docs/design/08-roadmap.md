@@ -490,6 +490,27 @@ Minions as tiny hooded figures, distinct from champions at a glance (the owner's
 - a super minion seen in a live match (it needs a Gatehouse down; covered by a sim test and the renders);
 - instancing, if many waves get costly (every minion has its own skeleton today).
 
+### A slice 6 status (2026-10-07): pilot Rook ✅ done (concept awaiting approval)
+- **The owner's brief:** a grizzled veteran in iron and oxblood, with a stone-headed maul.
+- **Rook's model** (`art/champions/rook/build.py`):
+  - The `biped` bones in the new `large` shape (`biped_large`, 10 §7.1: ~2.05 m, broad and deep); 3,194 triangles.
+  - Battered iron plate (breastplate, gorget, layered pauldrons, gauntlets, knee cops) over a quilted gambeson and an oxblood tabard. The team accent is on the sash, the tabard hems and the pauldron rims.
+  - The shared head grows a `bald` style, a beard (full, with a braid, an iron bead and a moustache) and a scar.
+  - The 1.4 m maul lies along the right hand bone, so every pose aims it exactly: on the shoulder, high in the windups, into the ground on the slams.
+- **Every clip** (31): 22 of his own and 9 shared. Each `fire` was checked against his kit, and the pack validates clean.
+- **Events** (10 §6):
+  - The animator reports `fire` when an action passes its `fire` marker, even when a walking caster skips the follow-through. Melee blows, novas and heals (no projectile) get effects and sounds from it as `<action>.fire`, placed from the kit (`MatchClient.action_info`).
+  - Instant casts (supports, shields) now emit `CastStarted` with `fire_at == at`, and the client pulses the animator so their clip and effects play. This covers Second Wind and any future support.
+- **VFX and SFX:**
+  - VFX: stone chips and dust where the maul lands, Cleave's ring on its true radius, gold motes for Second Wind, Lunge dust, a dusty Shockwave.
+  - 13 sounds, 77 KB: swings, maul impacts, Cleave, chest thumps and a breath, the Lunge, and Shockwave's rise, boom, roll and crack.
+- **Checked in Godot** against a duel server: the carry, Cleave's spin and slam, and Shockwave's slam on screen. The client log showed every effect and sound firing, including Second Wind's pulse.
+
+**Left for later:**
+- the owner's approval of his concept;
+- polish of the block-out swings;
+- the maul's head twisting about its haft between keys (the aim fixes the haft, not the roll).
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.

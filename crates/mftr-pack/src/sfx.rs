@@ -2,8 +2,8 @@
 //! Vorbis files in `sfx/`. First-party packs generate both with `mftr-tools sfx build` from a
 //! hand-written recipe; a community pack may ship recorded sounds instead.
 //!
-//! Events are those of the VFX (`<action>.<phase>`, with the extra phase `cast` for a windup's
-//! start), plus `unit.<what>` (`foot`, `death`, `respawn`, `recall`, `emote`) and the shared
+//! Events are those of the VFX (`<action>.<phase>`, including `fire`, with the extra phase `cast`
+//! for a windup's start), plus `unit.<what>` (`foot`, `death`, `respawn`, `recall`, `emote`) and the shared
 //! hard-CC accent `cc.hard` (05 §7: hard CC has a learnable signature). Several sounds on one
 //! event are variants: the client picks one, never the same twice in a row.
 //!
@@ -25,7 +25,7 @@ pub const MAX_SECONDS: f32 = 3.0;
 pub const RATES: (u32, u32) = (8_000, 48_000);
 
 pub const ACTIONS: &[&str] = &["attack", "q", "w", "e", "r", "d", "f", "*"];
-pub const PHASES: &[&str] = &["cast", "release", "impact", "detonate", "start", "land"];
+pub const PHASES: &[&str] = &["cast", "release", "impact", "detonate", "start", "land", "fire"];
 pub const UNIT_EVENTS: &[&str] = &["foot", "death", "respawn", "recall", "emote"];
 
 #[derive(Clone, Debug, DeRon)]
