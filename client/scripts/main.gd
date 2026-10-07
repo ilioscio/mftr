@@ -46,7 +46,8 @@ var match_banner_age := 0.0
 var notices := []                       # kill feed: { text, age }
 # A3 (10 §6): champion models from content packs. Until champions ship their own, they all wear
 # the shared template (tinted with their identity color). F3 toggles the placeholder shapes.
-var champion_model: MftrModel = null
+var champion_model: MftrModel = null     # the shared template
+var champion_models := {}                # champion name -> its own MftrModel (or the template)
 var use_models := true
 var hovered_body: Node3D = null
 const TURN_RATE := deg_to_rad(4500.0)    # 10 §3: a 180° turn in ~40 ms
@@ -116,12 +117,27 @@ func _ready() -> void:
 ## The shared template from `art/` (A3), validated by `mftr-pack` on load (11 §4). Missing or
 ## refused: champions keep their placeholder shapes.
 func _load_champion_model() -> void:
-	var path := ProjectSettings.globalize_path("res://").path_join("../art/library/biped/export/biped_library.glb").simplify_path()
+	var path := _art_path("library/biped/export/biped_library.glb")
 	if FileAccess.file_exists(path):
 		champion_model = MftrModel.load(path)
 	if champion_model == null:
 		use_models = false
 		print("MFTR: no champion model (%s): placeholder shapes" % path)
+
+
+func _art_path(rel: String) -> String:
+	return ProjectSettings.globalize_path("res://").path_join("../art").path_join(rel).simplify_path()
+
+
+## A champion's own pack (`art/champions/<id>/export/<id>.glb`, A4) if it ships one and it
+## validates, else the template. Loaded once per champion.
+func _model_for(champion: String) -> MftrModel:
+	if not champion_models.has(champion):
+		var id := champion.to_lower()
+		var path := _art_path("champions/%s/export/%s.glb" % [id, id])
+		var own: MftrModel = MftrModel.load(path) if FileAccess.file_exists(path) else null
+		champion_models[champion] = own if own != null else champion_model
+	return champion_models[champion]
 
 
 ## Join `address` (as set up: spectating, champion, blind playtest).
@@ -435,20 +451,22 @@ func _outline_material(team: Color) -> ShaderMaterial:
 ## The template model under `body`: one material per surface by slot, the team accent, the
 ## champion's identity color on cloth, the outline as a second pass, and its animator.
 func _attach_model(body: MeshInstance3D, team: Color, champion: String) -> void:
-	var model: Node3D = champion_model.instantiate()
+	var source := _model_for(champion)
+	var template := source == champion_model
+	var model: Node3D = source.instantiate()
 	model.position = Vector3(0, MODEL_LIFT, 0)
 	body.add_child(model)
 	var mesh: MeshInstance3D = model.get_node("Skeleton/Mesh")
 	var outline: ShaderMaterial = body.get_meta("outline")
 	var mats := []
-	var slots := champion_model.surface_slots()
+	var slots := source.surface_slots()
 	for i in slots.size():
 		var m := ShaderMaterial.new()
 		m.shader = load("res://shaders/champion_model.gdshader")
 		m.set_shader_parameter("slot", ["skin", "cloth", "metal", "emissive", "accent"].find(slots[i]))
 		m.set_shader_parameter("team_accent", team)
 		m.set_shader_parameter("identity", CHAMPION_COLORS.get(champion, Color(0.5, 0.5, 0.5)))
-		m.set_shader_parameter("identity_mix", 0.6)
+		m.set_shader_parameter("identity_mix", 0.6 if template else 0.0)
 		m.next_pass = outline
 		mesh.set_surface_override_material(i, m)
 		mats.append(m)
@@ -456,7 +474,7 @@ func _attach_model(body: MeshInstance3D, team: Color, champion: String) -> void:
 	body.set_meta("rig", {
 		"model": model,
 		"skeleton": model.get_node("Skeleton"),
-		"animator": champion_model.new_animator(),
+		"animator": source.new_animator(),
 		"yaw": NAN,
 		"last": Vector3.INF,
 		"speed": 0.0,

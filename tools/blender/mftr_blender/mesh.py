@@ -174,8 +174,9 @@ def _loft(bm, a, b, sides, profile, mat, color, group, layers):
             vert[col] = (*color, ao)
 
 
-def build_mannequin(armature, name="biped_v1_mannequin", collection=None):
-    """Create the template mesh, skinned to `armature`, and return it."""
+def build_mannequin(armature, name="biped_v1_mannequin", collection=None, part_list=None):
+    """Create a lofted mesh from `part_list` (default: the template's), skinned to `armature`
+    (one vertex group per deforming bone, extras included), and return it."""
     me = bpy.data.meshes.new(name)
     obj = bpy.data.objects.new(name, me)
     (collection or bpy.context.scene.collection).objects.link(obj)
@@ -183,12 +184,13 @@ def build_mannequin(armature, name="biped_v1_mannequin", collection=None):
     for slot in MATERIAL_SLOTS:
         me.materials.append(material(slot))
     groups = {}
-    for bname in rig.DEFORM_BONES:
-        groups[bname] = obj.vertex_groups.new(name=bname).index
+    for b in armature.data.bones:
+        if b.use_deform:
+            groups[b.name] = obj.vertex_groups.new(name=b.name).index
 
     bm = bmesh.new()
     layers = (bm.verts.layers.deform.verify(), bm.verts.layers.float_color.new("Col"))
-    for bone, a, b, sides, prof, slot, color in parts():
+    for bone, a, b, sides, prof, slot, color in (part_list if part_list is not None else parts()):
         _loft(bm, _resolve(a), _resolve(b), sides, prof, MATERIAL_SLOTS.index(slot), color, groups[bone], layers)
     bm.to_mesh(me)
     bm.free()

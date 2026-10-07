@@ -155,3 +155,63 @@ fn continue_keeps_the_action_showing_and_is_nothing_alone() {
     let c = &lib.clips[clip];
     assert!((t - (c.fire() + 0.5 * (c.end() - c.fire()))).abs() < 1e-6, "the cast's follow-through, halfway");
 }
+
+fn vesper() -> Library {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/vesper/export/vesper.glb");
+    mftr_pack::load_file(&path).expect("Vesper's pack loads").library
+}
+
+#[test]
+fn a_dash_plays_start_travel_and_land() {
+    let lib = vesper();
+    let (start, travel, land) =
+        (lib.clip("e_start").unwrap(), lib.clip("e_travel").unwrap(), lib.clip("e_land").unwrap());
+    let mut anim = Animator::new(&lib);
+    let mut seen = Vec::new();
+    for i in 0..60 {
+        let dashing = (5..25).contains(&i);
+        anim.update(&lib, &Drive { dt: 1.0 / 60.0, dashing, ..Default::default() });
+        if let Some(c) = anim.flourish_clip()
+            && seen.last() != Some(&c)
+        {
+            seen.push(c);
+        }
+    }
+    assert_eq!(seen, [start, travel, land], "{:?}", seen.iter().map(|c| &lib.clips[*c].name).collect::<Vec<_>>());
+    assert!(anim.flourish_clip().is_none(), "the landing finished and faded");
+}
+
+#[test]
+fn haste_runs_fast_and_standing_still_fidgets() {
+    let lib = vesper();
+    let mut a = Animator::new(&lib);
+    let mut b = Animator::new(&lib);
+    let (mut pa, mut pb) = (Pose::new(), Pose::new());
+    for _ in 0..40 {
+        pa = a.update(&lib, &Drive { dt: 0.016, speed: 450.0, ..Default::default() });
+        pb = b.update(&lib, &Drive { dt: 0.016, speed: 330.0, ..Default::default() });
+    }
+    assert!(!same(&pa, &pb), "450 u/s isn't the 330 u/s cycle");
+
+    let mut anim = Animator::new(&lib);
+    let fidgets = [lib.clip("idle_fidget_1").unwrap(), lib.clip("idle_fidget_2").unwrap()];
+    for _ in 0..(8.2 / 0.02) as usize {
+        anim.update(&lib, &Drive { dt: 0.02, ..Default::default() });
+    }
+    assert!(anim.flourish_clip().is_some_and(|c| fidgets.contains(&c)), "a fidget after 8 s still");
+    for _ in 0..5 {
+        anim.update(&lib, &Drive { dt: 0.02, speed: 330.0, ..Default::default() });
+    }
+    assert!(anim.flourish_clip().is_none(), "moving cuts it");
+}
+
+#[test]
+fn vespers_own_clips_win_over_the_shared_ones() {
+    let lib = vesper();
+    let c = Animator::action_clip(&lib, ActionKind::Attack { variant: 2 }).unwrap();
+    assert_eq!(lib.clips[c].name, "attack_2");
+    let c = Animator::action_clip(&lib, ActionKind::Cast { slot: 3 }).unwrap();
+    assert_eq!(lib.clips[c].name, "r");
+    let c = Animator::action_clip(&lib, ActionKind::Cast { slot: 4 }).unwrap();
+    assert_eq!(lib.clips[c].name, "cast_utility", "utility spells use the shared clip");
+}
