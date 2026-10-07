@@ -10,7 +10,7 @@ use crate::packet::PacketHeader;
 use mftr_sim::ability::{Cc, Damage, DamageKind, LineSkillshot, SLOTS};
 use mftr_sim::items::INVENTORY;
 use mftr_sim::map::MapId;
-use mftr_sim::world::{MAX_PATH, Path, Progress, Rules, Trade, UNDO};
+use mftr_sim::world::{EchoCast, MAX_PATH, Path, Progress, Rules, Trade, UNDO};
 use mftr_sim::{
     Area, AttackWindup, Bolt, Cast, ChampionId, Command, CommandKind, DashMove, Missile, Order, PlayerId, QPoint,
     SimDuration, SimEvent, SimTime, SubTick, Team, Tick, UnitId, UnitKind, UnitState, Vec2,
@@ -450,6 +450,56 @@ fn read_line_spec(r: &mut BitReader) -> Result<LineSkillshot, DecodeError> {
     Ok(LineSkillshot { windup, speed, radius, range, damage, cc })
 }
 
+fn write_missile(w: &mut BitWriter, m: &Missile) {
+    w.write_u32(m.id);
+    w.write_u32(m.owner.0);
+    write_team(w, m.team);
+    write_vec2(w, m.origin);
+    write_vec2(w, m.dir);
+    write_line_spec(w, &m.spec);
+    write_time(w, m.spawn_at);
+    w.write_u32(m.cast_seq);
+    w.write_f32(m.power);
+    w.write(m.shot as u64, 4);
+}
+
+fn read_missile(r: &mut BitReader) -> Result<Missile, DecodeError> {
+    Ok(Missile {
+        id: r.read_u32()?,
+        owner: UnitId(r.read_u32()?),
+        team: read_team(r)?,
+        origin: read_vec2(r)?,
+        dir: read_vec2(r)?,
+        spec: read_line_spec(r)?,
+        spawn_at: read_time(r)?,
+        cast_seq: r.read_u32()?,
+        power: read_finite(r)?,
+        shot: r.read(4)? as u8,
+    })
+}
+
+/// Event-list record kind for a volley: several missiles from one cast (Multishot) share all
+/// fields but the direction and shot index, so one record carries them (06 §3).
+const VOLLEY: u64 = 17;
+/// Most missiles in one volley record.
+const MAX_VOLLEY: usize = 8;
+
+/// How many events from `i` on form one volley: consecutive missile spawns from the same cast,
+/// instant, origin and spec, with consecutive ids and event sequences.
+fn volley_len(events: &[(u32, SimEvent)], i: usize) -> usize {
+    let (seq, SimEvent::MissileSpawned(first)) = events[i] else { return 1 };
+    let mut n = 1;
+    while n < MAX_VOLLEY
+        && let Some((s, SimEvent::MissileSpawned(m))) = events.get(i + n)
+        && *s == seq.wrapping_add(n as u32)
+        && m.id == first.id.wrapping_add(n as u32)
+        && (Missile { dir: first.dir, shot: first.shot, id: first.id, ..*m }) == first
+    {
+        n += 1;
+    }
+    n
+}
+
 fn write_event(w: &mut BitWriter, e: &SimEvent) {
     match e {
         SimEvent::CastStarted { unit, slot, at, dir, point, fire_at, seq } => {
@@ -464,15 +514,7 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
         }
         SimEvent::MissileSpawned(m) => {
             w.write(1, 5);
-            w.write_u32(m.id);
-            w.write_u32(m.owner.0);
-            write_team(w, m.team);
-            write_vec2(w, m.origin);
-            write_vec2(w, m.dir);
-            write_line_spec(w, &m.spec);
-            write_time(w, m.spawn_at);
-            w.write_u32(m.cast_seq);
-            w.write_f32(m.power);
+            write_missile(w, m);
         }
         SimEvent::MissileHit { id, target, at } => {
             w.write(2, 5);
@@ -498,6 +540,7 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             w.write_f32(a.power);
             w.write_u32(a.cast_seq);
             write_cc(w, a.cc);
+            w.write(a.shot as u64, 4);
         }
         SimEvent::AreaDetonated { id, at } => {
             w.write(5, 5);
@@ -589,9 +632,9 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
     }
 }
 
-fn read_event(r: &mut BitReader) -> Result<SimEvent, DecodeError> {
+fn read_event_of(kind: u64, r: &mut BitReader) -> Result<SimEvent, DecodeError> {
     let unit = |r: &mut BitReader| -> Result<UnitId, DecodeError> { Ok(UnitId(r.read_u32()?)) };
-    Ok(match r.read(5)? {
+    Ok(match kind {
         0 => SimEvent::CastStarted {
             unit: unit(r)?,
             slot: r.read(3)? as u8,
@@ -601,17 +644,7 @@ fn read_event(r: &mut BitReader) -> Result<SimEvent, DecodeError> {
             fire_at: read_time(r)?,
             seq: r.read_u32()?,
         },
-        1 => SimEvent::MissileSpawned(Missile {
-            id: r.read_u32()?,
-            owner: unit(r)?,
-            team: read_team(r)?,
-            origin: read_vec2(r)?,
-            dir: read_vec2(r)?,
-            spec: read_line_spec(r)?,
-            spawn_at: read_time(r)?,
-            cast_seq: r.read_u32()?,
-            power: read_finite(r)?,
-        }),
+        1 => SimEvent::MissileSpawned(read_missile(r)?),
         2 => SimEvent::MissileHit { id: r.read_u32()?, target: unit(r)?, at: read_time(r)? },
         3 => SimEvent::MissileExpired { id: r.read_u32()?, at: read_time(r)? },
         4 => SimEvent::AreaSpawned(Area {
@@ -626,6 +659,7 @@ fn read_event(r: &mut BitReader) -> Result<SimEvent, DecodeError> {
             power: read_finite(r)?,
             cast_seq: r.read_u32()?,
             cc: read_cc(r)?,
+            shot: r.read(4)? as u8,
         }),
         5 => SimEvent::AreaDetonated { id: r.read_u32()?, at: read_time(r)? },
         6 => SimEvent::AttackLaunched(Bolt {
@@ -746,6 +780,17 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     w.write_f32(s.shield);
     write_time(w, s.shield_until);
     write_opt_time(w, s.respawn_at);
+    match s.echo {
+        None => w.write_bool(false),
+        Some(e) => {
+            w.write_bool(true);
+            w.write(e.slot as u64, 3);
+            write_vec2(w, e.dir);
+            write_vec2(w, e.point);
+            write_time(w, e.at);
+            w.write_u32(e.seq);
+        }
+    }
     let p = &s.progress;
     w.write(p.level as u64, 5);
     w.write_u32(p.xp);
@@ -826,6 +871,17 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let shield = read_finite(r)?;
     let shield_until = read_time(r)?;
     let respawn_at = read_opt_time(r)?;
+    let echo = if r.read_bool()? {
+        Some(EchoCast {
+            slot: r.read(3)? as u8,
+            dir: read_vec2(r)?,
+            point: read_vec2(r)?,
+            at: read_time(r)?,
+            seq: r.read_u32()?,
+        })
+    } else {
+        None
+    };
     let level = r.read(5)? as u8;
     let xp = r.read_u32()?;
     let gold = read_finite(r)?;
@@ -900,6 +956,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         shield_until,
         respawn_at,
         progress,
+        echo,
     })
 }
 
@@ -1189,10 +1246,32 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
                 w.write_u32(id.0);
             }
             let n = s.events.len().min(MAX_EVENTS_PER_SNAPSHOT);
-            w.write(n as u64, 6);
-            for (seq, e) in &s.events[..n] {
+            let events = &s.events[..n];
+            let mut records = Vec::new();
+            let mut i = 0;
+            while i < n {
+                let len = volley_len(events, i);
+                records.push((i, len));
+                i += len;
+            }
+            w.write(records.len() as u64, 6);
+            for (i, len) in records {
+                let (seq, e) = &events[i];
                 w.write_u32(*seq);
-                write_event(&mut w, e);
+                match e {
+                    SimEvent::MissileSpawned(first) if len > 1 => {
+                        w.write(VOLLEY, 5);
+                        write_missile(&mut w, first);
+                        w.write((len - 1) as u64, 3);
+                        for (_, extra) in &events[i + 1..i + len] {
+                            if let SimEvent::MissileSpawned(m) = extra {
+                                write_vec2(&mut w, m.dir);
+                                w.write(m.shot as u64, 4);
+                            }
+                        }
+                    }
+                    _ => write_event(&mut w, e),
+                }
             }
             w.finish()
         }
@@ -1290,7 +1369,21 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             let mut events = Vec::with_capacity(n);
             for _ in 0..n {
                 let seq = r.read_u32()?;
-                events.push((seq, read_event(&mut r)?));
+                let kind = r.read(5)?;
+                if kind != VOLLEY {
+                    events.push((seq, read_event_of(kind, &mut r)?));
+                    continue;
+                }
+                let first = read_missile(&mut r)?;
+                events.push((seq, SimEvent::MissileSpawned(first)));
+                for k in 1..=r.read(3)? as u32 {
+                    let (dir, shot) = (read_vec2(&mut r)?, r.read(4)? as u8);
+                    let m = Missile { id: first.id.wrapping_add(k), dir, shot, ..first };
+                    events.push((seq.wrapping_add(k), SimEvent::MissileSpawned(m)));
+                }
+                if events.len() > MAX_EVENTS_PER_SNAPSHOT {
+                    return Err(DecodeError::Invalid("event count"));
+                }
             }
             ServerMessage::Snapshot(Box::new(Snapshot {
                 tick,
@@ -1441,6 +1534,13 @@ mod tests {
             shield: 77.7,
             shield_until: SimTime(130_000),
             respawn_at: Some(SimTime(140_000)),
+            echo: Some(EchoCast {
+                slot: 2,
+                dir: Vec2::new(0.6, 0.8),
+                point: Vec2::new(5.5, 6.25),
+                at: SimTime(77_777),
+                seq: 4242,
+            }),
             progress: Progress {
                 level: 17,
                 xp: 1234,
@@ -1517,6 +1617,7 @@ mod tests {
             spawn_at: SimTime(5_000),
             cast_seq: 41,
             power: 140.0,
+            shot: 2,
         };
         let area = Area {
             id: 11,
@@ -1530,6 +1631,7 @@ mod tests {
             power: 146.0,
             cast_seq: 42,
             cc: Cc::Knockup(SimDuration::from_millis(1000)),
+            shot: 4,
         };
         let bolt = Bolt {
             id: 12,
@@ -1637,6 +1739,60 @@ mod tests {
         if let ServerMessage::Snapshot(s) = back {
             assert!(s.own.unwrap().1.bits_eq(&own_state));
         }
+    }
+
+    /// A Multishot volley (consecutive spawns from one cast) travels as one record and decodes
+    /// back to the same events; anything that differs breaks the volley.
+    #[test]
+    fn volleys_are_batched_losslessly() {
+        let spec = match mftr_sim::champion::EMBER.abilities[0].effect {
+            mftr_sim::ability::Effect::Line(s) => s,
+            _ => unreachable!(),
+        };
+        let m = |id: u32, dir: Vec2, shot: u8| Missile {
+            id,
+            owner: UnitId(3),
+            team: Team::Red,
+            origin: Vec2::new(10.5, 20.25),
+            dir,
+            spec,
+            spawn_at: SimTime(5_000),
+            cast_seq: 41,
+            power: 140.0,
+            shot,
+        };
+        let volley = [
+            m(20, Vec2::new(1.0, 0.0), 0),
+            m(21, Vec2::new(0.965_925_8, 0.258_819_04), 1),
+            m(22, Vec2::new(0.965_925_8, -0.258_819_04), 2),
+        ];
+        let other = Missile { power: 99.0, ..m(23, Vec2::new(0.0, 1.0), 0) };
+        let events: Vec<(u32, SimEvent)> = volley
+            .iter()
+            .chain([other].iter())
+            .enumerate()
+            .map(|(i, m)| (100 + i as u32, SimEvent::MissileSpawned(*m)))
+            .chain([(104, SimEvent::MissileExpired { id: 20, at: SimTime(9) })])
+            .collect();
+        let snap = |events: Vec<(u32, SimEvent)>| Snapshot {
+            tick: Tick(7),
+            since_tick_us: 0,
+            time_echo: None,
+            last_cmd_seq: 0,
+            reports: Vec::new(),
+            own: None,
+            baseline: None,
+            others: Vec::new(),
+            removed: Vec::new(),
+            events,
+        };
+        let bytes = encode_server(&hdr(), &ServerMessage::Snapshot(Box::new(snap(events.clone()))));
+        let ServerMessage::Snapshot(back) = decode_server(&bytes).unwrap().1 else { panic!() };
+        assert_eq!(back.events, events);
+        // Batched, the two extra missiles cost a direction each instead of a whole event.
+        let single = encode_server(&hdr(), &ServerMessage::Snapshot(Box::new(snap(events[..1].to_vec())))).len();
+        let three = encode_server(&hdr(), &ServerMessage::Snapshot(Box::new(snap(events[..3].to_vec())))).len();
+        assert!(three - single <= 20, "{single} bytes for one missile, {three} for the volley");
     }
 
     #[test]

@@ -679,6 +679,78 @@ mod tests {
         assert!(watcher.is_spectator(), "the spectator is still watching");
     }
 
+    /// M3 slice 2: a champion with Multishot, Echo and Broadside casts over a jittery link. The
+    /// client predicts the whole volley and the echo (keyed by cast and shot), each one is
+    /// confirmed by the server's own, and prediction never corrects.
+    #[test]
+    fn transformed_casts_are_predicted() {
+        use mftr_client::missiles::Side;
+        let cfg = ServerConfig { seed: 3, scenario: Scenario::Mayhem, ..Default::default() };
+        let mut server = ServerCore::new(cfg, 0.0);
+        let mut session = ClientSession::new();
+        session.set_champion_request(Some(mftr_sim::ChampionId::Ember));
+        let (mut up, mut down) = (SimLink::new(LinkProfile::MID, 11), SimLink::new(LinkProfile::MID, 12));
+        let (mut t, mut next_hello, mut augmented) = (0.0, 0.0, false);
+        let (mut casts, mut most_predicted, mut most_confirmed) = (0, 0, 0);
+        let mut next_cast = 0.0;
+        while t < 30.0 {
+            while let Some(p) = up.recv(t) {
+                for (_, bytes) in server.handle_packet(1, &p, t) {
+                    down.send(bytes, t);
+                }
+            }
+            if t >= server.next_tick_due() {
+                for (_, bytes) in server.step(t) {
+                    down.send(bytes, t);
+                }
+            }
+            while let Some(p) = down.recv(t) {
+                session.handle_packet(&p, t);
+            }
+            session.update(t);
+            match session.phase() {
+                Phase::Connecting if t >= next_hello => {
+                    up.send(session.hello_packet(t), t);
+                    next_hello = t + 0.25;
+                }
+                Phase::Playing => {
+                    if !augmented {
+                        // Grant the augments on the server; the client learns them from its state.
+                        let u = server.world_mut().unit_mut(session.unit()).unwrap();
+                        u.state.progress.augments = [24, 25, 26, 0];
+                        u.state.progress.drafted = 4;
+                        u.state.progress.offer = [0; 3];
+                        u.state.progress.ranks = [1; 4];
+                        augmented = true;
+                        next_cast = t + 2.0;
+                    }
+                    if t >= next_cast && session.own_state_now().is_some_and(|s| s.progress.augments[0] == 24) {
+                        let own = session.own_render_position(t).unwrap();
+                        if session.cast(0, own + mftr_sim::Vec2::new(0.0, 600.0), t).is_some() {
+                            casts += 1;
+                        }
+                        next_cast = t + 5.0;
+                    }
+                    let own: Vec<_> = session.missiles_render(t).into_iter().filter(|m| m.side == Side::Own).collect();
+                    let predicted = own.iter().filter(|m| m.key > u32::MAX / 2).count();
+                    most_predicted = most_predicted.max(predicted);
+                    most_confirmed = most_confirmed.max(own.len() - predicted);
+                    if session.should_send(t) {
+                        up.send(session.input_packet(t), t);
+                    }
+                }
+                _ => {}
+            }
+            t += 0.002;
+        }
+        assert!(casts >= 4, "{casts} casts");
+        assert_eq!(most_predicted, 3, "the volley is predicted at once");
+        assert!(most_confirmed >= 3, "and confirmed by the server: {most_confirmed}");
+        assert_eq!(session.stats.hard_resets, 0);
+        assert!(session.stats.corrections.iter().all(|c| *c < 1.0), "{:?}", session.stats.corrections);
+        assert!(session.book_is_settled(), "every predicted missile was confirmed");
+    }
+
     /// Q13: over a lossy, jittery link with moving minions, every snapshot the client
     /// reconstructs from deltas equals, bit for bit, what the server recorded for it.
     #[test]

@@ -46,6 +46,47 @@ pub enum Effect {
     AdToAp(f32),
     /// Bonus ability power becomes attack damage at this rate.
     ApToAd(f32),
+    /// Line skillshots that accept it fire three projectiles in a spread.
+    Multishot,
+    /// Skillshots and areas that accept it repeat after a delay at reduced power.
+    Echo,
+    /// Wider skillshots and larger areas (where accepted).
+    Wide,
+}
+
+/// Multishot: projectiles per volley and the angle between neighbors (15°, as exact
+/// constants: no trigonometry in the sim).
+pub const MULTISHOT_COUNT: u8 = 3;
+pub const SPREAD_COS: f32 = 0.965_925_8;
+pub const SPREAD_SIN: f32 = 0.258_819_04;
+/// Echo: the repeat comes this much later, at this share of the power.
+pub const ECHO_DELAY_MS: u64 = 750;
+pub const ECHO_POWER: f32 = 0.4;
+/// Echo shots are numbered from here (volley shots below it).
+pub const ECHO_SHOT: u8 = 4;
+/// Broadside: projectile width and area radius factors.
+pub const WIDE_LINE: f32 = 1.5;
+pub const WIDE_AREA: f32 = 1.25;
+
+/// The delivery transformers a set of augments grants.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Delivery {
+    pub multishot: bool,
+    pub echo: bool,
+    pub wide: bool,
+}
+
+pub fn delivery(slots: &[u8; SLOTS]) -> Delivery {
+    let mut d = Delivery::default();
+    for a in held(slots) {
+        match a.effect {
+            Effect::Multishot => d.multishot = true,
+            Effect::Echo => d.echo = true,
+            Effect::Wide => d.wide = true,
+            _ => {}
+        }
+    }
+    d
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -129,6 +170,7 @@ pub const CATALOG: &[Augment] = &[
         "+25% attack damage and ability power, but 20% less health.",
         Bonus { attack_damage_pct: 0.25, ability_power_pct: 0.25, health_pct: -0.20, ..b() }
     ),
+    aug!(26, Gold, "Broadside", "Your skillshots are 50% wider and your ground areas 25% larger.", b(), Effect::Wide),
     aug!(
         20,
         Gold,
@@ -178,6 +220,22 @@ pub const CATALOG: &[Augment] = &[
         "Undying",
         "+500 health and +25% life steal.",
         Bonus { health: 500.0, life_steal: 0.25, ..b() }
+    ),
+    aug!(
+        24,
+        Prismatic,
+        "Multishot",
+        "Your line skillshots fire three projectiles in a spread. Each enemy is hit by one at most.",
+        b(),
+        Effect::Multishot
+    ),
+    aug!(
+        25,
+        Prismatic,
+        "Echo",
+        "Your skillshots and ground areas repeat 0.75 s later at 40% power.",
+        b(),
+        Effect::Echo
     ),
 ];
 

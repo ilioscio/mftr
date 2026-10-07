@@ -350,7 +350,7 @@ pub fn apply_items(
                 s.ability_power -= bonus;
                 s.attack_damage += bonus * rate;
             }
-            crate::augments::Effect::None => {}
+            _ => {}
         }
     }
     s.ability_power *= 1.0 + pct.ability_power;

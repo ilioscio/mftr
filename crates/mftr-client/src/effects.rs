@@ -24,7 +24,7 @@ fn st(ticks: f64) -> f64 {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AreaRender {
-    /// Server id, or `u32::MAX - cast_seq` for an own area not yet confirmed.
+    /// Server id, or `u32::MAX - (cast_seq << 4 | shot)` for an own area not yet confirmed.
     pub key: u32,
     pub side: Side,
     pub center: Vec2,
@@ -56,7 +56,7 @@ struct TrackedBolt {
 pub struct EffectBook {
     areas: BTreeMap<u32, (Area, Side)>,
     /// Own areas predicted locally, by cast sequence.
-    predicted_areas: BTreeMap<u32, Area>,
+    predicted_areas: BTreeMap<(u32, u8), Area>,
     bolts: BTreeMap<u32, TrackedBolt>,
     /// Own bolts predicted locally, by launch instant.
     predicted_bolts: BTreeMap<SimTime, Bolt>,
@@ -74,7 +74,11 @@ fn side_of(owner: UnitId, team: Team, own_unit: UnitId, own_team: Team) -> Side 
 
 impl EffectBook {
     pub fn predict_area(&mut self, a: Area) {
-        self.predicted_areas.insert(a.cast_seq, a);
+        self.predicted_areas.insert((a.cast_seq, a.shot), a);
+    }
+
+    pub fn predicted_area_count(&self) -> usize {
+        self.predicted_areas.len()
     }
 
     pub fn predict_bolt(&mut self, b: Bolt) {
@@ -84,7 +88,7 @@ impl EffectBook {
     pub fn on_area(&mut self, a: Area, own_unit: UnitId, own_team: Team) {
         let side = side_of(a.owner, a.team, own_unit, own_team);
         if side == Side::Own {
-            self.predicted_areas.remove(&a.cast_seq);
+            self.predicted_areas.remove(&(a.cast_seq, a.shot));
         }
         self.areas.insert(a.id, (a, side));
     }
@@ -139,8 +143,8 @@ impl EffectBook {
                 hard_cc: a.cc.is_hard(),
             });
         };
-        for (seq, a) in &self.predicted_areas {
-            push(u32::MAX - seq, a, Side::Own);
+        for (&(seq, shot), a) in &self.predicted_areas {
+            push(u32::MAX - (seq.wrapping_shl(4) | shot as u32), a, Side::Own);
         }
         for (id, (a, side)) in &self.areas {
             push(*id, a, *side);

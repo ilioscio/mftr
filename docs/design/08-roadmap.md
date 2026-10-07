@@ -304,6 +304,11 @@ Four more placeholder champions (original kits, D36), so all six M2 archetypes e
 - Picks and rerolls are predicted commands (offers are seeded per champion); bots and the lab's duel bots draft too. Lab: 4 clients over the MID link draft with no hard resets, and the recording re-simulates exactly (replays now end with a final state hash, so a check covers every simulated tick).
 - Client: draft cards above the ability bar while play goes on; held augments listed above the inventory.
 
+### M3 slice 2 status (2026-10-07): ✅ done
+- Delivery transformers (D44): **Multishot** (three projectiles 15° apart, each enemy hit once per volley), **Echo** (repeat after 0.75 s at 40% power), **Broadside** (wider lines, larger areas). Abilities declare which they accept.
+- Batched spawns: a volley is one event record on the wire (about 9 bytes per extra missile).
+- Lab: a Multishot + Echo + Broadside champion casting over the MID link has every missile predicted at once, confirmed by the server, and no corrections. 26 augments.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.

@@ -8,7 +8,7 @@
 
 use crate::ability::{
     Ability, BARRIER, BLINK, Blink, Cc, Damage, DamageKind, Dash, DelayedArea, Effect, LineSkillshot, Lunge,
-    RankScaling, ReactionClass, Support,
+    RankScaling, ReactionClass, Support, Transforms,
 };
 use crate::combat::stat_at_level;
 use crate::time::SimDuration;
@@ -211,6 +211,7 @@ pub const EMBER: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::Burst,
             per_rank: ranks(40.0, 500),
+            transforms: Transforms::LINE,
         },
         Ability {
             name: "Cinder Bloom",
@@ -225,6 +226,7 @@ pub const EMBER: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::Burst,
             per_rank: ranks(40.0, 500),
+            transforms: Transforms::AREA,
         },
         Ability {
             name: "Flicker",
@@ -232,6 +234,7 @@ pub const EMBER: ChampionDef = ChampionDef {
             effect: Effect::Blink(Blink { range: 350.0 }),
             reaction: ReactionClass::None,
             per_rank: ranks(0.0, 1000),
+            transforms: Transforms::NONE,
         },
         Ability {
             name: "Binding Sigil",
@@ -246,6 +249,7 @@ pub const EMBER: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::HardCc,
             per_rank: ranks(80.0, 3000),
+            transforms: Transforms::LINE,
         },
     ],
 };
@@ -279,6 +283,7 @@ pub const VESPER: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::Poke,
             per_rank: ranks(35.0, 400),
+            transforms: Transforms::LINE,
         },
         Ability {
             name: "Shrapnel Charge",
@@ -293,6 +298,7 @@ pub const VESPER: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::Burst,
             per_rank: ranks(30.0, 600),
+            transforms: Transforms::AREA,
         },
         Ability {
             name: "Tumble",
@@ -300,6 +306,7 @@ pub const VESPER: ChampionDef = ChampionDef {
             effect: Effect::Dash(Dash { range: 325.0, speed: 1000.0 }),
             reaction: ReactionClass::None,
             per_rank: ranks(0.0, 600),
+            transforms: Transforms::NONE,
         },
         Ability {
             name: "Snare Net",
@@ -314,6 +321,7 @@ pub const VESPER: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::HardCc,
             per_rank: ranks(60.0, 3000),
+            transforms: Transforms::LINE,
         },
     ],
 };
@@ -378,6 +386,7 @@ pub const BASTION: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::HardCc,
             per_rank: ranks(40.0, 1000),
+            transforms: Transforms::WIDE,
         },
         Ability {
             name: "Bulwark",
@@ -385,6 +394,7 @@ pub const BASTION: ChampionDef = ChampionDef {
             effect: Effect::Support(Support { shield: 140.0, duration: ms(3000), ..NO_SUPPORT }),
             reaction: ReactionClass::None,
             per_rank: ranks(30.0, 1000),
+            transforms: Transforms::NONE,
         },
         Ability {
             name: "Tremor",
@@ -392,6 +402,7 @@ pub const BASTION: ChampionDef = ChampionDef {
             effect: nova(250, 300.0, magic(60.0, 0.4), slow(40, 1500)),
             reaction: ReactionClass::None,
             per_rank: ranks(30.0, 500),
+            transforms: Transforms::NONE,
         },
         Ability {
             name: "Upheaval",
@@ -406,6 +417,7 @@ pub const BASTION: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::HardCc,
             per_rank: ranks(100.0, 15_000),
+            transforms: Transforms::AREA,
         },
     ],
 };
@@ -423,6 +435,7 @@ pub const ROOK: ChampionDef = ChampionDef {
             effect: nova(200, 275.0, physical(40.0, 1.0), Cc::None),
             reaction: ReactionClass::None,
             per_rank: ranks(25.0, 500),
+            transforms: Transforms::NONE,
         },
         Ability {
             name: "Second Wind",
@@ -430,6 +443,7 @@ pub const ROOK: ChampionDef = ChampionDef {
             effect: Effect::Support(Support { heal: 40.0, heal_missing: 0.12, ..NO_SUPPORT }),
             reaction: ReactionClass::None,
             per_rank: ranks(20.0, 1000),
+            transforms: Transforms::NONE,
         },
         Ability {
             name: "Lunge",
@@ -442,6 +456,7 @@ pub const ROOK: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::None,
             per_rank: ranks(30.0, 800),
+            transforms: Transforms::NONE,
         },
         Ability {
             name: "Shockwave",
@@ -456,6 +471,7 @@ pub const ROOK: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::Burst,
             per_rank: ranks(100.0, 10_000),
+            transforms: Transforms::LINE,
         },
     ],
 };
@@ -473,6 +489,7 @@ pub const LUMEN: ChampionDef = ChampionDef {
             effect: Effect::Support(Support { range: 700.0, heal: 70.0, heal_ap: 0.35, ..NO_SUPPORT }),
             reaction: ReactionClass::None,
             per_rank: ranks(25.0, 800),
+            transforms: Transforms::NONE,
         },
         Ability {
             name: "Aegis",
@@ -486,6 +503,7 @@ pub const LUMEN: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::None,
             per_rank: ranks(30.0, 800),
+            transforms: Transforms::NONE,
         },
         Ability {
             name: "Lull",
@@ -500,6 +518,7 @@ pub const LUMEN: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::Poke,
             per_rank: ranks(30.0, 500),
+            transforms: Transforms::LINE,
         },
         Ability {
             name: "Binding Halo",
@@ -514,6 +533,7 @@ pub const LUMEN: ChampionDef = ChampionDef {
             }),
             reaction: ReactionClass::HardCc,
             per_rank: ranks(80.0, 10_000),
+            transforms: Transforms::AREA,
         },
     ],
 };
@@ -531,6 +551,7 @@ pub const SHADE: ChampionDef = ChampionDef {
             effect: Effect::Lunge(Lunge { range: 600.0, speed: 1800.0, damage: physical(60.0, 0.8), cc: Cc::None }),
             reaction: ReactionClass::None,
             per_rank: ranks(30.0, 800),
+            transforms: Transforms::NONE,
         },
         Ability {
             name: "Fan of Blades",
@@ -538,6 +559,7 @@ pub const SHADE: ChampionDef = ChampionDef {
             effect: nova(150, 275.0, physical(50.0, 0.6), slow(25, 1000)),
             reaction: ReactionClass::None,
             per_rank: ranks(25.0, 500),
+            transforms: Transforms::NONE,
         },
         Ability {
             name: "Veil Step",
@@ -545,6 +567,7 @@ pub const SHADE: ChampionDef = ChampionDef {
             effect: Effect::Dash(Dash { range: 400.0, speed: 1400.0 }),
             reaction: ReactionClass::None,
             per_rank: ranks(0.0, 1000),
+            transforms: Transforms::NONE,
         },
         Ability {
             name: "Execution",
@@ -552,6 +575,7 @@ pub const SHADE: ChampionDef = ChampionDef {
             effect: Effect::Lunge(Lunge { range: 500.0, speed: 2000.0, damage: physical(150.0, 1.2), cc: Cc::None }),
             reaction: ReactionClass::None,
             per_rank: ranks(100.0, 10_000),
+            transforms: Transforms::NONE,
         },
     ],
 };

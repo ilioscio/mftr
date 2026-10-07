@@ -205,6 +205,31 @@ pub struct Ability {
     pub reaction: ReactionClass,
     /// What each rank past the first adds (M2: ranks 1–5, ultimates 1–3).
     pub per_rank: RankScaling,
+    /// Delivery transformers this ability accepts (augments, M3).
+    pub transforms: Transforms,
+}
+
+/// Delivery transformers an ability accepts (04 §4, 06 §3): augments that multiply, repeat or
+/// widen abilities only change the ones that allow it. Not every ability makes sense tripled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Transforms(pub u8);
+
+impl Transforms {
+    pub const NONE: Transforms = Transforms(0);
+    /// Fire extra projectiles in a spread.
+    pub const MULTISHOT: u8 = 1;
+    /// Repeat after a delay at reduced power.
+    pub const ECHO: u8 = 2;
+    /// Wider projectiles, larger areas.
+    pub const WIDE: Transforms = Transforms(4);
+    /// Most line skillshots: all three.
+    pub const LINE: Transforms = Transforms(1 | 2 | 4);
+    /// Ground areas: repeat and grow.
+    pub const AREA: Transforms = Transforms(2 | 4);
+
+    pub fn accepts(self, transform: u8) -> bool {
+        self.0 & transform != 0
+    }
 }
 
 /// Per-rank growth of an ability: more base damage, a shorter cooldown.
@@ -242,6 +267,7 @@ pub const BLINK: Ability = Ability {
     effect: Effect::Blink(Blink { range: 400.0 }),
     reaction: ReactionClass::None,
     per_rank: RankScaling::NONE,
+    transforms: Transforms::NONE,
 };
 
 /// Utility spell: Barrier (01 §10; R01 §5 shows it lasting ~2.2 s).
@@ -251,6 +277,7 @@ pub const BARRIER: Ability = Ability {
     effect: Effect::Shield(Shield { amount: 150.0, duration: SimDuration::from_millis(2500) }),
     reaction: ReactionClass::None,
     per_rank: RankScaling::NONE,
+    transforms: Transforms::NONE,
 };
 
 /// The dodge-rig turret's shot (03 §14): a line missile timed like a hard-CC skillshot, on a
@@ -270,6 +297,7 @@ pub const TURRET_SHOT: Ability = Ability {
     }),
     reaction: ReactionClass::HardCc,
     per_rank: RankScaling::NONE,
+    transforms: Transforms::NONE,
 };
 
 #[cfg(test)]

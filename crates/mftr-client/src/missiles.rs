@@ -54,7 +54,7 @@ pub struct Tracked {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MissileRender {
-    /// Server id, or `u32::MAX - cast_seq` for an own missile not yet confirmed.
+    /// Server id, or `u32::MAX - (cast_seq << 4 | shot)` for an own missile not yet confirmed.
     pub key: u32,
     pub side: Side,
     pub pos: Vec2,
@@ -113,7 +113,8 @@ pub enum OwnMissileDisplay {
 pub struct MissileBook {
     pub tracked: BTreeMap<u32, Tracked>,
     /// Own casts predicted locally, keyed by cast command sequence.
-    pub predicted_own: BTreeMap<u32, Missile>,
+    /// By (cast sequence, shot): Multishot and Echo fire several missiles per cast.
+    pub predicted_own: BTreeMap<(u32, u8), Missile>,
     pub stats: DodgeStats,
     pub own_display: OwnMissileDisplay,
 }
@@ -131,7 +132,7 @@ fn pos_at(m: &Missile, at_st: f64) -> Vec2 {
 impl MissileBook {
     pub fn on_spawn(&mut self, m: Missile, own_unit: UnitId, own_team: mftr_sim::Team, now: f64) {
         let side = if m.owner == own_unit {
-            self.predicted_own.remove(&m.cast_seq);
+            self.predicted_own.remove(&(m.cast_seq, m.shot));
             Side::Own
         } else if m.team == own_team {
             Side::Ally
@@ -298,8 +299,8 @@ impl MissileBook {
             let w = ((traveled - OWN_BLEND_START) / (m.spec.range - OWN_BLEND_START).max(1.0)).clamp(0.0, 1.0) as f64;
             st(t_input - w * (t_input - t_interp))
         };
-        for (cast_seq, m) in &self.predicted_own {
-            push(u32::MAX - cast_seq, m, Side::Own, own_display(m), None, false);
+        for (&(cast_seq, shot), m) in &self.predicted_own {
+            push(u32::MAX - (cast_seq.wrapping_shl(4) | shot as u32), m, Side::Own, own_display(m), None, false);
         }
         for (id, t) in &self.tracked {
             let server_end = t.end.map(|(e, tg)| (e, tg.is_some()));

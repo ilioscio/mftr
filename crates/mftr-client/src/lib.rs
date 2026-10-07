@@ -669,7 +669,7 @@ impl ClientSession {
         for e in self.world.take_events() {
             match e {
                 SimEvent::MissileSpawned(m) if m.owner == self.unit => {
-                    self.book.predicted_own.insert(m.cast_seq, m);
+                    self.book.predicted_own.insert((m.cast_seq, m.shot), m);
                 }
                 SimEvent::AreaSpawned(a) if a.owner == self.unit => self.effects.predict_area(a),
                 SimEvent::AttackLaunched(b) if b.owner == self.unit => self.effects.predict_bolt(b),
@@ -1296,6 +1296,11 @@ impl ClientSession {
     pub fn threats(&self, now: f64) -> Vec<Threat> {
         let Some(t_input) = self.input_time(now) else { return Vec::new() };
         self.book.threats(t_input, now, OWN_GAMEPLAY_RADIUS, &|k| self.history_at(k), self.world.tick())
+    }
+
+    /// No own missile or area is still waiting for the server's confirmation.
+    pub fn book_is_settled(&self) -> bool {
+        self.book.predicted_own.is_empty() && self.effects.predicted_area_count() == 0
     }
 
     pub fn dodge_stats(&self) -> &DodgeStats {

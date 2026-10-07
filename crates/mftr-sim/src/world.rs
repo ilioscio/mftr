@@ -17,7 +17,9 @@
 //! hits on others are never predicted (03a §7). Own missiles, areas and bolts are still
 //! announced (id 0) so the client can draw them at once.
 
-use crate::ability::{Ability, Cc, DamageKind, Effect, LUNGE_PICK, LineSkillshot, SLOTS, SUPPORT_PICK, TURRET_SHOT};
+use crate::ability::{
+    Ability, Cc, DamageKind, Effect, LUNGE_PICK, LineSkillshot, SLOTS, SUPPORT_PICK, TURRET_SHOT, Transforms,
+};
 use crate::augments;
 use crate::champion::{AttackSpec, ChampionId, Stats};
 use crate::collision::{Obstacle, choose_detour, constrained_move};
@@ -366,6 +368,19 @@ pub struct UnitState {
     /// Dead until this instant (then respawns at home).
     pub respawn_at: Option<SimTime>,
     pub progress: Progress,
+    /// A cast that repeats at `at` (the Echo augment, M3).
+    pub echo: Option<EchoCast>,
+}
+
+/// A cast waiting to repeat (Echo): lines fly again from the caster's position then, areas land
+/// on the same point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EchoCast {
+    pub slot: u8,
+    pub dir: Vec2,
+    pub point: Vec2,
+    pub at: SimTime,
+    pub seq: u32,
 }
 
 impl UnitState {
@@ -391,6 +406,7 @@ impl UnitState {
             shield_until: SimTime(0),
             respawn_at: None,
             progress: Progress::SANDBOX,
+            echo: None,
         }
     }
 
@@ -651,6 +667,19 @@ impl UnitState {
             }
         }
         self.progress.hash_into(h);
+        match self.echo {
+            None => h.write_u8(0),
+            Some(e) => {
+                h.write_u8(1);
+                h.write_u8(e.slot);
+                h.write_f32(e.dir.x);
+                h.write_f32(e.dir.y);
+                h.write_f32(e.point.x);
+                h.write_f32(e.point.y);
+                h.write_u64(e.at.0);
+                h.write_u32(e.seq);
+            }
+        }
     }
 }
 
@@ -822,6 +851,8 @@ pub struct Missile {
     pub cast_seq: u32,
     /// Raw damage, from the caster's stats at fire time.
     pub power: f32,
+    /// Index within the cast's volley (Multishot), plus `augments::ECHO_SHOT` for an echo.
+    pub shot: u8,
 }
 
 impl Missile {
@@ -862,6 +893,8 @@ pub struct Area {
     pub power: f32,
     pub cast_seq: u32,
     pub cc: Cc,
+    /// 0, or `augments::ECHO_SHOT` for an echo.
+    pub shot: u8,
 }
 
 /// A homing basic-attack bolt: not dodgeable, flies at the target until it lands.
@@ -878,6 +911,22 @@ pub struct Bolt {
     pub power: f32,
     /// Physical for attacks; true for a turret's share-of-health shot at a minion.
     pub kind: DamageKind,
+}
+
+/// A target a volley (owner, cast, echo or not) already hit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VolleyHit {
+    pub owner: UnitId,
+    pub cast_seq: u32,
+    pub echo: bool,
+    pub target: UnitId,
+}
+
+impl Missile {
+    /// Which volley the missile belongs to.
+    fn volley(&self) -> (UnitId, u32, bool) {
+        (self.owner, self.cast_seq, self.shot >= augments::ECHO_SHOT)
+    }
 }
 
 /// Things that happened during a step, for the network layer and the client display.
@@ -1082,6 +1131,8 @@ pub struct World {
     map: Arc<Map>,
     /// Id counter shared by missiles, areas and bolts.
     next_missile: u32,
+    /// Targets each live Multishot volley has hit (one hit per volley and target).
+    struck: Vec<VolleyHit>,
     prediction: bool,
     events: Vec<SimEvent>,
     /// Per team (blue, red): enemy units it can't see, which its units can't target with
@@ -1104,6 +1155,7 @@ impl World {
             areas: Vec::new(),
             bolts: Vec::new(),
             next_missile: 1,
+            struck: Vec::new(),
             prediction: false,
             events: Vec::new(),
             hidden: [Vec::new(), Vec::new()],
@@ -1241,6 +1293,7 @@ impl World {
     pub fn restart_match(&mut self) {
         self.units.retain(|u| u.kind == UnitKind::Champion);
         self.missiles.clear();
+        self.struck.clear();
         self.areas.clear();
         self.bolts.clear();
         for u in self.units.iter_mut() {
@@ -1371,7 +1424,9 @@ impl World {
             self.spawn_wave();
         }
 
-        let World { units, rng, missiles, areas, bolts, next_missile, events, map, hidden, game, rules, .. } = self;
+        let World {
+            units, rng, missiles, areas, bolts, next_missile, struck, events, map, hidden, game, rules, ..
+        } = self;
         let rules = *rules;
         let map: &Map = map;
 
@@ -1502,6 +1557,7 @@ impl World {
                 let waits = [
                     cmd_at,
                     st.cast.map(|c| c.fire_at),
+                    st.echo.map(|e| e.at),
                     st.attack.map(|a| a.fire_at),
                     st.dash.map(|d| d.end_at),
                     Some(st.stunned_until),
@@ -1584,7 +1640,7 @@ impl World {
             }
             on_hit(units, &landed, events);
             resolve_direct(units, &mut direct, s1, events);
-            resolve_effects(units, missiles, areas, bolts, &start_pos, s0, s1, events);
+            resolve_effects(units, missiles, areas, bolts, struck, &start_pos, s0, s1, events);
             let had_winner = game.winner.is_some();
             note_outcomes(units, game, &events[first_event..], s1);
             if rules.ranked {
@@ -1660,6 +1716,8 @@ impl World {
             h.write_f32(m.dir.y);
             h.write_u64(m.spawn_at.0);
             h.write_f32(m.power);
+            h.write_f32(m.spec.radius);
+            h.write_u8(m.shot);
         }
         for a in &self.areas {
             h.write_u32(a.id);
@@ -1667,6 +1725,14 @@ impl World {
             h.write_f32(a.center.y);
             h.write_u64(a.detonate_at.0);
             h.write_f32(a.power);
+            h.write_f32(a.radius);
+            h.write_u8(a.shot);
+        }
+        for v in &self.struck {
+            h.write_u32(v.owner.0);
+            h.write_u32(v.cast_seq);
+            h.write_u8(v.echo as u8);
+            h.write_u32(v.target.0);
         }
         for b in &self.bolts {
             h.write_u32(b.id);
@@ -1747,18 +1813,25 @@ fn think(unit: &mut Unit, roster: &[Target], hidden: &[UnitId], t: SimTime, map:
     Some((target.pos, reach))
 }
 
-/// Windups, casts and dashes whose instant is `t`.
-fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fired>, map: &Map) {
+/// Fire the line or area of the cast `c` at `t`, transformed by the caster's augments (06 §3:
+/// Multishot, Echo, Broadside, where the ability accepts them). An echo fires once more at
+/// reduced power. Returns whether the cast should echo.
+fn deliver(unit: &Unit, c: EchoCast, t: SimTime, echo: bool, fired: &mut Vec<Fired>) -> bool {
+    let Some(ability) = unit.ability(c.slot) else { return false };
     let (id, team, stats) = (unit.id, unit.team, unit.stats);
-    if let Some(c) = unit.state.cast
-        && c.fire_at == t
-    {
-        unit.state.cast = None;
-        let ability = unit.ability(c.slot);
-        let bonus = ability
-            .map_or(0.0, |a| a.bonus_damage_at(unit.state.progress.ranks.get(c.slot as usize).copied().unwrap_or(1)));
-        match ability.map(|a| a.effect) {
-            Some(Effect::Line(spec)) => fired.push(Fired::Missile(Missile {
+    let bonus = ability.bonus_damage_at(unit.state.progress.ranks.get(c.slot as usize).copied().unwrap_or(1));
+    let d = augments::delivery(&unit.state.progress.augments);
+    let tf = ability.transforms;
+    let wide = d.wide && tf.accepts(Transforms::WIDE.0);
+    let scale = if echo { augments::ECHO_POWER } else { 1.0 };
+    let first_shot = if echo { augments::ECHO_SHOT } else { 0 };
+    match ability.effect {
+        Effect::Line(mut spec) => {
+            if wide {
+                spec.radius *= augments::WIDE_LINE;
+            }
+            let power = (spec.damage.raw(stats.attack_damage, stats.ability_power) + bonus) * scale;
+            let base = Missile {
                 id: 0,
                 owner: id,
                 team,
@@ -1767,22 +1840,65 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
                 spec,
                 spawn_at: t,
                 cast_seq: c.seq,
-                power: spec.damage.raw(stats.attack_damage, stats.ability_power) + bonus,
-            })),
-            Some(Effect::Area(a)) => fired.push(Fired::Area(Area {
+                power,
+                shot: first_shot,
+            };
+            fired.push(Fired::Missile(base));
+            if d.multishot && tf.accepts(Transforms::MULTISHOT) {
+                // One to each side of the aim, 15° apart.
+                let (cs, sn) = (augments::SPREAD_COS, augments::SPREAD_SIN);
+                let left = Vec2::new(c.dir.x * cs - c.dir.y * sn, c.dir.x * sn + c.dir.y * cs);
+                let right = Vec2::new(c.dir.x * cs + c.dir.y * sn, -c.dir.x * sn + c.dir.y * cs);
+                fired.push(Fired::Missile(Missile { dir: left, shot: first_shot + 1, ..base }));
+                fired.push(Fired::Missile(Missile { dir: right, shot: first_shot + 2, ..base }));
+            }
+        }
+        Effect::Area(a) => {
+            let radius = if wide { a.radius * augments::WIDE_AREA } else { a.radius };
+            fired.push(Fired::Area(Area {
                 id: 0,
                 owner: id,
                 team,
                 center: c.point,
-                radius: a.radius,
+                radius,
                 spawn_at: t,
                 detonate_at: t.plus(a.delay),
                 kind: a.damage.kind,
-                power: a.damage.raw(stats.attack_damage, stats.ability_power) + bonus,
+                power: (a.damage.raw(stats.attack_damage, stats.ability_power) + bonus) * scale,
                 cast_seq: c.seq,
                 cc: a.cc,
-            })),
-            _ => {}
+                shot: first_shot,
+            }));
+        }
+        _ => return false,
+    }
+    !echo && d.echo && tf.accepts(Transforms::ECHO)
+}
+
+/// Windups, casts and dashes whose instant is `t`.
+fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fired>, map: &Map) {
+    let (id, team, stats) = (unit.id, unit.team, unit.stats);
+    if let Some(c) = unit.state.cast
+        && c.fire_at == t
+    {
+        unit.state.cast = None;
+        let echo = EchoCast {
+            slot: c.slot,
+            dir: c.dir,
+            point: c.point,
+            at: t.plus(SimDuration::from_millis(augments::ECHO_DELAY_MS)),
+            seq: c.seq,
+        };
+        if deliver(unit, echo, t, false, fired) {
+            unit.state.echo = Some(echo);
+        }
+    }
+    if let Some(e) = unit.state.echo
+        && e.at == t
+    {
+        unit.state.echo = None;
+        if unit.state.alive() {
+            deliver(unit, e, t, true, fired);
         }
     }
     if let Some(w) = unit.state.attack
@@ -2132,6 +2248,7 @@ fn resolve_effects(
     missiles: &mut Vec<Missile>,
     areas: &mut Vec<Area>,
     bolts: &mut Vec<Bolt>,
+    struck: &mut Vec<VolleyHit>,
     start_pos: &[(UnitId, Vec2)],
     s0: SimTime,
     s1: SimTime,
@@ -2151,9 +2268,11 @@ fn resolve_effects(
     missiles.retain(|m| {
         let a = m.spawn_at.max(s0);
         let b = m.end_at().min(s1);
+        let volley = m.volley();
         let mut hits: Vec<(SimTime, UnitId)> = motion
             .iter()
             .filter(|&&(id, team, ..)| team != m.team && id != m.owner)
+            .filter(|&&(id, ..)| !struck.iter().any(|h| (h.owner, h.cast_seq, h.echo) == volley && h.target == id))
             .filter_map(|&(id, _, r, q0, q1)| m.first_hit(a, b, s0, q0, q1, r).map(|at| (at, id)))
             .collect();
         hits.sort();
@@ -2161,6 +2280,7 @@ fn resolve_effects(
         // have killed the first candidate).
         let hit = hits.into_iter().find(|(_, id)| units.iter().any(|u| u.id == *id && u.targetable()));
         if let Some((at, target)) = hit {
+            struck.push(VolleyHit { owner: volley.0, cast_seq: volley.1, echo: volley.2, target });
             events.push(SimEvent::MissileHit { id: m.id, target, at });
             let from = pos_of(m.owner).unwrap_or(m.origin);
             if let Some(u) = units.iter_mut().find(|u| u.id == target) {
@@ -2175,6 +2295,8 @@ fn resolve_effects(
         }
         true
     });
+    // A volley's hits matter only while some of its missiles still fly.
+    struck.retain(|h| missiles.iter().any(|m| m.volley() == (h.owner, h.cast_seq, h.echo)));
     areas.retain(|a| {
         if a.detonate_at > s1 {
             return true;
@@ -3513,6 +3635,84 @@ mod tests {
         assert_eq!((p.offer, p.augments, p.drafted), ([0; 3], [0; 4], 0), "ARAM without Mayhem has no drafts");
     }
 
+    /// A Mayhem champion holding `augments`, all abilities learned, and an enemy dummy.
+    fn augmented(augments: [u8; augments::SLOTS], champion: ChampionId, enemy_at: Vec2) -> (World, UnitId, UnitId) {
+        let mut w = World::new(5);
+        w.set_rules(Rules::MAYHEM);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, champion, Vec2::new(1000.0, 1000.0));
+        let them = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Bastion, enemy_at);
+        for id in [me, them] {
+            let p = &mut w.unit_mut(id).unwrap().state.progress;
+            p.augments = augments;
+            p.ranks = [1; 4];
+            p.drafted = augments::SLOTS as u8; // no more drafts
+            p.level = 11;
+        }
+        (w, me, them)
+    }
+
+    /// M3 slice 2: Multishot fires three projectiles 15° apart; at point-blank range all three
+    /// cross the target, but a volley hits each enemy once.
+    #[test]
+    fn multishot_fires_a_spread_that_hits_each_enemy_once() {
+        let (mut w, _, them) = augmented([24, 0, 0, 0], ChampionId::Ember, Vec2::new(1150.0, 1000.0));
+        w.step(&[cast(0, 1, 1, 0, (2000.0, 1000.0))]);
+        let ev = run_until_quiet(&mut w, 60);
+        let spawned: Vec<Missile> = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::MissileSpawned(m) => Some(*m),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(spawned.len(), 3);
+        assert_eq!(spawned.iter().map(|m| m.shot).collect::<Vec<_>>(), vec![0, 1, 2]);
+        assert_eq!(spawned[1].dir, Vec2::new(augments::SPREAD_COS, augments::SPREAD_SIN));
+        assert_eq!(spawned[2].dir, Vec2::new(augments::SPREAD_COS, -augments::SPREAD_SIN));
+        let hits = ev.iter().filter(|e| matches!(e, SimEvent::MissileHit { target, .. } if *target == them)).count();
+        assert_eq!(hits, 1, "one hit per volley and target");
+        assert!(w.struck.is_empty(), "forgotten once the volley is gone");
+    }
+
+    /// Echo repeats a skillshot 0.75 s later from where the caster stands, at 40% power; a
+    /// Broadside line is 50% wider. Bastion's pull accepts Broadside but not Multishot or Echo.
+    #[test]
+    fn echo_repeats_and_broadside_widens() {
+        let (mut w, _, _) = augmented([25, 26, 0, 0], ChampionId::Ember, Vec2::new(4000.0, 4000.0));
+        w.step(&[cast(0, 1, 1, 0, (2000.0, 1000.0))]);
+        let ev = run_until_quiet(&mut w, 60);
+        let spawned: Vec<Missile> = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::MissileSpawned(m) => Some(*m),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(spawned.len(), 2);
+        let (first, echo) = (spawned[0], spawned[1]);
+        assert_eq!(echo.shot, augments::ECHO_SHOT);
+        assert_eq!(echo.spawn_at.0 - first.spawn_at.0, 750 * SUBTICKS_PER_SECOND / 1000);
+        assert!((echo.power - first.power * augments::ECHO_POWER).abs() < 1e-3);
+        let Effect::Line(lance) = ChampionId::Ember.def().abilities[0].effect else { panic!() };
+        assert_eq!(first.spec.radius, lance.radius * augments::WIDE_LINE);
+
+        let (mut w, _, _) = augmented([24, 25, 26, 0], ChampionId::Bastion, Vec2::new(4000.0, 4000.0));
+        let pull =
+            ChampionId::Bastion.def().abilities.iter().position(|a| matches!(a.effect, Effect::Line(_))).unwrap();
+        w.step(&[cast(0, 1, 1, pull as u8, (2000.0, 1000.0))]);
+        let ev = run_until_quiet(&mut w, 60);
+        let spawned: Vec<Missile> = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::MissileSpawned(m) => Some(*m),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(spawned.len(), 1, "the pull fires once");
+        let Effect::Line(hook) = ChampionId::Bastion.def().abilities[pull].effect else { panic!() };
+        assert_eq!(spawned[0].spec.radius, hook.radius * augments::WIDE_LINE);
+    }
+
     /// M2 slice 2: abilities must be learned; ranks are gated by level (R at 6 / 11 / 16) and
     /// raise damage and cut cooldowns.
     #[test]
@@ -3827,7 +4027,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0xb8d4_bdf4_879a_36de;
+    const GOLDEN_HASH_ARENA: u64 = 0x7513_0557_1b9f_141a;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -3883,7 +4083,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x6765_da18_e633_4637;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x6d4d_428a_a693_6897;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -3954,5 +4154,5 @@ mod tests {
 
     /// Recorded on x86_64-unknown-linux-gnu (debug and release agree). CI checks Linux, macOS
     /// (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x47e0_ff28_b813_3946;
+    const GOLDEN_HASH: u64 = 0x844f_a0b8_fbad_8c46;
 }
