@@ -73,6 +73,11 @@ SHAPES = {
                     (1.40, 0.60), (1.56, 0.68), (1.64, 0.71), (1.88, 0.98), (2.15, 1.20)],
         "x": 0.72, "y": 0.75, "scale": 1.0,
     },
+    # `biped_large` (10 §7.1): brutes. Taller (~2.05 m), much broader and deeper; the same bones.
+    "large": {
+        "heights": [(0.0, 0.0), (2.15, 2.15)],
+        "x": 1.25, "y": 1.2, "scale": 1.08,
+    },
 }
 _shape = None
 

@@ -1,0 +1,77 @@
+// Rook's sounds (A6): weight. Grunting windups, a stone maul that lands with a thud and a crunch
+// (two variants), a low whooshing Cleave, a chest-drum and a long breath for Second Wind, a
+// heavy Lunge landing, and Shockwave's rising rumble, boom and rolling crack. Footsteps, death and
+// respawn come from the library. A recipe for `mftr-tools sfx build` (export/rook.sfx.ron,
+// export/sfx/*.ogg); the synth is documented in crates/mftr-tools/src/sfx.rs.
+(
+    pack: "rook",
+    sounds: [
+        // Basic attack: a heavy swing, then the maul lands (two variants).
+        (name: "swing", events: ["attack.cast"], volume: 0.35, pitch: 0.06, layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.12, 0.05, 0.18), gain: 0.9, lowpass: (500.0, 1800.0), highpass: 120.0),
+        ]),
+        (name: "maul_1", events: ["attack.fire"], volume: 0.6, pitch: 0.06, crush: (bits: 9, hold: 2), layers: [
+            (wave: "sine", freq: (120.0, 42.0), env: (0.0, 0.02, 0.22), gain: 1.0, punch: 0.8),
+            (wave: "noise", freq: (5000.0, 900.0), env: (0.0, 0.01, 0.12), gain: 0.7, lowpass: (4000.0, 900.0)),
+            (wave: "noise", freq: (900.0, 300.0), env: (0.0, 0.03, 0.18), gain: 0.35, highpass: 600.0, delay: 0.02),
+        ]),
+        (name: "maul_2", events: ["attack.fire"], volume: 0.6, pitch: 0.06, crush: (bits: 9, hold: 2), layers: [
+            (wave: "sine", freq: (110.0, 38.0), env: (0.0, 0.025, 0.24), gain: 1.0, punch: 0.9),
+            (wave: "noise", freq: (4500.0, 800.0), env: (0.0, 0.012, 0.13), gain: 0.7, lowpass: (3600.0, 800.0)),
+            (wave: "noise", freq: (800.0, 260.0), env: (0.0, 0.03, 0.2), gain: 0.35, highpass: 600.0, delay: 0.025),
+        ]),
+
+        // Q Cleave: a low spinning whoosh and a thud as the ring lands.
+        (name: "cleave", events: ["q.cast"], volume: 0.5, layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.08, 0.15, 0.2), gain: 0.9, lowpass: (400.0, 2400.0), highpass: 100.0),
+            (wave: "saw", freq: (55.0, 80.0), env: (0.08, 0.15, 0.2), gain: 0.3, vibrato: (2.0, 8.0), lowpass: (600.0, 900.0)),
+        ]),
+        (name: "cleave_hit", events: ["q.detonate"], volume: 0.6, pitch: 0.05, crush: (bits: 9, hold: 2), layers: [
+            (wave: "sine", freq: (95.0, 40.0), env: (0.0, 0.03, 0.3), gain: 1.0, punch: 0.7),
+            (wave: "noise", freq: (3000.0, 500.0), env: (0.0, 0.05, 0.3), gain: 0.6, lowpass: (3000.0, 500.0)),
+        ]),
+
+        // W Second Wind: two drum-like chest thumps, then a long breath.
+        (name: "second_wind", events: ["w.fire"], volume: 0.5, layers: [
+            (wave: "sine", freq: (85.0, 60.0), env: (0.0, 0.01, 0.12), gain: 1.0, punch: 0.6),
+            (wave: "sine", freq: (85.0, 60.0), env: (0.0, 0.01, 0.12), gain: 0.9, punch: 0.6, delay: 0.16),
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.25, 0.3, 0.45), gain: 0.35, lowpass: (900.0, 1600.0), highpass: 300.0, delay: 0.3),
+            (wave: "sine", freq: (330.0, 495.0), env: (0.2, 0.2, 0.4), gain: 0.18, delay: 0.32, vibrato: (0.3, 5.0)),
+        ]),
+
+        // E Lunge: a grunting launch, a heavy landing.
+        (name: "lunge", events: ["e.start"], volume: 0.45, pitch: 0.05, layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.03, 0.08, 0.2), gain: 0.9, lowpass: (600.0, 2800.0), highpass: 150.0),
+        ]),
+        (name: "lunge_land", events: ["e.land"], volume: 0.65, pitch: 0.04, crush: (bits: 9, hold: 2), layers: [
+            (wave: "sine", freq: (100.0, 35.0), env: (0.0, 0.03, 0.3), gain: 1.0, punch: 1.0),
+            (wave: "noise", freq: (3500.0, 600.0), env: (0.0, 0.04, 0.22), gain: 0.6, lowpass: (3200.0, 600.0)),
+        ]),
+
+        // R Shockwave: a rising rumble, the boom, a rolling crack along the line.
+        (name: "shock_rise", events: ["r.cast"], volume: 0.45, layers: [
+            (wave: "noise", freq: (300.0, 900.0), env: (0.3, 0.1, 0.05), gain: 0.7, lowpass: (300.0, 1200.0)),
+            (wave: "saw", freq: (45.0, 70.0), env: (0.3, 0.1, 0.05), gain: 0.4, lowpass: (400.0, 700.0)),
+        ]),
+        (name: "shock_boom", events: ["r.fire"], volume: 0.85, crush: (bits: 8, hold: 2), echo: (delay: 0.11, feedback: 0.35), layers: [
+            (wave: "sine", freq: (80.0, 28.0), env: (0.0, 0.06, 0.7), gain: 1.0, punch: 1.0),
+            (wave: "noise", freq: (2500.0, 250.0), env: (0.0, 0.08, 0.8), gain: 0.9, lowpass: (5000.0, 300.0), drive: 0.6),
+            (wave: "metal", freq: (2200.0, 900.0), env: (0.0, 0.02, 0.3), gain: 0.25),
+        ]),
+        (name: "shock_roll", events: ["r.release"], volume: 0.5, layers: [
+            (wave: "noise", freq: (600.0, 200.0), env: (0.05, 0.4, 0.3), gain: 0.8, lowpass: (1500.0, 500.0)),
+            (wave: "sine", freq: (60.0, 45.0), env: (0.05, 0.4, 0.3), gain: 0.5, vibrato: (1.0, 11.0)),
+        ]),
+        (name: "shock_hit", events: ["r.impact"], volume: 0.55, pitch: 0.05, crush: (bits: 9, hold: 1), layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.0, 0.0, 0.05), gain: 0.9, highpass: 1200.0),
+            (wave: "sine", freq: (140.0, 50.0), env: (0.0, 0.02, 0.18), gain: 0.9, punch: 0.6),
+        ]),
+
+        // Emote: a drummed rhythm on his breastplate (no in-game trigger yet).
+        (name: "plate_drum", events: ["unit.emote"], volume: 0.45, layers: [
+            (wave: "metal", freq: (900.0, 900.0), env: (0.0, 0.02, 0.12), gain: 0.5),
+            (wave: "metal", freq: (900.0, 900.0), env: (0.0, 0.02, 0.12), gain: 0.5, delay: 0.2),
+            (wave: "metal", freq: (1100.0, 1100.0), env: (0.0, 0.02, 0.2), gain: 0.6, delay: 0.32),
+        ]),
+    ],
+)
