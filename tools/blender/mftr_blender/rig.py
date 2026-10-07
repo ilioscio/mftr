@@ -74,6 +74,27 @@ LOWER_BODY = ["pelvis"] + [b for b in BONE_NAMES if b.split("_")[0] in ("thigh",
 UPPER_BODY = [b for b in DEFORM_BONES if b not in LOWER_BODY]
 
 
+def add_chain(armature, chain, parent, points, axis=FORWARD):
+    """Add `extra_<chain>_1..n` (10 §7.2): deforming bones through `points`, under `parent`."""
+    prev_active = bpy.context.view_layer.objects.active
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode="EDIT")
+    eb = armature.data.edit_bones
+    up = eb[parent]
+    for i, (a, b) in enumerate(zip(points, points[1:]), start=1):
+        bone = eb.new(f"extra_{chain}_{i}")
+        bone.head, bone.tail = a, b
+        bone.use_deform = True
+        bone.align_roll(axis)
+        bone.parent = up
+        bone.use_connect = i > 1
+        up = bone
+    bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.context.view_layer.objects.active = prev_active
+    for pb in armature.pose.bones:
+        pb.rotation_mode = "QUATERNION"
+
+
 def build_armature(name="biped_v1", collection=None):
     """Create the reference armature object in A-pose and return it."""
     data = bpy.data.armatures.new(name)

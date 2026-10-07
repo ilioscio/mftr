@@ -38,6 +38,29 @@ Godot has the same trap. Its native resources (`.tscn`, `.tres`, `.res`, `.scn`)
 | Icons | SVG **subset** | Paths, solid fills and gradients; no scripts, images, fonts, external references or filters |
 | Text | RON | Names, tooltips, per-language strings |
 
+### 3.1 VFX files
+`<id>.vfx.ron` sits next to `<id>.glb` and is authored by hand. It is optional: a pack without one plays the shared library's effects.
+
+```ron
+(effects: [
+    (event: "q.release", kit: "flare", ramp: [(0.92, 1.0, 1.0), (0.55, 0.95, 0.9), (0.18, 0.6, 0.6)], count: 10, size: 1.4),
+    (event: "q.projectile", kit: "arrow", ramp: [(0.9, 1.0, 1.0), (0.5, 0.95, 0.88)]),
+    (event: "*.impact", kit: "burst", ramp: [(1.0, 1.0, 0.85), (1.0, 0.8, 0.4), (0.4, 0.22, 0.12)]),
+])
+```
+
+- `event` is `<action>.<phase>`. The action is `attack`, `q`, `w`, `e`, `r`, `d`, `f` or `*`. The phase is `release`, `projectile`, `impact`, `detonate`, `start` or `land`.
+- `kit` must be one the phase allows ([05 §5.1](05-art-and-assets.md#51-the-kit-a4b)).
+- `ramp` has 2–6 RGB colours in 0–1.
+- The optional knobs are bounded:
+  - `count`: 1–48;
+  - `size`: a multiplier from 0.25 to 3, and never allowed on projectile kits;
+  - `speed`: 0–12 m/s;
+  - `lifetime`: 0.02–1.5 s.
+- Caps: ≤ 4 effects per event, ≤ 64 per file, and ≤ 50 KB.
+
+`mftr-pack` validates the file with the model. A broken VFX file fails the pack.
+
 **Never accepted:** GDScript, C#, native libraries, Godot resources or scenes, shader source, HTML, any other file type, or anything that isn't listed above. First-party champions ship as packs too, so the official content proves the format is enough.
 
 ## 4. Validation

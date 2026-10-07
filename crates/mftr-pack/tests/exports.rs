@@ -49,7 +49,9 @@ fn assert_error(r: &Report, needle: &str) {
 
 #[test]
 fn committed_exports_are_clean() {
-    for f in ["rigs/export/biped_v1.glb", "library/biped/export/biped_library.glb"] {
+    for f in
+        ["rigs/export/biped_v1.glb", "library/biped/export/biped_library.glb", "champions/vesper/export/vesper.glb"]
+    {
         let r = validate_file(&art(f));
         assert!(r.findings.is_empty(), "{f}: {:#?}", r.findings);
     }
@@ -216,4 +218,33 @@ fn influences_and_weights_are_checked() {
         r.findings
     );
     assert_error(&r, "weights sum to 0.700");
+}
+
+#[test]
+fn committed_vfx_load_and_cover_the_kit() {
+    // The library defaults every particle phase; Vesper styles all five of her actions.
+    let lib = validate_file(&art("library/biped/export/biped_library.glb"));
+    assert!(lib.summary.iter().any(|s| s.starts_with("vfx: ")), "{:?}", lib.summary);
+    let events = |rel: &str| -> Vec<String> {
+        let loaded = mftr_pack::load_file(&art(rel)).unwrap();
+        loaded.vfx.expect("a vfx file").effects.into_iter().map(|e| e.event).collect()
+    };
+    let lib = events("library/biped/export/biped_library.glb");
+    for phase in ["release", "impact", "detonate", "start", "land"] {
+        assert!(lib.contains(&format!("*.{phase}")), "library lacks *.{phase}");
+    }
+    let vesper = events("champions/vesper/export/vesper.glb");
+    for event in ["attack.projectile", "q.projectile", "w.projectile", "w.detonate", "e.start", "r.projectile"] {
+        assert!(vesper.iter().any(|e| e == event), "vesper lacks {event}");
+    }
+    // The rig is not a pack and has no effects.
+    assert!(!mftr_pack::vfx_path(&art("rigs/export/biped_v1.glb")).exists());
+}
+
+#[test]
+fn too_many_effects_on_one_event_are_rejected() {
+    let one = r#"(event: "q.impact", kit: "burst", ramp: [(1.0, 1.0, 1.0), (0.0, 0.0, 0.0)])"#;
+    let text = format!("(effects: [{}])", [one; 5].join(", "));
+    let errs = mftr_pack::vfx::check(&mftr_pack::vfx::parse(&text).unwrap());
+    assert!(errs.iter().any(|e| e.contains("q.impact")), "{errs:?}");
 }

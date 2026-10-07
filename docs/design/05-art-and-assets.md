@@ -60,6 +60,24 @@ Full specification: **[10 — Characters & Animation](10-characters-and-animatio
 - Each ability VFX reads its **gameplay shape from content data** (width, radius, length, duration), so it can't drift from the hitbox.
 - A VFX "kit" library (impact, trail, burst, zone edge, ground warning) gives consistent grammar and saves size.
 
+### 5.1 The kit (A4b)
+The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gdshader`). Packs only pick kits and tune them, in `<id>.vfx.ron` ([11 §3.1](11-content-packs-and-mods.md#31-vfx-files)).
+
+| Kit | Phase | What it draws |
+|---|---|---|
+| `flare` | `release` | A spark at the projectile socket and a spray along the shot |
+| `burst` | `impact`, `detonate` | Sparks that fly out and fall |
+| `ring` | `impact`, `detonate` | Pixels on the area's edge, at the **radius from gameplay data**, drifting outward |
+| `dust` | `start`, `land`, `detonate` | Slow, growing ground puffs |
+| `trail` | `projectile` | Sparks shed behind the projectile |
+| `arrow`, `net`, `orb` | `projectile` | A style *inside* the projectile's gameplay body (a shaft, a spinning frame, nothing) plus a trail behind it |
+| `lob` | `projectile` (areas) | A bomb that arcs from the socket to the area's centre and sizzles until it detonates |
+
+- **Pixel style:** all particles share one MultiMesh of camera-facing squares whose corners snap to a grid of screen pixels (2 px at 1080p). They step at **20 Hz** ("on twos") and walk their 2–6 color ramp in whole steps, with no blending.
+- **Honest sizes:** projectile kits can't set a size. Shafts and frames are fitted inside the body's gameplay width, and trails only fall *behind* it (§1.1). Rings take the area's radius from the render state.
+- **Events:** the client fires `<action>.<phase>`. It finds the action from the kit: an area's or missile's radius is matched against the owner's abilities (augment-widened too), bolts are `attack`, and dashes are the kit's dash slot. A champion's own `action.phase` wins, then its `*.phase`, then the shared library's (`biped_library.vfx.ron`).
+- **Caps:** ≤ 48 particles per effect, ≤ 4 effects per event, ≤ 64 effects per pack, lifetimes ≤ 1.5 s, and 2,048 live particles client-wide.
+
 ## 6. UI
 
 - SVG icons (imported by Godot as scalable vectors), a single UI theme, procedural panel backgrounds.

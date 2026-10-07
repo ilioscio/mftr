@@ -113,6 +113,26 @@ impl MftrModel {
         root
     }
 
+    /// The pack's VFX (A4b, `<id>.vfx.ron`): `[{ event, kit, ramp: PackedColorArray, count, size,
+    /// speed, lifetime }]`, with -1 for knobs the pack leaves to the kit's defaults.
+    #[func]
+    fn vfx(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for e in self.pack.vfx.iter().flat_map(|f| &f.effects) {
+            let mut d = VarDictionary::new();
+            d.set("event", e.event.as_str());
+            d.set("kit", e.kit.as_str());
+            let ramp: PackedColorArray = e.ramp.iter().map(|&(r, g, b)| Color::from_rgb(r, g, b)).collect();
+            d.set("ramp", &ramp);
+            d.set("count", e.count.map_or(-1, |c| c as i64));
+            d.set("size", e.size.unwrap_or(-1.0));
+            d.set("speed", e.speed.unwrap_or(-1.0));
+            d.set("lifetime", e.lifetime.unwrap_or(-1.0));
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
     /// A new animator for one instance of this model.
     #[func]
     fn new_animator(&self) -> Gd<MftrAnimator> {

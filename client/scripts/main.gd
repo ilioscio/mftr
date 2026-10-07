@@ -46,18 +46,27 @@ var match_banner_age := 0.0
 var notices := []                       # kill feed: { text, age }
 # A3 (10 §6): champion models from content packs. Until champions ship their own, they all wear
 # the shared template (tinted with their identity color). F3 toggles the placeholder shapes.
-var champion_model: MftrModel = null
+var champion_model: MftrModel = null     # the shared template
+var champion_models := {}                # champion name -> its own MftrModel (or the template)
 var use_models := true
 var hovered_body: Node3D = null
 const TURN_RATE := deg_to_rad(4500.0)    # 10 §3: a 180° turn in ~40 ms
 const FLASH_TIME := 0.05                 # 10 §4.4: 2-3 frames of white on the target
 const OUTLINE_WIDTH := 0.025
 const MODEL_LIFT := -0.85                # bodies sit at y 0.85 (the placeholder's center)
+# A4b: the VFX kit and each champion's effects by event (`<action>.<phase>`), from its pack's
+# `<id>.vfx.ron`, falling back to the shared library's.
+var vfx: Node3D
+var _vfx_tables := {}                    # champion name -> { event: [effect] }
+var _vfx_recent := {}                    # dedupe key -> time (a prediction and its confirmation)
+const PARTICLE_KITS := ["flare", "burst", "ring", "dust"]
 
 
 func _ready() -> void:
 	_build_world()
 	_load_champion_model()
+	vfx = preload("res://scripts/vfx.gd").new()
+	add_child(vfx)
 	client = MatchClient.new()
 	add_child(client)
 	var address := ""
@@ -116,12 +125,27 @@ func _ready() -> void:
 ## The shared template from `art/` (A3), validated by `mftr-pack` on load (11 §4). Missing or
 ## refused: champions keep their placeholder shapes.
 func _load_champion_model() -> void:
-	var path := ProjectSettings.globalize_path("res://").path_join("../art/library/biped/export/biped_library.glb").simplify_path()
+	var path := _art_path("library/biped/export/biped_library.glb")
 	if FileAccess.file_exists(path):
 		champion_model = MftrModel.load(path)
 	if champion_model == null:
 		use_models = false
 		print("MFTR: no champion model (%s): placeholder shapes" % path)
+
+
+func _art_path(rel: String) -> String:
+	return ProjectSettings.globalize_path("res://").path_join("../art").path_join(rel).simplify_path()
+
+
+## A champion's own pack (`art/champions/<id>/export/<id>.glb`, A4) if it ships one and it
+## validates, else the template. Loaded once per champion.
+func _model_for(champion: String) -> MftrModel:
+	if not champion_models.has(champion):
+		var id := champion.to_lower()
+		var path := _art_path("champions/%s/export/%s.glb" % [id, id])
+		var own: MftrModel = MftrModel.load(path) if FileAccess.file_exists(path) else null
+		champion_models[champion] = own if own != null else champion_model
+	return champion_models[champion]
 
 
 ## Join `address` (as set up: spectating, champion, blind playtest).
@@ -435,20 +459,22 @@ func _outline_material(team: Color) -> ShaderMaterial:
 ## The template model under `body`: one material per surface by slot, the team accent, the
 ## champion's identity color on cloth, the outline as a second pass, and its animator.
 func _attach_model(body: MeshInstance3D, team: Color, champion: String) -> void:
-	var model: Node3D = champion_model.instantiate()
+	var source := _model_for(champion)
+	var template := source == champion_model
+	var model: Node3D = source.instantiate()
 	model.position = Vector3(0, MODEL_LIFT, 0)
 	body.add_child(model)
 	var mesh: MeshInstance3D = model.get_node("Skeleton/Mesh")
 	var outline: ShaderMaterial = body.get_meta("outline")
 	var mats := []
-	var slots := champion_model.surface_slots()
+	var slots := source.surface_slots()
 	for i in slots.size():
 		var m := ShaderMaterial.new()
 		m.shader = load("res://shaders/champion_model.gdshader")
 		m.set_shader_parameter("slot", ["skin", "cloth", "metal", "emissive", "accent"].find(slots[i]))
 		m.set_shader_parameter("team_accent", team)
 		m.set_shader_parameter("identity", CHAMPION_COLORS.get(champion, Color(0.5, 0.5, 0.5)))
-		m.set_shader_parameter("identity_mix", 0.6)
+		m.set_shader_parameter("identity_mix", 0.6 if template else 0.0)
 		m.next_pass = outline
 		mesh.set_surface_override_material(i, m)
 		mats.append(m)
@@ -456,7 +482,7 @@ func _attach_model(body: MeshInstance3D, team: Color, champion: String) -> void:
 	body.set_meta("rig", {
 		"model": model,
 		"skeleton": model.get_node("Skeleton"),
-		"animator": champion_model.new_animator(),
+		"animator": source.new_animator(),
 		"yaw": NAN,
 		"last": Vector3.INF,
 		"speed": 0.0,
@@ -487,6 +513,11 @@ func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
 	body.set_meta("flash", flash)
 	for m in body.get_meta("flash_mats", []):
 		m.set_shader_parameter("flash", flash)
+	var dashing: bool = info.get("dashing", false)
+	if dashing != bool(body.get_meta("was_dashing", false)):
+		body.set_meta("was_dashing", dashing)
+		var champ: String = info.get("champion", "")
+		_vfx_play(champ, client.dash_action(champ), "start" if dashing else "land", body.global_position)
 	if not _models_shown(body) or delta <= 0.0:
 		return
 	var rig: Dictionary = body.get_meta("rig")
@@ -512,6 +543,53 @@ func _flash(id: int) -> void:
 	var body = own_body if id == client.own_unit_id() else remote_bodies.get(id)
 	if body != null:
 		body.set_meta("flash", 1.0)
+
+
+## The effects for a champion's `<action>.<phase>`: its own, its own `*.<phase>`, then the
+## shared library's (A4b, 11 §3).
+func _effects(champion: String, action: String, phase: String) -> Array:
+	var tables := [_vfx_table(champion)]
+	if champion_model != null:
+		tables.append(_vfx_table(""))
+	for t in tables:
+		for key in [action + "." + phase, "*." + phase]:
+			if t.has(key):
+				return t[key]
+	return []
+
+
+func _vfx_table(champion: String) -> Dictionary:
+	if not _vfx_tables.has(champion):
+		var model: MftrModel = champion_model if champion == "" else _model_for(champion)
+		var table := {}
+		if model != null and (champion == "" or model != champion_model):
+			for e in model.vfx():
+				if not table.has(e.event):
+					table[e.event] = []
+				table[e.event].append(e)
+		_vfx_tables[champion] = table
+	return _vfx_tables[champion]
+
+
+## Plays a champion's particle effects for `<action>.<phase>` at `pos`, once per `dedupe` key
+## within a short window (an own prediction and its confirmation are two different keys).
+func _vfx_play(champion: String, action: String, phase: String, pos: Vector3, dir := Vector3.ZERO, radius := 0.0, dedupe := "") -> void:
+	if champion == "" or action == "":
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	if dedupe != "":
+		if now - float(_vfx_recent.get(dedupe, -10.0)) < 0.4:
+			return
+		_vfx_recent[dedupe] = now
+	for e in _effects(champion, action, phase):
+		if e.kit in PARTICLE_KITS:
+			vfx.play(e, pos, dir, radius)
+
+
+func _body_of(id: int):
+	if id == client.own_unit_id():
+		return own_body
+	return remote_bodies.get(id)
 
 
 ## A bone's world position (sockets: where projectiles leave from), or the body's.
@@ -1096,12 +1174,29 @@ func _update_missiles() -> void:
 				_spawn_streak(_socket_world(remote_bodies[m.owner], "socket_projectile"), world + Vector3(0, 0.3, 0), ENEMY_COLOR)
 			elif m.side == "own" and _models_shown(own_body):
 				_spawn_streak(_socket_world(own_body, "socket_projectile"), world + Vector3(0, 0.3, 0), OWN_COLOR)
+			var champ: String = m.get("champion", "")
+			var action: String = m.get("action", "")
+			if champ != "" and action != "":
+				var owner = _body_of(m.owner)
+				var src: Vector3 = _socket_world(owner, "socket_projectile") if owner != null else world
+				var dir3 := Vector3(m.dir.x, 0, m.dir.y)
+				_vfx_play(champ, action, "release", src, dir3, 0.0, "rel%d_%s" % [m.owner, action])
+				for e in _effects(champ, action, "projectile"):
+					vfx.decorate(node, e, float(m.radius) * UNITS_TO_METERS)
+				node.set_meta("vfx", [champ, action])
 		var node: Node3D = missile_nodes[key]
 		var dir: Vector2 = m.dir
 		node.position = world
 		node.rotation = Vector3(0, -atan2(dir.y, dir.x), 0)
 		node.get_node("Body").visible = not m.impact
 		node.get_node("Impact").visible = m.impact
+		for c in node.get_children():
+			if c.name != "Body" and c.name != "Impact":
+				c.visible = not m.impact
+		if m.impact and node.has_meta("vfx") and not node.has_meta("impacted"):
+			node.set_meta("impacted", true)
+			var v: Array = node.get_meta("vfx")
+			_vfx_play(v[0], v[1], "impact", world + Vector3(0, 0.6, 0), Vector3.ZERO, 0.0, "imp%d" % key)
 		# Predicted to hit someone else first (03a §7): keep it visible, dimmed, until confirmed.
 		var mat: ShaderMaterial = node.get_node("Body").material_override
 		mat.set_shader_parameter("dim", 0.35 if m.unconfirmed else 1.0)
@@ -1137,12 +1232,27 @@ func _update_areas() -> void:
 	for a in client.areas():
 		var key: int = a.key
 		seen[key] = true
+		var center := Vector3(a.center.x * UNITS_TO_METERS, 0.03, a.center.y * UNITS_TO_METERS)
+		var champ: String = a.get("champion", "")
+		var action: String = a.get("action", "")
+		var tag := "area%d_%d_%d" % [a.get("owner", 0), roundi(a.center.x), roundi(a.center.y)]
 		if not area_nodes.has(key):
 			var node := _make_area(a.side, a.radius, a.get("hard_cc", false))
 			add_child(node)
 			area_nodes[key] = node
+			var now := Time.get_ticks_msec() / 1000.0
+			if champ != "" and now - float(_vfx_recent.get(tag, -10.0)) > 1.5:
+				_vfx_recent[tag] = now
+				var owner = _body_of(a.get("owner", -1))
+				for e in _effects(champ, action, "projectile"):
+					if e.kit == "lob" and owner != null:
+						vfx.lob(tag.hash(), e, _socket_world(owner, "socket_projectile"), center, 0.45)
+		if a.detonated and not area_nodes[key].has_meta("detonated"):
+			area_nodes[key].set_meta("detonated", true)
+			vfx.land(tag.hash())
+			_vfx_play(champ, action, "detonate", center, Vector3.ZERO, float(a.radius) * UNITS_TO_METERS, "det" + tag)
 		var node: MeshInstance3D = area_nodes[key]
-		node.position = Vector3(a.center.x * UNITS_TO_METERS, 0.03, a.center.y * UNITS_TO_METERS)
+		node.position = center
 		var mat: ShaderMaterial = node.material_override
 		mat.set_shader_parameter("progress", a.progress)
 		mat.set_shader_parameter("detonated", 1.0 if a.detonated else 0.0)
@@ -1169,10 +1279,23 @@ func _update_bolts() -> void:
 			node.material_override = _unshaded(_side_color(b.side).lightened(0.4))
 			add_child(node)
 			bolt_nodes[key] = node
-		bolt_nodes[key].position = Vector3(b.pos.x * UNITS_TO_METERS, 1.0, b.pos.y * UNITS_TO_METERS)
+			var champ: String = b.get("champion", "")
+			if champ != "":
+				var owner = _body_of(b.owner)
+				var src: Vector3 = _socket_world(owner, "socket_projectile") if owner != null else node.position
+				_vfx_play(champ, "attack", "release", src, Vector3(b.dir.x, 0, b.dir.y), 0.0, "atk%d" % b.owner)
+				for e in _effects(champ, "attack", "projectile"):
+					vfx.decorate(node, e, 0.09, 0.0)
+				node.set_meta("vfx", champ)
+		var bolt: Node3D = bolt_nodes[key]
+		bolt.position = Vector3(b.pos.x * UNITS_TO_METERS, 1.0, b.pos.y * UNITS_TO_METERS)
+		bolt.rotation = Vector3(0, -atan2(b.dir.y, b.dir.x), 0)
 	for key in bolt_nodes.keys():
 		if not seen.has(key):
-			bolt_nodes[key].queue_free()
+			var bolt: Node3D = bolt_nodes[key]
+			if bolt.has_meta("vfx"):
+				_vfx_play(bolt.get_meta("vfx"), "attack", "impact", bolt.position, Vector3.ZERO, 0.0, "atkhit%d" % key)
+			bolt.queue_free()
 			bolt_nodes.erase(key)
 
 

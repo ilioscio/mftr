@@ -358,7 +358,7 @@ Runs alongside M3/M4 and replaces the placeholder shapes with real champions ([1
 1. **Pipeline:** `art/` layout, the `mftr_blender` add-on (rig generator for `biped` v1, export, marker sidecar, review renders) and the shared library block-out (CC, `walk`, `cast_utility`, `attack_melee_alt`). Pack format v0 and the `mftr-pack` validator in CI.
 2. **Sim contract (D52):** `facing` state and its wire field, action phases (`follow_through`, `hard_lock`, `windup_cancel`, `mobile`), the input buffer and the attack-variant counter. Unit tests plus a Netcode Lab check that cancelling and buffering survive prediction and reconciliation.
 3. **Client runtime:** pack loading through gdext (no `ResourceLoader`), the AnimationTree layout, piecewise retiming from sim time, facing display, socket-spawned projectiles, impact flash, hover outline.
-4. **Pilot: Vesper** (ranged), complete set, VFX and SFX, in game.
+4. **Pilot: Vesper** (ranged), complete set, VFX and SFX, in game. Split in three: **A4a** the model and every clip, in game; **A4b** the VFX kit (05 §5) and her VFX; **A4c** the SFX pipeline (05 §7) and her sounds.
 5. **Pilot: Rook** (melee, `biped_large`), complete set, VFX and SFX, in game.
 6. **The other eight champions**, one slice each, against the definition of done in 10 §10.
 
@@ -391,6 +391,39 @@ Runs alongside M3/M4 and replaces the placeholder shapes with real champions ([1
 - **Checked in Godot 4.7.2** against a duel server: walking and running facing the path, casting, the hover outline and the enemy's red accent. `--zoom <factor>` brings the camera closer for such review captures.
 
 **Left for later:** remote champions' death (dead units leave the snapshot); remote attack timing (the wire has none, so those clips play at their own rate); shipping packs inside exported builds (the client reads them from `art/` next to the project for now).
+
+### A slice 4a status (2026-10-07): ✅ done (concept awaiting approval)
+- **Heads** (`head.py`, shared by every model): a sculpted parametric skull (a V-shaped jaw, chin, cheekbones, a fuller back of the skull) with eyes (whites and pupils), brows, a nose, a mouth and ears, and hair that follows the skull from a hairline higher at the front than the nape; `short` (the template, which lost its headband) or `ponytail`. After the owner's review: the egg-shaped heads read as "an egg with two dots".
+- **Vesper's model** (`art/champions/vesper`): a slim archer on `biped` v1 plus an `extra_cape` chain (3 bones) for her cloak; 3,280 triangles; a feminine hourglass build, auburn hair with bangs and a ponytail, her hood down (a cowl and a back drape), dusk-teal cloak, leather, accent bracers and fletching. Her 1.5 m recurve is part of the skinned mesh on her left hand, built in the rest frame the full draw turns into *vertical*, so it stands upright whenever she shoots.
+- **Every clip** (10 §5): 22 of her own (idle, two fidgets, idle_ready, run, run_fast, two attacks, Q, W, the Tumble start/travel/land trio, R, recall, death, respawn, select and four emotes) plus the 10 shared ones copied in from the library. `mftr-tools pack validate` checks them all against her kit, each `fire` within a frame of her sim windup. Block-outs from `build.py` (a starting point, like the library).
+- **Runtime:** the client loads a champion's own pack when it ships one (else the template). The animator gains the dash trio (`<slot>_start` → looping `_travel` → `_land`), `run_fast` above the midpoint of the two strides, `idle_ready` for 3 s after an action and idle fidgets after 8 s still; 3 new tests on her pack.
+- **Checked in Godot** against a duel server: she faces her target and draws with the bow vertical.
+
+**Left for later:** the owner's approval of her concept; polish (the block-outs' draw hand and run arms); emotes, recall and select have no in-game trigger yet.
+
+### A slice 4b status (2026-10-07): ✅ done
+- **The VFX kit** (05 §5.1):
+  - nine kits: `flare`, `burst`, `ring`, `dust` and `trail`, plus the projectile styles `arrow`, `net`, `orb` and `lob`;
+  - pixel-style particles in one MultiMesh, snapped to screen pixels by `pixel_vfx.gdshader`, stepped at 20 Hz through stepped colour ramps;
+  - projectile styles fitted inside the gameplay body;
+  - detonation rings sized from the area's radius.
+- **Format:**
+  - `<id>.vfx.ron` next to the model (11 §3.1), parsed and checked by `mftr-pack` (kits per phase, ramps, bounded knobs, caps);
+  - loaded with the pack, and exposed to the client as `MftrModel.vfx()`.
+- **Events:** the render state now carries each area's, missile's and bolt's owner, champion and action. The action is resolved by matching radius against the owner's kit, including augment widening; dashes use `MatchClient.dash_action()`. A champion's effects fall back to the library's `biped_library.vfx.ron`.
+- **Vesper:**
+  - gold arrows (flare, shaft and trail, spark burst);
+  - a teal-white Longshot;
+  - a lobbed Shrapnel Charge that sizzles, then detonates in shrapnel, a ring and smoke;
+  - Tumble dust;
+  - a spinning gold Snare Net.
+- **Checked in Godot:** W, Q, E and R were checked against a duel server; the flare core and the smoke were toned down after the first captures.
+
+**Left for later:**
+- crit sparks and the impact flash's spark burst at `socket_chest` (10 §6), which need crit and target info in the render state;
+- the allied-VFX opacity setting (05 §1.6);
+- footstep dust from `foot_l`/`foot_r` markers;
+- the basic-attack path was not captured on screen (no enemy came into range in the scripted duel).
 
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.

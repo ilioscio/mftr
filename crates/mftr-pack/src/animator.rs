@@ -1,8 +1,9 @@
 //! The runtime layer stack of 10 §6, driven by simulation state each frame:
 //!
 //! ```text
-//! locomotion (idle / walk / run by speed)  →  action (attack or cast; upper body or full)
-//!   →  additive (rooted struggle)  →  override (stunned, dead)
+//! locomotion (idle / idle_ready / walk / run / run_fast by speed)  →  action (attack or cast;
+//!   upper body or full)  →  additive (rooted struggle)  →  flourish (dash start / travel / land,
+//!   idle fidgets)  →  override (stunned, dead)
 //! ```
 //!
 //! Actions are **retimed** to the sim (10 §4.3): a windup's progress maps to `[0, fire]` of
@@ -23,6 +24,10 @@ const DASH_RATE: f32 = 1.8;
 const LOCO_BLEND: f32 = 0.08;
 const ACTION_OUT: f32 = 0.05;
 const CC_OUT: f32 = 0.1;
+/// After an action, the combat-ready idle shows this long (10 §5.1).
+const READY_FOR: f32 = 3.0;
+/// Standing still this long plays an idle fidget (10 §5.1: 6–10 s *(start)*).
+const FIDGET_AFTER: f32 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActionKind {
@@ -72,11 +77,24 @@ struct Playing {
     leaving: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Flourish {
+    DashStart,
+    DashTravel,
+    DashLand,
+    Fidget,
+}
+
 #[derive(Clone, Debug)]
 pub struct Animator {
     idle: Option<usize>,
+    idle_ready: Option<usize>,
+    fidgets: Vec<usize>,
     walk: Option<usize>,
     run: Option<usize>,
+    run_fast: Option<usize>,
+    /// The kit's dash clips (`<slot>_start`, `<slot>_travel`, `<slot>_land`), if it has them.
+    dash: Option<(Option<usize>, usize, Option<usize>)>,
     stunned: Option<usize>,
     rooted: Option<usize>,
     death: Option<usize>,
@@ -88,14 +106,31 @@ pub struct Animator {
     rooted_w: f32,
     action: Option<Playing>,
     over: Option<Playing>,
+    flourish: Option<(Flourish, Playing)>,
+    was_dashing: bool,
+    /// Seconds of the combat-ready idle left.
+    ready_left: f32,
+    /// Seconds standing still with nothing going on (fidgets).
+    still: f32,
+    next_fidget: usize,
 }
 
 impl Animator {
     pub fn new(lib: &Library) -> Animator {
+        let suffixed =
+            |suffix: &str| lib.clips.iter().position(|c| c.name.len() == 1 + suffix.len() && c.name.ends_with(suffix));
+        let dash = suffixed("_travel").map(|travel| {
+            let slot = &lib.clips[travel].name[..1];
+            (lib.clip(&format!("{slot}_start")), travel, lib.clip(&format!("{slot}_land")))
+        });
         Animator {
             idle: lib.clip("idle"),
+            idle_ready: lib.clip("idle_ready"),
+            fidgets: ["idle_fidget_1", "idle_fidget_2"].iter().filter_map(|n| lib.clip(n)).collect(),
             walk: lib.clip("walk"),
             run: lib.clip("run"),
+            run_fast: lib.clip("run_fast"),
+            dash,
             stunned: lib.clip("cc_stunned"),
             rooted: lib.clip("cc_rooted"),
             death: lib.clip("death"),
@@ -106,6 +141,11 @@ impl Animator {
             rooted_w: 0.0,
             action: None,
             over: None,
+            flourish: None,
+            was_dashing: false,
+            ready_left: 0.0,
+            still: 0.0,
+            next_fidget: 0,
         }
     }
 
@@ -144,6 +184,10 @@ impl Animator {
         if let Some(c) = self.rooted {
             add(&mut pose, &lib.sample(c, self.idle_time), &lib.rig.rest, self.rooted_w);
         }
+        self.update_flourish(lib, d, dt);
+        if let Some((_, f)) = self.flourish {
+            blend(&mut pose, &lib.sample(f.clip, f.time), f.weight, None);
+        }
         self.update_override(d, dt);
         if let Some(o) = self.over {
             blend(&mut pose, &lib.sample(o.clip, o.time), o.weight, None);
@@ -154,7 +198,19 @@ impl Animator {
     fn locomotion(&mut self, lib: &Library, d: &Drive, dt: f32) -> Pose {
         let moving = d.dashing || d.speed >= MOVING;
         self.move_w = approach(self.move_w, if moving { 1.0 } else { 0.0 }, dt / LOCO_BLEND);
-        let cycle = if d.dashing || d.speed >= RUN_FROM { self.run.or(self.walk) } else { self.walk.or(self.run) };
+        // run_fast above the midpoint between the two cycles' stride speeds (haste, 10 §5.1).
+        let stride = |c: Option<usize>| c.and_then(|c| lib.clips[c].stride_speed);
+        let fast = match (stride(self.run), stride(self.run_fast)) {
+            (Some(a), Some(b)) if d.speed >= (a + b) / 2.0 && !d.dashing => self.run_fast,
+            _ => None,
+        };
+        let cycle = if fast.is_some() {
+            fast
+        } else if d.dashing || d.speed >= RUN_FROM {
+            self.run.or(self.walk)
+        } else {
+            self.walk.or(self.run)
+        };
         if let Some(c) = cycle {
             let clip = &lib.clips[c];
             let rate = if d.dashing {
@@ -166,7 +222,13 @@ impl Animator {
                 self.loco_phase = (self.loco_phase + dt * rate / clip.length.max(1e-3)).fract();
             }
         }
-        let mut pose = match self.idle {
+        if d.action.is_some() {
+            self.ready_left = READY_FOR;
+        } else {
+            self.ready_left = (self.ready_left - dt).max(0.0);
+        }
+        let idle = if self.ready_left > 0.0 { self.idle_ready.or(self.idle) } else { self.idle };
+        let mut pose = match idle {
             Some(i) => lib.sample(i, self.idle_time),
             None => lib.rig.rest.clone(),
         };
@@ -230,6 +292,64 @@ impl Animator {
                 }
             }
         }
+    }
+
+    /// Dashes play the kit's start → travel (looping) → land clips; standing still long enough
+    /// plays a fidget. Anything else happening cuts a fidget short.
+    fn update_flourish(&mut self, lib: &Library, d: &Drive, dt: f32) {
+        let play = |clip: usize| Playing { clip, kind: None, time: 0.0, weight: 1.0, leaving: false };
+        let blocked = d.dead || d.stunned;
+        if let Some((start, travel, land)) = self.dash.filter(|_| !blocked) {
+            if d.dashing && !self.was_dashing {
+                self.flourish = Some(match start {
+                    Some(s) => (Flourish::DashStart, play(s)),
+                    None => (Flourish::DashTravel, play(travel)),
+                });
+            } else if !d.dashing && self.was_dashing {
+                self.flourish = land.map(|l| (Flourish::DashLand, play(l)));
+            }
+            if d.dashing
+                && let Some((Flourish::DashStart, p)) = self.flourish
+                && p.time >= lib.clips[p.clip].length
+            {
+                self.flourish = Some((Flourish::DashTravel, play(travel)));
+            }
+        }
+        self.was_dashing = d.dashing;
+
+        let busy = blocked || d.dashing || d.action.is_some() || d.speed >= MOVING || self.action.is_some();
+        if busy {
+            self.still = 0.0;
+        } else if self.flourish.is_none() {
+            self.still += dt;
+            if self.still >= FIDGET_AFTER && !self.fidgets.is_empty() {
+                let clip = self.fidgets[self.next_fidget % self.fidgets.len()];
+                self.next_fidget += 1;
+                self.still = 0.0;
+                self.flourish = Some((Flourish::Fidget, play(clip)));
+            }
+        }
+
+        if let Some((kind, p)) = &mut self.flourish {
+            let len = lib.clips[p.clip].length;
+            p.time += dt;
+            let interrupted = blocked
+                || (*kind == Flourish::Fidget && busy)
+                || (*kind != Flourish::Fidget && !d.dashing && *kind != Flourish::DashLand);
+            let finished = *kind != Flourish::DashTravel && p.time >= len;
+            if interrupted || finished || p.leaving {
+                p.leaving = true;
+                p.weight -= dt / ACTION_OUT;
+                if p.weight <= 0.0 {
+                    self.flourish = None;
+                }
+            }
+        }
+    }
+
+    /// The flourish clip showing (dash parts, fidgets), if any.
+    pub fn flourish_clip(&self) -> Option<usize> {
+        self.flourish.map(|(_, p)| p.clip)
     }
 
     fn update_override(&mut self, d: &Drive, dt: f32) {
