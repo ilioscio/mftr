@@ -248,3 +248,53 @@ fn too_many_effects_on_one_event_are_rejected() {
     let errs = mftr_pack::vfx::check(&mftr_pack::vfx::parse(&text).unwrap());
     assert!(errs.iter().any(|e| e.contains("q.impact")), "{errs:?}");
 }
+
+#[test]
+fn committed_sounds_decode_and_cover_the_kit() {
+    // A4c: the library has footstep variants and the hard-CC accent; Vesper voices her kit.
+    let events = |rel: &str| -> Vec<String> {
+        let loaded = mftr_pack::load_file(&art(rel)).unwrap();
+        assert!(loaded.sounds.iter().all(|s| s.rate == 22_050 && s.channels == 1 && !s.pcm.is_empty()));
+        loaded.sounds.into_iter().flat_map(|s| s.spec.events).collect()
+    };
+    let lib = events("library/biped/export/biped_library.glb");
+    assert!(lib.iter().filter(|e| *e == "unit.foot").count() >= 2, "footstep variants");
+    for event in ["cc.hard", "unit.death", "unit.respawn", "*.impact", "*.cast"] {
+        assert!(lib.iter().any(|e| e == event), "library lacks {event}");
+    }
+    let vesper = events("champions/vesper/export/vesper.glb");
+    for action in ["attack", "q", "w", "r"] {
+        for phase in ["cast", "release"] {
+            let event = format!("{action}.{phase}");
+            assert!(vesper.contains(&event), "vesper lacks {event}");
+        }
+    }
+    for event in ["attack.impact", "q.impact", "w.detonate", "e.start", "e.land", "r.impact"] {
+        assert!(vesper.iter().any(|e| e == event), "vesper lacks {event}");
+    }
+}
+
+#[test]
+fn generated_sounds_are_built_from_the_current_recipe() {
+    // Edit a `sounds.ron` and forget `mftr-tools sfx build`, and this fails.
+    for (recipe, binding) in [
+        ("library/biped/sounds.ron", "library/biped/export/biped_library.sfx.ron"),
+        ("champions/vesper/sounds.ron", "champions/vesper/export/vesper.sfx.ron"),
+    ] {
+        let text = std::fs::read_to_string(art(recipe)).unwrap();
+        let file = mftr_pack::sfx::parse(&std::fs::read_to_string(art(binding)).unwrap()).unwrap();
+        assert_eq!(
+            file.source.as_deref(),
+            Some(mftr_pack::sfx::source_hash(&text).as_str()),
+            "{binding} is stale: run `mftr-tools sfx build`"
+        );
+    }
+}
+
+#[test]
+fn stray_or_broken_sounds_fail_the_pack() {
+    let f = mftr_pack::sfx::parse(r#"(sounds: [(name: "a", events: ["q.cast"], volume: 0.5)])"#).unwrap();
+    let (_, _, errs) = mftr_pack::sfx::load(&f, |_| Ok(b"OggS not really".to_vec()), &["a".into(), "b".into()]);
+    assert!(errs.iter().any(|e| e.starts_with("sfx/a.ogg")), "{errs:?}");
+    assert!(errs.iter().any(|e| e.contains("sfx/b.ogg is not bound")), "{errs:?}");
+}

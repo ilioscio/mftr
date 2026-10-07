@@ -3,14 +3,16 @@
 //! `MftrModel.load(path)` reads a pack through `mftr-pack` only: it is validated first, and
 //! its bytes never reach Godot's `ResourceLoader` (11 §1). The mesh, skeleton and skin are
 //! built here from the validated arrays. `MftrAnimator` then writes the poses `mftr-pack`'s
-//! animator computes into the skeleton every frame.
+//! animator computes into the skeleton every frame. Sounds arrive the same way: `mftr-pack`
+//! decodes the pack's Ogg files and Godot only ever sees the PCM (A4c).
 
 use std::sync::Arc;
 
+use godot::classes::audio_stream_wav::Format;
 use godot::classes::mesh::{ArrayType, PrimitiveType};
-use godot::classes::{ArrayMesh, MeshInstance3D, Node3D, RefCounted, Skeleton3D};
+use godot::classes::{ArrayMesh, AudioStreamWav, MeshInstance3D, Node3D, RefCounted, Skeleton3D};
 use godot::prelude::*;
-use mftr_pack::animator::{Action, ActionKind, Animator, Drive, Phase};
+use mftr_pack::animator::{Action, ActionKind, AnimEvent, Animator, Drive, Phase};
 use mftr_pack::pose::Trs;
 
 #[derive(GodotClass)]
@@ -133,6 +135,30 @@ impl MftrModel {
         out
     }
 
+    /// The pack's sounds (A4c, `<id>.sfx.ron` and `sfx/*.ogg`, decoded by `mftr-pack`):
+    /// `[{ name, events: PackedStringArray, volume, pitch, stream: AudioStreamWAV }]`.
+    #[func]
+    fn sounds(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for s in &self.pack.sounds {
+            let mut stream = AudioStreamWav::new_gd();
+            stream.set_format(Format::FORMAT_16_BITS);
+            stream.set_mix_rate(s.rate as i32);
+            stream.set_stereo(s.channels == 2);
+            let bytes: PackedByteArray = s.pcm.iter().flat_map(|v| v.to_le_bytes()).collect();
+            stream.set_data(&bytes);
+            let mut d = VarDictionary::new();
+            d.set("name", s.spec.name.as_str());
+            let events: PackedStringArray = s.spec.events.iter().map(|e| GString::from(e.as_str())).collect();
+            d.set("events", &events);
+            d.set("volume", s.spec.volume);
+            d.set("pitch", s.spec.pitch);
+            d.set("stream", &stream);
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
     /// A new animator for one instance of this model.
     #[func]
     fn new_animator(&self) -> Gd<MftrAnimator> {
@@ -154,9 +180,10 @@ pub struct MftrAnimator {
 impl MftrAnimator {
     /// Advance `dt` seconds and pose `skeleton`. `unit` is an `own_status()` or
     /// `remote_units()` entry (`dead`, `stunned`, `rooted`, `dashing` and the `anim_*` keys);
-    /// `speed` is the displayed ground speed in u/s.
+    /// `speed` is the displayed ground speed in u/s. Returns what happened, for sounds (A4c):
+    /// `"foot"` for a footstep, `"attack"` or a slot's action (`"q"` … `"f"`) for a windup's start.
     #[func]
-    fn drive(&mut self, mut skeleton: Gd<Skeleton3D>, unit: VarDictionary, speed: f32, dt: f32) {
+    fn drive(&mut self, mut skeleton: Gd<Skeleton3D>, unit: VarDictionary, speed: f32, dt: f32) -> PackedStringArray {
         let flag = |k: &str| unit.get(k).and_then(|v| v.try_to::<bool>().ok()).unwrap_or(false);
         let int = |k: &str| unit.get(k).and_then(|v| v.try_to::<i64>().ok()).unwrap_or(0);
         let text =
@@ -185,6 +212,18 @@ impl MftrAnimator {
             skeleton.set_bone_pose_rotation(i, Quaternion::new(p.r[0], p.r[1], p.r[2], p.r[3]));
             skeleton.set_bone_pose_scale(i, Vector3::new(p.s[0], p.s[1], p.s[2]));
         }
+        const SLOTS: [&str; 6] = ["q", "w", "e", "r", "d", "f"];
+        self.animator
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                AnimEvent::Foot => Some("foot"),
+                AnimEvent::Start(ActionKind::Attack { .. }) => Some("attack"),
+                AnimEvent::Start(ActionKind::Cast { slot }) => SLOTS.get(*slot as usize).copied(),
+                AnimEvent::Start(ActionKind::Continue) => None,
+            })
+            .map(GString::from)
+            .collect()
     }
 }
 

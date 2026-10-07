@@ -60,6 +60,10 @@ var vfx: Node3D
 var _vfx_tables := {}                    # champion name -> { event: [effect] }
 var _vfx_recent := {}                    # dedupe key -> time (a prediction and its confirmation)
 const PARTICLE_KITS := ["flare", "burst", "ring", "dust"]
+# A4c: the SFX player and each champion's sounds by event, from its pack's `<id>.sfx.ron`,
+# falling back to the shared library's (as the VFX do).
+var sfx: Node3D
+var _sfx_tables := {}                    # champion name -> { event: [sound] }
 
 
 func _ready() -> void:
@@ -67,6 +71,8 @@ func _ready() -> void:
 	_load_champion_model()
 	vfx = preload("res://scripts/vfx.gd").new()
 	add_child(vfx)
+	sfx = preload("res://scripts/sfx.gd").new()
+	add_child(sfx)
 	client = MatchClient.new()
 	add_child(client)
 	var address := ""
@@ -513,6 +519,10 @@ func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
 	body.set_meta("flash", flash)
 	for m in body.get_meta("flash_mats", []):
 		m.set_shader_parameter("flash", flash)
+	var dead: bool = info.get("dead", false)
+	if dead != bool(body.get_meta("was_dead", false)):
+		body.set_meta("was_dead", dead)
+		_sfx_play(info.get("champion", ""), ["unit.death" if dead else "unit.respawn"], body.global_position)
 	var dashing: bool = info.get("dashing", false)
 	if dashing != bool(body.get_meta("was_dashing", false)):
 		body.set_meta("was_dashing", dashing)
@@ -536,7 +546,12 @@ func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
 		var diff := wrapf(target - rig.yaw, -PI, PI)
 		rig.yaw += clampf(diff, -TURN_RATE * delta, TURN_RATE * delta)
 		rig.model.rotation.y = rig.yaw
-	rig.animator.drive(rig.skeleton, info, rig.speed, delta)
+	for e in rig.animator.drive(rig.skeleton, info, rig.speed, delta):
+		var champ: String = info.get("champion", "")
+		if e == "foot":
+			_sfx_play(champ, ["unit.foot"], p)
+		else:
+			_sfx_play(champ, [e + ".cast", "*.cast"], p + Vector3(0, 1.2, 0))
 
 
 func _flash(id: int) -> void:
@@ -584,6 +599,36 @@ func _vfx_play(champion: String, action: String, phase: String, pos: Vector3, di
 	for e in _effects(champion, action, phase):
 		if e.kit in PARTICLE_KITS:
 			vfx.play(e, pos, dir, radius)
+	_sfx_play(champion, [action + "." + phase, "*." + phase], pos)
+
+
+## Plays a champion's sound for the first of `keys` it (or else the shared library) binds, at
+## `pos` (A4c, 11 §3.2).
+func _sfx_play(champion: String, keys: Array, pos: Vector3) -> void:
+	if champion == "":
+		return
+	var tables := [_sfx_table(champion)]
+	if champion_model != null:
+		tables.append(_sfx_table(""))
+	for t in tables:
+		for key in keys:
+			if t.has(key):
+				sfx.play(champion + "/" + key, t[key], pos)
+				return
+
+
+func _sfx_table(champion: String) -> Dictionary:
+	if not _sfx_tables.has(champion):
+		var model: MftrModel = champion_model if champion == "" else _model_for(champion)
+		var table := {}
+		if model != null and (champion == "" or model != champion_model):
+			for s in model.sounds():
+				for event in s.events:
+					if not table.has(event):
+						table[event] = []
+					table[event].append(s)
+		_sfx_tables[champion] = table
+	return _sfx_tables[champion]
 
 
 func _body_of(id: int):
@@ -780,6 +825,8 @@ func _place_camera(target: Vector3) -> void:
 	var look := Vector3(target.x, 0.0, target.z)
 	camera.position = look + Vector3(0, sin(pitch) * dist, cos(pitch) * dist)
 	camera.look_at(look, Vector3.UP)
+	if sfx != null:
+		sfx.listen(look, camera.basis)
 
 
 func _show_statuses(body: Node3D, stunned: bool, rooted: bool, shield: float, slowed := false) -> void:
@@ -1197,6 +1244,8 @@ func _update_missiles() -> void:
 			node.set_meta("impacted", true)
 			var v: Array = node.get_meta("vfx")
 			_vfx_play(v[0], v[1], "impact", world + Vector3(0, 0.6, 0), Vector3.ZERO, 0.0, "imp%d" % key)
+			if m.get("hard_cc", false):
+				_sfx_play(v[0], ["cc.hard"], world)
 		# Predicted to hit someone else first (03a §7): keep it visible, dimmed, until confirmed.
 		var mat: ShaderMaterial = node.get_node("Body").material_override
 		mat.set_shader_parameter("dim", 0.35 if m.unconfirmed else 1.0)
@@ -1247,10 +1296,14 @@ func _update_areas() -> void:
 				for e in _effects(champ, action, "projectile"):
 					if e.kit == "lob" and owner != null:
 						vfx.lob(tag.hash(), e, _socket_world(owner, "socket_projectile"), center, 0.45)
+				if owner != null:
+					_sfx_play(champ, [action + ".release", "*.release"], owner.global_position)
 		if a.detonated and not area_nodes[key].has_meta("detonated"):
 			area_nodes[key].set_meta("detonated", true)
 			vfx.land(tag.hash())
 			_vfx_play(champ, action, "detonate", center, Vector3.ZERO, float(a.radius) * UNITS_TO_METERS, "det" + tag)
+			if a.get("hard_cc", false):
+				_sfx_play(champ, ["cc.hard"], center)
 		var node: MeshInstance3D = area_nodes[key]
 		node.position = center
 		var mat: ShaderMaterial = node.material_override

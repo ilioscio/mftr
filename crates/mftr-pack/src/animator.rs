@@ -40,6 +40,15 @@ pub enum ActionKind {
     Continue,
 }
 
+/// What happened during one update, for sounds (A4c).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnimEvent {
+    /// The locomotion cycle crossed a `foot_l` / `foot_r` marker (not while dashing).
+    Foot,
+    /// An attack or cast started its windup.
+    Start(ActionKind),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
     Windup,
@@ -113,6 +122,8 @@ pub struct Animator {
     /// Seconds standing still with nothing going on (fidgets).
     still: f32,
     next_fidget: usize,
+    /// This update's events.
+    pub events: Vec<AnimEvent>,
 }
 
 impl Animator {
@@ -146,6 +157,7 @@ impl Animator {
             ready_left: 0.0,
             still: 0.0,
             next_fidget: 0,
+            events: Vec::new(),
         }
     }
 
@@ -167,6 +179,7 @@ impl Animator {
     /// Advance by `d.dt` and return the pose to show.
     pub fn update(&mut self, lib: &Library, d: &Drive) -> Pose {
         let dt = d.dt.max(0.0);
+        self.events.clear();
         self.idle_time += dt;
         let mut pose = self.locomotion(lib, d, dt);
         self.update_action(lib, d, dt);
@@ -219,7 +232,15 @@ impl Animator {
                 (d.speed / clip.stride_speed.unwrap_or(d.speed.max(1.0))).clamp(RATE_RANGE.0, RATE_RANGE.1)
             };
             if moving {
+                let before = self.loco_phase;
                 self.loco_phase = (self.loco_phase + dt * rate / clip.length.max(1e-3)).fract();
+                let after = self.loco_phase;
+                let crossed =
+                    |m: f32| if after >= before { before < m && m <= after } else { m > before || m <= after };
+                let feet = ["foot_l", "foot_r"].iter().filter_map(|n| clip.marker(n));
+                if !d.dashing && self.move_w > 0.5 && feet.map(|t| t / clip.length.max(1e-3)).any(crossed) {
+                    self.events.push(AnimEvent::Foot);
+                }
             }
         }
         if d.action.is_some() {
@@ -260,6 +281,9 @@ impl Animator {
                     p.leaving || p.kind != Some(a.kind) || (a.phase == Phase::Windup && p.time > c.fire())
                 });
                 let start = if a.phase == Phase::Windup { 0.0 } else { c.fire() };
+                if fresh && a.phase == Phase::Windup {
+                    self.events.push(AnimEvent::Start(a.kind));
+                }
                 let mut p = if fresh {
                     Playing { clip, kind: Some(a.kind), time: start, weight: 1.0, leaving: false }
                 } else {

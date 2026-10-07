@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 mftr-sim.workspace = true
 nanoserde = { version = "0.2", default-features = false, features = ["ron", "std"] }
+lewton = { version = "0.10", default-features = false, features = ["ogg"] }
 
 [lints]
 workspace = true
