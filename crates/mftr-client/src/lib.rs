@@ -114,6 +114,8 @@ pub struct RemoteRender {
     /// `T_input` so they line up with their missiles (03a §7).
     pub windup: Option<(f32, Vec2)>,
     pub champion: Option<ChampionId>,
+    /// Held augments (indicators above the health bar).
+    pub augments: [u8; mftr_sim::augments::SLOTS],
     pub gameplay_radius: f32,
     /// Confirmed health (03a §7: never predicted for others).
     pub health: f32,
@@ -1184,6 +1186,7 @@ impl ClientSession {
                     pos,
                     windup,
                     champion: l.champion,
+                    augments: l.augments,
                     gameplay_radius: track.gameplay_radius(),
                     health: l.health as f32,
                     max_health: l.max_health as f32,

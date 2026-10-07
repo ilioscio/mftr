@@ -183,6 +183,8 @@ pub struct Progress {
     pub stacks: u16,
     /// Champion takedowns (kills and assists) this match: Champion of Chaos counts them.
     pub takedowns: u8,
+    /// Plays under Hyper rules (set from the rules at spawn).
+    pub hyper: bool,
 }
 
 /// One buy or sell: the inventory before it and the gold it changed.
@@ -220,6 +222,7 @@ impl Progress {
         unstable_tiny: false,
         stacks: 0,
         takedowns: 0,
+        hyper: false,
     };
 
     pub fn hash_into(&self, h: &mut impl StateSink) {
@@ -254,6 +257,7 @@ impl Progress {
         h.write_u8(self.unstable_tiny as u8);
         h.write_u32(self.stacks as u32);
         h.write_u8(self.takedowns);
+        h.write_u8(self.hyper as u8);
     }
 
     /// What a champion's stats are computed from.
@@ -262,6 +266,7 @@ impl Progress {
             unstable_tiny: self.unstable_tiny,
             stacks: self.stacks,
             chaos_done: self.takedowns >= augments::CHAOS_TAKEDOWNS,
+            hyper: self.hyper,
         };
         (self.level, self.items, self.augments, growth)
     }
@@ -294,17 +299,21 @@ pub struct Rules {
     pub ranked: bool,
     /// Augment drafts (ARAM: Mayhem, 06 §3).
     pub augments: bool,
+    /// Hyper (06 §2): basic abilities and attacks much faster.
+    pub hyper: bool,
 }
 
 impl Rules {
     /// Sandboxes: level 1, every ability at rank 1, no economy.
     pub const SANDBOX: Rules =
-        Rules { start_level: 1, start_gold: 0.0, passive_gold: 0.0, ranked: false, augments: false };
+        Rules { start_level: 1, start_gold: 0.0, passive_gold: 0.0, ranked: false, augments: false, hyper: false };
     /// ARAM (06 §2): a quick start and faster gold *(start values)*.
     pub const ARAM: Rules =
-        Rules { start_level: 3, start_gold: 1400.0, passive_gold: 4.0, ranked: true, augments: false };
+        Rules { start_level: 3, start_gold: 1400.0, passive_gold: 4.0, ranked: true, augments: false, hyper: false };
     /// ARAM: Mayhem (06 §2): ARAM with augment drafts.
     pub const MAYHEM: Rules = Rules { augments: true, ..Rules::ARAM };
+    /// ARAM: Mayhem under Hyper rules: the stress mode (M3 exit).
+    pub const HYPER: Rules = Rules { hyper: true, ..Rules::MAYHEM };
 
     pub fn progress(&self) -> Progress {
         if !self.ranked {
@@ -315,10 +324,15 @@ impl Rules {
             gold: self.start_gold,
             ranks: [0; 4],
             points: self.start_level,
+            hyper: self.hyper,
             ..Progress::SANDBOX
         }
     }
 }
+
+/// Hyper (06 §2) *(start values)*: ability haste for Q, W and E, and bonus attack speed.
+pub const HYPER_HASTE: f32 = 300.0;
+pub const HYPER_ATTACK_SPEED: f32 = 0.5;
 
 /// Most waypoints a path keeps; longer paths are re-planned when they run out.
 pub const MAX_PATH: usize = 12;
@@ -953,8 +967,8 @@ pub struct VolleyHit {
 }
 
 impl Missile {
-    /// Which volley the missile belongs to.
-    fn volley(&self) -> (UnitId, u32, bool) {
+    /// Which volley the missile belongs to: a volley hits each unit once.
+    pub fn volley(&self) -> (UnitId, u32, bool) {
         (self.owner, self.cast_seq, self.shot >= augments::ECHO_SHOT)
     }
 }
@@ -2128,7 +2142,9 @@ fn try_cast(
     if slot == 3 && mods.fundamentals {
         return; // Fundamentals: no ultimate
     }
-    let (id, team, radius, haste) = (unit.id, unit.team, unit.collision_radius, unit.stats.ability_haste);
+    let (id, team, radius) = (unit.id, unit.team, unit.collision_radius);
+    let hyper = if slot < 3 && unit.state.progress.hyper { HYPER_HASTE } else { 0.0 };
+    let haste = unit.stats.ability_haste + hyper;
     let (stats, gameplay_radius) = (unit.stats, unit.gameplay_radius);
     let st = &mut unit.state;
     if !st.can_cast(t, slot) {
@@ -3894,6 +3910,36 @@ mod tests {
             .sum()
     }
 
+    /// M3 slice 6: Hyper rules give Q, W and E 300 ability haste (a quarter of the cooldown)
+    /// and attacks 50% more speed; the ultimate keeps its cooldown.
+    #[test]
+    fn hyper_rules_speed_up_basic_abilities_and_attacks() {
+        let cooldowns = |rules: Rules| {
+            let mut w = World::new(5);
+            w.set_rules(rules);
+            let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, Vec2::new(1000.0, 1000.0));
+            {
+                let p = &mut w.unit_mut(me).unwrap().state.progress;
+                (p.level, p.ranks) = (11, [1; 4]);
+            }
+            w.step(&[]);
+            w.step(&[cast_slot(0, 1, 2, 0, 0, (2000.0, 1000.0))]);
+            run_until_quiet(&mut w, 30);
+            let r_tick = w.tick().0 + 1;
+            w.step(&[cast_slot(0, 2, r_tick, 0, 3, (2000.0, 1000.0))]);
+            let u = w.unit(me).unwrap();
+            let (q_at, r_at) = (SimTime::end_of(Tick(1)).0, SimTime::end_of(Tick(r_tick - 1)).0);
+            let (q, r) = (u.state.cooldowns[0].0 - q_at, u.state.cooldowns[3].0.saturating_sub(r_at));
+            (q, r, u.attack.unwrap().attack_speed, u.state.progress.hyper)
+        };
+        let (aram, hyper) = (cooldowns(Rules::ARAM), cooldowns(Rules::HYPER));
+        assert!(hyper.3 && !aram.3);
+        assert!(hyper.0.abs_diff(aram.0 / 4) <= 1, "Q: {} → {} sub-ticks", aram.0, hyper.0);
+        assert!(aram.1 > 0, "R was cast");
+        assert_eq!(aram.1, hyper.1, "R keeps its cooldown");
+        assert!((hyper.2 / aram.2 - (1.0 + HYPER_ATTACK_SPEED)).abs() < 1e-4, "{} → {}", aram.2, hyper.2);
+    }
+
     /// M3 slice 4: conditional damage augments multiply onto the hit (server side).
     #[test]
     fn conditional_augments_amp_damage() {
@@ -4457,7 +4503,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0xe0ff_038c_b640_ffba;
+    const GOLDEN_HASH_ARENA: u64 = 0x1dfc_9c1c_800c_bd5e;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -4513,7 +4559,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x524f_82f7_c5d7_b02b;
+    const GOLDEN_HASH_BRIDGE: u64 = 0xbdac_cac8_5203_6fbb;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -4584,5 +4630,5 @@ mod tests {
 
     /// Recorded on x86_64-unknown-linux-gnu (debug and release agree). CI checks Linux, macOS
     /// (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x0bd8_38a3_d146_c77d;
+    const GOLDEN_HASH: u64 = 0x33d3_0ff2_1b78_05ed;
 }

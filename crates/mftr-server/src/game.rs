@@ -73,6 +73,7 @@ impl Match {
         match cfg.scenario {
             Scenario::Aram => world.set_rules(mftr_sim::world::Rules::ARAM),
             Scenario::Mayhem => world.set_rules(mftr_sim::world::Rules::MAYHEM),
+            Scenario::Hyper => world.set_rules(mftr_sim::world::Rules::HYPER),
             _ => {}
         }
         populate(&mut world, cfg.scenario);

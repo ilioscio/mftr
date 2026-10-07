@@ -144,7 +144,7 @@ Without NixOS, `nix build github:ilioscio/mftr` gives `result/bin/mftr-server`.
 | `--bind ADDR` | `0.0.0.0:7777` | Address and UDP port to listen on. |
 | `--key FILE` | `server.key` | The server's key, created on first start (see below). |
 | `--fingerprint` | | Print the key's fingerprint and exit. |
-| `--scenario NAME` | `duel` (`aram` in Docker) | `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM: Mayhem, ARAM with augment drafts. `duel`: the Duel Sandbox. `minions`, `dodge`, `empty`: test grounds. |
+| `--scenario NAME` | `duel` (`aram` in Docker) | `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM: Mayhem, ARAM with augment drafts. `hyper`: Mayhem under Hyper rules (+300 ability haste on Q, W and E, +50% attack speed). `duel`: the Duel Sandbox. `minions`, `dodge`, `empty`: test grounds. |
 | `--bots N` | `0` (`10` in Docker) | Server bots. They count toward the player limit, and with `--lobby` a joining human takes a bot's place. |
 | `--lobby` | off (on in Docker) | Champion select before each match: ARAM all-random, 2 rerolls each, a team bench. Starts 3 s after everyone is ready, or after 60 s. |
 | `--max-players N` | `10` | Players (humans and bots) per game. Up to 8 spectators come on top. |

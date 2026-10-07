@@ -362,6 +362,9 @@ pub fn apply_items(
             _ => {}
         }
     }
+    if growth.hyper {
+        pct.attack_speed += crate::world::HYPER_ATTACK_SPEED;
+    }
     // Size forms (Titan, Pebble, Unstable Experiment).
     match form {
         crate::augments::Form::Huge => {

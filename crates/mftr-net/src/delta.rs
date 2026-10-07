@@ -82,8 +82,15 @@ pub fn diff(base: Option<&RemoteUnit>, current: &RemoteUnit, ticks: u32) -> (Opt
     if flags(b) != flags(current) {
         mask |= FLAGS;
     }
-    if (b.kind, b.team, b.collision_radius, b.gameplay_radius, b.champion)
-        != (current.kind, current.team, current.collision_radius, current.gameplay_radius, current.champion)
+    if (b.kind, b.team, b.collision_radius, b.gameplay_radius, b.champion, b.augments)
+        != (
+            current.kind,
+            current.team,
+            current.collision_radius,
+            current.gameplay_radius,
+            current.champion,
+            current.augments,
+        )
     {
         mask |= STATIC;
     }
@@ -101,8 +108,8 @@ pub fn apply(base: Option<&RemoteUnit>, update: Option<&UnitUpdate>, ticks: u32)
     let Some(u) = update else { return Some(r) };
     let n = &u.unit;
     if u.mask & STATIC != 0 {
-        (r.kind, r.team, r.collision_radius, r.gameplay_radius, r.champion) =
-            (n.kind, n.team, n.collision_radius, n.gameplay_radius, n.champion);
+        (r.kind, r.team, r.collision_radius, r.gameplay_radius, r.champion, r.augments) =
+            (n.kind, n.team, n.collision_radius, n.gameplay_radius, n.champion, n.augments);
     }
     if u.mask & POS != 0 {
         r.pos = n.pos;
@@ -162,6 +169,7 @@ mod tests {
             gameplay_radius: 48,
             protected: false,
             champion: None,
+            augments: [0; 4],
             health: 300,
             max_health: 300,
             shield: 0,

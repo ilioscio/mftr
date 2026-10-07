@@ -26,6 +26,9 @@ pub struct LabConfig {
     pub reaction: f64,
     /// Fault injection: force every client's input margin (validates the ghost-hit detector).
     pub margin_override: Option<f64>,
+    /// Stress tests: every champion holds these augments (granted on the server, so the
+    /// recording no longer re-simulates).
+    pub augments: Option<[u8; mftr_sim::augments::SLOTS]>,
 }
 
 enum Bot {
@@ -81,7 +84,9 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                 down: SimLink::new(cfg.profile, s * 2 + 2),
                 bot: match cfg.scenario {
                     Scenario::DodgeRig => Bot::Dodge(DodgeBot::new(s, cfg.reaction)),
-                    Scenario::Duel | Scenario::Aram | Scenario::Mayhem => Bot::Duel(DuelBot::new(s, cfg.reaction)),
+                    Scenario::Duel | Scenario::Aram | Scenario::Mayhem | Scenario::Hyper => {
+                        Bot::Duel(DuelBot::new(s, cfg.reaction))
+                    }
                     _ => Bot::Click(ClickBot::new(s)),
                 },
                 jumps: JumpMeter::default(),
@@ -116,6 +121,14 @@ pub fn run(cfg: &LabConfig) -> LabResult {
         }
         // Server tick.
         if t >= server.next_tick_due() {
+            if let Some(held) = cfg.augments {
+                let champions: Vec<_> =
+                    server.world().units().iter().filter(|u| u.champion.is_some()).map(|u| u.id).collect();
+                for id in champions {
+                    let p = &mut server.world_mut().unit_mut(id).unwrap().state.progress;
+                    (p.augments, p.drafted, p.offer) = (held, mftr_sim::augments::SLOTS as u8, [0; 3]);
+                }
+            }
             let started = std::time::Instant::now();
             let packets = server.step(t);
             let cost = started.elapsed().as_secs_f64() * 1e3;
@@ -218,6 +231,7 @@ mod tests {
             proxies,
             reaction: 0.25,
             margin_override: None,
+            augments: None,
         })
     }
 
@@ -239,6 +253,7 @@ mod tests {
                 proxies: true,
                 reaction: 0.25,
                 margin_override: None,
+                augments: None,
             })
             .summary
         };
@@ -286,6 +301,7 @@ mod tests {
             proxies,
             reaction: 0.25,
             margin_override: None,
+            augments: None,
         })
     }
 
@@ -315,6 +331,7 @@ mod tests {
             proxies: true,
             reaction,
             margin_override,
+            augments: None,
         })
         .summary
     }
@@ -348,6 +365,7 @@ mod tests {
             proxies: true,
             reaction: 0.25,
             margin_override: None,
+            augments: None,
         });
         assert_eq!(r.fog_violations, 0);
         assert!(r.fog_hidden > 10_000, "fog should be hiding things: {}", r.fog_hidden);
@@ -378,6 +396,7 @@ mod tests {
             proxies: true,
             reaction: 0.25,
             margin_override: None,
+            augments: None,
         });
         let s = &r.summary;
         assert_eq!(s.hard_resets, 0, "{}", s.row());
@@ -406,6 +425,7 @@ mod tests {
             proxies: true,
             reaction: 0.25,
             margin_override: None,
+            augments: None,
         });
         let s = &r.summary;
         assert_eq!(s.hard_resets, 0, "{}", s.row());
@@ -427,6 +447,37 @@ mod tests {
         assert_eq!(check.final_hash, r.server_hash);
     }
 
+    /// M3 exit: ARAM: Mayhem under Hyper rules, every champion with Multishot, Echo and
+    /// Broadside, ten clients over the MID link. Downstream stays within the 32 KB/s per client
+    /// target and the server within its 3 ms tick budget, with no hard resets, no fog leaks,
+    /// and dodges judged as the server judges them (a volley hits each champion once).
+    #[test]
+    fn hyper_multishot_stress_stays_within_budgets() {
+        let r = run(&LabConfig {
+            profile: LinkProfile::MID,
+            clients: 10,
+            seconds: 40.0,
+            seed: 1,
+            fps: 60.0,
+            warmup: 5.0,
+            scenario: Scenario::Hyper,
+            proxies: true,
+            reaction: 0.25,
+            margin_override: None,
+            augments: Some([24, 25, 26, 0]),
+        });
+        let s = &r.summary;
+        assert_eq!(s.hard_resets, 0, "{}", s.row());
+        assert_eq!(r.fog_violations, 0);
+        assert!(s.dodge.enemy_missiles >= 600, "the stress happened: {}", s.dodge_row());
+        assert!(s.down_kbps < 32.0, "{}", s.row());
+        assert!(r.tick_ms_mean < 3.0, "tick {:.3} ms (max {:.3})", r.tick_ms_mean, r.tick_ms_max);
+        assert!(s.ghost_rate() < 0.02, "{}", s.dodge_row());
+        // Phantom hits (shown, not dealt) run near 4% here against 2% without Multishot: three
+        // missiles per cast triple the chances that a proxy misses an interception.
+        assert!((s.dodge.phantom_hits as f64) <= 0.06 * s.dodge.near_misses as f64, "{}", s.dodge_row());
+    }
+
     /// M2 slice 1: ARAM on The Bridge with 3v3 bots (waves, turrets, relics, fountains): stable
     /// prediction, nothing leaked through fog, and every bot both kills and dies.
     #[test]
@@ -442,6 +493,7 @@ mod tests {
             proxies: true,
             reaction: 0.25,
             margin_override: None,
+            augments: None,
         });
         let s = &r.summary;
         assert_eq!(s.hard_resets, 0, "{}", s.row());

@@ -60,6 +60,8 @@ pub enum Scenario {
     Aram,
     /// M3: ARAM: Mayhem, ARAM with augment drafts (06 §3).
     Mayhem,
+    /// M3: ARAM: Mayhem under Hyper rules (06 §2): much faster basic abilities and attacks.
+    Hyper,
 }
 
 impl Scenario {
@@ -68,7 +70,7 @@ impl Scenario {
         match self {
             Scenario::Empty => MapId::Open,
             Scenario::MinionSandbox | Scenario::DodgeRig | Scenario::Duel => MapId::Arena,
-            Scenario::Aram | Scenario::Mayhem => MapId::Bridge,
+            Scenario::Aram | Scenario::Mayhem | Scenario::Hyper => MapId::Bridge,
         }
     }
 
@@ -80,6 +82,7 @@ impl Scenario {
             "duel" => Some(Scenario::Duel),
             "aram" => Some(Scenario::Aram),
             "mayhem" => Some(Scenario::Mayhem),
+            "hyper" => Some(Scenario::Hyper),
             _ => None,
         }
     }
@@ -93,6 +96,7 @@ impl Scenario {
             Scenario::Duel => msg::GameMode::Duel,
             Scenario::Aram => msg::GameMode::Aram,
             Scenario::Mayhem => msg::GameMode::Mayhem,
+            Scenario::Hyper => msg::GameMode::Hyper,
         }
     }
 
@@ -104,12 +108,13 @@ impl Scenario {
             Scenario::Duel => "duel",
             Scenario::Aram => "aram",
             Scenario::Mayhem => "mayhem",
+            Scenario::Hyper => "hyper",
         }
     }
 
     /// ARAM and its variants: The Bridge, a full match with champion select.
     pub fn is_aram(self) -> bool {
-        matches!(self, Scenario::Aram | Scenario::Mayhem)
+        matches!(self, Scenario::Aram | Scenario::Mayhem | Scenario::Hyper)
     }
 }
 
@@ -649,6 +654,7 @@ impl ServerCore {
                     gameplay_radius: u.gameplay_radius.round().clamp(0.0, 255.0) as u8,
                     protected: u.protected,
                     champion: u.champion,
+                    augments: if u.champion.is_some() { st.progress.augments } else { [0; mftr_sim::augments::SLOTS] },
                     health: hp(st.health.max(if st.alive() { 1.0 } else { 0.0 })),
                     max_health: hp(u.stats.max_health),
                     shield: hp(if st.shield_until > s1 { st.shield } else { 0.0 }),

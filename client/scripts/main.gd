@@ -1113,6 +1113,7 @@ func _draw_overlay() -> void:
 		var hp: float = own_status.get("health", 0.0)
 		var mx: float = own_status.get("max_health", 1.0)
 		_draw_bar(own_body.position + Vector3(0, 1.25, 0), Vector2(104, 11), hp, mx, own_status.get("shield", 0.0), Color(0.3, 0.85, 0.35))
+		_draw_augment_pips(font, own_body.position + Vector3(0, 1.25, 0), own_status.get("augments", []))
 	for id in remote_info:
 		var u: Dictionary = remote_info[id]
 		if u.kind == "relic" or not remote_bodies.has(id):
@@ -1123,6 +1124,8 @@ func _draw_overlay() -> void:
 		var size := Vector2(104, 11) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
 		var lift := 1.25 if champ else (2.6 if structure else 0.6)
 		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color)
+		if champ:
+			_draw_augment_pips(font, remote_bodies[id].position + Vector3(0, lift, 0), u.get("augments", []))
 		if champ and u.level > 0:
 			var sp = _screen(remote_bodies[id].position + Vector3(0, lift, 0))
 			if sp != null:
@@ -1138,6 +1141,28 @@ func _draw_overlay() -> void:
 	for n in notices:
 		overlay.draw_string(font, Vector2(overlay.size.x - 420, y), n.text, HORIZONTAL_ALIGNMENT_RIGHT, 400, 18, Color(1, 1, 1, clampf(4.0 - n.age, 0.0, 1.0)))
 		y += 24.0
+
+
+## Augment indicators (06 §3: no invisible power): one tier-colored diamond per held augment,
+## marked with its initial, in a row above a champion's health bar.
+func _draw_augment_pips(font: Font, world: Vector3, held: Array) -> void:
+	if held.is_empty():
+		return
+	var s = _screen(world)
+	if s == null:
+		return
+	var step := 18.0
+	var x0: float = s.x - step * (held.size() - 1) / 2.0
+	for i in held.size():
+		var a: Dictionary = held[i]
+		var c := Vector2(x0 + step * i, s.y - 20)
+		var r := 8.0
+		var pts := PackedVector2Array([c + Vector2(0, -r), c + Vector2(r, 0), c + Vector2(0, r), c + Vector2(-r, 0)])
+		overlay.draw_colored_polygon(pts, _tier_color(a.get("tier", "")).darkened(0.35))
+		pts.append(pts[0])
+		overlay.draw_polyline(pts, _tier_color(a.get("tier", "")), 1.5)
+		var initial: String = String(a.get("name", "?")).left(1)
+		overlay.draw_string(font, c + Vector2(-6, 4), initial, HORIZONTAL_ALIGNMENT_CENTER, 12, 10, Color.WHITE)
 
 
 func _draw_bar(world: Vector3, size: Vector2, hp: float, max_hp: float, shield: float, color: Color) -> void:

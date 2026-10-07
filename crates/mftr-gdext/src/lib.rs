@@ -781,8 +781,8 @@ impl MatchClient {
     }
 
     /// Remote units to draw. Each entry: `{ id, pos: Vector2, minion, turret, champion (name or
-    /// ""), red, ally, radius (collision), gameplay_radius, health, max_health, shield,
-    /// stunned, rooted, attacking, dashing, windup?, windup_dir? }`.
+    /// ""), red, ally, radius (collision), gameplay_radius, augments ([{ name, tier }]),
+    /// health, max_health, shield, stunned, rooted, attacking, dashing, windup?, windup_dir? }`.
     /// Champions are on `T_interp`; minions near us blend toward `T_input` (03a §5).
     #[func]
     fn remote_units(&self) -> VarArray {
@@ -811,6 +811,14 @@ impl MatchClient {
             d.set("shield", u.shield);
             d.set("level", u.level as i64);
             d.set("gameplay_radius", u.gameplay_radius);
+            let mut held = VarArray::new();
+            for a in u.augments.iter().filter_map(|id| augments::augment(*id)) {
+                let mut c = VarDictionary::new();
+                c.set("name", a.name);
+                c.set("tier", a.tier.name());
+                held.push(&c.to_variant());
+            }
+            d.set("augments", &held);
             d.set("attacking", u.attacking);
             d.set("rooted", u.rooted);
             d.set("dashing", u.dashing);

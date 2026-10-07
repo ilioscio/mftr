@@ -125,6 +125,8 @@ pub struct RemoteUnit {
     /// A structure that can't be hurt yet (an earlier one in its lane still stands).
     pub protected: bool,
     pub champion: Option<ChampionId>,
+    /// Held augments (ARAM: Mayhem): shown as indicators above the health bar (06 §3).
+    pub augments: [u8; mftr_sim::augments::SLOTS],
     /// Whole health points (16 bits each): confirmed values only (03a §7).
     pub health: u16,
     pub max_health: u16,
@@ -204,6 +206,7 @@ pub enum GameMode {
     Duel = 3,
     Aram = 4,
     Mayhem = 5,
+    Hyper = 6,
 }
 
 impl GameMode {
@@ -215,6 +218,7 @@ impl GameMode {
             3 => GameMode::Duel,
             4 => GameMode::Aram,
             5 => GameMode::Mayhem,
+            6 => GameMode::Hyper,
             _ => return None,
         })
     }
@@ -228,6 +232,7 @@ impl GameMode {
             GameMode::Duel => "Duel Sandbox",
             GameMode::Aram => "ARAM",
             GameMode::Mayhem => "ARAM: Mayhem",
+            GameMode::Hyper => "ARAM: Mayhem (Hyper)",
         }
     }
 }
@@ -820,6 +825,7 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     w.write_bool(p.unstable_tiny);
     w.write(p.stacks as u64, 16);
     w.write_u8(p.takedowns);
+    w.write_bool(p.hyper);
     write_time(w, s.spellblade_until);
 }
 
@@ -925,6 +931,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let unstable_tiny = r.read_bool()?;
     let stacks = r.read(16)? as u16;
     let takedowns = r.read_u8()?;
+    let hyper = r.read_bool()?;
     let spellblade_until = read_time(r)?;
     let progress = Progress {
         level,
@@ -945,6 +952,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         unstable_tiny,
         stacks,
         takedowns,
+        hyper,
     };
     Ok(UnitState {
         pos,
@@ -994,6 +1002,15 @@ fn write_update(w: &mut BitWriter, u: &UnitUpdate) {
         w.write_u8(o.collision_radius);
         w.write_u8(o.gameplay_radius);
         write_champion(w, o.champion);
+        if o.champion.is_some() {
+            let held = o.augments != [0; mftr_sim::augments::SLOTS];
+            w.write_bool(held);
+            if held {
+                for a in o.augments {
+                    w.write_u8(a);
+                }
+            }
+        }
     }
     if u.mask & delta::POS != 0 {
         write_qpoint(w, o.pos);
@@ -1034,6 +1051,7 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         gameplay_radius: 0,
         protected: false,
         champion: None,
+        augments: [0; mftr_sim::augments::SLOTS],
         health: 0,
         max_health: 0,
         shield: 0,
@@ -1051,6 +1069,11 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         o.collision_radius = r.read_u8()?;
         o.gameplay_radius = r.read_u8()?;
         o.champion = read_champion(r)?;
+        if o.champion.is_some() && r.read_bool()? {
+            for a in o.augments.iter_mut() {
+                *a = r.read_u8()?;
+            }
+        }
     }
     if mask & delta::POS != 0 {
         o.pos = read_qpoint(r)?;
@@ -1212,6 +1235,7 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             w.write_f32(rules.passive_gold);
             w.write_bool(rules.ranked);
             w.write_bool(rules.augments);
+            w.write_bool(rules.hyper);
             w.write_u32(tick.0);
             w.write_u8(*tick_hz);
             w.write_u32(*since_tick_us);
@@ -1331,6 +1355,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 passive_gold: read_finite(&mut r)?,
                 ranked: r.read_bool()?,
                 augments: r.read_bool()?,
+                hyper: r.read_bool()?,
             },
             tick: Tick(r.read_u32()?),
             tick_hz: r.read_u8()?,
@@ -1578,6 +1603,7 @@ mod tests {
                 unstable_tiny: true,
                 stacks: 37,
                 takedowns: 5,
+                hyper: true,
             },
             spellblade_until: SimTime(88_888),
         }
@@ -1673,6 +1699,7 @@ mod tests {
             gameplay_radius: 220,
             protected: true,
             champion,
+            augments: if champion.is_some() { [24, 52, 0, 0] } else { [0; 4] },
             health: 512,
             max_health: 620,
             shield: 150,
@@ -1819,9 +1846,9 @@ mod tests {
             unit: UnitId(40),
             team: Team::Red,
             map: MapId::Arena,
-            champion: ChampionId::Vesper,
+            champion: ChampionId::Wren,
             home: Vec2::new(3400.0, 2000.0),
-            rules: Rules::ARAM,
+            rules: Rules::HYPER,
             tick: Tick(77),
             tick_hz: 30,
             since_tick_us: 12,

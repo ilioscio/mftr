@@ -330,6 +330,25 @@ Four more placeholder champions (original kits, D36), built from the existing sh
 - All four pass the D10 reaction budget and the hard-CC classification; prediction stays bit-exact through every kit. Bots play them with build paths of their own.
 - The wire's champion field grows to 5 bits (room for 31). Godot client: a silhouette and identity color each; the menu and ARAM pick from all ten.
 
+### M3 slice 6 status (2026-10-07): ✅ done
+- **Hyper** (D47): `--scenario hyper` is Mayhem with +300 ability haste on Q, W and E and +50% attack speed.
+- **Augment indicators:** every champion's augments show as tier-colored diamonds above its health bar; the client also shows Spellhunger stacks and quest progress.
+- **Volley rule on the client:** the display predicts one hit on us per enemy volley, as the server rules. Before, Multishot made every missile of a volley look like a hit.
+
+**Stress exit (Netcode Lab, release build, MID link, 10 clients under Hyper, every champion with Multishot + Echo + Broadside, 60 s):**
+
+| Metric | Result | Budget |
+|---|---|---|
+| Download per client | 11.0 KB/s | 32 KB/s |
+| Upload per client | 1.1 KB/s | — |
+| Server tick (mean / max) | 0.18 ms / 1.6 ms | 3 ms |
+| Enemy missiles judged | 1,635 | — |
+| Ghost hits | 0 on seeds 1–3 | < 2% of near-misses |
+| Phantom hits | 2–5% of near-misses (2% without Multishot) | — |
+| Hard resets, fog leaks | 0, 0 | 0 |
+
+The same check runs in CI as a 40 s lab test. **Left for the M3 exit:** playtesters rating Mayhem fun.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.

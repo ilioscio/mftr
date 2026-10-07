@@ -172,10 +172,12 @@ pub struct Growth {
     pub unstable_tiny: bool,
     pub stacks: u16,
     pub chaos_done: bool,
+    /// Hyper rules (not an augment, but part of the same stat stack).
+    pub hyper: bool,
 }
 
 impl Growth {
-    pub const NONE: Growth = Growth { unstable_tiny: false, stacks: 0, chaos_done: false };
+    pub const NONE: Growth = Growth { unstable_tiny: false, stacks: 0, chaos_done: false, hyper: false };
 }
 
 /// Champion of Chaos's reward.

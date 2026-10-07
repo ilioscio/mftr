@@ -43,6 +43,14 @@ fn main() {
                     proxies: !args.iter().any(|a| a == "--no-proxies"),
                     reaction: num("--reaction", 0.25),
                     margin_override: get("--margin-override").map(|v| v.parse::<f64>().expect("seconds")),
+                    // `--augments 24,25,26`: every champion holds these (stress runs).
+                    augments: get("--augments").map(|v| {
+                        let mut held = [0u8; mftr_sim::augments::SLOTS];
+                        for (slot, id) in held.iter_mut().zip(v.split(',')) {
+                            *slot = id.trim().parse().expect("augment id");
+                        }
+                        held
+                    }),
                 };
                 let r = netlab::run(&cfg);
                 println!(
@@ -55,10 +63,13 @@ fn main() {
                     r.tick_ms_mean,
                     r.tick_ms_max
                 );
-                if matches!(cfg.scenario, Scenario::DodgeRig | Scenario::Duel | Scenario::Aram | Scenario::Mayhem) {
+                if matches!(
+                    cfg.scenario,
+                    Scenario::DodgeRig | Scenario::Duel | Scenario::Aram | Scenario::Mayhem | Scenario::Hyper
+                ) {
                     println!("{}", r.summary.dodge_row());
                 }
-                if matches!(cfg.scenario, Scenario::Duel | Scenario::Aram | Scenario::Mayhem) {
+                if matches!(cfg.scenario, Scenario::Duel | Scenario::Aram | Scenario::Mayhem | Scenario::Hyper) {
                     println!("{}", r.summary.duel_row());
                 }
             }
@@ -68,7 +79,13 @@ fn main() {
             let cfg = mftr_server::ServerConfig {
                 seed: num("--seed", 1.0) as u64,
                 bots: num("--bots", 10.0) as u8,
-                scenario: if args.iter().any(|a| a == "--mayhem") { Scenario::Mayhem } else { Scenario::Aram },
+                scenario: if args.iter().any(|a| a == "--hyper") {
+                    Scenario::Hyper
+                } else if args.iter().any(|a| a == "--mayhem") {
+                    Scenario::Mayhem
+                } else {
+                    Scenario::Aram
+                },
                 ..Default::default()
             };
             let minutes = num("--minutes", 40.0);
