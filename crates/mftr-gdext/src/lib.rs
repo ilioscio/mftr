@@ -63,6 +63,49 @@ struct BlindSession {
     base: RoundStats,
 }
 
+impl MatchClient {
+    /// Every champion this client knows about, by unit: its own and the remote ones.
+    fn champions_by_unit(&self) -> std::collections::BTreeMap<UnitId, ChampionId> {
+        let mut out: std::collections::BTreeMap<UnitId, ChampionId> = self
+            .session
+            .remote_render_units(self.now())
+            .into_iter()
+            .filter_map(|u| u.champion.map(|c| (u.id, c)))
+            .collect();
+        if !self.session.is_spectator() {
+            out.insert(self.session.unit(), self.session.champion());
+        }
+        out
+    }
+}
+
+const ACTIONS: [&str; SLOTS] = ["q", "w", "e", "r", "d", "f"];
+
+/// Which ability of `champion` produced a line of `radius` (A4b: picks its VFX). Matches the
+/// kit's widths, Broadside-widened too; `None` if nothing matches (turret shots).
+fn line_action(champion: ChampionId, radius: f32) -> Option<&'static str> {
+    (0..SLOTS as u8).find_map(|slot| match champion.ability(slot)?.effect {
+        mftr_sim::ability::Effect::Line(l)
+            if (l.radius - radius).abs() < 0.5 || (l.radius * augments::WIDE_LINE - radius).abs() < 0.5 =>
+        {
+            Some(ACTIONS[slot as usize])
+        }
+        _ => None,
+    })
+}
+
+/// The same for a delayed area of `radius`.
+fn area_action(champion: ChampionId, radius: f32) -> Option<&'static str> {
+    (0..SLOTS as u8).find_map(|slot| match champion.ability(slot)?.effect {
+        mftr_sim::ability::Effect::Area(a)
+            if (a.radius - radius).abs() < 0.5 || (a.radius * augments::WIDE_AREA - radius).abs() < 0.5 =>
+        {
+            Some(ACTIONS[slot as usize])
+        }
+        _ => None,
+    })
+}
+
 fn side_name(side: Side) -> &'static str {
     match side {
         Side::Own => "own",
@@ -511,8 +554,13 @@ impl MatchClient {
     #[func]
     fn areas(&self) -> VarArray {
         let mut out = VarArray::new();
+        let champions = self.champions_by_unit();
         for a in self.session.areas_render(self.now()) {
             let mut d = VarDictionary::new();
+            let champion = champions.get(&a.owner).copied();
+            d.set("owner", a.owner.0 as i64);
+            d.set("champion", champion.map_or("", |c| c.def().name));
+            d.set("action", champion.and_then(|c| area_action(c, a.radius)).unwrap_or(""));
             d.set("key", a.key as i64);
             d.set("center", Vector2::new(a.center.x, a.center.y));
             d.set("radius", a.radius);
@@ -529,8 +577,11 @@ impl MatchClient {
     #[func]
     fn bolts(&self) -> VarArray {
         let mut out = VarArray::new();
+        let champions = self.champions_by_unit();
         for b in self.session.bolts_render(self.now()) {
             let mut d = VarDictionary::new();
+            d.set("owner", b.owner.0 as i64);
+            d.set("champion", champions.get(&b.owner).map_or("", |c| c.def().name));
             d.set("key", b.key as i64);
             d.set("pos", Vector2::new(b.pos.x, b.pos.y));
             d.set("dir", Vector2::new(b.dir.x, b.dir.y));
@@ -608,8 +659,12 @@ impl MatchClient {
     #[func]
     fn missiles(&self) -> VarArray {
         let mut out = VarArray::new();
+        let champions = self.champions_by_unit();
         for m in self.session.missiles_render(self.now()) {
             let mut d = VarDictionary::new();
+            let champion = champions.get(&m.owner).copied();
+            d.set("champion", champion.map_or("", |c| c.def().name));
+            d.set("action", champion.and_then(|c| line_action(c, m.radius)).unwrap_or(""));
             d.set("key", m.key as i64);
             d.set("pos", Vector2::new(m.pos.x, m.pos.y));
             d.set("dir", Vector2::new(m.dir.x, m.dir.y));
@@ -654,6 +709,19 @@ impl MatchClient {
         }
         d.set("fountains", &fountains);
         d
+    }
+
+    /// The action (`q`…`f`) a champion's dash or lunge sits on, or "" (A4b: dash VFX).
+    #[func]
+    fn dash_action(&self, champion: GString) -> GString {
+        let Some(c) = ChampionId::by_name(&champion.to_string()) else { return GString::new() };
+        let slot = (0..SLOTS as u8).find(|s| {
+            matches!(
+                c.ability(*s).map(|a| a.effect),
+                Some(mftr_sim::ability::Effect::Dash(_) | mftr_sim::ability::Effect::Lunge(_))
+            )
+        });
+        GString::from(slot.map_or("", |s| ACTIONS[s as usize]))
     }
 
     /// Own champion on the input timeline: `{ champion, health, max_health, shield, dead,

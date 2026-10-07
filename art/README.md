@@ -7,11 +7,13 @@ art/
 ├─ rigs/biped_v1.blend            # the biped v1 reference skeleton + faceted template mesh
 │  └─ export/biped_v1.glb (+ .anims.ron)
 ├─ library/biped/biped_library.blend   # shared clips: walk, cast_utility, attack_melee_alt, cc_*
-│  └─ export/biped_library.glb (+ .anims.ron)
+│  └─ export/biped_library.glb (+ .anims.ron, .vfx.ron)
 └─ champions/<id>/                 # one folder per champion (see champions/README.md)
 ```
 
 `.blend` files are the source of truth. `export/` holds generated files that are committed so CI (and the game) can check and load them without Blender. `review/` folders hold generated renders and are git-ignored.
+
+The exception is `<id>.vfx.ron`. It is **authored by hand** next to the `.glb`, and the exporter never touches it. It picks effects from the client's VFX kit for each `<action>.<phase>` ([11 §3.1](../docs/design/11-content-packs-and-mods.md#31-vfx-files)). The library's file holds the defaults that every champion falls back to. `pack validate` checks it with the model.
 
 ## Setup
 

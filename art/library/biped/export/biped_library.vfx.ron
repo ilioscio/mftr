@@ -1,0 +1,13 @@
+// The shared VFX (A4b, 05 §5): what champions without their own play. Authored by hand (the
+// Blender export doesn't touch it); validated by `mftr-tools pack validate` (11 §4).
+// Events are <action>.<phase>; `*` matches any action. Ramps run from birth to death.
+(
+    effects: [
+        (event: "*.release", kit: "flare", ramp: [(1.0, 1.0, 0.95), (1.0, 0.85, 0.55), (0.75, 0.55, 0.35)], count: 5),
+        (event: "*.impact", kit: "burst", ramp: [(1.0, 1.0, 0.9), (1.0, 0.8, 0.45), (0.8, 0.45, 0.2), (0.35, 0.25, 0.2)]),
+        (event: "*.detonate", kit: "burst", ramp: [(1.0, 1.0, 0.85), (1.0, 0.7, 0.3), (0.6, 0.3, 0.15), (0.25, 0.22, 0.2)], count: 24, speed: 4.5),
+        (event: "*.detonate", kit: "ring", ramp: [(1.0, 0.95, 0.75), (0.9, 0.6, 0.3), (0.45, 0.35, 0.3)]),
+        (event: "*.start", kit: "dust", ramp: [(0.62, 0.56, 0.46), (0.5, 0.46, 0.4), (0.38, 0.36, 0.33)]),
+        (event: "*.land", kit: "dust", ramp: [(0.62, 0.56, 0.46), (0.5, 0.46, 0.4), (0.38, 0.36, 0.33)], count: 10),
+    ],
+)

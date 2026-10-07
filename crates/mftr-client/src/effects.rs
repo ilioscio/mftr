@@ -35,6 +35,8 @@ pub struct AreaRender {
     pub detonated: bool,
     /// Stuns, roots, knocks up or pulls (drawn with the hard-CC accent).
     pub hard_cc: bool,
+    /// The caster (its champion's VFX, A4b).
+    pub owner: UnitId,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,6 +45,8 @@ pub struct BoltRender {
     pub side: Side,
     pub pos: Vec2,
     pub dir: Vec2,
+    /// The attacker (its champion's VFX, A4b).
+    pub owner: UnitId,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -141,6 +145,7 @@ impl EffectBook {
                 progress,
                 detonated: at >= d,
                 hard_cc: a.cc.is_hard(),
+                owner: a.owner,
             });
         };
         for (&(seq, shot), a) in &self.predicted_areas {
@@ -168,7 +173,7 @@ impl EffectBook {
                 return; // arrived where the target is drawn; damage shows when confirmed
             }
             let dir = to.normalize_or_zero();
-            out.push(BoltRender { key, side, pos: b.origin + dir * flown, dir });
+            out.push(BoltRender { key, side, pos: b.origin + dir * flown, dir, owner: b.owner });
         };
         for (at, b) in &self.predicted_bolts {
             push(u32::MAX - (at.0 as u32), b, Side::Own, None);

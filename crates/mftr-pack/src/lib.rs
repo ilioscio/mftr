@@ -12,6 +12,7 @@ pub mod pose;
 pub mod rules;
 pub mod sidecar;
 pub mod validate;
+pub mod vfx;
 
 pub use validate::{Finding, Level, Report, validate, validate_model};
 
@@ -26,6 +27,13 @@ pub fn sidecar_path(glb: &Path) -> PathBuf {
 pub struct Loaded {
     pub model: glb::Model,
     pub library: pose::Library,
+    /// `<id>.vfx.ron`, when the pack ships one (A4b).
+    pub vfx: Option<vfx::VfxFile>,
+}
+
+/// A pack's optional VFX file: `<id>.glb` → `<id>.vfx.ron`.
+pub fn vfx_path(glb: &Path) -> PathBuf {
+    glb.with_extension("vfx.ron")
 }
 
 /// Reads, validates and parses `<id>.glb` and its sidecar. Refuses anything with errors: the
@@ -41,20 +49,39 @@ pub fn load_file(glb_path: &Path) -> Result<Loaded, String> {
     let model = glb::parse(&bytes)?;
     let side = sidecar::parse(&text)?;
     let library = pose::Library::new(&model, &side)?;
-    Ok(Loaded { model, library })
+    let vfx_file = vfx_path(glb_path);
+    let vfx = if vfx_file.exists() {
+        Some(vfx::parse(&std::fs::read_to_string(&vfx_file).map_err(|e| e.to_string())?)?)
+    } else {
+        None
+    };
+    Ok(Loaded { model, library, vfx })
 }
 
 /// Reads and validates `<id>.glb` and its sidecar from disk.
 pub fn validate_file(glb_path: &Path) -> Report {
     let read = |p: &Path| std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()));
     let side_path = sidecar_path(glb_path);
-    match (read(glb_path), read(&side_path)) {
+    let mut report = match (read(glb_path), read(&side_path)) {
         (Ok(g), Ok(s)) => match String::from_utf8(s) {
             Ok(text) => validate(&g, &text),
             Err(_) => error_report(format!("{}: not UTF-8", side_path.display())),
         },
         (Err(e), _) | (_, Err(e)) => error_report(e),
+    };
+    let vfx_file = vfx_path(glb_path);
+    if vfx_file.exists() {
+        let problems = match std::fs::read_to_string(&vfx_file).map_err(|e| e.to_string()).and_then(|t| vfx::parse(&t))
+        {
+            Ok(f) => {
+                report.summary.push(format!("vfx: {} effects", f.effects.len()));
+                vfx::check(&f)
+            }
+            Err(e) => vec![e],
+        };
+        report.findings.extend(problems.into_iter().map(|msg| Finding { level: Level::Error, msg }));
     }
+    report
 }
 
 fn error_report(msg: String) -> Report {
