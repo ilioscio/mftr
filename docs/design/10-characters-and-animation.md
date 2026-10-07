@@ -34,7 +34,7 @@ Decided with the owner (D48). The reference is a reduced-poly reimagining of the
 
 Measured in [R04 §1](reference/R04-video-facing-and-attack-animation.md#1-facing): the reference turns ~150–180° in ~2 frames (≈ 33 ms) with one in-between pose. The run cycle keeps playing through the turn, and nothing turns before the server confirms the order.
 
-- **Facing is sim state** (`facing`, quantized to 10 bits on the wire as planned in [03](03-netcode.md)). It's deterministic, predicted for our own champion and available to future mechanics (backstabs, facing-based shields, "turn away" fears).
+- **Facing is sim state** (`facing`, a unit vector; exact for the own champion, 10 bits on the wire for others, as planned in [03](03-netcode.md)). It's deterministic, predicted for our own champion and available to future mechanics (backstabs, facing-based shields, "turn away" fears).
 - **Sim rules:** facing snaps to the current path segment while moving; to the target at windup start for attacks and targeted casts; to the aim direction at windup start for skillshots; and to the travel direction for dashes and lunges. During a windup it tracks a committed target. It doesn't change while stunned, rooted (unless casting) or idle.
 - **Display:** the drawn facing approaches the sim facing at **4,500 °/s** *(start)*, so 180° takes ≈ 40 ms, matching the reference's one in-between frame. There's no easing and no lean. A **run-lean** (≤ 8° roll into the turn, decaying over 120 ms) is an optional per-champion flourish.
 - **Our champion turns on the click frame** because movement is predicted, ~100 ms sooner than the reference. Remote champions turn on T_interp with their position.
@@ -49,34 +49,37 @@ Every basic attack and ability is an **action** with phases defined in sim data.
 ```
 order ─► WINDUP ──► FIRE ──► FOLLOW-THROUGH ──► end
           │          │        │
-          │          │        └ soft lock: rooted; ANY order cancels it immediately (no loss);
-          │          │          with no order, a queued attack/cast waits until it ends
+          │          │        └ soft lock: rooted; a move, attack-move, stop or cast ends it at
+          │          │          once (no loss); an attack order waits until it ends
           │          └ projectile spawns / melee lands / effect applies (exact sub-tick time)
           └ rooted (unless the ability is `mobile`); facing tracks the target;
-            orders during it are BUFFERED or CANCEL it (per action, §4.2)
+            casts during it are BUFFERED; a move CANCELS a basic attack (§4.2)
 ```
 
-| Field | Meaning | Today |
+| Field | Meaning | Status |
 |---|---|---|
 | `windup` | Order → fire. Attacks: `windup_fraction × period`, scaled by attack speed. Abilities: fixed ms. | Exists ([02 §7](02-combat-math.md)) |
-| `follow_through` | Fire → end. A **soft lock**: cosmetic, cancelled by any order. Its job is to punish *idle* players, not active ones. | New |
-| `hard_lock` | Fire → end, but **not** cancellable (orders are buffered). Rare, for heavy finishers and ultimates. Default 0. | New |
-| `windup_cancel` | `Cancel`: a move order during the windup cancels the action (basic attacks: orb-walking, already implemented). `Buffer`: the order waits until fire (most abilities). | Partly (attacks) |
-| `mobile` | The caster keeps moving during the windup (upper-body animation layer, §6). | New |
-| `stages` | Recast chains (Riven-style 3-part abilities): stage counter, recast window, a separate clip per stage. | New |
+| `follow_through` | Fire (or a dash's landing) → end. A **soft lock**: the caster stays put. A move, attack-move, stop or new cast ends it at once with no loss; an **attack order waits** for it (so cutting it takes a deliberate move: the Riven/Caitlyn tech). A caster still walking somewhere when it fires skips it. Its job is to punish *idle* players, not active ones. | A2 (`Recovery` in the unit state) |
+| `hard_lock` | The start of the follow-through that nothing ends early: casts are buffered, moves take effect when it ends. Rare, for heavy finishers and ultimates. Default 0. | A2 |
+| `windup_cancel` | By action kind, not per ability (nothing needs otherwise yet): a move during a **basic attack**'s windup cancels it (orb-walking); **abilities** buffer. | A2 |
+| `mobile` | The caster keeps moving during the windup (upper-body animation layer, §6). | A2 (no current ability uses it) |
+| `stages` | Recast chains (Riven-style 3-part abilities): stage counter, recast window, a separate clip per stage. | With the first champion that needs it |
 
-**Input buffer:** one slot, last order wins, held during `windup` (for `Buffer` actions) and `hard_lock`, and executed on the phase end. This is what makes combos (dash → skillshot, the Caitlyn E→Q pattern) and quick follow-ups feel crisp instead of eaten. It's also the skill ceiling: a player who cancels the follow-through gains time, and a player who buffers well never loses inputs.
+**Input buffer:** one slot for a **cast** ordered while a cast is winding up, a dash is travelling or a hard lock holds. It starts the instant that ends, instead of being dropped. A newer order (a move, stop, attack or another cast) replaces it, and hard CC clears it. Moves need no buffer: one issued during a windup sets the order at once and the caster, rooted anyway, walks when the cast fires. This is what makes combos (dash → skillshot, the Caitlyn E→Q pattern) and quick follow-ups feel crisp instead of eaten. It's also the skill ceiling: a player who cancels the follow-through gains time, and a player who buffers well never loses inputs.
 
 ### 4.2 Defaults *(start)*
 
 | Action kind | windup_cancel | follow_through | Notes |
 |---|---|---|---|
-| Basic attack (ranged) | Cancel | `period − windup` | Cut it with a move order to orb-walk, as in R04 |
-| Basic attack (melee) | Cancel | `period − windup` | Hit lands on fire |
-| Line / area / targeted ability | Buffer | 150–300 ms | The follow-through sells the cast; cancelling it is the "animation cancel" tech |
-| Dash / lunge / blink | Buffer | 0–100 ms | Landing pose, cancellable |
-| Self buff / heal | Buffer, often `mobile` | 0 | Upper-body only |
-| Ultimate | Buffer | 250–500 ms, sometimes with a short `hard_lock` | Weight and commitment |
+| Basic attack (ranged) | Cancel | `period − windup`, implicit | Purely cosmetic: it ends at the attack timer, which already gates the next attack, and an attack order chases a target leaving range at once (as in R04). Cut it with a move to orb-walk |
+| Basic attack (melee) | Cancel | `period − windup`, implicit | Hit lands on fire |
+| Line / area ability | Buffer | **200 ms** | The follow-through sells the cast; cancelling it is the "animation cancel" tech |
+| Dash / lunge | Buffer | **80 ms** after landing | Landing pose, cancellable |
+| Blink, self buff / heal / shield | — (instant), `mobile` | 0 | Upper-body only |
+| Ultimate (line / area) | Buffer | **350 ms**, the first **150 ms** a `hard_lock` | Weight and commitment |
+| Utility spells (D, F) | — | 0 | Instant |
+
+These are `Ability::timing` in `mftr-sim`, by effect kind and slot; per-ability tuning arrives with the pilots.
 
 ### 4.3 Retiming
 

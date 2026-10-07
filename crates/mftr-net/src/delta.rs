@@ -24,9 +24,9 @@ pub const COAST_TOLERANCE: f32 = 0.5;
 /// Field groups of a unit update.
 pub const STATIC: u8 = 1; // kind, team, radii, champion: only when a unit is new to the client
 pub const POS: u8 = 2;
-pub const MOTION: u8 = 4; // heading target and speed
+pub const MOTION: u8 = 4; // heading target, speed and facing
 pub const VITALS: u8 = 8; // health, max health, shield, level
-pub const FLAGS: u8 = 16; // casting, attacking, stunned, rooted, dashing, protected, slowed
+pub const FLAGS: u8 = 16; // casting, attacking, stunned, rooted, dashing, protected, slowed, recovering, attack variant
 pub const ALL: u8 = STATIC | POS | MOTION | VITALS | FLAGS;
 
 /// One unit in a delta snapshot: `mask` says which groups of `unit` are meaningful.
@@ -53,8 +53,8 @@ pub fn coast(base: &RemoteUnit, ticks: u32) -> QPoint {
     QPoint::from_vec2(p + to * (step / len))
 }
 
-fn flags(u: &RemoteUnit) -> [bool; 7] {
-    [u.casting, u.attacking, u.stunned, u.rooted, u.dashing, u.protected, u.slowed]
+fn flags(u: &RemoteUnit) -> ([bool; 8], u8) {
+    ([u.casting, u.attacking, u.stunned, u.rooted, u.dashing, u.protected, u.slowed, u.recovering], u.attack_variant)
 }
 
 /// The update to send for `current`, given the client's `base` record `ticks` ago, and the
@@ -71,7 +71,7 @@ pub fn diff(base: Option<&RemoteUnit>, current: &RemoteUnit, ticks: u32) -> (Opt
     } else {
         mask |= POS;
     }
-    if (b.target, b.speed) != (current.target, current.speed) {
+    if (b.target, b.speed, b.facing) != (current.target, current.speed, current.facing) {
         mask |= MOTION;
     }
     if (b.health, b.max_health, b.shield, b.level)
@@ -115,13 +115,16 @@ pub fn apply(base: Option<&RemoteUnit>, update: Option<&UnitUpdate>, ticks: u32)
         r.pos = n.pos;
     }
     if u.mask & MOTION != 0 {
-        (r.target, r.speed) = (n.target, n.speed);
+        (r.target, r.speed, r.facing) = (n.target, n.speed, n.facing);
     }
     if u.mask & VITALS != 0 {
         (r.health, r.max_health, r.shield, r.level) = (n.health, n.max_health, n.shield, n.level);
     }
     if u.mask & FLAGS != 0 {
-        [r.casting, r.attacking, r.stunned, r.rooted, r.dashing, r.protected, r.slowed] = flags(n);
+        (
+            [r.casting, r.attacking, r.stunned, r.rooted, r.dashing, r.protected, r.slowed, r.recovering],
+            r.attack_variant,
+        ) = flags(n);
     }
     r.id = n.id;
     Some(r)
@@ -180,6 +183,9 @@ mod tests {
             rooted: false,
             dashing: false,
             slowed: false,
+            recovering: false,
+            attack_variant: 0,
+            facing: 0,
         }
     }
 

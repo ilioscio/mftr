@@ -10,7 +10,7 @@ use crate::packet::PacketHeader;
 use mftr_sim::ability::{Cc, Damage, DamageKind, LineSkillshot, SLOTS};
 use mftr_sim::items::INVENTORY;
 use mftr_sim::map::MapId;
-use mftr_sim::world::{EchoCast, MAX_PATH, Path, Progress, Rules, Trade, UNDO};
+use mftr_sim::world::{BufferedCast, EchoCast, MAX_PATH, Path, Progress, Recovery, Rules, Trade, UNDO};
 use mftr_sim::{
     Area, AttackWindup, Bolt, Cast, ChampionId, Command, CommandKind, DashMove, Missile, Order, PlayerId, QPoint,
     SimDuration, SimEvent, SimTime, SubTick, Team, Tick, UnitId, UnitKind, UnitState, Vec2,
@@ -140,6 +140,24 @@ pub struct RemoteUnit {
     pub rooted: bool,
     pub dashing: bool,
     pub slowed: bool,
+    /// In an ability's follow-through (10 §4.1).
+    pub recovering: bool,
+    /// Basic attacks started, modulo 4: picks the attack animation (10 §5.2).
+    pub attack_variant: u8,
+    /// Facing angle, 10 bits (see [`facing_to_wire`]).
+    pub facing: u16,
+}
+
+/// Facing for display, quantized to 1024 steps (0.35°) for other units (10 §3). Server only:
+/// the quantization uses `atan2`, which is fine because nothing simulates with the result.
+pub fn facing_to_wire(facing: Vec2) -> u16 {
+    let turns = facing.y.atan2(facing.x) / std::f32::consts::TAU;
+    ((turns.rem_euclid(1.0) * 1024.0).round() as u16) & 1023
+}
+
+/// The facing angle in radians (counter-clockwise from +x, in game coordinates).
+pub fn facing_from_wire(q: u16) -> f32 {
+    (q & 1023) as f32 / 1024.0 * std::f32::consts::TAU
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -755,6 +773,7 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
         write_vec2(w, c.point);
         write_time(w, c.fire_at);
         w.write_u32(c.seq);
+        w.write_bool(c.mobile);
     }
     w.write_bool(s.attack.is_some());
     if let Some(a) = s.attack {
@@ -773,6 +792,7 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
             w.write_u32(id.0);
             w.write(slot as u64, 3);
         }
+        w.write_u32(d.recover.0 as u32);
     }
     write_time(w, s.stunned_until);
     write_time(w, s.rooted_until);
@@ -827,6 +847,20 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     w.write_u8(p.takedowns);
     w.write_bool(p.hyper);
     write_time(w, s.spellblade_until);
+    // A2 (D52): facing, the follow-through, the input buffer, the attack counter.
+    write_vec2(w, s.facing);
+    w.write_bool(s.recovery.is_some());
+    if let Some(r) = s.recovery {
+        write_time(w, r.hard_until);
+        write_time(w, r.until);
+    }
+    w.write_bool(s.buffered.is_some());
+    if let Some(b) = s.buffered {
+        w.write(b.slot as u64, 3);
+        write_qpoint(w, b.target);
+        w.write_u32(b.seq);
+    }
+    w.write_u8(s.attacks);
 }
 
 fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
@@ -852,6 +886,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
             point: read_vec2(r)?,
             fire_at: read_time(r)?,
             seq: r.read_u32()?,
+            mobile: r.read_bool()?,
         })
     } else {
         None
@@ -865,7 +900,8 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let dash = if r.read_bool()? {
         let (dir, to, speed, end_at) = (read_vec2(r)?, read_vec2(r)?, read_finite(r)?, read_time(r)?);
         let strike = if r.read_bool()? { Some((UnitId(r.read_u32()?), r.read(3)? as u8)) } else { None };
-        Some(DashMove { dir, to, speed, end_at, strike })
+        let recover = SimDuration(r.read_u32()? as u64);
+        Some(DashMove { dir, to, speed, end_at, strike, recover })
     } else {
         None
     };
@@ -933,6 +969,15 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let takedowns = r.read_u8()?;
     let hyper = r.read_bool()?;
     let spellblade_until = read_time(r)?;
+    let facing = read_vec2(r)?;
+    let recovery =
+        if r.read_bool()? { Some(Recovery { hard_until: read_time(r)?, until: read_time(r)? }) } else { None };
+    let buffered = if r.read_bool()? {
+        Some(BufferedCast { slot: r.read(3)? as u8, target: read_qpoint(r)?, seq: r.read_u32()? })
+    } else {
+        None
+    };
+    let attacks = r.read_u8()?;
     let progress = Progress {
         level,
         xp,
@@ -977,6 +1022,10 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         progress,
         echo,
         spellblade_until,
+        facing,
+        recovery,
+        buffered,
+        attacks,
     })
 }
 
@@ -1021,6 +1070,7 @@ fn write_update(w: &mut BitWriter, u: &UnitUpdate) {
             write_qpoint(w, t);
         }
         w.write(o.speed.min(1023) as u64, 10);
+        w.write((o.facing & 1023) as u64, 10);
     }
     if u.mask & delta::VITALS != 0 {
         w.write_u16(o.health);
@@ -1029,9 +1079,10 @@ fn write_update(w: &mut BitWriter, u: &UnitUpdate) {
         w.write(o.level as u64, 5);
     }
     if u.mask & delta::FLAGS != 0 {
-        for f in [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected, o.slowed] {
+        for f in [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected, o.slowed, o.recovering] {
             w.write_bool(f);
         }
+        w.write((o.attack_variant & 3) as u64, 2);
     }
 }
 
@@ -1062,6 +1113,9 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         rooted: false,
         dashing: false,
         slowed: false,
+        recovering: false,
+        attack_variant: 0,
+        facing: 0,
     };
     if mask & delta::STATIC != 0 {
         o.kind = UnitKind::from_wire(r.read(3)? as u8).ok_or(DecodeError::Invalid("unit kind"))?;
@@ -1081,17 +1135,19 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
     if mask & delta::MOTION != 0 {
         o.target = if r.read_bool()? { Some(read_qpoint(r)?) } else { None };
         o.speed = r.read(10)? as u16;
+        o.facing = r.read(10)? as u16;
     }
     if mask & delta::VITALS != 0 {
         (o.health, o.max_health, o.shield) = (r.read_u16()?, r.read_u16()?, r.read_u16()?);
         o.level = r.read(5)? as u8;
     }
     if mask & delta::FLAGS != 0 {
-        let mut f = [false; 7];
+        let mut f = [false; 8];
         for b in f.iter_mut() {
             *b = r.read_bool()?;
         }
-        [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected, o.slowed] = f;
+        [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected, o.slowed, o.recovering] = f;
+        o.attack_variant = r.read(2)? as u8;
     }
     Ok(UnitUpdate { mask, unit: o })
 }
@@ -1532,6 +1588,22 @@ mod tests {
         assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
     }
 
+    /// Facing travels in 10 bits: every direction comes back within half a step (0.18°).
+    #[test]
+    fn facing_round_trips_within_half_a_step() {
+        for i in 0..3600 {
+            let a = i as f32 / 3600.0 * std::f32::consts::TAU;
+            let q = facing_to_wire(Vec2::new(a.cos(), a.sin()));
+            assert!(q < 1024);
+            let back = facing_from_wire(q);
+            let err = (back - a).rem_euclid(std::f32::consts::TAU);
+            let err = err.min(std::f32::consts::TAU - err);
+            assert!(err.to_degrees() <= 360.0 / 1024.0 / 2.0 + 1e-3, "{a} -> {q} -> {back}");
+        }
+        assert_eq!(facing_to_wire(Vec2::new(1.0, 0.0)), 0);
+        assert_eq!(facing_to_wire(Vec2::new(0.0, -1.0)), 768);
+    }
+
     fn sample_state() -> UnitState {
         UnitState {
             pos: Vec2::new(1_234.567_9, 9_876.543),
@@ -1553,6 +1625,7 @@ mod tests {
                 point: Vec2::new(10.1, 20.2),
                 fire_at: SimTime(123_457),
                 seq: 41,
+                mobile: true,
             }),
             attack: Some(AttackWindup { target: UnitId(17), fire_at: SimTime(123_460) }),
             attack_ready_at: SimTime(124_000),
@@ -1562,6 +1635,7 @@ mod tests {
                 speed: 1000.0,
                 end_at: SimTime(124_100),
                 strike: Some((UnitId(23), 2)),
+                recover: SimDuration(154),
             }),
             stunned_until: SimTime(99_999),
             rooted_until: SimTime(99_998),
@@ -1606,6 +1680,10 @@ mod tests {
                 hyper: true,
             },
             spellblade_until: SimTime(88_888),
+            facing: Vec2::new(0.6, -0.8),
+            recovery: Some(Recovery { hard_until: SimTime(123_500), until: SimTime(123_800) }),
+            buffered: Some(BufferedCast { slot: 4, target: QPoint { x: 1234, y: 5678 }, seq: 77 }),
+            attacks: 201,
         }
     }
 
@@ -1710,6 +1788,9 @@ mod tests {
             rooted: false,
             dashing: true,
             slowed: true,
+            recovering: true,
+            attack_variant: 3,
+            facing: 1001,
         };
         let events = vec![
             SimEvent::CastStarted {

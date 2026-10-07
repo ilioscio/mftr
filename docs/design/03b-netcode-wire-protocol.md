@@ -120,6 +120,8 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 | Action | cast/attack slot, phase, phase start tick delta | 16–24 |
 | Appearance | size scale, team tint, augment indicators | rare |
 
+> **Implemented (A2, protocol 16):** facing travels as a 10-bit angle with the motion group (heading, speed); the basic-attack animation variant (2 bits, attacks started modulo 4) and a follow-through flag join the status flags. The own champion's lossless state adds its exact facing, follow-through, buffered cast and attack counter ([10 §3–4](10-characters-and-animation.md#3-facing)).
+
 ### Path-based movement saves most of the bandwidth
 Units following a path don't need a position every tick. The client advances them along the replicated path. The server sends **Movement intent when the path changes**, plus a **Transform refresh** only every ~10 ticks or when error exceeds 2 u (e.g. after a collision slide). Lane minions walking in a line then cost close to nothing.
 
