@@ -33,6 +33,7 @@ pub fn minion_reward(attack_range: f32) -> (f32, u32) {
         crate::world::MinionKind::Melee => (21.0, 60),
         crate::world::MinionKind::Caster => (14.0, 30),
         crate::world::MinionKind::Siege => (60.0, 90),
+        crate::world::MinionKind::Super => (60.0, 97),
     }
 }
 
@@ -90,6 +91,8 @@ pub fn turret_minion_share(minion_attack_range: f32) -> f32 {
         0.70 // caster
     } else if minion_attack_range >= 200.0 {
         0.14 // siege
+    } else if minion_attack_range >= 150.0 {
+        0.07 // super
     } else {
         0.45 // melee
     }
@@ -101,6 +104,7 @@ pub fn minion_attack(kind: MinionKind) -> AttackSpec {
         MinionKind::Melee => AttackSpec { range: 110.0, attack_speed: 1.25, windup_fraction: 0.3, bolt_speed: 0.0 },
         MinionKind::Caster => AttackSpec { range: 550.0, attack_speed: 0.67, windup_fraction: 0.3, bolt_speed: 650.0 },
         MinionKind::Siege => AttackSpec { range: 300.0, attack_speed: 1.0, windup_fraction: 0.3, bolt_speed: 1200.0 },
+        MinionKind::Super => AttackSpec { range: 170.0, attack_speed: 0.85, windup_fraction: 0.3, bolt_speed: 0.0 },
     }
 }
 
@@ -109,6 +113,7 @@ pub fn minion_damage(kind: MinionKind) -> f32 {
         MinionKind::Melee => 12.0,
         MinionKind::Caster => 23.0,
         MinionKind::Siege => 40.0,
+        MinionKind::Super => 190.0,
     }
 }
 
@@ -142,9 +147,11 @@ impl MatchState {
         }
     }
 
-    /// Minions of wave `n` (0-based): 3 melee, 3 casters, a siege minion every third wave.
-    pub fn wave(n: u32) -> Vec<MinionKind> {
-        let mut w = vec![MinionKind::Melee; 3];
+    /// Minions of wave `n` (0-based): 3 melee, 3 casters, a siege minion every third wave, and
+    /// a super minion in front while the team has an enemy Gatehouse down (`empowered`).
+    pub fn wave(n: u32, empowered: bool) -> Vec<MinionKind> {
+        let mut w = if empowered { vec![MinionKind::Super] } else { Vec::new() };
+        w.extend([MinionKind::Melee; 3]);
         if n % 3 == 2 {
             w.push(MinionKind::Siege);
         }
@@ -358,10 +365,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn waves_have_a_siege_minion_every_third() {
-        assert_eq!(MatchState::wave(0).len(), 6);
-        assert_eq!(MatchState::wave(2).len(), 7);
-        assert!(MatchState::wave(5).contains(&MinionKind::Siege));
+    fn waves_have_a_siege_minion_every_third_and_a_super_when_empowered() {
+        assert_eq!(MatchState::wave(0, false).len(), 6);
+        assert_eq!(MatchState::wave(2, false).len(), 7);
+        assert!(MatchState::wave(5, false).contains(&MinionKind::Siege));
+        assert!(!MatchState::wave(4, false).contains(&MinionKind::Super));
+        assert_eq!(MatchState::wave(4, true)[0], MinionKind::Super);
+        assert_eq!(MatchState::wave(5, true).len(), 8);
+        for kind in [MinionKind::Melee, MinionKind::Caster, MinionKind::Siege, MinionKind::Super] {
+            assert_eq!(MinionKind::from_attack_range(minion_attack(kind).range), kind);
+        }
+        assert_eq!(turret_minion_share(minion_attack(MinionKind::Super).range), 0.07);
         assert_eq!(turret_minion_share(minion_attack(MinionKind::Caster).range), 0.70);
         assert_eq!(turret_minion_share(minion_attack(MinionKind::Siege).range), 0.14);
         assert_eq!(turret_minion_share(minion_attack(MinionKind::Melee).range), 0.45);
