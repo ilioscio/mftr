@@ -460,6 +460,36 @@ Runs alongside M3/M4 and replaces the placeholder shapes with real champions ([1
 - triggers for recall and emotes;
 - sounds for a unit drawn without its model (F3): they come from the animator, so none play.
 
+### A slice 5 status (2026-10-07): lane minions ✅ done
+Minions as tiny hooded figures, distinct from champions at a glance (the owner's brief: faceless like a black mage, four kinds, team-colored).
+- **Sim:** super minions (01 §4).
+  - While a team has an enemy Gatehouse down, each of its waves brings one in front, until that Gatehouse respawns. This was stated before but not built.
+  - Their numbers are in 01 §4.
+- **Wire:** protocol 17. Remote units carry the minion kind in their static group: 2 bits, on minions only.
+- **Art** (`art/minions/build.py`):
+  - One block-out generator for four packs on the `biped` bones in a new chibi "minion" shape (`rig.use_shape`), 1,186–1,558 triangles each.
+  - Each has a pointed hood and robe in the team color (`accent`), and a dark void for a face with two eyes glowing in the team color (`accent_glow`, a new slot).
+  - **Melee:** sword and buckler.
+  - **Caster:** a staff with a glowing orb; it throws spells from its free hand.
+  - **Siege:** a gunner pushing a two-wheeled bronze cannon (extra bones for the carriage, a recoiling barrel and wheels that roll on the run).
+  - **Super:** ×1.6 and armored, with a horned crown and a great maul.
+  - Clips: idle, run, attack_1 (`fire` on the sim's windup, checked), death and an additive flinch.
+- **Format:**
+  - A `minion` pack kind with its own catalogue, triangle target (600–2,600), and fire check against `lane::minion_attack`.
+  - `Loaded.kind` records which kind of pack it is.
+- **Runtime:**
+  - The animator plays `flinch` on a hit (minions flinch, champions don't, 10 §5.4) and, for minion packs, lets a swing play out after its windup instead of cutting it.
+  - The client draws each minion with its kind's model in its team's color, and animates it like a champion.
+  - A minion last seen at 0 health plays its death where it fell, then sinks away.
+  - Release packages ship `art/minions/*/export`.
+- **Checked in Godot** on an ARAM server: blue and red waves meet and fight, with the casters' bolts, the hit flash, and the siege cart in the third wave.
+
+**Left for later:**
+- the super minion's buff aura (01 §4);
+- minion sounds and VFX (they use none yet);
+- a super minion seen in a live match (it needs a Gatehouse down; covered by a sim test and the renders);
+- instancing, if many waves get costly (every minion has its own skeleton today).
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.

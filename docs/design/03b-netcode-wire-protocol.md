@@ -120,6 +120,8 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 | Action | cast/attack slot, phase, phase start tick delta | 16–24 |
 | Appearance | size scale, team tint, augment indicators | rare |
 
+> **Implemented (A5, protocol 17):** a minion's kind (melee, caster, siege, super) travels in the static group, 2 bits on minions only, so clients draw the right model.
+>
 > **Implemented (A2, protocol 16):** facing travels as a 10-bit angle with the motion group (heading, speed); the basic-attack animation variant (2 bits, attacks started modulo 4) and a follow-through flag join the status flags. The own champion's lossless state adds its exact facing, follow-through, buffered cast and attack counter ([10 §3–4](10-characters-and-animation.md#3-facing)).
 
 ### Path-based movement saves most of the bandwidth
