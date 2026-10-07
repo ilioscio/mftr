@@ -48,6 +48,11 @@ var notices := []                       # kill feed: { text, age }
 # the shared template (tinted with their identity color). F3 toggles the placeholder shapes.
 var champion_model: MftrModel = null     # the shared template
 var champion_models := {}                # champion name -> its own MftrModel (or the template)
+var minion_models := {}                  # A5: minion kind -> its MftrModel (or null)
+# A5: minions that just died, playing their death where they fell: { body, t }.
+var corpses := []
+const MINION_LIFT := -0.45               # minion bodies sit at y 0.45 (the capsule's center)
+const MINION_SLOTS := ["skin", "cloth", "metal", "emissive", "accent", "accent_glow"]
 var use_models := true
 var hovered_body: Node3D = null
 const TURN_RATE := deg_to_rad(4500.0)    # 10 §3: a 180° turn in ~40 ms
@@ -172,6 +177,17 @@ func _model_for(champion: String) -> MftrModel:
 		var own: MftrModel = MftrModel.load(path) if FileAccess.file_exists(path) else null
 		champion_models[champion] = own if own != null else champion_model
 	return champion_models[champion]
+
+
+## A lane minion's pack (`art/minions/<kind>/export/<kind>.glb`, A5), loaded once per kind;
+## null without one (the capsule stays).
+func _minion_model(kind: String) -> MftrModel:
+	if kind == "":
+		return null
+	if not minion_models.has(kind):
+		var path := _art_path("minions/%s/export/%s.glb" % [kind, kind])
+		minion_models[kind] = MftrModel.load(path) if FileAccess.file_exists(path) else null
+	return minion_models[kind]
 
 
 ## Join `address` (as set up: spectating, champion, blind playtest).
@@ -484,11 +500,11 @@ func _outline_material(team: Color) -> ShaderMaterial:
 
 ## The template model under `body`: one material per surface by slot, the team accent, the
 ## champion's identity color on cloth, the outline as a second pass, and its animator.
-func _attach_model(body: MeshInstance3D, team: Color, champion: String) -> void:
-	var source := _model_for(champion)
+func _attach_model(body: MeshInstance3D, team: Color, champion: String, pack: MftrModel = null, lift := MODEL_LIFT) -> void:
+	var source := pack if pack != null else _model_for(champion)
 	var template := source == champion_model
 	var model: Node3D = source.instantiate()
-	model.position = Vector3(0, MODEL_LIFT, 0)
+	model.position = Vector3(0, lift, 0)
 	body.add_child(model)
 	var mesh: MeshInstance3D = model.get_node("Skeleton/Mesh")
 	var outline: ShaderMaterial = body.get_meta("outline")
@@ -497,7 +513,7 @@ func _attach_model(body: MeshInstance3D, team: Color, champion: String) -> void:
 	for i in slots.size():
 		var m := ShaderMaterial.new()
 		m.shader = load("res://shaders/champion_model.gdshader")
-		m.set_shader_parameter("slot", ["skin", "cloth", "metal", "emissive", "accent"].find(slots[i]))
+		m.set_shader_parameter("slot", MINION_SLOTS.find(slots[i]))
 		m.set_shader_parameter("team_accent", team)
 		m.set_shader_parameter("identity", CHAMPION_COLORS.get(champion, Color(0.5, 0.5, 0.5)))
 		m.set_shader_parameter("identity_mix", 0.6 if template else 0.0)
@@ -566,6 +582,8 @@ func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
 		var diff := wrapf(target - rig.yaw, -PI, PI)
 		rig.yaw += clampf(diff, -TURN_RATE * delta, TURN_RATE * delta)
 		rig.model.rotation.y = rig.yaw
+	info["hit"] = body.get_meta("hit", false)
+	body.set_meta("hit", false)
 	for e in rig.animator.drive(rig.skeleton, info, rig.speed, delta):
 		var champ: String = info.get("champion", "")
 		if e == "foot":
@@ -578,6 +596,7 @@ func _flash(id: int) -> void:
 	var body = own_body if id == client.own_unit_id() else remote_bodies.get(id)
 	if body != null:
 		body.set_meta("flash", 1.0)
+		body.set_meta("hit", true)   # minions flinch (10 §5.4)
 
 
 ## The effects for a champion's `<action>.<phase>`: its own, its own `*.<phase>`, then the
@@ -878,7 +897,7 @@ func _update_remotes(delta: float) -> void:
 			elif u.turret:
 				b = _make_turret(team_color, u.radius)
 			elif u.minion:
-				b = _make_minion(MINION_BLUE if u.ally else MINION_RED, u.radius)
+				b = _make_minion(MINION_BLUE if u.ally else MINION_RED, u.radius, u.get("minion_kind", ""))
 			else:
 				b = _make_champion(ALLY_COLOR if u.ally else ENEMY_COLOR, u.champion)
 			b.add_child(_make_windup_indicator())
@@ -905,17 +924,37 @@ func _update_remotes(delta: float) -> void:
 			body.get_node("Protected").visible = u.protected
 		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO))
 		_show_statuses(body, u.stunned, u.rooted, u.shield, u.get("slowed", false))
-		if u.champion != "":
+		if u.champion != "" or (u.minion and body.has_meta("rig")):
 			_animate(body, u, delta)
+		if u.minion:
+			body.set_meta("last_health", float(u.get("health", 1.0)))
 	for id in remote_bodies.keys():
 		if not seen.has(id):
-			remote_bodies[id].queue_free()
+			var gone: Node3D = remote_bodies[id]
 			remote_bodies.erase(id)
+			# A minion last seen at 0 health died (rather than leaving our vision): it plays its
+			# death where it fell, then sinks away (A5).
+			if _models_shown(gone) and float(gone.get_meta("last_health", 1.0)) <= 0.0:
+				for c in gone.get_children():
+					c.visible = c == gone.get_meta("rig").model
+				corpses.append({ "body": gone, "t": 0.0 })
+			else:
+				gone.queue_free()
+	for c in corpses.duplicate():
+		c.t += delta
+		var rig: Dictionary = c.body.get_meta("rig")
+		rig.animator.drive(rig.skeleton, { "dead": true }, 0.0, delta)
+		if c.t > 1.4:
+			c.body.position.y -= delta * 0.6
+		if c.t > 2.4:
+			c.body.queue_free()
+			corpses.erase(c)
 
 
-## Minions: short capsules whose ground ring is the *collision* radius, so minion block is
-## visible exactly as the simulation sees it (D11).
-func _make_minion(color: Color, collision_radius_u: float) -> MeshInstance3D:
+## Minions: their pack's model (A5) in the team color, else a short capsule; either way the
+## ground ring is the *collision* radius, so minion block is visible exactly as the simulation
+## sees it (D11).
+func _make_minion(color: Color, collision_radius_u: float, kind := "") -> MeshInstance3D:
 	var body := MeshInstance3D.new()
 	var capsule := CapsuleMesh.new()
 	capsule.radius = collision_radius_u * UNITS_TO_METERS * 0.8
@@ -932,6 +971,13 @@ func _make_minion(color: Color, collision_radius_u: float) -> MeshInstance3D:
 	ring.position = Vector3(0, -0.44, 0)
 	ring.material_override = _unshaded(color.lightened(0.3))
 	body.add_child(ring)
+	var pack := _minion_model(kind)
+	if pack != null:
+		var outline := _outline_material(color)
+		body.set_meta("outline", outline)
+		body.set_meta("placeholder_mesh", body.mesh)
+		_attach_model(body, color, "", pack, MINION_LIFT)
+		_apply_model_mode(body)
 	return body
 
 
