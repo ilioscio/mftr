@@ -291,7 +291,7 @@ pub fn parse(bytes: &[u8]) -> Result<Model, String> {
             let colors: Vec<[f32; 4]> = match attr("COLOR_0") {
                 Some(a) => {
                     let (n, flat) = r.read(a)?;
-                    let width = if n == 0 { 4 } else { flat.len() / n };
+                    let width = flat.len().checked_div(n).unwrap_or(4);
                     if n != count || !(width == 3 || width == 4) {
                         return Err(format!("mesh {mi}: COLOR_0 must be RGB or RGBA per vertex"));
                     }
