@@ -159,6 +159,27 @@ impl MatchClient {
         self.secure = None;
     }
 
+    /// What the server runs, for the server list: "ARAM", "Duel Sandbox", ... (empty until
+    /// champion select or the welcome; champion select only exists in ARAM).
+    #[func]
+    fn game_type(&self) -> GString {
+        if self.socket.is_none() {
+            return GString::new();
+        }
+        let mode = self.session.game_mode();
+        GString::from(match self.session.phase() {
+            Phase::Connecting => "",
+            Phase::Lobby if mode == mftr_net::msg::GameMode::Empty => mftr_net::msg::GameMode::Aram.label(),
+            _ => mode.label(),
+        })
+    }
+
+    /// Every champion's name, for pickers.
+    #[func]
+    fn champion_names(&self) -> PackedStringArray {
+        ChampionId::ALL.iter().map(|c| GString::from(c.def().name)).collect()
+    }
+
     /// The server's key fingerprint (empty until its handshake reply arrives).
     #[func]
     fn server_fingerprint(&self) -> GString {
@@ -901,10 +922,24 @@ impl MatchClient {
         let mut packets = Vec::new();
         loop {
             match socket.recv(&mut buf) {
-                Ok(n) => packets.push(buf[..n].to_vec()),
+                Ok(n) => {
+                    packets.push(buf[..n].to_vec());
+                    if self.last_error == NO_ANSWER {
+                        self.last_error = GString::new();
+                    }
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                // Windows reports ICMP "port unreachable" as a reset; the server may just not be up yet.
-                Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => break,
+                // ICMP "port unreachable" (a reset on Windows): the server may just not be up
+                // yet, so keep trying.
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    self.last_error = GString::from(NO_ANSWER);
+                    break;
+                }
                 Err(e) => {
                     self.last_error = GString::from(&e.to_string());
                     break;
@@ -951,6 +986,7 @@ impl MatchClient {
 }
 
 const IDENTITY_FILE: &str = "identity.key";
+const NO_ANSWER: &str = "No server is answering at this address yet (is it running, and is its UDP port open?)";
 const KNOWN_FILE: &str = "known_servers.txt";
 
 /// The OS path of a file in Godot's user data folder.

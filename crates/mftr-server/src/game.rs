@@ -40,6 +40,11 @@ pub enum ReplayEntry {
         tick: Tick,
         commands: Vec<Command>,
     },
+    /// A new match started (champions and all) before tick `tick + 1`: the server went
+    /// back to champion select after a Base fell.
+    Restart {
+        tick: Tick,
+    },
     /// The state hash after tick `tick`.
     Hash {
         tick: Tick,
@@ -128,6 +133,25 @@ impl Match {
         (unit, team, champion)
     }
 
+    /// Everyone playing, humans and bots.
+    pub fn players(&self) -> Vec<PlayerId> {
+        self.players.iter().copied().collect()
+    }
+
+    /// A Base fell long enough ago that the next tick starts a new match.
+    pub fn restart_due(&self) -> bool {
+        self.world.game().winner.is_some_and(|(_, at)| {
+            SimTime::end_of(self.world.tick()) >= at.plus(mftr_sim::SimDuration::from_millis(RESTART_AFTER_MS))
+        })
+    }
+
+    /// Start a new match now, without waiting for `step` to (champion select between matches:
+    /// everyone has left, and joins with a new champion before the next tick).
+    pub fn restart(&mut self) {
+        self.record(ReplayEntry::Restart { tick: self.world.tick() });
+        self.world.restart_match();
+    }
+
     pub fn leave(&mut self, player: PlayerId) {
         if !self.players.remove(&player) {
             return;
@@ -142,10 +166,9 @@ impl Match {
     /// Simulate the next tick with `due` (commands for it), then update fog: units a team can't
     /// see can't be targeted by its attacks next tick.
     pub fn step(&mut self, due: Vec<Command>) -> (Vec<SimEvent>, Fog) {
-        // A new match 10 s after a Base falls (ARAM).
-        if let Some((_, at)) = self.world.game().winner
-            && SimTime::end_of(self.world.tick()) >= at.plus(mftr_sim::SimDuration::from_millis(RESTART_AFTER_MS))
-        {
+        // A new match 10 s after a Base falls (ARAM), with the same champions (servers with
+        // champion select restart through `restart` instead).
+        if self.restart_due() {
             self.world.restart_match();
         }
         let k = self.world.tick().next();
@@ -210,6 +233,7 @@ impl Replay {
                         m.join(*player, *champion);
                     }
                     ReplayEntry::Leave { player, .. } => m.leave(*player),
+                    ReplayEntry::Restart { .. } => m.restart(),
                     ReplayEntry::Commands { commands, .. } => due = commands.clone(),
                     ReplayEntry::Hash { .. } => {}
                 }
@@ -268,6 +292,9 @@ impl Replay {
                         );
                     }
                 }
+                ReplayEntry::Restart { tick } => {
+                    let _ = writeln!(s, "R {}", tick.0);
+                }
                 ReplayEntry::Hash { tick, hash } => {
                     let _ = writeln!(s, "H {} {hash:016x}", tick.0);
                 }
@@ -313,6 +340,7 @@ impl Replay {
                     entries.push(ReplayEntry::Join { tick, player: PlayerId(int(2)? as u8), champion });
                 }
                 Some("L") => entries.push(ReplayEntry::Leave { tick, player: PlayerId(int(2)? as u8) }),
+                Some("R") => entries.push(ReplayEntry::Restart { tick }),
                 Some("H") => {
                     let hash = f.get(2).and_then(|h| u64::from_str_radix(h, 16).ok()).ok_or_else(bad)?;
                     entries.push(ReplayEntry::Hash { tick, hash });
@@ -342,6 +370,7 @@ impl ReplayEntry {
         match self {
             ReplayEntry::Join { tick, .. }
             | ReplayEntry::Leave { tick, .. }
+            | ReplayEntry::Restart { tick }
             | ReplayEntry::Commands { tick, .. }
             | ReplayEntry::Hash { tick, .. } => *tick,
         }

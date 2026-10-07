@@ -11,13 +11,13 @@ And which own-missile display (A or B) and minion setting feels better? (Decisio
 ## For testers (about 12 minutes)
 
 1. Get the client: download `mftr-client-<version>-<os>` from the releases page and unpack it
-   (or run from source: `godot --path client -- ...` instead of `./mftr.x86_64 -- ...`).
-2. Start it with the address the organizer gave you (the part after `#` is the server's key
-   fingerprint: with it, the client only talks to that server):
+   (or run from source: open `client/project.godot` in Godot 4.5+ and press Play).
+2. Start it (`mftr.exe` on Windows, `./mftr.x86_64` on Linux). In the start menu, enter the
+   address the organizer gave you, set **Join as** to **Blind playtest**, and press **Join**.
+   The part after `#` in the address is the server's key fingerprint: with it, the client only
+   talks to that server. The client remembers the server for next time.
 
-   ```sh
-   ./mftr.x86_64 -- --blind playtest.example.org:7777#8a0bb4a2aa55a37cf673e459749c6705   # mftr.exe on Windows
-   ```
+   From a terminal instead: `./mftr.x86_64 -- --blind playtest.example.org:7777#8a0bb4a2aa55a37cf673e459749c6705`.
 
 3. Play 10 rounds of one minute. Dodge the skillshots and fight back. Right-click moves, Q W E R
    cast at the cursor, D blinks, F shields.

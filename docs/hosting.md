@@ -21,8 +21,9 @@ This builds the server image and starts two games:
 | `aram` | UDP 7777 | ARAM on The Bridge with champion select; bots fill empty slots, so you can start with friends or alone. Records a replay of the session. |
 | `duel` | UDP 7778 | The Duel Sandbox for up to 4 players: practice skillshots. |
 
-Players connect with the client: `./mftr.x86_64 -- your.server.address:7777` (`mftr.exe` on
-Windows; `godot --path client -- your.server.address:7777` from the source). Open the ports in your firewall, e.g.
+Players type `your.server.address:7777` into the client's start menu (it remembers the servers
+they joined), or start it with the address: `./mftr.x86_64 -- your.server.address:7777`
+(`mftr.exe` on Windows; `godot --path client -- your.server.address:7777` from the source). Open the ports in your firewall, e.g.
 `ufw allow 7777:7778/udp`.
 
 Without compose: `docker build -t mftr-server . && docker run -d -p 7777:7777/udp mftr-server`.
@@ -145,12 +146,14 @@ Without NixOS, `nix build github:ilioscio/mftr` gives `result/bin/mftr-server`.
 | `--fingerprint` | | Print the key's fingerprint and exit. |
 | `--scenario NAME` | `duel` (`aram` in Docker) | `aram`: The Bridge, a full match with a winner. `duel`: the Duel Sandbox. `minions`, `dodge`, `empty`: test grounds. |
 | `--bots N` | `0` (`10` in Docker) | Server bots. They count toward the player limit, and with `--lobby` a joining human takes a bot's place. |
-| `--lobby` | off (on in Docker) | Champion select before the match: ARAM all-random, 2 rerolls each, a team bench. Starts 3 s after everyone is ready, or after 60 s. |
+| `--lobby` | off (on in Docker) | Champion select before each match: ARAM all-random, 2 rerolls each, a team bench. Starts 3 s after everyone is ready, or after 60 s. |
 | `--max-players N` | `10` | Players (humans and bots) per game. Up to 8 spectators come on top. |
 | `--seed N` | `1` | Seeds everything random in the match (bots, champion select, spawns). |
 | `--replay FILE` | off | Record the session. The file is rewritten every minute and at each match end. |
 
-A match restarts 10 s after a Base falls. Players who lose their connection keep their champion
+10 s after a Base falls, a server with `--lobby` holds champion select again for everyone still
+connected (new random champions, fresh rerolls); without it, the next match starts with the same
+champions. Players who lose their connection keep their champion
 for 60 s and get it back when their client reconnects, even from a new address.
 
 ## The server key

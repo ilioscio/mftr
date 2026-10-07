@@ -81,6 +81,17 @@ impl Scenario {
         }
     }
 
+    /// What the client is told it joined.
+    pub fn mode(self) -> msg::GameMode {
+        match self {
+            Scenario::Empty => msg::GameMode::Empty,
+            Scenario::MinionSandbox => msg::GameMode::Minions,
+            Scenario::DodgeRig => msg::GameMode::Dodge,
+            Scenario::Duel => msg::GameMode::Duel,
+            Scenario::Aram => msg::GameMode::Aram,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Scenario::Empty => "empty",
@@ -214,6 +225,8 @@ pub struct ServerCore {
     /// Session tokens (independent of the world RNG, so replays are unaffected).
     tokens: mftr_sim::rng::Pcg32,
     lobby_steps: u32,
+    /// Matches finished: each champion select after one draws from a new seed.
+    rounds: u64,
     start: f64,
     conns: BTreeMap<ClientKey, Conn>,
     queue: Vec<Command>,
@@ -244,6 +257,7 @@ impl ServerCore {
             dropped: Vec::new(),
             tokens: mftr_sim::rng::Pcg32::new(cfg.seed ^ 0x746f_6b65_6e73, 7),
             lobby_steps: 0,
+            rounds: 0,
             cfg,
             start,
             conns: BTreeMap::new(),
@@ -462,6 +476,7 @@ impl ServerCore {
             time_echo: TimeEcho { client_time_us, hold_us: 0 },
             token: conn.token,
             spectator: conn.spectator,
+            mode: self.cfg.scenario.mode(),
         };
         let conn = self.conns.get_mut(&key)?;
         let h = Self::header(conn);
@@ -506,6 +521,36 @@ impl ServerCore {
         out
     }
 
+    /// A Base fell: every connected player goes back to champion select (new random
+    /// champions, rerolls and bench), bots refill the free slots, and the world restarts empty
+    /// until the next match starts. Spectators stay connected and see the next match.
+    fn return_to_lobby(&mut self, now: f64) -> Vec<(ClientKey, Vec<u8>)> {
+        self.rounds += 1;
+        let seed = self.cfg.seed.wrapping_add(self.rounds);
+        let mut lobby = Lobby::new(seed, self.cfg.max_players, self.cfg.bots);
+        let players: Vec<ClientKey> = self.conns.iter().filter(|(_, c)| !c.spectator).map(|(k, _)| *k).collect();
+        for key in players {
+            let c = self.conns.remove(&key).expect("listed");
+            if let Some(player) = lobby.add_human(now) {
+                // The packet sequence carries over, so the client accepts what follows.
+                self.pending.insert(key, Pending { player, last_heard: c.last_heard, send: c.send });
+            }
+        }
+        for player in self.game.players() {
+            self.game.leave(player);
+        }
+        self.bots.clear();
+        self.dropped.clear();
+        self.queue.clear();
+        self.missiles.clear();
+        self.areas.clear();
+        self.game.restart();
+        self.lobby = Some(lobby);
+        self.lobby_steps = 0;
+        let pending: Vec<(ClientKey, PlayerId)> = self.pending.iter().map(|(k, p)| (*k, p.player)).collect();
+        pending.into_iter().filter_map(|(key, player)| self.lobby_packet(key, player, now)).collect()
+    }
+
     fn leave(&mut self, key: ClientKey) {
         if let Some(c) = self.conns.remove(&key)
             && !c.spectator
@@ -532,6 +577,10 @@ impl ServerCore {
         self.dropped = kept;
         for d in gone {
             self.game.leave(d.player);
+        }
+        // After a match, servers with champion select hold another one for everyone still here.
+        if self.cfg.lobby && self.lobby.is_none() && self.game.restart_due() {
+            return self.return_to_lobby(now);
         }
         // Champion select: no simulation (time is held), state to everyone a few times a second.
         if self.lobby.is_some() {
@@ -1197,6 +1246,153 @@ mod tests {
         assert_eq!(check.mismatch, None);
         assert_eq!(check.final_hash, m.world().state_hash());
         assert_eq!(check.hashes_checked, 3);
+    }
+
+    /// Champion select between matches: everyone leaves, the world restarts empty, and new
+    /// champions join before the next tick. The replay holds the restart and re-simulates.
+    #[test]
+    fn replays_handle_a_restart_between_matches() {
+        let mut m = Match::new(ServerConfig { scenario: Scenario::Aram, record: true, ..Default::default() });
+        let mut bots: Vec<Bot> = (0..4u8).map(|p| Bot::new(PlayerId(p), 3)).collect();
+        for b in &bots {
+            m.join(b.player, None);
+        }
+        for k in 1..=700u32 {
+            if k == 400 {
+                for p in m.players() {
+                    m.leave(p);
+                }
+                m.restart();
+                bots = (0..4u8).map(|p| Bot::new(PlayerId(p), 5)).collect();
+                for (i, b) in bots.iter().enumerate() {
+                    m.join(b.player, Some(ChampionId::ALL[5 - i]));
+                }
+            }
+            let mut due = Vec::new();
+            for b in &mut bots {
+                due.extend(b.think(m.world(), Tick(k)));
+            }
+            m.step(due);
+        }
+        let text = m.replay().to_text();
+        assert!(text.contains("\nR 399\n"), "the restart is recorded");
+        let replay = Replay::from_text(&text).unwrap();
+        assert_eq!(replay, m.replay());
+        // Hashes after ticks 300 and 600, before and after the restart.
+        let check = replay.verify();
+        assert_eq!(check.mismatch, None);
+        assert_eq!(check.hashes_checked, 2);
+    }
+
+    /// After a Base falls, a server with champion select holds it again for everyone still
+    /// connected: a new random champion, fresh rerolls, bots in the free slots, and then a new
+    /// match from scratch. Players aren't dropped in between.
+    #[test]
+    fn champion_select_again_after_each_match() {
+        let cfg = ServerConfig { seed: 4, bots: 10, lobby: true, scenario: Scenario::Aram, ..Default::default() };
+        let mut core = ServerCore::new(cfg, 0.0);
+        let mut seq = 0u16;
+        let mut packet = |core: &mut ServerCore, msg: ClientMessage, t: f64| {
+            seq += 1;
+            let bytes = encode_client(&PacketHeader { seq, ack: 0, ack_bits: 0 }, &msg);
+            core.handle_packet(1, &bytes, t)
+                .into_iter()
+                .filter(|(to, _)| *to == 1)
+                .map(|(_, b)| decode_server(&b).unwrap().1)
+                .collect::<Vec<_>>()
+        };
+        let input = |commands: Vec<Command>| ClientMessage::Input {
+            client_time_us: 0,
+            event_ack: 0,
+            snapshot_ack: 0,
+            commands,
+        };
+        // Steps until key 1 hears `want`, keeping the connection alive.
+        let mut t = 0.0;
+        let until = |core: &mut ServerCore,
+                     t: &mut f64,
+                     packet: &mut dyn FnMut(&mut ServerCore, ClientMessage, f64) -> Vec<ServerMessage>,
+                     want: &dyn Fn(&ServerMessage) -> bool| {
+            let deadline = *t + 90.0;
+            while *t < deadline {
+                *t += 1.0 / 30.0;
+                if ((*t * 30.0) as u32).is_multiple_of(15) {
+                    packet(core, input(Vec::new()), *t);
+                }
+                for (to, b) in core.step(*t) {
+                    if to == 1 {
+                        let m = decode_server(&b).unwrap().1;
+                        if want(&m) {
+                            return m;
+                        }
+                    }
+                }
+            }
+            panic!("nothing arrived by {t} (tick {:?}, winner {:?})", core.world().tick(), core.world().game().winner);
+        };
+        let is_welcome = |m: &ServerMessage| matches!(m, ServerMessage::Welcome { .. });
+        let is_lobby = |m: &ServerMessage| matches!(m, ServerMessage::Lobby(_));
+
+        packet(&mut core, hello_msg(0, false), t);
+        packet(&mut core, ClientMessage::Lobby(msg::LobbyAction::Ready(true)), t);
+        let ServerMessage::Welcome { unit, .. } = until(&mut core, &mut t, &mut packet, &is_welcome) else {
+            unreachable!()
+        };
+        // Win quickly: the enemy's other structures are gone (the Base is protected until they
+        // fall) and our champion stands next to its Base.
+        let team = core.world().unit(unit).unwrap().team;
+        let base = core.world().units().iter().find(|u| u.kind == mftr_sim::UnitKind::Base && u.team != team).unwrap();
+        let (base_id, base_pos) = (base.id, base.state.pos);
+        let guards: Vec<UnitId> = core
+            .world()
+            .units()
+            .iter()
+            .filter(|u| u.team != team && u.kind.is_structure() && u.tier > 0 && u.tier < base.tier)
+            .map(|u| u.id)
+            .collect();
+        let w = core.world_mut();
+        for g in guards {
+            w.despawn(g);
+        }
+        w.unit_mut(base_id).unwrap().state.health = 1.0;
+        let me = w.unit_mut(unit).unwrap();
+        me.state.pos = base_pos + Vec2::new(if team == Team::Blue { -300.0 } else { 300.0 }, 0.0);
+        me.stats.attack_damage = 5000.0;
+        let k = core.world().tick().0 + 3;
+        let attack = Command {
+            player: PlayerId(0),
+            seq: 1,
+            tick: Tick(k),
+            sub: SubTick::START,
+            kind: mftr_sim::CommandKind::Attack(base_id),
+        };
+        packet(&mut core, input(vec![attack]), t);
+        let ServerMessage::Lobby(l) = until(&mut core, &mut t, &mut packet, &is_lobby) else { unreachable!() };
+        let ended = core.world().game().winner;
+        assert!(ended.is_none(), "the world restarted");
+        assert_eq!(core.game().player_count(), 0, "nobody plays during champion select");
+        let me = *l.slots.iter().find(|s| s.player == l.you).unwrap();
+        assert!(!me.bot && !me.ready && me.rerolls == lobby::REROLLS, "{me:?}");
+        assert_eq!(l.slots.len(), 10);
+        assert!(l.starts_in_ms > 50_000, "a full champion select");
+
+        let l = packet(&mut core, ClientMessage::Lobby(msg::LobbyAction::Reroll), t);
+        let rerolled = l
+            .iter()
+            .find_map(|m| match m {
+                ServerMessage::Lobby(l) => l.slots.iter().find(|s| s.player == l.you).map(|s| s.champion),
+                _ => None,
+            })
+            .unwrap();
+        packet(&mut core, ClientMessage::Lobby(msg::LobbyAction::Ready(true)), t);
+        let ServerMessage::Welcome { unit, .. } = until(&mut core, &mut t, &mut packet, &is_welcome) else {
+            unreachable!()
+        };
+        assert_eq!(core.world().unit(unit).unwrap().champion, Some(rerolled));
+        assert_eq!(core.game().player_count(), 10);
+        let base = core.world().unit(base_id);
+        assert!(base.is_none(), "structures were rebuilt as new units");
+        assert_eq!(core.world().units().iter().filter(|u| u.kind == mftr_sim::UnitKind::Base).count(), 2);
     }
 
     #[test]
