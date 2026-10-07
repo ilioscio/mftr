@@ -44,6 +44,7 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The start menu 
 | P | Shop (ARAM: buy while dead or in your fountain) |
 | S | Stop |
 | F1 / F2 | Net graph / client collision proxies (to feel the difference) |
+| F3 | Champion models / placeholder shapes |
 
 **Blind playtest** (helps us tune netcode against how it *feels*): choose **Blind playtest** in the client's start menu (or start it with `godot --path client -- --blind 127.0.0.1:7777`). You'll play 10 one-minute rounds under hidden network conditions and rate each one. Your answers go to `blind_results.tsv` in Godot's user data folder (the path is shown at the end). Send us that file; `mftr-tools blind-report blind_results.tsv` summarizes it. The [playtest guide](docs/playtest.md) has the full steps for testers and organizers.
 

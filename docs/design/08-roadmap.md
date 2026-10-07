@@ -383,6 +383,15 @@ Runs alongside M3/M4 and replaces the placeholder shapes with real champions ([1
 
 **Left for later:** recast `stages` (with the first champion that needs them); per-ability timing overrides (with the pilots).
 
+### A slice 3 status (2026-10-07): ✅ done
+- **Pose runtime in Rust** (`mftr-pack`: `pose`, `animator`): rig and clips from a validated pack, sampling (slerp), masked and additive blending, and the 10 §6 layer stack driven by sim state. Actions are retimed piecewise (windup progress → `[0, fire]`, follow-through → `[fire, end]`), so the release lands on the fire time at any attack speed. 8 tests on the committed library.
+- **Packs load through gdext only:** `MftrModel.load` validates (`mftr_pack::load_file`), then builds the `Skeleton3D`, the skinned `ArrayMesh` (Godot winding, joints remapped parents-first, smooth normals for the outline hull) and the skin; `ResourceLoader` never sees pack bytes. `MftrAnimator` poses the skeleton each frame from `own_status()` / `remote_units()` (`anim_*` keys; the own champion's are exact predicted sim times).
+- **Client:** champions wear the template (identity tint on cloth, team accent) until they ship their own models; **F3** toggles the placeholder shapes. Facing turns at 4,500 °/s, confirmed damage flashes the target white for ~3 frames, the enemy under the cursor gets a red outline, and projectile streaks leave from `socket_projectile`. The model shader is faceted (screen-space derivatives) with a three-band ramp. Our own champion's death now plays instead of the body vanishing.
+- **Library** gains fallback `idle`, `run` (330 u/s stride) and `death` block-outs.
+- **Checked in Godot 4.7.2** against a duel server: walking and running facing the path, casting, the hover outline and the enemy's red accent. `--zoom <factor>` brings the camera closer for such review captures.
+
+**Left for later:** remote champions' death (dead units leave the snapshot); remote attack timing (the wire has none, so those clips play at their own rate); shipping packs inside exported builds (the client reads them from `art/` next to the project for now).
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.

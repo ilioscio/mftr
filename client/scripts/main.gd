@@ -7,7 +7,7 @@ extends Node3D
 ## User args (after `--`) skip the menu: a server address (`host:port#fingerprint` pins the
 ## server's key, otherwise it is trusted on first use), `--champion NAME`,
 ## `--spectate` to watch (Tab cycles champions), `--shot-lobby` for a champion-select capture,
-## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots, and the blind playtest
+## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots (`--zoom <factor>` brings the camera closer), and the blind playtest
 ## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`. `--menu-join`
 ## (scripted checks) opens the menu and joins the first remembered server through it.
 
