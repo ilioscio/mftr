@@ -6,6 +6,7 @@
 //!
 //!   mftr-tools blind-report FILE.tsv...
 //!   mftr-tools pack validate FILE.glb|DIR...
+//!   mftr-tools sfx build [sounds.ron|DIR...]   (default: art)
 //!
 //! Profiles: perfect, lan, good, typical, mid, rough, awful.
 
@@ -210,6 +211,31 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("sfx") if args.get(1).map(String::as_str) == Some("build") => {
+            // A4c (05 §7): render every `sounds.ron` recipe into its pack's `export/`.
+            let mut recipes = Vec::new();
+            let roots: Vec<&str> =
+                if args.len() > 2 { args[2..].iter().map(String::as_str).collect() } else { vec!["art"] };
+            for arg in roots {
+                let path = std::path::Path::new(arg);
+                if path.is_dir() {
+                    mftr_tools::sfx::find_recipes(path, &mut recipes);
+                } else {
+                    recipes.push(path.to_path_buf());
+                }
+            }
+            for r in &recipes {
+                match mftr_tools::sfx::build(r) {
+                    Ok(b) => {
+                        println!("{}: {} sounds, {:.1} KB", b.binding.display(), b.sounds, b.bytes as f32 / 1000.0)
+                    }
+                    Err(e) => {
+                        eprintln!("{}: {e}", r.display());
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
         _ => {
             eprintln!("usage: mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--seed N]");
             eprintln!(
@@ -217,6 +243,7 @@ fn main() {
             );
             eprintln!("       mftr-tools blind-report FILE.tsv...");
             eprintln!("       mftr-tools pack validate FILE.glb|DIR...");
+            eprintln!("       mftr-tools sfx build [sounds.ron|DIR...]");
             std::process::exit(2);
         }
     }

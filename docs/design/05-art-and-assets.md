@@ -91,6 +91,38 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 - **Voice lines:** optional, downloadable per-language packs, not in the base download.
 - **Music:** optional pack (or a small procedural/adaptive layer in base).
 
+### 7.1 The SFX pipeline (A4c)
+
+**Authoring.** First-party sounds are synthesized.
+- A hand-written `sounds.ron` recipe sits next to each `.blend` and is the source of truth.
+- `mftr-tools sfx build` renders each sound from layered voices: sine, triangle, square, saw, noise and NES-style "metal".
+- Each voice has an exponential pitch slide, an attack/sustain/decay envelope with punch, vibrato, a swept low-pass, a high-pass and drive.
+- Each sound can add an echo and a PS1-era crunch (bit depth and sample-and-hold).
+- Output is mono at 22.05 kHz, in Ogg Vorbis (aoTuV, quality 0.3, a fixed stream serial), so the same recipe always gives the same bytes.
+- The build writes `export/<id>.sfx.ron` (event bindings plus the recipe's hash) and `export/sfx/*.ogg`.
+- A community pack may ship recorded Ogg files and a hand-written binding file instead.
+
+**Events.**
+- The VFX events (`<action>.<phase>`, §5.1), plus `cast`: a windup starting.
+- `unit.foot`, from the walk and run clips' `foot_l`/`foot_r` markers, never while dashing.
+- `unit.death` and `unit.respawn`.
+- `unit.recall` and `unit.emote`. These are authored but have no in-game trigger yet.
+- `cc.hard`: the **shared hard-CC accent**, a clang over a low gong. It plays on top of any hard-CC hit or detonation, the same for every champion, so lockdown has one learnable sound.
+
+**Variants.** Several sounds on one event are variants. One plays at random, never the same twice in a row, with the sound's random pitch spread. A champion's own `action.phase` wins, then its `*.phase`, then the shared library's (`biped_library.sfx.ron`).
+
+**Playback** (`client/scripts/sfx.gd`).
+- `mftr-pack` decodes the Ogg files with lewton under the caps. Godot receives 16-bit PCM as `AudioStreamWAV`, so pack bytes never reach it.
+- A pool of 24 positional voices plays them, stealing the oldest when all are busy.
+- The listener sits 6 m above the point the camera looks at, so units on screen sound near and off-screen ones fade.
+- Attenuation is inverse distance, with a 9 m reference, a 40 m cutoff and no distance muffling.
+
+**Caps** (11 §3.2):
+- ≤ 3 s per sound; mono or stereo; 8–48 kHz;
+- ≤ 128 KB per file;
+- ≤ 4 variants per event and ≤ 48 sounds;
+- ≤ 550 KB in total (10 §9).
+
 ## 8. Size budgets (compressed, per platform)
 
 | Component | Budget |

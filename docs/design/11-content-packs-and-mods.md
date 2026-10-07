@@ -34,7 +34,7 @@ Godot has the same trap. Its native resources (`.tscn`, `.tres`, `.res`, `.scn`)
 | Markers | `.anims.ron` | [10 §4.5](10-characters-and-animation.md#45-markers) |
 | Materials | RON | Slot → parameters of the **built-in** champion shader ([10 §2](10-characters-and-animation.md#2-character-visual-style-faceted-ps1)) |
 | VFX | RON | Instances of the built-in **VFX kit** (05 §5) with parameters; sizes come from the gameplay data |
-| Audio | Ogg Vorbis | Mono or stereo, ≤ 48 kHz, capped duration |
+| Audio | Ogg Vorbis + `.sfx.ron` | Mono or stereo, 8–48 kHz, ≤ 3 s per sound; bound to events by `<id>.sfx.ron` (§3.2) |
 | Icons | SVG **subset** | Paths, solid fills and gradients; no scripts, images, fonts, external references or filters |
 | Text | RON | Names, tooltips, per-language strings |
 
@@ -60,6 +60,28 @@ Godot has the same trap. Its native resources (`.tscn`, `.tres`, `.res`, `.scn`)
 - Caps: ≤ 4 effects per event, ≤ 64 per file, and ≤ 50 KB.
 
 `mftr-pack` validates the file with the model. A broken VFX file fails the pack.
+
+### 3.2 Sound files
+`<id>.sfx.ron` sits next to `<id>.glb` and binds events to the Ogg Vorbis files in `sfx/`. It is optional: without it, a pack plays the shared library's sounds. First-party packs generate it from a recipe (05 §7.1); a community pack may write it by hand.
+
+```ron
+(sounds: [
+    (name: "twang_1", events: ["attack.release"], volume: 0.5, pitch: 0.05),
+    (name: "twang_2", events: ["attack.release"], volume: 0.5, pitch: 0.05),
+    (name: "net_snare", events: ["r.impact"], volume: 0.65),
+])
+```
+
+- `name` is the file `sfx/<name>.ogg`: 1–32 characters from `a–z`, `0–9` and `_`, unique within the pack.
+- `events` are any of:
+  - the VFX events (§3.1), with the extra phase `cast`;
+  - `unit.<foot|death|respawn|recall|emote>`;
+  - `cc.hard`.
+- `volume` is 0–1.
+- `pitch` is the random spread per play, 0–0.25.
+- Up to 4 sounds may share an event, as variants.
+
+Every file is decoded by lewton when the pack is validated. Before any samples are allocated, the validator checks the file size, channels, sample rate and length (read from the last Ogg page). The pack fails if `sfx/` holds an `.ogg` that no sound names, or any other file.
 
 **Never accepted:** GDScript, C#, native libraries, Godot resources or scenes, shader source, HTML, any other file type, or anything that isn't listed above. First-party champions ship as packs too, so the official content proves the format is enough.
 

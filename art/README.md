@@ -7,13 +7,16 @@ art/
 ├─ rigs/biped_v1.blend            # the biped v1 reference skeleton + faceted template mesh
 │  └─ export/biped_v1.glb (+ .anims.ron)
 ├─ library/biped/biped_library.blend   # shared clips: walk, cast_utility, attack_melee_alt, cc_*
-│  └─ export/biped_library.glb (+ .anims.ron, .vfx.ron)
+│  ├─ sounds.ron                   # the shared sound recipes (footsteps, death, the hard-CC accent…)
+│  └─ export/biped_library.glb (+ .anims.ron, .vfx.ron, .sfx.ron, sfx/*.ogg)
 └─ champions/<id>/                 # one folder per champion (see champions/README.md)
 ```
 
 `.blend` files are the source of truth. `export/` holds generated files that are committed so CI (and the game) can check and load them without Blender. `review/` folders hold generated renders and are git-ignored.
 
 The exception is `<id>.vfx.ron`. It is **authored by hand** next to the `.glb`, and the exporter never touches it. It picks effects from the client's VFX kit for each `<action>.<phase>` ([11 §3.1](../docs/design/11-content-packs-and-mods.md#31-vfx-files)). The library's file holds the defaults that every champion falls back to. `pack validate` checks it with the model.
+
+Sounds work like the models: a hand-written **`sounds.ron`** recipe next to the `.blend` is the source of truth. `mftr-tools sfx build` renders it into `export/<id>.sfx.ron` and `export/sfx/*.ogg` ([05 §7.1](../docs/design/05-art-and-assets.md#71-the-sfx-pipeline-a4c)). A test fails if a recipe changed and the export wasn't rebuilt.
 
 ## Setup
 
@@ -38,11 +41,13 @@ Everything the add-on panel does also runs headless (`tools/blender/run.py`):
 ```
 blender -b art/library/biped/biped_library.blend --python tools/blender/run.py -- export --id biped_library --kind library
 blender -b art/library/biped/biped_library.blend --python tools/blender/run.py -- review [--clips walk,cast_utility]
+cargo run -p mftr-tools -- sfx build art
 cargo run -p mftr-tools -- pack validate art
 ```
 
 - **Export** writes `<id>.glb` and `<id>.anims.ron` into `export/` next to the `.blend`. The output is deterministic: the same `.blend` gives the same bytes, so a diff in `export/` always means a real change.
 - **Review** renders a contact sheet (PNG) and a looping GIF per clip into `review/`: the gameplay camera of [R01](../docs/design/reference/R01-video-ezreal-flash-barrier-q.md) at its true 1080p size (shown 2× with nearest filtering) next to a ¾ close-up. The strip under each sheet tile shows the frame number and the markers (red `fire`, blue loop, green foot contacts, white the playhead). Attach these to PRs.
+- **Sfx build** renders every `sounds.ron` under the folder with a small layered synthesizer. It has sine, triangle, square, saw, noise and NES-style "metal" voices, with slides, envelopes, filters, echo and a PS1-style bit and sample-rate crunch. Output is mono at 22.05 kHz, as Ogg Vorbis, and deterministic, like the export. The syntax is documented at the top of `crates/mftr-tools/src/sfx.rs`.
 - **Validate** checks the rig standard, caps, clip catalogue, markers, root motion and loop seams ([10 §8.4](../docs/design/10-characters-and-animation.md#84-validation-ci-and-add-on)). CI runs it on every push.
 
 ## Authoring rules (short version)

@@ -10,6 +10,7 @@ pub mod glb;
 pub mod json;
 pub mod pose;
 pub mod rules;
+pub mod sfx;
 pub mod sidecar;
 pub mod validate;
 pub mod vfx;
@@ -29,6 +30,8 @@ pub struct Loaded {
     pub library: pose::Library,
     /// `<id>.vfx.ron`, when the pack ships one (A4b).
     pub vfx: Option<vfx::VfxFile>,
+    /// The decoded sounds of `<id>.sfx.ron` and `sfx/*.ogg`, when the pack ships them (A4c).
+    pub sounds: Vec<sfx::Sound>,
 }
 
 /// A pack's optional VFX file: `<id>.glb` → `<id>.vfx.ron`.
@@ -36,10 +39,20 @@ pub fn vfx_path(glb: &Path) -> PathBuf {
     glb.with_extension("vfx.ron")
 }
 
+/// A pack's optional sound bindings: `<id>.glb` → `<id>.sfx.ron`, with the files in `sfx/`.
+pub fn sfx_path(glb: &Path) -> PathBuf {
+    glb.with_extension("sfx.ron")
+}
+
+/// The folder of a pack's `.ogg` files.
+pub fn sfx_dir(glb: &Path) -> PathBuf {
+    glb.parent().unwrap_or(Path::new(".")).join("sfx")
+}
+
 /// Reads, validates and parses `<id>.glb` and its sidecar. Refuses anything with errors: the
 /// client never draws an invalid pack (11 §4).
 pub fn load_file(glb_path: &Path) -> Result<Loaded, String> {
-    let report = validate_file(glb_path);
+    let (report, sounds) = validate_with_sounds(glb_path);
     if report.errors() > 0 {
         let first = report.findings.iter().find(|f| f.level == Level::Error).map_or(String::new(), |f| f.msg.clone());
         return Err(format!("{}: {} errors (first: {first})", glb_path.display(), report.errors()));
@@ -55,11 +68,15 @@ pub fn load_file(glb_path: &Path) -> Result<Loaded, String> {
     } else {
         None
     };
-    Ok(Loaded { model, library, vfx })
+    Ok(Loaded { model, library, vfx, sounds })
 }
 
 /// Reads and validates `<id>.glb` and its sidecar from disk.
 pub fn validate_file(glb_path: &Path) -> Report {
+    validate_with_sounds(glb_path).0
+}
+
+fn validate_with_sounds(glb_path: &Path) -> (Report, Vec<sfx::Sound>) {
     let read = |p: &Path| std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()));
     let side_path = sidecar_path(glb_path);
     let mut report = match (read(glb_path), read(&side_path)) {
@@ -81,7 +98,45 @@ pub fn validate_file(glb_path: &Path) -> Report {
         };
         report.findings.extend(problems.into_iter().map(|msg| Finding { level: Level::Error, msg }));
     }
-    report
+    let (sounds, problems) = read_sounds(glb_path, &mut report.summary);
+    report.findings.extend(problems.into_iter().map(|msg| Finding { level: Level::Error, msg }));
+    (report, sounds)
+}
+
+/// `<id>.sfx.ron` and `sfx/*.ogg`, checked and decoded; `sfx/` without a binding file is an error.
+fn read_sounds(glb_path: &Path, summary: &mut Vec<String>) -> (Vec<sfx::Sound>, Vec<String>) {
+    let (bind, dir) = (sfx_path(glb_path), sfx_dir(glb_path));
+    let mut present = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            match name.strip_suffix(".ogg") {
+                Some(stem) => present.push(stem.to_string()),
+                None => return (Vec::new(), vec![format!("sfx/{name}: only .ogg files belong in sfx/")]),
+            }
+        }
+    }
+    present.sort();
+    if !bind.exists() {
+        let problems =
+            if present.is_empty() { Vec::new() } else { vec![format!("sfx/ has sounds but no {}", bind.display())] };
+        return (Vec::new(), problems);
+    }
+    let file = match std::fs::read_to_string(&bind).map_err(|e| e.to_string()).and_then(|t| sfx::parse(&t)) {
+        Ok(f) => f,
+        Err(e) => return (Vec::new(), vec![e]),
+    };
+    let read = |name: &str| {
+        let p = dir.join(format!("{name}.ogg"));
+        let len = std::fs::metadata(&p).map_err(|e| e.to_string())?.len() as usize;
+        if len > sfx::MAX_FILE_BYTES {
+            return Err(format!("{len} bytes, over the {} byte cap", sfx::MAX_FILE_BYTES));
+        }
+        std::fs::read(&p).map_err(|e| e.to_string())
+    };
+    let (sounds, total, problems) = sfx::load(&file, read, &present);
+    summary.push(format!("sfx: {} sounds, {:.1} KB", file.sounds.len(), total as f32 / 1000.0));
+    (sounds, problems)
 }
 
 fn error_report(msg: String) -> Report {

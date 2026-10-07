@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use mftr_pack::animator::{Action, ActionKind, Animator, Drive, Phase};
+use mftr_pack::animator::{Action, ActionKind, AnimEvent, Animator, Drive, Phase};
 use mftr_pack::glb::quat_angle_deg;
 use mftr_pack::pose::{Library, Pose, add};
 
@@ -214,4 +214,30 @@ fn vespers_own_clips_win_over_the_shared_ones() {
     assert_eq!(lib.clips[c].name, "r");
     let c = Animator::action_clip(&lib, ActionKind::Cast { slot: 4 }).unwrap();
     assert_eq!(lib.clips[c].name, "cast_utility", "utility spells use the shared clip");
+}
+
+#[test]
+fn running_steps_twice_a_cycle_and_actions_announce_their_start() {
+    // A4c: footsteps on the run's foot markers, none while dashing; one start per windup.
+    let lib = vesper();
+    let run = lib.clip("run").unwrap();
+    let len = lib.clips[run].length;
+    let mut anim = Animator::new(&lib);
+    let mut steps = 0;
+    for _ in 0..400 {
+        anim.update(&lib, &Drive { dt: len / 100.0, speed: 330.0, ..Default::default() });
+        steps += anim.events.iter().filter(|e| **e == AnimEvent::Foot).count();
+    }
+    assert!((7..=8).contains(&steps), "{steps} steps in 4 cycles");
+    let mut dashing = 0;
+    for _ in 0..200 {
+        anim.update(&lib, &Drive { dt: 0.01, dashing: true, speed: 1000.0, ..Default::default() });
+        dashing += anim.events.len();
+    }
+    assert_eq!(dashing, 0);
+    let cast = Action { kind: ActionKind::Cast { slot: 0 }, phase: Phase::Windup, progress: Some(0.1) };
+    anim.update(&lib, &Drive { dt: 0.016, action: Some(cast), ..Default::default() });
+    assert_eq!(anim.events, vec![AnimEvent::Start(ActionKind::Cast { slot: 0 })]);
+    anim.update(&lib, &Drive { dt: 0.016, action: Some(Action { progress: Some(0.3), ..cast }), ..Default::default() });
+    assert!(anim.events.is_empty());
 }

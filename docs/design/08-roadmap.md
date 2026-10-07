@@ -419,11 +419,46 @@ Runs alongside M3/M4 and replaces the placeholder shapes with real champions ([1
   - a spinning gold Snare Net.
 - **Checked in Godot:** W, Q, E and R were checked against a duel server; the flare core and the smoke were toned down after the first captures.
 
-**Left for later:**
+**Left for later (A4b):**
 - crit sparks and the impact flash's spark burst at `socket_chest` (10 §6), which need crit and target info in the render state;
 - the allied-VFX opacity setting (05 §1.6);
 - footstep dust from `foot_l`/`foot_r` markers;
 - the basic-attack path was not captured on screen (no enemy came into range in the scripted duel).
+
+### A slice 4c status (2026-10-07): ✅ done
+- **SFX pipeline** (05 §7.1):
+  - `mftr-tools sfx build` renders hand-written `sounds.ron` recipes with a layered synthesizer into deterministic Ogg Vorbis files and a generated `<id>.sfx.ron`.
+  - The encoder is `vorbis_rs`, a tools-only dependency.
+  - A test fails when a recipe changed without a rebuild.
+- **Format** (11 §3.2):
+  - `mftr-pack` checks bindings and caps, rejects stray files, and decodes every file with lewton (memory-safe; caps checked before allocation; trimmed to the stream's true end).
+  - Packs load with their PCM, which `MftrModel.sounds()` hands to Godot as `AudioStreamWAV`.
+- **Events:**
+  - The animator reports footsteps (crossing `foot_l`/`foot_r`, not while dashing) and windup starts; `MftrAnimator.drive()` returns them.
+  - Death and respawn come from the unit's `dead` edge.
+  - Every VFX event also plays its sound, and a hard-CC hit or detonation adds the shared `cc.hard` accent.
+- **Client:** `sfx.gd` has 24 positional voices with stealing, variants that don't repeat, and a listener above the camera's look point.
+- **Sounds:**
+  - The library has 14 in 83 KB: a generic cast, release, hits, explosion, dash and land, three footsteps, death, respawn, recall and the hard-CC accent.
+  - Vesper has 17 in 84 KB (of her 550 KB budget):
+    - a bow-draw creak, twangs and thunks;
+    - Longshot's draw, release and crack;
+    - a fuse, a toss and a rattling blast for Shrapnel Charge;
+    - Tumble's whoosh and landing;
+    - Snare Net's swing, throw and two-note "caught" jangle;
+    - a whistle emote.
+- **Checked in Godot** against a duel server, from the client log:
+  - every sound fired on its event;
+  - the bot fell back to the library;
+  - footstep variants alternated;
+  - the net's hit played with the hard-CC accent.
+
+**Left for later:**
+- the owner's listening review (an audition page goes with the PR);
+- a volume setting and an SFX bus;
+- crit sounds (no crit info in the render state yet);
+- triggers for recall and emotes;
+- sounds for a unit drawn without its model (F3): they come from the animator, so none play.
 
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
