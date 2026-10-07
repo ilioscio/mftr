@@ -5,6 +5,7 @@
 //!   mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]
 //!
 //!   mftr-tools blind-report FILE.tsv...
+//!   mftr-tools pack validate FILE.glb|DIR...
 //!
 //! Profiles: perfect, lan, good, typical, mid, rough, awful.
 
@@ -176,13 +177,60 @@ fn main() {
             }
             print!("{}", mftr_tools::report::blind_report(&records));
         }
+        Some("pack") if args.get(1).map(String::as_str) == Some("validate") => {
+            // A1 (10 §8.4): every `<id>.glb` given, or found under a given directory, with its
+            // `<id>.anims.ron` sidecar. Exits non-zero on any error.
+            let mut files = Vec::new();
+            for arg in &args[2..] {
+                let path = std::path::Path::new(arg);
+                if path.is_dir() {
+                    collect_glbs(path, &mut files);
+                } else {
+                    files.push(path.to_path_buf());
+                }
+            }
+            if files.is_empty() {
+                eprintln!("usage: mftr-tools pack validate FILE.glb|DIR...");
+                std::process::exit(2);
+            }
+            let mut errors = 0;
+            for f in &files {
+                let report = mftr_pack::validate_file(f);
+                println!("{}", f.display());
+                for line in &report.summary {
+                    println!("  {line}");
+                }
+                for finding in &report.findings {
+                    println!("  {finding}");
+                }
+                println!("  {} errors, {} warnings", report.errors(), report.warnings());
+                errors += report.errors();
+            }
+            if errors > 0 {
+                std::process::exit(1);
+            }
+        }
         _ => {
             eprintln!("usage: mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--seed N]");
             eprintln!(
                 "       mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]"
             );
             eprintln!("       mftr-tools blind-report FILE.tsv...");
+            eprintln!("       mftr-tools pack validate FILE.glb|DIR...");
             std::process::exit(2);
+        }
+    }
+}
+
+/// Every `.glb` under `dir`, recursively, in name order.
+fn collect_glbs(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let mut entries: Vec<_> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    entries.sort();
+    for p in entries {
+        if p.is_dir() {
+            collect_glbs(&p, out);
+        } else if p.extension().is_some_and(|e| e == "glb") {
+            out.push(p);
         }
     }
 }

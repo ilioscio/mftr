@@ -18,6 +18,8 @@ This is a living document. Each file covers one area. Record decisions in [DECIS
 | 07 | [Hosting, Identity & Trust](07-hosting-and-trust.md) | Self-hosting, lobby, identity, anti-cheat stance, federation path |
 | 08 | [Roadmap](08-roadmap.md) | Milestones with exit criteria |
 | 09 | [Naming & Legal](09-naming-and-legal.md) | Legally distinct names, licensing, IP hygiene |
+| 10 | [Characters & Animation](10-characters-and-animation.md) | Faceted PS1 style, facing, action timing contract, the full animation set, rig standard, Blender pipeline, pilots |
+| 11 | [Content Packs & Mods](11-content-packs-and-mods.md) | Server-pushed packs, threat model, data-only format, validation, signatures, cache |
 | — | [Decisions & Open Questions](DECISIONS.md) | Decision log and unresolved questions |
 
 ### Reference analyses
@@ -29,6 +31,7 @@ Measurements taken from captures of the reference game. The captures stay in the
 | R01 | [Ezreal: Barrier, Flash, Mystic Shot, minions](reference/R01-video-ezreal-flash-barrier-q.md) | Camera model, movement and minion speed, input latency, skillshot speed and visual width, UI metrics |
 | R02 | [Allied champion pathing](reference/R02-video-allied-champion-pathing.md) | *Superseded by R03* (misread an ambiguous pass) |
 | R03 | [Allied champion collision](reference/R03-video-allied-champion-collision.md) | Champions block allied champions: stop at contact, path around (D23) |
+| R04 | [Facing and attack animation](reference/R04-video-facing-and-attack-animation.md) | Turn speed and latency, attack windup, release, cancellable follow-through, impact feedback |
 
 ## Conventions
 

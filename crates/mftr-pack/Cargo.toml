@@ -1,0 +1,14 @@
+[package]
+name = "mftr-pack"
+description = "MFTR content packs: the strict glTF subset, the marker sidecar and the validator."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mftr-sim.workspace = true
+nanoserde = { version = "0.2", default-features = false, features = ["ron", "std"] }
+
+[lints]
+workspace = true

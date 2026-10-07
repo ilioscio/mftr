@@ -11,6 +11,7 @@ mftr-sim.workspace = true
 mftr-net.workspace = true
 mftr-client.workspace = true
 mftr-server.workspace = true
+mftr-pack.workspace = true
 
 [lints]
 workspace = true
