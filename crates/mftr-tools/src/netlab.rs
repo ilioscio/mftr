@@ -679,9 +679,10 @@ mod tests {
         assert!(watcher.is_spectator(), "the spectator is still watching");
     }
 
-    /// M3 slice 2: a champion with Multishot, Echo and Broadside casts over a jittery link. The
-    /// client predicts the whole volley and the echo (keyed by cast and shot), each one is
-    /// confirmed by the server's own, and prediction never corrects.
+    /// M3 slices 2 and 3: a Titan with Multishot, Echo and Broadside casts over a jittery link.
+    /// The client predicts the whole volley and the echo (keyed by cast and shot), each one is
+    /// confirmed by the server's own, its hitbox grows with the server's, and prediction never
+    /// corrects.
     #[test]
     fn transformed_casts_are_predicted() {
         use mftr_client::missiles::Side;
@@ -717,7 +718,7 @@ mod tests {
                     if !augmented {
                         // Grant the augments on the server; the client learns them from its state.
                         let u = server.world_mut().unit_mut(session.unit()).unwrap();
-                        u.state.progress.augments = [24, 25, 26, 0];
+                        u.state.progress.augments = [24, 25, 26, 27];
                         u.state.progress.drafted = 4;
                         u.state.progress.offer = [0; 3];
                         u.state.progress.ranks = [1; 4];
@@ -749,6 +750,9 @@ mod tests {
         assert_eq!(session.stats.hard_resets, 0);
         assert!(session.stats.corrections.iter().all(|c| *c < 1.0), "{:?}", session.stats.corrections);
         assert!(session.book_is_settled(), "every predicted missile was confirmed");
+        let titan = mftr_sim::world::CHAMPION_GAMEPLAY_RADIUS * mftr_sim::augments::TITAN_SCALE;
+        assert_eq!(session.own_radius(), titan);
+        assert_eq!(server.world().unit(session.unit()).unwrap().gameplay_radius, titan);
     }
 
     /// Q13: over a lossy, jittery link with moving minions, every snapshot the client

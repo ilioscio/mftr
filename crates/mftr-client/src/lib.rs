@@ -623,7 +623,7 @@ impl ClientSession {
         let icpt = self.interceptions();
         let mut book = std::mem::take(&mut self.book);
         let last = self.world.tick();
-        book.update_outcomes(t, self.unit, OWN_GAMEPLAY_RADIUS, &|k| self.history_at(k), last, &icpt);
+        book.update_outcomes(t, self.unit, self.own_radius(), &|k| self.history_at(k), last, &icpt);
         if let Some(t_now) = self.now_ticks(now) {
             let stale = SimTime(((t_now - 30.0).max(0.0) * SUBTICKS as f64) as u64);
             book.prune_predicted(SimTime(u64::MAX), stale);
@@ -1206,7 +1206,7 @@ impl ClientSession {
             return Vec::new();
         };
         let icpt = self.interceptions();
-        self.book.render(t_input, t_interp, OWN_GAMEPLAY_RADIUS, &|k| self.history_at(k), self.world.tick(), &icpt)
+        self.book.render(t_input, t_interp, self.own_radius(), &|k| self.history_at(k), self.world.tick(), &icpt)
     }
 
     /// Delayed ground areas to draw this frame, each on its display timeline (03a §7).
@@ -1295,12 +1295,17 @@ impl ClientSession {
     /// Enemy missiles still in flight, as the player sees them (scripted dodgers).
     pub fn threats(&self, now: f64) -> Vec<Threat> {
         let Some(t_input) = self.input_time(now) else { return Vec::new() };
-        self.book.threats(t_input, now, OWN_GAMEPLAY_RADIUS, &|k| self.history_at(k), self.world.tick())
+        self.book.threats(t_input, now, self.own_radius(), &|k| self.history_at(k), self.world.tick())
     }
 
     /// No own missile or area is still waiting for the server's confirmation.
     pub fn book_is_settled(&self) -> bool {
         self.book.predicted_own.is_empty() && self.effects.predicted_area_count() == 0
+    }
+
+    /// The own champion's hitbox (augments can grow or shrink it).
+    pub fn own_radius(&self) -> f32 {
+        self.world.unit(self.unit).map_or(mftr_sim::world::CHAMPION_GAMEPLAY_RADIUS, |u| u.gameplay_radius)
     }
 
     pub fn dodge_stats(&self) -> &DodgeStats {
@@ -1317,8 +1322,6 @@ impl ClientSession {
         self.input_time(now).map(|t| SimTime((t * SUBTICKS as f64) as u64))
     }
 }
-
-const OWN_GAMEPLAY_RADIUS: f32 = mftr_sim::world::CHAMPION_GAMEPLAY_RADIUS;
 
 /// Interpolate between buffered snapshots; hold at the newest, never extrapolate (03a §10.3).
 fn interpolate(buf: &VecDeque<(Tick, Vec2)>, t: f64) -> Option<Vec2> {

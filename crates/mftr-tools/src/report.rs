@@ -427,10 +427,7 @@ impl DuelBot {
         let d = e.pos.distance(own);
         let to = (e.pos - own).normalize_or_zero();
         let perp = Vec2::new(-to.y, to.x) * if self.rng.next_u32().is_multiple_of(2) { 1.0 } else { -1.0 };
-        let max_hp =
-            mftr_sim::items::champion_stats(champ.def(), st.progress.level, &st.progress.items, &st.progress.augments)
-                .0
-                .max_health;
+        let max_hp = mftr_sim::items::champion_stats(champ.def(), &st.progress.stats_key()).0.max_health;
         if st.health < 0.35 * max_hp && ready(5) {
             return session.cast(5, own, now).is_some();
         }

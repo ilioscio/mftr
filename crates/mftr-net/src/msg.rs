@@ -817,6 +817,7 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     w.write(p.drafted as u64, 3);
     w.write_bool(p.rerolled);
     w.write_u32(p.augment_seed);
+    w.write_bool(p.unstable_tiny);
 }
 
 fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
@@ -918,6 +919,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let drafted = r.read(3)? as u8;
     let rerolled = r.read_bool()?;
     let augment_seed = r.read_u32()?;
+    let unstable_tiny = r.read_bool()?;
     let progress = Progress {
         level,
         xp,
@@ -934,6 +936,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         drafted,
         rerolled,
         augment_seed,
+        unstable_tiny,
     };
     Ok(UnitState {
         pos,
@@ -1562,6 +1565,7 @@ mod tests {
                 drafted: 3,
                 rerolled: true,
                 augment_seed: 0xdead_beef,
+                unstable_tiny: true,
             },
         }
     }

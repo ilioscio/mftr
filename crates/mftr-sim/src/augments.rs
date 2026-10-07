@@ -52,6 +52,58 @@ pub enum Effect {
     Echo,
     /// Wider skillshots and larger areas (where accepted).
     Wide,
+    /// Grow: a larger hitbox, more health and adaptive force.
+    Titan,
+    /// Shrink: a smaller hitbox, more speed, more damage to larger targets.
+    Pebble,
+    /// Titan or Pebble, rolled again at every respawn.
+    Unstable,
+}
+
+/// A champion's size form (06 §3 physical transformations).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Form {
+    Normal,
+    Huge,
+    Tiny,
+}
+
+/// Hitbox scale per form (the gameplay radius and the model; collision with units and walls
+/// keeps the champion size, which paths and wall clearance are tuned for).
+pub const TITAN_SCALE: f32 = 1.5;
+pub const PEBBLE_SCALE: f32 = 0.6;
+/// Huge: +30% health and 40 adaptive force. Tiny: +12% movement speed, +20% damage to targets
+/// with a larger hitbox.
+pub const TITAN_HEALTH: f32 = 0.30;
+pub const TITAN_FORCE: f32 = 40.0;
+pub const PEBBLE_SPEED: f32 = 0.12;
+pub const PEBBLE_AMP: f32 = 1.2;
+
+/// The form from held augments (Unstable: as last rolled).
+pub fn form(slots: &[u8; SLOTS], unstable_tiny: bool) -> Form {
+    let mut f = Form::Normal;
+    for a in held(slots) {
+        match a.effect {
+            Effect::Titan => f = Form::Huge,
+            Effect::Pebble => f = Form::Tiny,
+            Effect::Unstable => f = if unstable_tiny { Form::Tiny } else { Form::Huge },
+            _ => {}
+        }
+    }
+    f
+}
+
+pub fn scale(form: Form) -> f32 {
+    match form {
+        Form::Normal => 1.0,
+        Form::Huge => TITAN_SCALE,
+        Form::Tiny => PEBBLE_SCALE,
+    }
+}
+
+/// Unstable Experiment's roll for a seed and an instant (each respawn, and when picked).
+pub fn unstable_roll(seed: u32, at: u64) -> bool {
+    Pcg32::new(seed as u64 ^ at, 0x7369_7a65).next_u32() & 1 == 1
 }
 
 /// Multishot: projectiles per volley and the angle between neighbors (15°, as exact
@@ -222,6 +274,30 @@ pub const CATALOG: &[Augment] = &[
         Bonus { health: 500.0, life_steal: 0.25, ..b() }
     ),
     aug!(
+        27,
+        Prismatic,
+        "Titan",
+        "Grow by 50%: a larger hitbox, +30% health and 40 adaptive force.",
+        b(),
+        Effect::Titan
+    ),
+    aug!(
+        28,
+        Prismatic,
+        "Pebble",
+        "Shrink by 40%: a smaller hitbox, +12% movement speed and 20% more damage to larger targets.",
+        b(),
+        Effect::Pebble
+    ),
+    aug!(
+        29,
+        Prismatic,
+        "Unstable Experiment",
+        "Every time you respawn, you become a Titan or a Pebble at random.",
+        b(),
+        Effect::Unstable
+    ),
+    aug!(
         24,
         Prismatic,
         "Multishot",
@@ -299,6 +375,9 @@ pub fn pick(p: &mut Progress, choice: u8) {
     }
     p.augments[slot] = id;
     p.offer = [0; CHOICES];
+    if augment(id).is_some_and(|a| a.effect == Effect::Unstable) {
+        p.unstable_tiny = unstable_roll(p.augment_seed, p.drafted as u64);
+    }
 }
 
 /// Replace the open offer with three new choices (once per draft).

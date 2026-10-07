@@ -670,8 +670,7 @@ impl MatchClient {
         d.set("abilities", &names);
         if let (Some(s), Some(t)) = (self.session.own_state_now(), self.session.input_sim_time(now)) {
             d.set("health", s.health);
-            let (stats, attack) =
-                items::champion_stats(champ.def(), s.progress.level, &s.progress.items, &s.progress.augments);
+            let (stats, attack) = items::champion_stats(champ.def(), &s.progress.stats_key());
             d.set("max_health", stats.max_health);
             d.set("attack_damage", stats.attack_damage);
             d.set("ability_power", stats.ability_power);
@@ -686,6 +685,7 @@ impl MatchClient {
             }
             d.set("items", &inv);
             d.set("can_undo", s.progress.undo_len > 0);
+            d.set("hitbox", self.session.own_radius());
             // ARAM: Mayhem: held augments and the open draft.
             let card = |id: u8| {
                 let mut c = VarDictionary::new();

@@ -177,6 +177,8 @@ pub struct Progress {
     pub rerolled: bool,
     /// Seeds this champion's offers, so picks and rerolls are predicted exactly.
     pub augment_seed: u32,
+    /// Unstable Experiment's current roll: tiny (else huge).
+    pub unstable_tiny: bool,
 }
 
 /// One buy or sell: the inventory before it and the gold it changed.
@@ -189,8 +191,9 @@ pub struct Trade {
 /// How many trades can be undone.
 pub const UNDO: usize = 4;
 
-/// Level, items and augments: what a champion's stats are computed from.
-pub type StatsKey = (u8, [u8; INVENTORY], [u8; augments::SLOTS]);
+/// Level, items, augments and the Unstable Experiment roll: what a champion's stats (and size)
+/// are computed from.
+pub type StatsKey = (u8, [u8; INVENTORY], [u8; augments::SLOTS], bool);
 
 impl Progress {
     /// Sandbox default: level 1, every ability at rank 1, nothing to spend.
@@ -210,6 +213,7 @@ impl Progress {
         drafted: 0,
         rerolled: false,
         augment_seed: 0,
+        unstable_tiny: false,
     };
 
     pub fn hash_into(&self, h: &mut impl StateSink) {
@@ -241,11 +245,12 @@ impl Progress {
         h.write_u8(self.drafted);
         h.write_u8(self.rerolled as u8);
         h.write_u32(self.augment_seed);
+        h.write_u8(self.unstable_tiny as u8);
     }
 
     /// What a champion's stats are computed from.
     pub fn stats_key(&self) -> StatsKey {
-        (self.level, self.items, self.augments)
+        (self.level, self.items, self.augments, self.unstable_tiny)
     }
 
     fn push_trade(&mut self, t: Trade) {
@@ -745,7 +750,7 @@ impl Unit {
             attack: None,
             tier: 0,
             protected: false,
-            stats_for: (1, [0; INVENTORY], [0; augments::SLOTS]),
+            stats_for: (1, [0; INVENTORY], [0; augments::SLOTS], false),
         }
     }
 
@@ -771,7 +776,8 @@ impl Unit {
         if key == self.stats_for {
             return false;
         }
-        let (stats, attack) = items::champion_stats(c.def(), key.0, &key.1, &key.2);
+        let (stats, attack) = items::champion_stats(c.def(), &key);
+        self.gameplay_radius = CHAMPION_GAMEPLAY_RADIUS * augments::scale(augments::form(&key.2, key.3));
         if self.state.alive() {
             self.state.health =
                 (self.state.health + (stats.max_health - self.stats.max_health).max(0.0)).min(stats.max_health);
@@ -788,7 +794,8 @@ impl Unit {
     pub fn reset_stats(&mut self) {
         let Some(c) = self.champion else { return };
         let key = self.state.progress.stats_key();
-        let (stats, attack) = items::champion_stats(c.def(), key.0, &key.1, &key.2);
+        let (stats, attack) = items::champion_stats(c.def(), &key);
+        self.gameplay_radius = CHAMPION_GAMEPLAY_RADIUS * augments::scale(augments::form(&key.2, key.3));
         self.stats = stats;
         self.attack = Some(attack);
         self.stats_for = key;
@@ -1398,7 +1405,9 @@ impl World {
         self.units.retain(|u| u.state.alive() || !matches!(u.brain, Some(Brain::Laner { .. })));
         for u in self.units.iter_mut() {
             if u.state.respawn_at.is_some_and(|r| r <= s0) {
-                let progress = u.state.progress;
+                let mut progress = u.state.progress;
+                // Unstable Experiment: huge or tiny again, at random, at every respawn.
+                progress.unstable_tiny = augments::unstable_roll(progress.augment_seed, s0.0);
                 u.state = UnitState::new(u.home, u.stats.move_speed);
                 u.state.health = u.stats.max_health;
                 u.state.progress = progress;
@@ -1633,8 +1642,9 @@ impl World {
             melee.sort_by_key(|m| (m.3, m.0));
             let mut landed = Vec::new();
             for (owner, target, power, at) in melee {
+                let amp = size_amp(units, owner, target);
                 if let Some(u) = units.iter_mut().find(|u| u.id == target) {
-                    let dealt = deal_damage(u, owner, power, DamageKind::Physical, at, events);
+                    let dealt = deal_damage(u, owner, power * amp, DamageKind::Physical, at, events);
                     landed.push((owner, target, dealt, at));
                 }
             }
@@ -2283,9 +2293,10 @@ fn resolve_effects(
             struck.push(VolleyHit { owner: volley.0, cast_seq: volley.1, echo: volley.2, target });
             events.push(SimEvent::MissileHit { id: m.id, target, at });
             let from = pos_of(m.owner).unwrap_or(m.origin);
+            let amp = size_amp(units, m.owner, target);
             if let Some(u) = units.iter_mut().find(|u| u.id == target) {
                 apply_cc(u, m.spec.cc, at, from, s1, events);
-                deal_damage(u, m.owner, m.power, m.spec.damage.kind, at, events);
+                deal_damage(u, m.owner, m.power * amp, m.spec.damage.kind, at, events);
             }
             return false;
         }
@@ -2305,18 +2316,18 @@ fn resolve_effects(
         events.push(SimEvent::AreaDetonated { id: a.id, at: a.detonate_at });
         for &(id, team, r, q0, q1) in &motion {
             let reach = a.radius + r;
-            if team != a.team
-                && (q0.lerp(q1, frac) - a.center).length_sq() <= reach * reach
-                && let Some(u) = units.iter_mut().find(|u| u.id == id)
-            {
+            if team != a.team && (q0.lerp(q1, frac) - a.center).length_sq() <= reach * reach {
+                let amp = size_amp(units, a.owner, id);
+                let Some(u) = units.iter_mut().find(|u| u.id == id) else { continue };
                 apply_cc(u, a.cc, a.detonate_at, a.center, s1, events);
-                deal_damage(u, a.owner, a.power, a.kind, a.detonate_at, events);
+                deal_damage(u, a.owner, a.power * amp, a.kind, a.detonate_at, events);
             }
         }
         false
     });
     let mut landed: Vec<(UnitId, UnitId, f32, SimTime)> = Vec::new();
     bolts.retain_mut(|b| {
+        let amp = size_amp(units, b.owner, b.target);
         let Some(target) = units.iter_mut().find(|u| u.id == b.target && u.targetable()) else {
             events.push(SimEvent::AttackLanded { id: b.id, target: b.target, at: s1, hit: false });
             return false;
@@ -2329,7 +2340,7 @@ fn resolve_effects(
         if gap <= step {
             let at = SimTime(from.0 + (gap / b.speed * SUBTICKS_PER_SECOND as f32) as u64).min(s1);
             events.push(SimEvent::AttackLanded { id: b.id, target: b.target, at, hit: true });
-            let dealt = deal_damage(target, b.owner, b.power, b.kind, at, events);
+            let dealt = deal_damage(target, b.owner, b.power * amp, b.kind, at, events);
             landed.push((b.owner, b.target, dealt, at));
             return false;
         }
@@ -2399,6 +2410,15 @@ fn apply_cc(u: &mut Unit, cc: Cc, at: SimTime, from: Vec2, s1: SimTime, events: 
     }
 }
 
+/// Pebble (a tiny champion) deals more damage to targets with a larger hitbox (06 §3).
+fn size_amp(units: &[Unit], owner: UnitId, target: UnitId) -> f32 {
+    let radius = |id: UnitId| units.iter().find(|u| u.id == id).map(|u| (u.kind, u.gameplay_radius));
+    match (radius(owner), radius(target)) {
+        (Some((UnitKind::Champion, r)), Some((_, t))) if r < CHAMPION_GAMEPLAY_RADIUS && t > r => augments::PEBBLE_AMP,
+        _ => 1.0,
+    }
+}
+
 /// How fast a pull drags its target.
 pub const PULL_SPEED: f32 = 1800.0;
 
@@ -2412,6 +2432,7 @@ fn resolve_direct(units: &mut [Unit], direct: &mut [Fired], s1: SimTime, events:
     for f in direct.iter() {
         match *f {
             Fired::Strike { owner, target, power, kind, cc, at } => {
+                let power = power * size_amp(units, owner, target);
                 let from = units.iter().find(|u| u.id == owner).map(|u| (u.state.pos, u.gameplay_radius));
                 if let (Some((p, r)), Some(u)) = (from, units.iter_mut().find(|u| u.id == target)) {
                     // Still within reach on arrival (it may have dashed or blinked away).
@@ -3623,7 +3644,8 @@ mod tests {
         let u = w.unit(me).unwrap();
         assert_eq!(u.state.progress.augments, [offer[2], 0, 0, 0]);
         assert_eq!(u.state.progress.offer, [0; augments::CHOICES]);
-        let expected = items::champion_stats(ChampionId::Bastion.def(), 3, &[0; INVENTORY], &[offer[2], 0, 0, 0]).0;
+        let expected =
+            items::champion_stats(ChampionId::Bastion.def(), &(3, [0; INVENTORY], [offer[2], 0, 0, 0], false)).0;
         assert_eq!(u.stats, expected);
         assert_ne!(u.stats, before, "every Silver augment changes some stat");
 
@@ -3699,7 +3721,7 @@ mod tests {
         let (mut w, _, _) = augmented([24, 25, 26, 0], ChampionId::Bastion, Vec2::new(4000.0, 4000.0));
         let pull =
             ChampionId::Bastion.def().abilities.iter().position(|a| matches!(a.effect, Effect::Line(_))).unwrap();
-        w.step(&[cast(0, 1, 1, pull as u8, (2000.0, 1000.0))]);
+        w.step(&[cast_slot(0, 1, 1, 0, pull as u8, (2000.0, 1000.0))]);
         let ev = run_until_quiet(&mut w, 60);
         let spawned: Vec<Missile> = ev
             .iter()
@@ -3711,6 +3733,92 @@ mod tests {
         assert_eq!(spawned.len(), 1, "the pull fires once");
         let Effect::Line(hook) = ChampionId::Bastion.def().abilities[pull].effect else { panic!() };
         assert_eq!(spawned[0].spec.radius, hook.radius * augments::WIDE_LINE);
+    }
+
+    /// An Ember (red) firing its Q along y = 1000 + `offset`, past a blue Bastion at (2000,
+    /// 1000) that holds `target_augments`; the Ember holds `shooter_augments`. Returns the
+    /// damage the Bastion took (0 for a miss).
+    fn lance_past(offset: f32, target_augments: [u8; 4], shooter_augments: [u8; 4]) -> f32 {
+        let mut w = World::new(9);
+        w.set_rules(Rules::MAYHEM);
+        let target = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Bastion, Vec2::new(2000.0, 1000.0));
+        let shooter = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, Vec2::new(1000.0, 1000.0 + offset));
+        for (id, augments) in [(target, target_augments), (shooter, shooter_augments)] {
+            let p = &mut w.unit_mut(id).unwrap().state.progress;
+            p.augments = augments;
+            p.ranks = [1; 4];
+            p.drafted = augments::SLOTS as u8;
+        }
+        w.step(&[]);
+        w.step(&[cast(1, 1, 2, 0, (3000.0, 1000.0 + offset))]);
+        run_until_quiet(&mut w, 60)
+            .iter()
+            .map(|e| match e {
+                SimEvent::Damage { target: t, amount, absorbed, .. } if *t == target => amount + absorbed,
+                _ => 0.0,
+            })
+            .sum()
+    }
+
+    /// M3 slice 3: Titan and Pebble change the hitbox the sim judges hits against, along with
+    /// the stats; collision with walls and units keeps the champion size.
+    #[test]
+    fn titan_and_pebble_change_hitboxes_honestly() {
+        let (mut w, titan, pebble) = augmented([27, 0, 0, 0], ChampionId::Bastion, Vec2::new(3000.0, 3000.0));
+        w.unit_mut(pebble).unwrap().state.progress.augments = [28, 0, 0, 0];
+        let plain = items::champion_stats(ChampionId::Bastion.def(), &(11, [0; INVENTORY], [0; 4], false)).0;
+        w.step(&[]);
+        let (t, p) = (w.unit(titan).unwrap(), w.unit(pebble).unwrap());
+        assert_eq!(t.gameplay_radius, CHAMPION_GAMEPLAY_RADIUS * augments::TITAN_SCALE);
+        assert_eq!(p.gameplay_radius, CHAMPION_GAMEPLAY_RADIUS * augments::PEBBLE_SCALE);
+        assert_eq!((t.collision_radius, p.collision_radius), (CHAMPION_COLLISION_RADIUS, CHAMPION_COLLISION_RADIUS));
+        assert!((t.stats.max_health - plain.max_health * 1.3).abs() < 1e-2);
+        assert!(p.stats.move_speed > plain.move_speed);
+
+        // 110 u beside the center: past a normal hitbox (65 + 35), into a Titan's (97.5 + 35).
+        assert_eq!(lance_past(110.0, [0; 4], [0; 4]), 0.0);
+        assert!(lance_past(110.0, [27, 0, 0, 0], [0; 4]) > 0.0);
+        // 80 u beside: into a normal hitbox, past a Pebble's (39 + 35).
+        assert!(lance_past(80.0, [0; 4], [0; 4]) > 0.0);
+        assert_eq!(lance_past(80.0, [28, 0, 0, 0], [0; 4]), 0.0);
+        // A Pebble hits larger targets 20% harder.
+        let (normal, pebble) = (lance_past(0.0, [0; 4], [0; 4]), lance_past(0.0, [0; 4], [28, 0, 0, 0]));
+        assert!((pebble / normal - augments::PEBBLE_AMP).abs() < 1e-4, "{normal} → {pebble}");
+    }
+
+    /// Unstable Experiment rolls huge or tiny when picked and again at every respawn, from the
+    /// champion's seed and the respawn instant (so prediction rolls the same).
+    #[test]
+    fn unstable_experiment_rerolls_at_each_respawn() {
+        let (mut w, me, _) = augmented([0; 4], ChampionId::Rook, Vec2::new(3000.0, 3000.0));
+        {
+            let p = &mut w.unit_mut(me).unwrap().state.progress;
+            p.drafted = 1;
+            p.offer = [29, 0, 0];
+        }
+        w.step(&[Command {
+            player: PlayerId(0),
+            seq: 1,
+            tick: Tick(1),
+            sub: SubTick::START,
+            kind: CommandKind::PickAugment(0),
+        }]);
+        w.step(&[]);
+        let mut forms = std::collections::BTreeSet::new();
+        for _ in 0..12 {
+            let u = w.unit(me).unwrap();
+            let expected = if u.state.progress.unstable_tiny { augments::PEBBLE_SCALE } else { augments::TITAN_SCALE };
+            assert_eq!(u.gameplay_radius, CHAMPION_GAMEPLAY_RADIUS * expected);
+            forms.insert(u.state.progress.unstable_tiny);
+            // Die and come back at the start of the next tick.
+            let at = SimTime::end_of(w.tick());
+            let u = w.unit_mut(me).unwrap();
+            u.state.respawn_at = Some(at);
+            let seed = u.state.progress.augment_seed;
+            w.step(&[]);
+            assert_eq!(w.unit(me).unwrap().state.progress.unstable_tiny, augments::unstable_roll(seed, at.0));
+        }
+        assert_eq!(forms.len(), 2, "both forms come up");
     }
 
     /// M2 slice 2: abilities must be learned; ranks are gated by level (R at 6 / 11 / 16) and
@@ -4027,7 +4135,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0x7513_0557_1b9f_141a;
+    const GOLDEN_HASH_ARENA: u64 = 0xd145_d569_bd91_9dbe;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -4083,7 +4191,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x6d4d_428a_a693_6897;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x7282_39aa_4eb4_bb1b;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -4154,5 +4262,5 @@ mod tests {
 
     /// Recorded on x86_64-unknown-linux-gnu (debug and release agree). CI checks Linux, macOS
     /// (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x844f_a0b8_fbad_8c46;
+    const GOLDEN_HASH: u64 = 0x6a51_8c99_bc59_ad7d;
 }

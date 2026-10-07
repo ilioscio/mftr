@@ -473,6 +473,8 @@ func _process(delta: float) -> void:
 		own_body.visible = playing and not dead
 		var own := _to_world(client.own_position())
 		own_body.position = own
+		# Titan and Pebble: the model grows and shrinks with the hitbox (honest hitboxes).
+		own_body.scale = Vector3.ONE * (float(own_status.get("hitbox", CHAMPION_RADIUS_U)) / CHAMPION_RADIUS_U)
 		_place_camera(own)
 		_show_statuses(own_body, own_status.get("stunned", false), own_status.get("rooted", false), own_status.get("shield", 0.0), own_status.get("slowed", false))
 	_update_remotes()
@@ -545,6 +547,8 @@ func _update_remotes() -> void:
 		elif u.kind in ["gatehouse", "base", "relic"]:
 			p.y = 0.0
 		body.position = p
+		if u.champion != "":
+			body.scale = Vector3.ONE * (float(u.gameplay_radius) / CHAMPION_RADIUS_U)
 		if body.has_node("Protected"):
 			body.get_node("Protected").visible = u.protected
 		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO))
