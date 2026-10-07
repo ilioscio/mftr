@@ -807,6 +807,106 @@ mod tests {
         assert_eq!(server.world().unit(session.unit()).unwrap().gameplay_radius, titan);
     }
 
+    /// A2 (D52): buffered casts, cut follow-throughs and hard locks are predicted exactly over a
+    /// jittery link, and the server confirms the buffered casts. A scripted Vesper repeats, every
+    /// 11 s (so every cast is off cooldown): W then Q at once (Q waits in the buffer for W's windup), Tumble, Q then a move right
+    /// after it fires (the cancel), and the ultimate with a cast and a move inside its hard lock.
+    #[test]
+    fn timing_contract_is_predicted() {
+        use mftr_client::missiles::Side;
+        use mftr_sim::Vec2;
+        let cfg = ServerConfig { seed: 5, scenario: Scenario::Empty, ..Default::default() };
+        let mut server = ServerCore::new(cfg, 0.0);
+        let mut session = ClientSession::new();
+        session.set_champion_request(Some(mftr_sim::ChampionId::Vesper));
+        let (mut up, mut down) = (SimLink::new(LinkProfile::MID, 21), SimLink::new(LinkProfile::MID, 22));
+        let (mut t, mut next_hello, mut start) = (0.0, 0.0, None);
+        let (mut buffered_seen, mut recovering_seen, mut hard_seen) = (0, 0, 0);
+        let mut confirmed: std::collections::BTreeSet<u32> = Default::default();
+        let mut done: std::collections::BTreeSet<u32> = Default::default();
+        while t < 45.0 {
+            while let Some(p) = up.recv(t) {
+                for (_, bytes) in server.handle_packet(1, &p, t) {
+                    down.send(bytes, t);
+                }
+            }
+            if t >= server.next_tick_due() {
+                for (_, bytes) in server.step(t) {
+                    down.send(bytes, t);
+                }
+            }
+            while let Some(p) = down.recv(t) {
+                session.handle_packet(&p, t);
+            }
+            session.update(t);
+            match session.phase() {
+                Phase::Connecting if t >= next_hello => {
+                    up.send(session.hello_packet(t), t);
+                    next_hello = t + 0.25;
+                }
+                Phase::Playing => {
+                    let t0 = *start.get_or_insert(t + 1.0);
+                    let own = session.own_render_position(t).unwrap();
+                    let east = own + Vec2::new(600.0, 0.0);
+                    // (offset in the 10 s cycle, step id): each step once per cycle.
+                    let cycle = ((t - t0) / 11.0).floor();
+                    let at = t - t0 - cycle * 11.0;
+                    let id = |step: u32| cycle.max(0.0) as u32 * 16 + step;
+                    let mut once = |step: u32, when: f64| t >= t0 && at >= when && done.insert(id(step));
+                    if once(0, 0.0) {
+                        session.cast(1, own + Vec2::new(500.0, 0.0), t); // W: delayed area
+                    }
+                    if once(1, 0.05) {
+                        session.cast(0, east, t); // Q during W's windup: buffered
+                    }
+                    if once(2, 2.0) {
+                        session.cast(2, own + Vec2::new(0.0, 300.0), t); // E: Tumble
+                    }
+                    if once(3, 5.5) {
+                        session.cast(0, east, t);
+                    }
+                    if once(4, 5.9) {
+                        session.move_to(own + Vec2::new(0.0, -200.0), t); // cut Q's follow-through
+                    }
+                    if once(5, 8.0) {
+                        session.cast(3, east, t); // R: hard lock after it fires
+                    }
+                    if once(6, 8.33) {
+                        session.cast(4, own + Vec2::new(-300.0, 0.0), t); // Blink, buffered in the lock
+                        session.move_to(own + Vec2::new(0.0, 200.0), t);
+                    }
+                    if let Some((tick, s)) = session.own_state_latest() {
+                        let now = mftr_sim::SimTime::end_of(tick);
+                        buffered_seen += s.buffered.is_some() as u32;
+                        recovering_seen += s.recovering(now) as u32;
+                        hard_seen += s.hard_locked(now) as u32;
+                    }
+                    for m in session.missiles_render(t).into_iter().filter(|m| m.side == Side::Own) {
+                        if m.key < u32::MAX / 2 {
+                            confirmed.insert(m.key);
+                        }
+                    }
+                    if session.should_send(t) {
+                        up.send(session.input_packet(t), t);
+                    }
+                }
+                _ => {}
+            }
+            t += 0.002;
+        }
+        // Four cycles: the buffered Q and the cancelled Q each fire a confirmed Longshot, and
+        // the ultimate's net (every other cycle: 20 s cooldown) is a missile too.
+        assert!(confirmed.len() >= 10, "{} confirmed own missiles", confirmed.len());
+        assert!(
+            buffered_seen > 0 && recovering_seen > 0 && hard_seen > 0,
+            "{buffered_seen} {recovering_seen} {hard_seen}"
+        );
+        assert_eq!(session.stats.hard_resets, 0);
+        assert!(session.stats.corrections.iter().all(|c| *c < 1.0), "{:?}", session.stats.corrections);
+        let me = server.world().unit(session.unit()).unwrap().state;
+        assert!(me.buffered.is_none(), "nothing left waiting");
+    }
+
     /// Q13: over a lossy, jittery link with moving minions, every snapshot the client
     /// reconstructs from deltas equals, bit for bit, what the server recorded for it.
     #[test]

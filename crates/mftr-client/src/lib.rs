@@ -129,6 +129,12 @@ pub struct RemoteRender {
     pub slowed: bool,
     /// A structure that can't be hurt yet.
     pub protected: bool,
+    /// Facing in radians, counter-clockwise from +x (10 bits on the wire, 10 §3).
+    pub facing: f32,
+    /// Basic attacks started, modulo 4: which attack animation to play.
+    pub attack_variant: u8,
+    /// In an ability's follow-through (10 §4.1).
+    pub recovering: bool,
 }
 
 /// A confirmed damage instance, for floating numbers and the combat log.
@@ -1198,6 +1204,9 @@ impl ClientSession {
                     dashing: l.dashing,
                     slowed: l.slowed,
                     protected: l.protected,
+                    facing: mftr_net::msg::facing_from_wire(l.facing),
+                    attack_variant: l.attack_variant,
+                    recovering: l.recovering,
                 })
             })
             .collect()
@@ -1318,6 +1327,11 @@ impl ClientSession {
     /// Own state on the input timeline (cooldowns, cast, stun) for HUD display.
     pub fn own_state_now(&self) -> Option<UnitState> {
         self.history.back().map(|(_, s)| *s)
+    }
+
+    /// The latest predicted own state and the tick it is at the end of.
+    pub fn own_state_latest(&self) -> Option<(Tick, UnitState)> {
+        self.history.back().copied()
     }
 
     /// The input timeline as a `SimTime` (for comparing against cooldown/stun instants).

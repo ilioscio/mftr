@@ -655,8 +655,9 @@ impl MatchClient {
     }
 
     /// Own champion on the input timeline: `{ champion, health, max_health, shield, dead,
-    /// respawn_in, stunned, rooted, casting, attacking, dashing, cooldowns: [6 × seconds],
-    /// abilities: [6 × name] }`. Health and shield are predicted; damage arrives from the server.
+    /// respawn_in, stunned, rooted, casting, attacking, dashing, facing (radians), attack_variant,
+    /// recovering, buffered_slot (-1 = none), cooldowns: [6 × seconds], abilities: [6 × name] }`.
+    /// Health and shield are predicted; damage arrives from the server.
     #[func]
     fn own_status(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -750,6 +751,11 @@ impl MatchClient {
             d.set("casting", s.cast.is_some());
             d.set("attacking", s.attack.is_some());
             d.set("dashing", s.dash.is_some());
+            // A2 (10 §3–4): facing (radians), attack animation variant, follow-through, buffer.
+            d.set("facing", s.facing.y.atan2(s.facing.x));
+            d.set("attack_variant", (s.attacks & 3) as i64);
+            d.set("recovering", s.recovering(t));
+            d.set("buffered_slot", s.buffered.map_or(-1, |b| b.slot as i64));
             d.set("slowed", s.slow > 0 && s.slowed_until > t);
             let mut cds = VarArray::new();
             for c in s.cooldowns {
@@ -782,7 +788,8 @@ impl MatchClient {
 
     /// Remote units to draw. Each entry: `{ id, pos: Vector2, minion, turret, champion (name or
     /// ""), red, ally, radius (collision), gameplay_radius, augments ([{ name, tier }]),
-    /// health, max_health, shield, stunned, rooted, attacking, dashing, windup?, windup_dir? }`.
+    /// health, max_health, shield, stunned, rooted, attacking, attack_variant, recovering, facing
+    /// (radians), dashing, windup?, windup_dir? }`.
     /// Champions are on `T_interp`; minions near us blend toward `T_input` (03a §5).
     #[func]
     fn remote_units(&self) -> VarArray {
@@ -820,6 +827,9 @@ impl MatchClient {
             }
             d.set("augments", &held);
             d.set("attacking", u.attacking);
+            d.set("attack_variant", u.attack_variant as i64);
+            d.set("recovering", u.recovering);
+            d.set("facing", u.facing);
             d.set("rooted", u.rooted);
             d.set("dashing", u.dashing);
             d.set("slowed", u.slowed);

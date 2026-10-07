@@ -648,7 +648,13 @@ impl ServerCore {
                     kind: u.kind,
                     team: u.team,
                     pos: QPoint::from_vec2(st.pos),
-                    target: st.heading().map(QPoint::from_vec2),
+                    // A unit that can't walk this tick (rooted, stunned, winding up, in a
+                    // follow-through) sends no heading, so clients don't extrapolate it walking.
+                    target: if st.dash.is_some() || st.can_move(s1) {
+                        st.heading().map(QPoint::from_vec2)
+                    } else {
+                        None
+                    },
                     speed: st.speed_at(s1).round().clamp(0.0, 1023.0) as u16,
                     collision_radius: u.collision_radius.round().clamp(0.0, 255.0) as u8,
                     gameplay_radius: u.gameplay_radius.round().clamp(0.0, 255.0) as u8,
@@ -665,6 +671,9 @@ impl ServerCore {
                     rooted: st.rooted_until > s1,
                     dashing: st.dash.is_some(),
                     slowed: st.slow > 0 && st.slowed_until > s1,
+                    recovering: st.recovering(s1),
+                    attack_variant: st.attacks & 3,
+                    facing: mftr_net::msg::facing_to_wire(st.facing),
                 };
                 (u.id, u.state, remote)
             })

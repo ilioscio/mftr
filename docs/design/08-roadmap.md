@@ -372,6 +372,17 @@ Runs alongside M3/M4 and replaces the placeholder shapes with real champions ([1
 
 **Left for later:** re-exporting in CI to prove `export/` matches its `.blend` (needs Blender in CI); the fire-time check against champion data gets its first real use with the Vesper pilot (slice 4).
 
+### A slice 2 status (2026-10-07): ✅ done (D52, protocol 16)
+- **Facing** is sim state: a unit vector that snaps to the walking direction, the attack target (tracked through the windup) and the aim of casts, dashes and blinks. Exact for the own champion; a 10-bit angle (half-step error ≤ 0.18°) with the motion group for others.
+- **Follow-through** (`Recovery`): after a line or area ability fires (200 ms; ultimates 350 ms, the first 150 ms a hard lock) and after a dash lands (80 ms). The caster stays put; a move, attack-move, stop or cast ends the soft part at once, an attack order waits for it, and a caster walking on skips it. Timings are `Ability::timing` defaults by effect kind *(start)*.
+- **Input buffer:** a cast ordered during a windup, a dash or a hard lock starts the instant that ends (one slot; a newer order replaces it; hard CC clears it). Previously such casts were dropped.
+- **Attack counter** (wrapping, 2 bits on the wire) picks the attack animation identically on every client; the follow-through state is a status flag. All of it is exposed to GDScript for slice 3.
+- **Tests:** 9 sim tests (facing, holding and cutting the follow-through, walking on, the attack order waiting versus the move-cancel tech, buffering behind windups and dashes, the latest order winning, hard locks, stuns, the counter), a 10-bit facing round trip, and a Netcode Lab check: a scripted Vesper buffering, cancelling and hard-locking over the `mid` link for 45 s predicts with **0 corrections** in 1,331 reconciliations, and the server confirms every buffered cast.
+- **Proxies:** a follow-through made a long-standing gap common: the server sent a heading for units that couldn't walk (an attack order waiting out a follow-through, but also stunned, rooted or winding-up units), so clients extrapolated them walking. It now sends none for them. In the Hyper + Multishot stress (seed 1) phantom hits went from 3–4 to **0**, at 690 enemy missiles, 10.4 KB/s down and 0.069 ms per tick.
+- The golden state hashes changed (new state), recorded on Windows; CI checks Linux and macOS.
+
+**Left for later:** recast `stages` (with the first champion that needs them); per-ability timing overrides (with the pilots).
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.

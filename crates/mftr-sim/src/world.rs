@@ -18,7 +18,7 @@
 //! announced (id 0) so the client can draw them at once.
 
 use crate::ability::{
-    Ability, Cc, DamageKind, Effect, LUNGE_PICK, LineSkillshot, SLOTS, SUPPORT_PICK, TURRET_SHOT, Transforms,
+    Ability, Cc, DamageKind, Effect, LUNGE_PICK, LineSkillshot, SLOTS, SUPPORT_PICK, TURRET_SHOT, Timing, Transforms,
 };
 use crate::augments;
 use crate::champion::{AttackSpec, ChampionId, Stats};
@@ -125,6 +125,24 @@ pub struct Cast {
     pub fire_at: SimTime,
     /// Sequence number of the command that started it (0 for AI casts).
     pub seq: u32,
+    /// The caster keeps moving while it winds up (`Timing::mobile`).
+    pub mobile: bool,
+}
+
+/// After an ability fires (10 §4.1): rooted until `until`; nothing ends it before `hard_until`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Recovery {
+    pub hard_until: SimTime,
+    pub until: SimTime,
+}
+
+/// A cast ordered while another action was still busy (a windup, a dash, a hard lock): it
+/// starts the moment that ends (10 §4.1, the input buffer). One slot; the latest wins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BufferedCast {
+    pub slot: u8,
+    pub target: QPoint,
+    pub seq: u32,
 }
 
 /// A basic attack winding up: the attacker is rooted; the bolt launches at `fire_at`.
@@ -143,6 +161,8 @@ pub struct DashMove {
     pub end_at: SimTime,
     /// Lunges: the enemy struck on arrival, and the ability slot that strikes.
     pub strike: Option<(UnitId, u8)>,
+    /// The landing's follow-through (10 §4.2; 0 for forced movement such as pulls).
+    pub recover: SimDuration,
 }
 
 /// A champion's progression (M2): survives death and respawn.
@@ -404,6 +424,14 @@ pub struct UnitState {
     pub echo: Option<EchoCast>,
     /// Spellblade is armed until this instant.
     pub spellblade_until: SimTime,
+    /// Unit vector the unit faces (10 §3): snaps to its path, its attack target and its aim.
+    pub facing: Vec2,
+    /// An ability's follow-through in progress.
+    pub recovery: Option<Recovery>,
+    /// The input buffer: a cast waiting for the current action to end.
+    pub buffered: Option<BufferedCast>,
+    /// Basic attacks started (wrapping): picks the attack animation, the same on every client.
+    pub attacks: u8,
 }
 
 /// A cast waiting to repeat (Echo): lines fly again from the caster's position then, areas land
@@ -442,6 +470,10 @@ impl UnitState {
             progress: Progress::SANDBOX,
             echo: None,
             spellblade_until: SimTime(0),
+            facing: Vec2::new(1.0, 0.0),
+            recovery: None,
+            buffered: None,
+            attacks: 0,
         }
     }
 
@@ -500,7 +532,8 @@ impl UnitState {
 
     pub fn can_move(&self, at: SimTime) -> bool {
         self.alive()
-            && self.cast.is_none()
+            && self.cast.is_none_or(|c| c.mobile)
+            && self.recovery.is_none_or(|r| r.until <= at)
             && self.attack.is_none()
             && self.dash.is_none()
             && self.stunned_until <= at
@@ -522,6 +555,53 @@ impl UnitState {
     fn cancel_attack(&mut self, at: SimTime) {
         if self.attack.take().is_some() {
             self.attack_ready_at = at;
+        }
+    }
+
+    /// A move or stop ends the soft part of a follow-through (the hard lock holds).
+    fn end_soft_recovery(&mut self, at: SimTime) {
+        if !self.hard_locked(at) {
+            self.recovery = None;
+        }
+    }
+
+    /// Inside a follow-through's hard lock at `at`.
+    pub fn hard_locked(&self, at: SimTime) -> bool {
+        self.recovery.is_some_and(|r| r.hard_until > at)
+    }
+
+    /// Inside a follow-through at `at` (soft or hard).
+    pub fn recovering(&self, at: SimTime) -> bool {
+        self.recovery.is_some_and(|r| r.until > at)
+    }
+
+    /// Enter an action's follow-through at `t` (skipped at once by a unit that's walking on).
+    fn start_recovery(&mut self, timing: Timing, t: SimTime) {
+        if timing.follow_through.0 == 0 {
+            return;
+        }
+        self.recovery = Some(Recovery { hard_until: t.plus(timing.hard_lock), until: t.plus(timing.follow_through) });
+        self.settle_recovery(t);
+    }
+
+    /// Face along `dir` (ignored when zero).
+    fn face(&mut self, dir: Vec2) {
+        let n = dir.normalize_or_zero();
+        if n != Vec2::ZERO {
+            self.facing = n;
+        }
+    }
+
+    /// The soft part of a follow-through ends when the unit has somewhere to go (a move or
+    /// attack-move order with a heading): an active player never waits for it (10 §4.1).
+    fn settle_recovery(&mut self, at: SimTime) {
+        if let Some(r) = self.recovery
+            && (r.until <= at
+                || (r.hard_until <= at
+                    && matches!(self.order, Order::MoveTo(_) | Order::AttackMove(_))
+                    && self.heading().is_some()))
+        {
+            self.recovery = None;
         }
     }
 
@@ -549,6 +629,7 @@ impl UnitState {
         }
         let to = target - self.pos;
         let dist = to.length();
+        self.face(to);
         let step = self.speed_at(at) * dt;
         let (mut delta, mut arrives) = if step >= dist { (to, true) } else { (to * (step / dist), false) };
         let mut used = 1.0;
@@ -653,6 +734,7 @@ impl UnitState {
                 h.write_f32(c.point.y);
                 h.write_u64(c.fire_at.0);
                 h.write_u32(c.seq);
+                h.write_u8(c.mobile as u8);
             }
         }
         match self.attack {
@@ -674,6 +756,7 @@ impl UnitState {
                 h.write_f32(d.to.y);
                 h.write_f32(d.speed);
                 h.write_u64(d.end_at.0);
+                h.write_u64(d.recover.0);
                 match d.strike {
                     None => h.write_u8(0),
                     Some((id, slot)) => {
@@ -716,6 +799,27 @@ impl UnitState {
             }
         }
         h.write_u64(self.spellblade_until.0);
+        h.write_f32(self.facing.x);
+        h.write_f32(self.facing.y);
+        match self.recovery {
+            None => h.write_u8(0),
+            Some(r) => {
+                h.write_u8(1);
+                h.write_u64(r.hard_until.0);
+                h.write_u64(r.until.0);
+            }
+        }
+        match self.buffered {
+            None => h.write_u8(0),
+            Some(b) => {
+                h.write_u8(1);
+                h.write_u8(b.slot);
+                h.write_u16(b.target.x);
+                h.write_u16(b.target.y);
+                h.write_u32(b.seq);
+            }
+        }
+        h.write_u8(self.attacks);
     }
 }
 
@@ -1586,6 +1690,19 @@ impl World {
                 // Instants at `t`: windups and dashes ending, then commands.
                 if t > s0 {
                     fire_due(unit, t, &roster, &mut fired, map);
+                    unit.state.settle_recovery(t);
+                    // The input buffer: a cast ordered while busy starts once the action ends.
+                    let st = &unit.state;
+                    if let Some(b) = st.buffered
+                        && st.cast.is_none()
+                        && st.dash.is_none()
+                        && !st.hard_locked(t)
+                    {
+                        unit.state.buffered = None;
+                        let ctx =
+                            CastContext { roster: &roster, hidden: &hidden[unit.team as usize], fired: &mut fired };
+                        try_cast(unit, b.slot, b.target.to_vec2(), t, b.seq, map, ctx, events);
+                    }
                 }
                 while let Some(c) = mine.get(next_cmd)
                     && SimTime::at(k, c.sub) == t
@@ -1606,6 +1723,8 @@ impl World {
                     st.echo.map(|e| e.at),
                     st.attack.map(|a| a.fire_at),
                     st.dash.map(|d| d.end_at),
+                    st.recovery.map(|r| r.hard_until),
+                    st.recovery.map(|r| r.until),
                     Some(st.stunned_until),
                     Some(st.rooted_until),
                     Some(st.slowed_until),
@@ -1822,7 +1941,9 @@ fn think(unit: &mut Unit, roster: &[Target], hidden: &[UnitId], t: SimTime, map:
     let st = &mut unit.state;
     if let Some(w) = st.attack {
         // Winding up: rooted; keep facing the committed target.
-        return roster.iter().find(|r| r.id == w.target).map(|r| (r.pos, atk.range + r.radius));
+        let target = roster.iter().find(|r| r.id == w.target)?;
+        st.face(target.pos - st.pos);
+        return Some((target.pos, atk.range + target.radius));
     }
     let enemy = |r: &&Target| r.team != my_team && r.id != me && hidden.binary_search(&r.id).is_err();
     let target = match st.order {
@@ -1847,9 +1968,17 @@ fn think(unit: &mut Unit, roster: &[Target], hidden: &[UnitId], t: SimTime, map:
     };
     let reach = atk.range + target.radius;
     if target.pos.distance(st.pos) <= reach + RANGE_SLACK {
-        if st.cast.is_none() && st.dash.is_none() && st.stunned_until <= t && st.attack_ready_at <= t {
+        // An attack order waits for a follow-through (10 §4.1): only moves and casts cut it.
+        if st.cast.is_none()
+            && st.dash.is_none()
+            && st.stunned_until <= t
+            && st.attack_ready_at <= t
+            && !st.recovering(t)
+        {
             st.attack = Some(AttackWindup { target: target.id, fire_at: t.plus(atk.windup()) });
             st.attack_ready_at = t.plus(atk.period());
+            st.attacks = st.attacks.wrapping_add(1);
+            st.face(target.pos - st.pos);
         }
     } else if matches!(st.order, Order::Attack(_))
         && st.detour.is_none()
@@ -1941,6 +2070,11 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
         if deliver(unit, echo, t, false, fired) {
             unit.state.echo = Some(echo);
         }
+        if unit.kind == UnitKind::Champion
+            && let Some(a) = unit.ability(c.slot)
+        {
+            unit.state.start_recovery(a.timing(c.slot), t);
+        }
     }
     if let Some(e) = unit.state.echo
         && e.at == t
@@ -2007,6 +2141,8 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
         unit.state.dash = None;
         unit.state.detour = None;
         unit.state.route(map);
+        let landing = Timing { follow_through: d.recover, ..Timing::NONE };
+        unit.state.start_recovery(landing, t);
     }
 }
 
@@ -2029,30 +2165,48 @@ fn apply_command(
 ) {
     let st = &mut unit.state;
     match c.kind {
+        // A newer order replaces a buffered cast (one slot, the latest wins: 10 §4.1).
         CommandKind::MoveTo(q) => {
             st.cancel_attack(t);
+            st.end_soft_recovery(t);
+            st.buffered = None;
             st.set_order(Order::MoveTo(q), map);
         }
         CommandKind::AttackMove(q) => {
             st.cancel_attack(t);
+            st.end_soft_recovery(t);
+            st.buffered = None;
             st.set_order(Order::AttackMove(q), map);
         }
         CommandKind::Attack(target) => {
             if target == unit.id {
                 return;
             }
+            st.buffered = None;
             if st.attack.is_some_and(|w| w.target != target) {
                 st.cancel_attack(t);
             }
+            // An attack order doesn't cut a follow-through: it waits for it (the cancel tech
+            // needs a move or a cast).
             if st.order != Order::Attack(target) {
                 st.set_order(Order::Attack(target), map);
             }
         }
         CommandKind::Stop => {
             st.cancel_attack(t);
+            st.end_soft_recovery(t);
+            st.buffered = None;
             st.set_order(Order::Idle, map);
         }
-        CommandKind::Cast { slot, target } => try_cast(unit, slot, target.to_vec2(), t, c.seq, map, ctx, events),
+        CommandKind::Cast { slot, target } => {
+            // Abilities buffer (10 §4.2): a cast ordered during a windup, a dash or a hard
+            // lock waits for it to end instead of being dropped.
+            if st.alive() && (st.cast.is_some() || st.dash.is_some() || st.hard_locked(t)) {
+                st.buffered = Some(BufferedCast { slot, target, seq: c.seq });
+            } else {
+                try_cast(unit, slot, target.to_vec2(), t, c.seq, map, ctx, events);
+            }
+        }
         CommandKind::LevelUp(slot) => {
             let p = &mut st.progress;
             if p.points > 0
@@ -2146,6 +2300,7 @@ fn try_cast(
     let hyper = if slot < 3 && unit.state.progress.hyper { HYPER_HASTE } else { 0.0 };
     let haste = unit.stats.ability_haste + hyper;
     let (stats, gameplay_radius) = (unit.stats, unit.gameplay_radius);
+    let timing = if unit.kind == UnitKind::Champion { ability.timing(slot) } else { Timing::NONE };
     let st = &mut unit.state;
     if !st.can_cast(t, slot) {
         return;
@@ -2159,15 +2314,17 @@ fn try_cast(
                 return;
             }
             st.cancel_attack(t);
+            st.face(dir);
             let fire_at = t.plus(spec.windup);
-            st.cast = Some(Cast { slot, dir, point: target, fire_at, seq });
+            st.cast = Some(Cast { slot, dir, point: target, fire_at, seq, mobile: timing.mobile });
             events.push(SimEvent::CastStarted { unit: id, slot, at: t, dir, point: target, fire_at, seq });
         }
         Effect::Area(a) => {
             st.cancel_attack(t);
             let point = if len > a.range { st.pos + dir * a.range } else { target };
+            st.face(dir);
             let fire_at = t.plus(a.windup);
-            st.cast = Some(Cast { slot, dir, point, fire_at, seq });
+            st.cast = Some(Cast { slot, dir, point, fire_at, seq, mobile: timing.mobile });
             events.push(SimEvent::CastStarted { unit: id, slot, at: t, dir, point, fire_at, seq });
         }
         Effect::Dash(d) => {
@@ -2178,7 +2335,8 @@ fn try_cast(
             let dist = len.min(d.range);
             let to = st.pos + dir * dist;
             let end_at = SimTime(t.0 + ((dist / d.speed * SUBTICKS_PER_SECOND as f32).ceil() as u64).max(1));
-            st.dash = Some(DashMove { dir, to, speed: d.speed, end_at, strike: None });
+            st.dash = Some(DashMove { dir, to, speed: d.speed, end_at, strike: None, recover: timing.follow_through });
+            st.face(dir);
             st.detour = None;
             events.push(SimEvent::Dashed { unit: id, from: st.pos, to, at: t, end_at });
         }
@@ -2207,7 +2365,15 @@ fn try_cast(
             let dist = (to_victim.length() - victim.radius - gameplay_radius * 0.5).max(0.0);
             let to = st.pos + dir * dist;
             let end_at = SimTime(t.0 + ((dist / l.speed * SUBTICKS_PER_SECOND as f32).ceil() as u64).max(1));
-            st.dash = Some(DashMove { dir, to, speed: l.speed, end_at, strike: Some((victim.id, slot)) });
+            st.dash = Some(DashMove {
+                dir,
+                to,
+                speed: l.speed,
+                end_at,
+                strike: Some((victim.id, slot)),
+                recover: timing.follow_through,
+            });
+            st.face(dir);
             st.detour = None;
             events.push(SimEvent::Dashed { unit: id, from: st.pos, to, at: t, end_at });
         }
@@ -2268,6 +2434,7 @@ fn try_cast(
                 return;
             }
             st.cancel_attack(t);
+            st.face(dir);
             let from = st.pos;
             st.pos = blink_landing(map, from, dir, len.min(b.range), radius);
             st.detour = None;
@@ -2281,6 +2448,8 @@ fn try_cast(
             events.push(SimEvent::Shielded { unit: id, amount: s.amount, at: t, until: st.shield_until });
         }
     }
+    // A new cast ends any follow-through still running (10 §4.1).
+    st.recovery = None;
     let rank = st.progress.ranks.get(slot as usize).copied().unwrap_or(1);
     let mut cooldown = ability.cooldown_at(rank);
     if slot < 4 && haste > 0.0 {
@@ -2486,8 +2655,10 @@ fn apply_cc(u: &mut Unit, cc: Cc, at: SimTime, from: Vec2, s1: SimTime, events: 
     let st = &mut u.state;
     let hard_stop = |st: &mut UnitState, until: SimTime| {
         st.stunned_until = st.stunned_until.max(until);
-        st.cast = None; // hard CC interrupts casts and attacks
+        st.cast = None; // hard CC interrupts casts, attacks, follow-throughs and the buffer
         st.attack = None;
+        st.recovery = None;
+        st.buffered = None;
     };
     match cc {
         Cc::None => {}
@@ -2505,7 +2676,8 @@ fn apply_cc(u: &mut Unit, cc: Cc, at: SimTime, from: Vec2, s1: SimTime, events: 
             let to = from + dir * stop as f32;
             let dist = len - stop as f32;
             let end_at = SimTime(s1.0 + ((dist / PULL_SPEED * SUBTICKS_PER_SECOND as f32).ceil() as u64).max(1));
-            st.dash = Some(DashMove { dir: -dir, to, speed: PULL_SPEED, end_at, strike: None });
+            st.dash =
+                Some(DashMove { dir: -dir, to, speed: PULL_SPEED, end_at, strike: None, recover: SimDuration(0) });
             st.detour = None;
             hard_stop(st, end_at);
             events.push(SimEvent::Dashed { unit: u.id, from: st.pos, to, at, end_at });
@@ -3428,6 +3600,205 @@ mod tests {
         let ev = run_until_quiet(&mut w, 60);
         assert!(damage_to(&ev, enemy).is_empty());
         assert!(!ev.iter().any(|e| matches!(e, SimEvent::AttackLaunched(_))));
+    }
+
+    // A2 (D52): facing, follow-throughs, the input buffer and the attack counter.
+
+    fn state(w: &World, id: UnitId) -> UnitState {
+        w.unit(id).unwrap().state
+    }
+
+    fn step_events(w: &mut World, cmds: &[Command]) -> Vec<SimEvent> {
+        w.step(cmds);
+        w.take_events()
+    }
+
+    /// Steps until `stop` holds for the unit (at most `ticks`), returning the events.
+    fn run_while(w: &mut World, id: UnitId, ticks: u32, keep: impl Fn(&UnitState) -> bool) -> Vec<SimEvent> {
+        let mut ev = Vec::new();
+        for _ in 0..ticks {
+            if !keep(&state(w, id)) {
+                break;
+            }
+            ev.extend(step_events(w, &[]));
+        }
+        ev
+    }
+
+    fn cast_started(ev: &[SimEvent], slot: u8) -> Option<(SimTime, SimTime)> {
+        ev.iter().find_map(|e| match *e {
+            SimEvent::CastStarted { slot: s, at, fire_at, .. } if s == slot => Some((at, fire_at)),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn facing_follows_the_path_the_attack_target_and_the_aim() {
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        w.step(&[cmd(0, 1, 1, 0, (1000.0, 2000.0))]);
+        assert_eq!(state(&w, me).facing, Vec2::new(0.0, 1.0), "walking: faces the path");
+
+        let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, Vec2::new(1400.0, 1033.0));
+        w.step(&[attack(0, 2, 2, enemy)]);
+        let st = state(&w, me);
+        assert!(st.attack.is_some());
+        let to_enemy = (Vec2::new(1400.0, 1033.0) - st.pos).normalize_or_zero();
+        assert!(st.facing.distance(to_enemy) < 1e-6, "attacking: faces the target");
+
+        w.step(&[cast_slot(0, 3, 3, 0, 0, (st.pos.x, 0.0))]);
+        assert_eq!(state(&w, me).facing, Vec2::new(0.0, -1.0), "casting: faces the aim");
+    }
+
+    #[test]
+    fn an_idle_caster_holds_the_follow_through_and_a_move_cuts_it() {
+        for cut in [false, true] {
+            let mut w = World::new(1);
+            let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+            let ev = step_events(&mut w, &[cast_slot(0, 1, 1, 0, 0, (2000.0, 1000.0))]);
+            let (_, fire_at) = cast_started(&ev, 0).unwrap();
+            run_while(&mut w, me, 30, |s| s.cast.is_some());
+            let r = state(&w, me).recovery.expect("Longshot's follow-through");
+            assert_eq!(r.until, fire_at.plus(SimDuration::from_millis(200)));
+            assert_eq!(r.hard_until, fire_at, "no hard lock on a basic ability");
+            let before = state(&w, me).pos;
+            if cut {
+                let k = w.tick().next().0;
+                w.step(&[cmd(0, 2, k, 0, (1000.0, 1500.0))]);
+                assert!(state(&w, me).recovery.is_none(), "a move ends it");
+                assert!(state(&w, me).pos.distance(before) > 5.0, "and the caster walks at once");
+            } else {
+                // Without orders the caster waits it out in place, then is free.
+                run_while(&mut w, me, 30, |s| s.recovery.is_some());
+                assert!(SimTime::end_of(w.tick()) >= r.until);
+                assert_eq!(state(&w, me).pos, before);
+            }
+            assert!(state(&w, me).recovery.is_none());
+        }
+    }
+
+    #[test]
+    fn a_caster_walking_on_skips_the_follow_through() {
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        w.step(&[cmd(0, 1, 1, 0, (3000.0, 1000.0))]);
+        w.step(&[cast_slot(0, 2, 2, 0, 0, (1000.0, 2000.0))]);
+        run_while(&mut w, me, 30, |s| s.cast.is_some());
+        assert!(state(&w, me).recovery.is_none(), "still walking somewhere: no follow-through");
+        let x = state(&w, me).pos.x;
+        w.step(&[]);
+        assert!(state(&w, me).pos.x > x, "walks on toward the old destination");
+    }
+
+    #[test]
+    fn an_attack_order_waits_for_the_follow_through_and_a_move_first_is_faster() {
+        // When does the first attack start after a cast, with and without the move-cancel?
+        let first_attack = |cancel: bool| {
+            let mut w = World::new(1);
+            let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+            let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, Vec2::new(1450.0, 1000.0));
+            w.step(&[cast_slot(0, 1, 1, 0, 0, (2000.0, 1000.0))]);
+            w.step(&[attack(0, 2, 2, enemy)]); // during the windup: the attack order waits
+            run_while(&mut w, me, 30, |s| s.cast.is_some());
+            let until = state(&w, me).recovery.map(|r| r.until);
+            if cancel {
+                // The tech: a move (on the spot) cuts the follow-through, then attack again.
+                let k = w.tick().next().0;
+                let here = state(&w, me).pos;
+                w.step(&[cmd(0, 3, k, 0, (here.x, here.y)), attack(0, 4, k, enemy)]);
+            }
+            for _ in 0..30 {
+                if state(&w, me).attack.is_some() {
+                    break;
+                }
+                w.step(&[]);
+            }
+            (w.tick(), until.unwrap())
+        };
+        let (waited, until) = first_attack(false);
+        let (cut, _) = first_attack(true);
+        assert!(SimTime::end_of(waited) >= until, "the attack started only after the follow-through");
+        assert!(cut < waited, "cancelling is faster: {cut:?} vs {waited:?}");
+    }
+
+    #[test]
+    fn casts_during_a_windup_or_a_dash_are_buffered() {
+        // Q during W's windup starts the moment W fires.
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        let ev = step_events(&mut w, &[cast_slot(0, 1, 1, 0, 1, (1500.0, 1000.0))]);
+        let (_, w_fires) = cast_started(&ev, 1).unwrap();
+        let ev = step_events(&mut w, &[cast_slot(0, 2, 2, 0, 0, (2000.0, 1000.0))]);
+        assert!(cast_started(&ev, 0).is_none(), "busy: buffered, not started");
+        assert_eq!(state(&w, me).buffered.map(|b| b.slot), Some(0));
+        let ev = run_until_quiet(&mut w, 15);
+        assert_eq!(cast_started(&ev, 0).map(|c| c.0), Some(w_fires), "Q starts as W fires");
+        assert!(state(&w, me).buffered.is_none());
+
+        // Q during Tumble (the dash) starts on landing.
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        let ev = step_events(&mut w, &[cast_slot(0, 1, 1, 0, 2, (1300.0, 1000.0))]);
+        let lands = ev.iter().find_map(|e| match *e {
+            SimEvent::Dashed { end_at, .. } => Some(end_at),
+            _ => None,
+        });
+        w.step(&[cast_slot(0, 2, 2, 0, 0, (2000.0, 1000.0))]);
+        let ev = run_until_quiet(&mut w, 15);
+        assert_eq!(cast_started(&ev, 0).map(|c| c.0), lands, "Q starts as Tumble lands");
+        assert!(state(&w, me).buffered.is_none());
+
+        // A newer order replaces the buffered cast (one slot, the latest wins).
+        let mut w = World::new(1);
+        w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        w.step(&[cast_slot(0, 1, 1, 0, 1, (1500.0, 1000.0))]);
+        w.step(&[cast_slot(0, 2, 2, 0, 0, (2000.0, 1000.0)), cmd(0, 3, 2, 10, (1000.0, 1500.0))]);
+        let ev = run_until_quiet(&mut w, 15);
+        assert!(cast_started(&ev, 0).is_none(), "the move replaced the buffered Q");
+    }
+
+    #[test]
+    fn an_ultimate_hard_locks_then_releases_to_buffered_orders() {
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        let ev = step_events(&mut w, &[cast_slot(0, 1, 1, 0, 3, (2000.0, 1000.0))]);
+        let (_, fires) = cast_started(&ev, 3).unwrap();
+        run_while(&mut w, me, 30, |s| s.cast.is_some());
+        let r = state(&w, me).recovery.unwrap();
+        assert_eq!(r.hard_until, fires.plus(SimDuration::from_millis(150)));
+        assert_eq!(r.until, fires.plus(SimDuration::from_millis(350)));
+        // During the hard lock: a move doesn't free the caster, a cast waits in the buffer.
+        let k = w.tick().next().0;
+        let here = state(&w, me).pos;
+        let ev = step_events(&mut w, &[cmd(0, 2, k, 0, (1000.0, 2000.0)), cast_slot(0, 3, k, 1, 0, (2000.0, 1000.0))]);
+        assert!(cast_started(&ev, 0).is_none());
+        assert!(state(&w, me).hard_locked(SimTime::end_of(w.tick())));
+        assert_eq!(state(&w, me).pos, here, "rooted in the hard lock");
+        let ev = run_until_quiet(&mut w, 10);
+        assert_eq!(cast_started(&ev, 0).map(|c| c.0), Some(r.hard_until), "the buffered cast goes as it ends");
+    }
+
+    #[test]
+    fn stuns_clear_the_buffer_and_the_follow_through() {
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        w.step(&[cast_slot(0, 1, 1, 0, 1, (1500.0, 1000.0))]);
+        w.step(&[cast_slot(0, 2, 2, 0, 0, (2000.0, 1000.0))]);
+        let s1 = SimTime::end_of(w.tick());
+        let u = w.unit_mut(me).unwrap();
+        apply_cc(u, Cc::Stun(SimDuration::from_millis(500)), s1, Vec2::ZERO, s1, &mut Vec::new());
+        assert!(u.state.buffered.is_none() && u.state.recovery.is_none() && u.state.cast.is_none());
+    }
+
+    #[test]
+    fn attacks_are_counted_for_their_animation() {
+        let mut w = World::new(1);
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
+        let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, Vec2::new(1450.0, 1000.0));
+        w.step(&[attack(0, 1, 1, enemy)]);
+        assert_eq!(state(&w, me).attacks, 1);
+        run_until_quiet(&mut w, 80); // every 1.25 s (0.8 per second): two more in 2.67 s
+        assert_eq!(state(&w, me).attacks, 3);
     }
 
     #[test]
@@ -4503,7 +4874,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0x1dfc_9c1c_800c_bd5e;
+    const GOLDEN_HASH_ARENA: u64 = 0x91e2_43f3_1c8f_18c1;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -4559,7 +4930,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0xbdac_cac8_5203_6fbb;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x7b30_4292_5883_4f7d;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -4628,7 +4999,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH, "hash = {:#018x}", w.state_hash());
     }
 
-    /// Recorded on x86_64-unknown-linux-gnu (debug and release agree). CI checks Linux, macOS
-    /// (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x33d3_0ff2_1b78_05ed;
+    /// Recorded on x86_64-pc-windows-msvc when facing, follow-throughs and the input buffer
+    /// joined the state (A2). CI checks Linux, macOS (aarch64) and Windows.
+    const GOLDEN_HASH: u64 = 0x9096_3d59_9916_a899;
 }

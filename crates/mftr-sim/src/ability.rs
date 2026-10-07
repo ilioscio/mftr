@@ -254,6 +254,40 @@ impl Ability {
     pub fn bonus_damage_at(&self, rank: u8) -> f32 {
         self.per_rank.damage * (rank.max(1) - 1) as f32
     }
+
+    /// What happens after the ability fires, when cast from `slot` (10 §4.2 defaults *(start)*,
+    /// by effect kind; per-ability tuning comes with the pilots).
+    pub fn timing(&self, slot: u8) -> Timing {
+        let ms = SimDuration::from_millis;
+        if slot >= 4 {
+            return Timing::NONE; // utility spells: instant, nothing to recover from
+        }
+        match self.effect {
+            Effect::Line(_) | Effect::Area(_) if slot == 3 => {
+                Timing { follow_through: ms(350), hard_lock: ms(150), mobile: false }
+            }
+            Effect::Line(_) | Effect::Area(_) => Timing { follow_through: ms(200), ..Timing::NONE },
+            Effect::Dash(_) | Effect::Lunge(_) => Timing { follow_through: ms(80), ..Timing::NONE },
+            Effect::Blink(_) | Effect::Shield(_) | Effect::Support(_) => Timing { mobile: true, ..Timing::NONE },
+        }
+    }
+}
+
+/// An action's phases after its windup (10 §4.1): `fire → follow-through → end`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Timing {
+    /// Fire (or a dash's landing) to the end of the action: a **soft lock**. The caster stays
+    /// put; a move, attack-move, stop or new cast ends it at once with no loss, while an attack
+    /// order waits for it. A caster still walking somewhere when it fires skips it.
+    pub follow_through: SimDuration,
+    /// The start of the follow-through that nothing ends early (casts are buffered).
+    pub hard_lock: SimDuration,
+    /// The caster keeps moving during the windup (upper-body casts).
+    pub mobile: bool,
+}
+
+impl Timing {
+    pub const NONE: Timing = Timing { follow_through: SimDuration(0), hard_lock: SimDuration(0), mobile: false };
 }
 
 /// Ability slots on the wire and in the cooldown array: Q W E R, then utility spells D F.
