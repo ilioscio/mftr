@@ -208,7 +208,7 @@ Override     death (holds its last frame), cc_stunned; later recall and emotes
 - a footstep when the walk or run crosses `foot_l`/`foot_r`;
 - a windup's start;
 - **`fire`** when an action passes its `fire` marker. That is the moment a melee blow lands, a slam hits, a nova sweeps or a heal pulses, so effects with no projectile hang off it as `<action>.fire`. A cast that ends at the very end of its windup (a caster walking on skips the follow-through) still fires.
-- **Instant casts** (supports, shields) have no windup, so the drive never shows them. The sim announces them with a `CastStarted` whose `fire_at` equals its start, and the client **pulses** the animator: the clip plays from `fire` to its end, and fires.
+- **Instant casts** (supports, shields, blinks) have no windup, so the drive never shows them. The sim announces them with a `CastStarted` whose `fire_at` equals its start, and the client **pulses** the animator: the clip plays from `fire` to its end, and fires.
 
 Fallbacks: a champion without its own `idle`, `run`, `death`, attack or ability clips plays the shared library's (`idle`, `run`, `death`, `attack_melee_alt`, `cast_utility`), so a pack with gaps, or the template, still animates. Inputs come from the client's state: the own champion's windup and follow-through progress are exact (predicted sim times); other units' cast windups come from their `CastStarted` events, their follow-throughs from the status flag, and their attacks (no timing on the wire yet) play at the clip's own rate.
 

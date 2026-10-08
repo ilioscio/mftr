@@ -511,6 +511,22 @@ Minions as tiny hooded figures, distinct from champions at a glance (the owner's
 - polish of the block-out swings;
 - the maul's head twisting about its haft between keys (the aim fixes the haft, not the roll).
 
+### A slice 7 status (2026-10-07): Ember ✅ done (concept awaiting approval)
+The first of the other eight champions (6 in the A list). Designed without an owner brief; `concept.md` is a draft.
+- **Look:** a lean pyromancer on `biped` v1, 2,920 triangles.
+  - A charcoal long coat with gold-trimmed edges, and coat tails on an `extra_coat` chain (2 bones).
+  - A tall ember-orange collar flaring behind his head.
+  - Glowing ember cuffs and a chest rune (`emissive`); the team accent on a sash and forearm bands.
+  - Short dark hair and amber eyes.
+- **Clips:** all 30, every `fire` checked against his kit. Flicker (a blink) plays as a pulse.
+- **Effects and sounds:**
+  - VFX: fireballs, a white-hot lance, Cinder Bloom's embers and ring, the Flicker flash, a spinning gold Binding Sigil.
+  - 14 sounds, 75 KB.
+- **Runtime:** blinks now announce themselves as instant casts too, so Flicker and the Blink utility spell animate and get their `fire` effects.
+- **Checked in Godot** in an Ember mirror duel: his whole kit fired its effects and sounds (fireball, Bloom, Lance, both blinks, Sigil), with the Sigil's spinning frame on screen.
+
+**Left for later:** the owner's approval of his concept; polish.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.

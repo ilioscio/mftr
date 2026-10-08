@@ -1,0 +1,83 @@
+// Ember's sounds (A7): fire. A crackle as each flame catches, fireballs that whoosh and pop, the
+// Lance's rising roar and crack, Cinder Bloom's low build and burst, a flick of air for Flicker,
+// and the Binding Sigil's arcane chime (the shared hard-CC clang plays with its hit). Footsteps,
+// death and respawn come from the library. A recipe for `mftr-tools sfx build`.
+(
+    pack: "ember",
+    sounds: [
+        // Basic attack: the flame catches, the fireball whooshes off, and pops.
+        (name: "ignite", events: ["attack.cast"], volume: 0.3, pitch: 0.08, layers: [
+            (wave: "noise", freq: (2500.0, 9000.0), env: (0.06, 0.06, 0.08), gain: 0.6, highpass: 1200.0, lowpass: (5000.0, 9000.0)),
+            (wave: "noise", freq: (300.0, 120.0), env: (0.04, 0.05, 0.08), gain: 0.25, highpass: 2000.0),
+        ]),
+        (name: "fireball", events: ["attack.release"], volume: 0.45, pitch: 0.06, layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.01, 0.04, 0.2), gain: 0.9, lowpass: (2500.0, 700.0), highpass: 150.0),
+            (wave: "sine", freq: (160.0, 90.0), env: (0.0, 0.02, 0.12), gain: 0.4),
+        ]),
+        (name: "pop_1", events: ["attack.impact"], volume: 0.45, pitch: 0.08, crush: (bits: 10, hold: 1), layers: [
+            (wave: "noise", freq: (6000.0, 1200.0), env: (0.0, 0.01, 0.1), gain: 0.8, lowpass: (6000.0, 1200.0)),
+            (wave: "sine", freq: (200.0, 70.0), env: (0.0, 0.01, 0.1), gain: 0.7, punch: 0.6),
+            (wave: "noise", freq: (500.0, 200.0), env: (0.0, 0.05, 0.15), gain: 0.25, highpass: 2500.0, delay: 0.03),
+        ]),
+        (name: "pop_2", events: ["attack.impact"], volume: 0.45, pitch: 0.08, crush: (bits: 10, hold: 1), layers: [
+            (wave: "noise", freq: (5000.0, 1000.0), env: (0.0, 0.012, 0.11), gain: 0.8, lowpass: (5000.0, 1000.0)),
+            (wave: "sine", freq: (180.0, 64.0), env: (0.0, 0.01, 0.11), gain: 0.7, punch: 0.6),
+            (wave: "noise", freq: (420.0, 160.0), env: (0.0, 0.05, 0.16), gain: 0.25, highpass: 2500.0, delay: 0.035),
+        ]),
+
+        // Q Ember Lance: a rising roar, the lance's fwoom, a cracking hit.
+        (name: "lance_charge", events: ["q.cast"], volume: 0.4, layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.2, 0.05, 0.03), gain: 0.7, lowpass: (600.0, 3500.0), highpass: 200.0),
+            (wave: "saw", freq: (90.0, 180.0), env: (0.2, 0.05, 0.03), gain: 0.3, lowpass: (500.0, 1500.0)),
+        ]),
+        (name: "lance", events: ["q.release"], volume: 0.6, pitch: 0.03, echo: (delay: 0.06, feedback: 0.2), layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.0, 0.03, 0.3), gain: 0.9, lowpass: (6000.0, 900.0)),
+            (wave: "square", freq: (240.0, 120.0), env: (0.0, 0.02, 0.2), gain: 0.25, duty: 0.25, lowpass: (3000.0, 800.0)),
+            (wave: "sine", freq: (120.0, 60.0), env: (0.0, 0.02, 0.2), gain: 0.5, punch: 0.6),
+        ]),
+        (name: "lance_hit", events: ["q.impact"], volume: 0.6, pitch: 0.05, crush: (bits: 9, hold: 1), layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.0, 0.0, 0.04), gain: 0.9, highpass: 1500.0),
+            (wave: "sine", freq: (260.0, 70.0), env: (0.0, 0.01, 0.14), gain: 0.9, punch: 0.8),
+            (wave: "noise", freq: (600.0, 220.0), env: (0.0, 0.08, 0.25), gain: 0.3, highpass: 2500.0, delay: 0.03),
+        ]),
+
+        // W Cinder Bloom: a low build as it gathers, then a fiery burst with crackling embers.
+        (name: "bloom_gather", events: ["w.cast"], volume: 0.35, layers: [
+            (wave: "noise", freq: (500.0, 1200.0), env: (0.15, 0.1, 0.05), gain: 0.6, lowpass: (600.0, 1500.0)),
+            (wave: "sine", freq: (70.0, 110.0), env: (0.15, 0.1, 0.05), gain: 0.4),
+        ]),
+        (name: "bloom", events: ["w.detonate"], volume: 0.8, pitch: 0.04, crush: (bits: 8, hold: 2), echo: (delay: 0.09, feedback: 0.3), layers: [
+            (wave: "noise", freq: (3500.0, 500.0), env: (0.0, 0.05, 0.6), gain: 1.0, lowpass: (6000.0, 500.0), drive: 0.5),
+            (wave: "sine", freq: (95.0, 35.0), env: (0.0, 0.04, 0.45), gain: 1.0, punch: 1.0),
+            (wave: "noise", freq: (450.0, 150.0), env: (0.0, 0.15, 0.4), gain: 0.35, highpass: 2500.0, delay: 0.05),
+        ]),
+
+        // E Flicker: a quick flick of air and a small flare.
+        (name: "flicker", events: ["e.fire"], volume: 0.45, pitch: 0.06, layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.0, 0.02, 0.12), gain: 0.8, lowpass: (8000.0, 2000.0), highpass: 800.0),
+            (wave: "sine", freq: (1200.0, 2400.0), env: (0.0, 0.01, 0.1), gain: 0.25),
+        ]),
+
+        // R Binding Sigil: an arcane chime as he traces it, a whirring throw, a binding clap.
+        (name: "sigil_trace", events: ["r.cast"], volume: 0.4, echo: (delay: 0.08, feedback: 0.3), layers: [
+            (wave: "sine", freq: (660.0, 660.0), env: (0.01, 0.05, 0.2), gain: 0.4),
+            (wave: "sine", freq: (990.0, 990.0), env: (0.01, 0.05, 0.2), gain: 0.35, delay: 0.1),
+            (wave: "triangle", freq: (1320.0, 1320.0), env: (0.01, 0.05, 0.25), gain: 0.3, delay: 0.2),
+        ]),
+        (name: "sigil_throw", events: ["r.release"], volume: 0.55, layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.0, 0.05, 0.3), gain: 0.6, lowpass: (3000.0, 1000.0)),
+            (wave: "square", freq: (330.0, 300.0), env: (0.0, 0.05, 0.3), gain: 0.25, duty: 0.25, vibrato: (1.0, 18.0), lowpass: (2500.0, 1200.0)),
+        ]),
+        (name: "sigil_bind", events: ["r.impact"], volume: 0.6, crush: (bits: 9, hold: 1), layers: [
+            (wave: "sine", freq: (880.0, 880.0), env: (0.0, 0.03, 0.3), gain: 0.45),
+            (wave: "sine", freq: (1320.0, 1320.0), env: (0.0, 0.03, 0.35), gain: 0.35, delay: 0.06),
+            (wave: "noise", freq: (5000.0, 1500.0), env: (0.0, 0.0, 0.06), gain: 0.6, lowpass: (8000.0, 2000.0)),
+        ]),
+
+        // Emote: a crackle and a fizzle (no in-game trigger yet).
+        (name: "fizzle", events: ["unit.emote"], volume: 0.4, layers: [
+            (wave: "noise", freq: (800.0, 200.0), env: (0.02, 0.2, 0.3), gain: 0.5, highpass: 2000.0),
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.3, 0.0, 0.25), gain: 0.4, lowpass: (3000.0, 600.0), highpass: 400.0, delay: 0.3),
+        ]),
+    ],
+)
