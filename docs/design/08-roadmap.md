@@ -615,6 +615,21 @@ The first of the other eight champions (6 in the A list). Designed without an ow
 
 **Left for later:** the owner's approval of her concept; polish.
 
+### A slice 14 status (2026-10-07): Wren ✅ done (concept awaiting approval)
+- **Look:** a feathered scout on `biped` v1, 3,076 triangles.
+  - A peaked russet cap with a long team-colored feather.
+  - A tan jerkin, an olive capelet (`extra_cape`), tall boots, and a quiver at her hip.
+  - A hand crossbow, aimed per pose.
+- **Clips:** all 32, including Pounce's start / travel / land set.
+- **Effects and sounds:**
+  - VFX: crossbow bolts, Ricochet, Caltrops' lob and scatter, Pounce's dust, Hail of Arrows' volley.
+  - 11 sounds, 53 KB.
+- **Checked in Godot:** the whole kit fired its effects and sounds, Pounce's start and landing included.
+
+**Left for later:** the owner's approval of her concept; polish.
+
+With A14 every champion in the roster has a model, clips, effects and sounds.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.
