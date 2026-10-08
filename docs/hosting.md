@@ -100,7 +100,9 @@ nix flake update mftr && sudo nixos-rebuild switch --flake .#myserver
 To test a branch, point the input at it (`url = "github:ilioscio/mftr/my-branch";`), or at a
 local checkout with `--override-input mftr path:/home/me/mftr`.
 
-Several servers, one service each (`mftr-<name>`):
+Several servers, one service each (`mftr-<name>`). The name is only the service's name: every
+server is an ARAM unless its `scenario` says otherwise, so a server named `mayhem` still needs
+`scenario = "mayhem";`.
 
 ```nix
 services.mftr = {
@@ -108,8 +110,9 @@ services.mftr = {
   openFirewall = true;
   servers = {
     aram = { port = 7777; replay = true; };
-    duel = { port = 7778; scenario = "duel"; maxPlayers = 4; };
-    dodge = { port = 7779; scenario = "dodge"; };   # the blind playtest's dodge rig
+    mayhem = { port = 7778; scenario = "mayhem"; replay = true; };   # ARAM with augment drafts
+    duel = { port = 7779; scenario = "duel"; maxPlayers = 4; };
+    dodge = { port = 7780; scenario = "dodge"; };   # the blind playtest's dodge rig
   };
 };
 ```
@@ -118,8 +121,8 @@ services.mftr = {
 |---|---|---|
 | `enable` | `true` | Run this server. |
 | `address`, `port` | `0.0.0.0`, `7777` | Where to listen (`::` for IPv6 as well). |
-| `scenario` | `aram` | As `--scenario`. |
-| `bots`, `lobby` | `10` and `true` for `aram`, else `0` and `false` | As the options below. |
+| `scenario` | `aram` | As `--scenario` (`aram`, `mayhem`, `hyper`, `duel`, …). Not taken from the server's name. |
+| `bots`, `lobby` | `10` and `true` for `aram`, `mayhem` and `hyper`, else `0` and `false` | As the options below. |
 | `maxPlayers`, `seed` | `10`, `1` | As the options below. |
 | `replay` | `false` | Record to `/var/lib/mftr/<name>/session.replay`. |
 | `openFirewall` | `services.mftr.openFirewall` | Open this server's UDP port. |

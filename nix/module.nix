@@ -3,11 +3,13 @@
 #   services.mftr.enable = true;          # one ARAM server on UDP 7777, like the Docker image
 #   services.mftr.openFirewall = true;
 #
-# or several, one service each (`mftr-<name>.service`):
+# or several, one service each (`mftr-<name>.service`). The name is only the service's name;
+# the game is `scenario` (default "aram"), so a `mayhem` server needs `scenario = "mayhem"`:
 #
 #   services.mftr.servers = {
 #     aram = { port = 7777; replay = true; };
-#     duel = { port = 7778; scenario = "duel"; maxPlayers = 4; };
+#     mayhem = { port = 7778; scenario = "mayhem"; };
+#     duel = { port = 7779; scenario = "duel"; maxPlayers = 4; };
 #   };
 #
 # Each server keeps its key and replay in /var/lib/mftr/<name>. Clients pin the key, so it
@@ -44,6 +46,7 @@ let
         type = types.enum [ "aram" "mayhem" "hyper" "duel" "minions" "dodge" "empty" ];
         default = "aram";
         description = ''
+          The game this server runs (not taken from the server's name).
           `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM with augment drafts. `hyper`: Mayhem under Hyper rules.
           `duel`: the Duel Sandbox. `minions`,
           `dodge`, `empty`: test grounds (`dodge` is the blind playtest's dodge rig).
