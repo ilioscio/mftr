@@ -588,6 +588,19 @@ The first of the other eight champions (6 in the A list). Designed without an ow
 
 **Left for later:** the owner's approval of her concept; polish.
 
+### A slice 12 status (2026-10-07): Cairn ✅ done (concept awaiting approval)
+- **Look:** an antlered earth-warden on `biped` v1, 2,922 triangles.
+  - Antlers rising from his brow; grey hair tied back; green paint down his cheeks.
+  - A moss-green cloak (`extra_cloak`) over bark-brown leathers.
+  - A staff topped with a small cairn of stacked stones and team ribbons, aimed per pose.
+- **Clips:** all 29, every `fire` checked.
+- **Effects and sounds:**
+  - VFX: stone chips, Stone Lash's shards, Shelter's ward, Rockfall's stones and ring, Monolith's eruption.
+  - 11 sounds, 55 KB.
+- **Checked in Godot:** Shelter (instant), Stone Lash, Rockfall (its call, landing and root) and Monolith's strike fired their effects and sounds.
+
+**Left for later:** the owner's approval of his concept; polish.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.
