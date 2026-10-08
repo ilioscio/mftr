@@ -74,8 +74,22 @@ fn committed_exports_are_clean() {
 }
 
 /// The Bridge's dressing and structures (art/props).
-const MAP_PROPS: [&str; 14] =
-    ["turret", "gatehouse", "base", "pine_1", "pine_2", "pine_3", "rock_1", "rock_2", "rock_3", "grass_1", "bush_1", "fountain", "relic_pad", "rubble"];
+const MAP_PROPS: [&str; 14] = [
+    "turret",
+    "gatehouse",
+    "base",
+    "pine_1",
+    "pine_2",
+    "pine_3",
+    "rock_1",
+    "rock_2",
+    "rock_3",
+    "grass_1",
+    "bush_1",
+    "fountain",
+    "relic_pad",
+    "rubble",
+];
 
 /// A prop is static: its model loads (one `root` bone, no clips), and the same model claiming to
 /// be a prop while carrying a biped skeleton and clips is refused.

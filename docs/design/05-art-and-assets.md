@@ -43,6 +43,16 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
 - A bake step generates: terrain mesh (height = SDF falloff from walls + low-frequency noise), wall meshes (extruded polygons with procedural rock detail), navmesh and vision grid ([04](04-architecture.md)), and prop scatter points (seeded).
 - Visual detail comes from shaders, so the shipped map is mostly **meshes + parameters**. Target: ≤ 8 MB for the main map.
 - Elemental-wyrm terrain changes are shader parameter sets plus a few prop variants, not new textures.
+- **As built on The Bridge:** the structures, landmarks and scenery are map props (kind `prop`,
+  [11 §3](11-content-packs-and-mods.md#3-what-a-pack-may-contain)), built by scripts in `art/props`
+  with `mftr_blender.prop` in the champions' faceted style (every face its own shade, the team
+  color on `accent`). Turrets are round stone towers with team-colored roofs, the Gatehouse a gate
+  between two towers, the Base a crystal shrine; the fountain is a platform, relics float over
+  pads, fallen structures leave rubble. The client scatters the scenery from a fixed seed in
+  batches (pines on the cliffs and past the map, rocks on the cliff edges, tall grass in the
+  brush), never close to the lane on the camera's side. The ground shader draws grass with
+  chunky texels, a dirt road with ruts, pebbles and a worn cobbled spine; cliffs have strata,
+  moss and grassy tops, and the land past a lane map's edges is raised to them.
 
 ## 4. Champions
 
@@ -84,6 +94,12 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 - SVG icons (imported by Godot as scalable vectors), a single UI theme, procedural panel backgrounds.
 - Ability and item icons as SVG: a strong silhouette shape plus an element/color code. Many can share motifs.
 - Fonts: open-licensed (e.g. Inter, Noto for i18n), subset per language pack.
+- **Minimap** (bottom right; shown and sized in Settings): the map painted by one top-down render
+  of its ground, cliffs and scenery, the fog of war over it, icons for champions (their initial
+  on their identity color, ringed by team), minions, structures and relics, and the camera's view
+  on the ground. Left click or drag looks there while held; right click moves.
+- **Fog of war** in the world as on the minimap: what the team doesn't see is darkened and cooled
+  (the client computes its team's vision with the sim's rules; units in it are never sent).
 
 ## 7. Audio
 

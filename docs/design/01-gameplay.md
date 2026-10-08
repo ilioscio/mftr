@@ -179,7 +179,9 @@ Two per champion, chosen before the match. *(start)* list:
 
 ## 13. Controls
 
-Genre-standard by default, fully rebindable:
+Genre-standard by default, fully rebindable (Esc → Settings → Keys; *as built*: every action
+below except pings, saved per player). The camera is free by default and scrolls at the screen
+edges, at a speed the player sets; Esc closes settings, then the shop, then opens the menu:
 
 | Action | Default |
 |---|---|
@@ -191,9 +193,11 @@ Genre-standard by default, fully rebindable:
 | Items / trinket | 1–6 / 4 |
 | Stop | S |
 | Recall | B |
-| Level-up ability | Ctrl + Q/W/E/R |
-| Camera lock toggle / center | Y / Space |
-| Ping wheel | G (alt + click quick ping) |
+| Level-up ability | Alt + Q/W/E/R |
+| Shop | G |
+| Camera lock toggle / center (hold) | Y / Space |
+| Scroll the camera | Bump the screen edges, arrow keys, or drag with the middle mouse button |
+| Ping wheel | (to be bound; G is the shop) |
 
 **Cast modes** per key: Normal (press → show indicator → click), Quick cast (cast on press at the cursor), and Quick cast with indicator (cast on release). Ability **range indicators** use the true range and the true hitbox width.
 
