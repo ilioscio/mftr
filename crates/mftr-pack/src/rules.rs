@@ -12,6 +12,12 @@ pub const TRIANGLES_TARGET: (usize, usize) = (2500, 4000);
 /// Lane minions (A5): many on screen at once, so lighter.
 pub const MINION_TRIANGLES_TARGET: (usize, usize) = (600, 2600);
 pub const TRIANGLES_MAX: usize = 6000;
+/// Map props (structures, trees, rocks): static, one `root` bone, no clips. A structure is the
+/// most detailed thing on screen, so its cap is higher; scenery is drawn many times over.
+pub const PROP_TRIANGLES_TARGET: (usize, usize) = (20, 8000);
+pub const PROP_TRIANGLES_MAX: usize = 12_000;
+/// A prop's bones: `root`, plus up to this many `part_<name>` bones for pieces that move.
+pub const PROP_PARTS_MAX: usize = 8;
 pub const BONES_TARGET: usize = 64;
 pub const BONES_MAX: usize = 80;
 pub const INFLUENCES_TARGET: usize = 2;

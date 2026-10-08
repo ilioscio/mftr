@@ -7,7 +7,7 @@ extends Node3D
 ## User args (after `--`) skip the menu: a server address (`host:port#fingerprint` pins the
 ## server's key, otherwise it is trusted on first use), `--champion NAME`,
 ## `--spectate` to watch (Tab cycles champions), `--shot-lobby` for a champion-select capture,
-## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots (`--zoom <factor>` brings the camera closer), and the blind playtest
+## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots (`--zoom <factor>` brings the camera closer, `--look X,Y` aims it at a map point), and the blind playtest
 ## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`. `--menu-join`
 ## (scripted checks) opens the menu and joins the first remembered server through it.
 
@@ -25,6 +25,7 @@ const ALLY_COLOR := Color(0.3, 0.85, 0.8)
 const HARD_CC_COLOR := Color(1.0, 0.85, 0.25)
 const SLOT_KEYS := ["Q", "W", "E", "R", "D", "F"]
 const SLOT_ACTIONS := ["cast_q", "cast_w", "cast_e", "cast_r", "cast_d", "cast_f"]
+const LEVEL_ACTIONS := ["level_q", "level_w", "level_e", "level_r"]
 
 var client: MatchClient
 var camera: Camera3D
@@ -69,6 +70,12 @@ const PARTICLE_KITS := ["flare", "burst", "ring", "dust"]
 # falling back to the shared library's (as the VFX do).
 var sfx: Node3D
 var _sfx_tables := {}                    # champion name -> { event: [sound] }
+# Player settings (Esc → Settings): camera, minimap, keybinds. The camera rig scrolls the view.
+var settings = preload("res://scripts/settings.gd").new()
+var cam = preload("res://scripts/camera_rig.gd").new()
+var settings_panel: Control
+var minimap: Control
+var _was_dead := false
 
 
 func _ready() -> void:
@@ -104,6 +111,10 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--zoom" and i + 1 < args.size():
 			camera_zoom = maxf(0.05, float(args[i + 1]))
+			i += 1
+		elif args[i] == "--look" and i + 1 < args.size():
+			var xy := args[i + 1].split(",")
+			_shot_look = Vector2(float(xy[0]), float(xy[1]))
 			i += 1
 		elif args[i] == "--shot-shop":
 			_shot_shop = true
@@ -212,6 +223,7 @@ var _shot_shop := false                  # `--shot-shop`: buy from the fountain,
 var _shot_lobby := false                 # `--shot-lobby`: reroll in champion select, capture it
 var _menu_auto_join := false             # `--menu-join`: join the first remembered server from the menu
 var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
+var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
 
 
 func _update_shot(delta: float) -> void:
@@ -774,10 +786,18 @@ func _cursor_ground():
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.is_pressed() and not event.is_echo() and (event as InputEventKey).keycode == KEY_ESCAPE:
-		if menu_panel == null:
+		# Esc closes what's open, innermost first: settings, the shop, then the pause menu.
+		if settings_panel != null and settings_panel.visible:
+			settings_panel.close()
+		elif shop_panel != null and shop_panel.visible:
+			_toggle_shop()
+		elif menu_panel == null:
 			_toggle_pause_menu()
 		return
 	if menu_panel != null or (pause_panel != null and pause_panel.visible):
+		return
+	if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_MIDDLE:
+		cam.drag(event.is_pressed(), (event as InputEventMouseButton).position)
 		return
 	if blind_panel != null and blind_panel.visible:
 		return  # rating between rounds: the game ignores input
@@ -801,19 +821,27 @@ func _unhandled_input(event: InputEvent) -> void:
 			client.attack_move(p)
 			_show_click_marker(_to_world(p), ENEMY_COLOR)
 		return
+	# Level-ups (default Alt + Q/W/E/R, 01 §13) before casts: both match exactly, modifiers
+	# included, so Alt+Q never also casts Q.
+	for slot in 4:
+		if event.is_action_pressed(LEVEL_ACTIONS[slot], false, true):
+			client.level_up(slot)
+			return
 	for slot in SLOT_ACTIONS.size():
-		if event.is_action_pressed(SLOT_ACTIONS[slot]):
-			# Ctrl + Q/W/E/R spends an ability point (01 §13).
-			if slot < 4 and event is InputEventKey and (event as InputEventKey).ctrl_pressed:
-				client.level_up(slot)
-				return
+		if event.is_action_pressed(SLOT_ACTIONS[slot], false, true):
 			var aim = _cursor_ground()
 			if aim != null:
 				client.cast(slot, aim)
 				# Our own dash is predicted before its event arrives: note its slot now.
 				_note_dash(own_body, own_status.get("champion", ""), slot)
 			return
-	if event.is_action_pressed("attack_move"):
+	if event.is_action_pressed("camera_lock"):
+		settings.camera_locked = not settings.camera_locked
+		settings.save()
+	elif event.is_action_pressed("toggle_minimap"):
+		settings.minimap_shown = not settings.minimap_shown
+		settings.save()
+	elif event.is_action_pressed("attack_move"):
 		attack_move_armed = true
 	elif event.is_action_pressed("stop"):
 		attack_move_armed = false
@@ -884,7 +912,7 @@ func _process(delta: float) -> void:
 		own_body.position = own
 		# Titan and Pebble: the model grows and shrinks with the hitbox (honest hitboxes).
 		own_body.scale = Vector3.ONE * (float(own_status.get("hitbox", CHAMPION_RADIUS_U)) / CHAMPION_RADIUS_U)
-		_place_camera(own)
+		_update_camera(delta, dead)
 		_show_statuses(own_body, own_status.get("stunned", false), own_status.get("rooted", false), own_status.get("shield", 0.0), own_status.get("slowed", false))
 		_animate(own_body, own_status, delta)
 	# Casts without a windup (A6): the drive never shows them, so play them on the event.
@@ -905,8 +933,25 @@ func _process(delta: float) -> void:
 	_update_fx(delta)
 	_update_click_marker(delta)
 	_update_net_graph()
+	_update_minimap(delta, playing)
 	_update_shot(delta)
 	overlay.queue_redraw()
+
+
+## The rig moves the look point (edge, keys, drag, lock, Space); the camera frames it (D13).
+func _update_camera(delta: float, dead: bool) -> void:
+	if _was_dead and not dead:
+		cam.center(client.own_position())  # back from the dead: look at the champion
+	_was_dead = dead
+	var free := menu_panel == null and (pause_panel == null or not pause_panel.visible) and (settings_panel == null or not settings_panel.visible)
+	if _shot_path != "":
+		# Scripted captures follow the champion, or look where `--look` says.
+		cam.center(client.own_position() if _shot_look == null else _shot_look)
+	var units_per_px := CAMERA_DISTANCE_U / camera_zoom * 2.0 * tan(deg_to_rad(CAMERA_VFOV_DEG) / 2.0) / maxf(1.0, get_viewport().get_visible_rect().size.y)
+	cam.update(delta, settings, client.own_position(), client.map_geometry().size, get_viewport(), units_per_px, free)
+	_place_camera(_to_world(cam.focus))
+	var confine: bool = settings.confine_cursor and free and _shot_path == ""
+	Input.mouse_mode = Input.MOUSE_MODE_CONFINED if confine else Input.MOUSE_MODE_VISIBLE
 
 
 func _place_camera(target: Vector3) -> void:
@@ -962,7 +1007,21 @@ func _update_remotes(delta: float) -> void:
 			remote_bodies[id] = b
 		var body: Node3D = remote_bodies[id]
 		var p := _to_world(u.pos)
-		if u.minion:
+		if u.kind == "relic":
+			_relic_pad(u.pos)
+		if body.has_meta("prop"):
+			p.y = 0.0
+			if not body.has_meta("faced"):
+				# Face down the lane, toward the enemy's side of the map.
+				var dir := Vector2(1, 0)
+				if _lane_axis.size() == 2:
+					dir = _lane_axis[1]
+					var half: float = (client.map_geometry().size / 2.0 - _lane_axis[0]).dot(dir)
+					if (u.pos - _lane_axis[0]).dot(dir) > half:
+						dir = -dir
+				body.rotation.y = atan2(dir.x, dir.y)
+				body.set_meta("faced", true)
+		elif u.minion:
 			p.y = 0.45
 		elif u.turret:
 			p.y = 1.2
@@ -973,6 +1032,10 @@ func _update_remotes(delta: float) -> void:
 			body.scale = Vector3.ONE * (float(u.gameplay_radius) / CHAMPION_RADIUS_U)
 		if body.has_node("Protected"):
 			body.get_node("Protected").visible = u.protected
+			if body.has_node("Model") and (not body.has_meta("shown_protected") or body.get_meta("shown_protected") != u.protected):
+				body.set_meta("shown_protected", u.protected)
+				for m in body.get_node("Model").get_meta("prop_mats", []):
+					m.set_shader_parameter("protected_glow", 1.0 if u.protected else 0.0)
 		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO))
 		_show_statuses(body, u.stunned, u.rooted, u.shield, u.get("slowed", false))
 		if u.champion != "" or (u.minion and body.has_meta("rig")):
@@ -983,6 +1046,9 @@ func _update_remotes(delta: float) -> void:
 		if not seen.has(id):
 			var gone: Node3D = remote_bodies[id]
 			remote_bodies.erase(id)
+			# Structures are always visible: one that's gone fell. It leaves rubble.
+			if gone.has_meta("prop"):
+				_leave_rubble(gone)
 			# A minion last seen at 0 health died (rather than leaving our vision): it plays its
 			# death where it fell, then sinks away (A5).
 			if _models_shown(gone) and float(gone.get_meta("last_health", 1.0)) <= 0.0:
@@ -1035,11 +1101,13 @@ func _make_minion(color: Color, collision_radius_u: float, kind := "") -> MeshIn
 ## Walls (extruded, vision-blocking) and brush (low translucent tufts) from the map the server
 ## announced. The same polygons drive collision, pathing and vision in the simulation.
 var _map_built := false
+var _lane_axis := []                      # a lane map's [blue fountain, unit direction to red's]
 
 
-func _size_ground(size_u: Vector2) -> void:
+## The ground covers the map and the scenery around it (`margin_u` past every edge).
+func _size_ground(size_u: Vector2, margin_u := 0.0) -> void:
 	var plane := PlaneMesh.new()
-	plane.size = size_u * UNITS_TO_METERS
+	plane.size = (size_u + Vector2(margin_u, margin_u) * 2.0) * UNITS_TO_METERS
 	ground.mesh = plane
 	ground.position = Vector3(size_u.x, 0, size_u.y) * (UNITS_TO_METERS / 2.0)
 
@@ -1048,14 +1116,42 @@ func _build_map() -> void:
 	_map_built = true
 	var geo: Dictionary = client.map_geometry()
 	var size: Vector2 = geo.size
-	_size_ground(size)
-	if size.x != size.y:
-		# A lane map: the dirt lane runs along its middle.
+	_size_ground(size, 2600.0)
+	ground.layers = MAP_LAYERS
+	_build_minimap(geo)
+	# The dressing: forest, rocks, tall grass (art/props), where the packs are present.
+	var dressing := preload("res://scripts/scenery.gd").new()
+	dressing.name = "Scenery"
+	add_child(dressing)
+	dressing.build(geo, func(id: String):
+		var model := _prop_model(id)
+		if model == null:
+			return null
+		var mats := _prop_materials(model, Color.WHITE, true)
+		for m in mats:
+			m.set_shader_parameter("sway", 0.05 if id.begins_with("grass") else (0.012 if id.begins_with("pine") else 0.0))
+		return [model.static_mesh(), mats])
+	for c in dressing.get_children():
+		c.layers = MAP_LAYERS
+	if geo.fountains.size() == 2:
+		# A lane map: the road runs from one fountain to the other, at whatever angle.
+		var a: Vector2 = geo.fountains[0].center
+		var b: Vector2 = geo.fountains[1].center
 		var gm: ShaderMaterial = ground.material_override
 		gm.set_shader_parameter("lane_mode", 1.0)
-		gm.set_shader_parameter("lane_z", size.y / 2.0 * UNITS_TO_METERS)
+		gm.set_shader_parameter("lane_origin", (a + b) / 2.0 * UNITS_TO_METERS)
+		gm.set_shader_parameter("lane_dir", (b - a).normalized())
 		gm.set_shader_parameter("lane_width", 13.0)
+		_lane_axis = [a, (b - a).normalized()]
 	for f in geo.fountains:
+		# The spawn platform (a prop the size of the fountain's circle), else a tinted disk.
+		var platform := _prop_node("fountain", ALLY_COLOR if f.ally else ENEMY_COLOR)
+		if platform != null:
+			platform.position = Vector3(f.center.x * UNITS_TO_METERS, 0.0, f.center.y * UNITS_TO_METERS)
+			platform.scale = Vector3.ONE * (f.radius / 600.0)
+			platform.layers = MAP_LAYERS
+			add_child(platform)
+			continue
 		var disk := MeshInstance3D.new()
 		var cyl := CylinderMesh.new()
 		cyl.top_radius = f.radius * UNITS_TO_METERS
@@ -1070,9 +1166,18 @@ func _build_map() -> void:
 	var brush_mat := ShaderMaterial.new()
 	brush_mat.shader = load("res://shaders/brush.gdshader")
 	for poly in geo.walls:
-		add_child(_extrude(poly, 1.4, wall_mat))
-	for poly in geo.brush:
-		add_child(_extrude(poly, 0.55, brush_mat))
+		if _prop_model("rock_1") != null and preload("res://scripts/scenery.gd").is_outcrop(poly):
+			continue  # drawn as a rock cluster by the scenery
+		var wall := _extrude(poly, 1.4, wall_mat)
+		wall.layers = MAP_LAYERS
+		add_child(wall)
+	# Tall grass props fill the brush when they're present; else a swaying block of brush.
+	if _prop_model("grass_1") == null:
+		for poly in geo.brush:
+			var b := _extrude(poly, 0.55, brush_mat)
+			b.layers = MAP_LAYERS
+			add_child(b)
+	_render_minimap_terrain()
 
 
 ## CSGPolygon3D extrudes along local -Z; rotating +90° about X lays the polygon on the ground
@@ -1090,7 +1195,108 @@ func _extrude(poly: PackedVector2Array, height: float, mat: Material) -> CSGPoly
 	return csg
 
 
-func _make_turret(color: Color, collision_radius_u: float) -> MeshInstance3D:
+## ---- Map props (art/props: structures, trees, rocks) ------------------------------------------
+## Static models from packs, validated like the champions (11 §4), drawn with the prop shader.
+
+var _prop_models := {}                    # id -> MftrModel (or null without a pack)
+
+
+func _prop_model(id: String) -> MftrModel:
+	if not _prop_models.has(id):
+		var path := _art_path("props/%s/export/%s.glb" % [id, id])
+		_prop_models[id] = MftrModel.load(path) if FileAccess.file_exists(path) else null
+	return _prop_models[id]
+
+
+func _prop_materials(model: MftrModel, team: Color, tinted := false) -> Array:
+	var mats := []
+	for slot in model.surface_slots():
+		var m := ShaderMaterial.new()
+		m.shader = load("res://shaders/prop.gdshader")
+		m.set_shader_parameter("slot", MINION_SLOTS.find(slot))
+		m.set_shader_parameter("team_accent", team)
+		m.set_shader_parameter("instance_tint", tinted)
+		mats.append(m)
+	return mats
+
+
+## One prop as a node (null without its pack).
+func _prop_node(id: String, team: Color) -> MeshInstance3D:
+	var model := _prop_model(id)
+	if model == null:
+		return null
+	var n := MeshInstance3D.new()
+	n.mesh = model.static_mesh()
+	var mats := _prop_materials(model, team)
+	for i in mats.size():
+		n.set_surface_override_material(i, mats[i])
+	n.set_meta("prop_mats", mats)
+	return n
+
+
+## A structure from its prop (turned to face down the lane when placed); null without one.
+func _structure_prop(id: String, color: Color, dome_radius: float, dome_lift: float) -> Node3D:
+	var model := _prop_node(id, color)
+	if model == null:
+		return null
+	var root := Node3D.new()
+	model.name = "Model"
+	root.add_child(model)
+	# Protected (an earlier structure in its lane stands): a pale ward ring on the ground and a
+	# cold sheen on the stone, instead of a dome hiding the model.
+	var ward := MeshInstance3D.new()
+	ward.name = "Protected"
+	var ring := TorusMesh.new()
+	ring.inner_radius = dome_radius - 0.08
+	ring.outer_radius = dome_radius
+	ring.rings = 48
+	ward.mesh = ring
+	ward.position.y = 0.04
+	ward.scale = Vector3(1.0, 0.15, 1.0)
+	ward.material_override = _unshaded(Color(0.75, 0.88, 1.0), 0.35)
+	ward.visible = false
+	root.add_child(ward)
+	root.set_meta("prop", id)
+	return root
+
+
+var _relic_pads := {}                     # rounded position -> the pad under a relic
+
+
+## A relic's pad stays where the relic floats, also while it's taken.
+func _relic_pad(at: Vector2) -> void:
+	var key := Vector2i(roundi(at.x), roundi(at.y))
+	if _relic_pads.has(key):
+		return
+	var pad := _prop_node("relic_pad", Color.WHITE)
+	_relic_pads[key] = pad
+	if pad != null:
+		pad.position = _to_world(at)
+		add_child(pad)
+
+
+func _leave_rubble(gone: Node3D) -> void:
+	var kind: String = gone.get_meta("prop")
+	var pile := _prop_node("rubble", Color.WHITE)
+	if pile != null:
+		pile.position = Vector3(gone.position.x, 0.0, gone.position.z)
+		pile.rotation.y = gone.rotation.y
+		pile.scale = Vector3.ONE * {"turret": 1.0, "gatehouse": 1.5, "base": 2.0}.get(kind, 1.0)
+		add_child(pile)
+	# A cloud of stone dust where it fell.
+	var dust := {"kit": "dust", "ramp": PackedColorArray([Color(0.62, 0.6, 0.55), Color(0.5, 0.48, 0.45), Color(0.36, 0.35, 0.33)]),
+		"count": 40, "size": 2.2, "speed": 3.0, "lifetime": 1.4}
+	vfx.play(dust, Vector3(gone.position.x, 0.0, gone.position.z))
+
+
+func _make_turret(color: Color, collision_radius_u: float) -> Node3D:
+	var built := _structure_prop("turret", color, 1.5, 1.6)
+	if built != null:
+		return built
+	return _make_turret_shape(color, collision_radius_u)
+
+
+func _make_turret_shape(color: Color, collision_radius_u: float) -> MeshInstance3D:
 	var body := MeshInstance3D.new()
 	var cyl := CylinderMesh.new()
 	cyl.top_radius = collision_radius_u * UNITS_TO_METERS * 0.6
@@ -1135,6 +1341,9 @@ func _make_protected_dome(radius_m: float, lift: float) -> MeshInstance3D:
 
 
 func _make_gatehouse(color: Color) -> Node3D:
+	var built := _structure_prop("gatehouse", color, 2.0, 0.0)
+	if built != null:
+		return built
 	var root := Node3D.new()
 	for side in [-1.0, 1.0]:
 		var pillar := MeshInstance3D.new()
@@ -1165,6 +1374,9 @@ func _make_gatehouse(color: Color) -> Node3D:
 
 
 func _make_base(color: Color) -> Node3D:
+	var built := _structure_prop("base", color, 2.6, 0.0)
+	if built != null:
+		return built
 	var root := Node3D.new()
 	var plinth := MeshInstance3D.new()
 	var cyl := CylinderMesh.new()
@@ -1582,6 +1794,8 @@ func _draw_overlay() -> void:
 		var color := Color(0.3, 0.7, 0.95) if u.ally else Color(0.9, 0.25, 0.2)
 		var size := Vector2(104, 11) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
 		var lift := 1.25 if champ else (2.6 if structure else 0.6)
+		if remote_bodies[id].has_meta("prop"):
+			lift = {"turret": 7.0, "gatehouse": 5.4, "base": 6.2}.get(u.kind, 3.0)
 		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color)
 		if champ:
 			_draw_augment_pips(font, remote_bodies[id].position + Vector3(0, lift, 0), u.get("augments", []))
@@ -1644,7 +1858,10 @@ func _draw_ability_bar(font: Font) -> void:
 	var names: Array = own_status.abilities
 	var cds: Array = own_status.cooldowns
 	var slot_w := 120.0
-	var x0 := overlay.size.x / 2.0 - slot_w * 3.0
+	# Centered, unless the inventory beside it would run under the minimap.
+	var right := overlay.size.x / 2.0 + slot_w * 3.0 + 24.0 + 300.0
+	var limit: float = minimap.position.x - 12.0 if minimap != null and minimap.visible else overlay.size.x
+	var x0 := overlay.size.x / 2.0 - slot_w * 3.0 - maxf(0.0, right - limit)
 	var y0 := overlay.size.y - 92.0
 	overlay.draw_rect(Rect2(x0 - 10, y0 - 34, slot_w * 6.0 + 20, 120), Color(0, 0, 0, 0.55))
 	var hp: float = own_status.health
@@ -1664,7 +1881,7 @@ func _draw_ability_bar(font: Font) -> void:
 		var box := Rect2(x, y0, slot_w - 8, 54)
 		overlay.draw_rect(box, Color(0.18, 0.2, 0.24) if ready else Color(0.1, 0.1, 0.12))
 		overlay.draw_rect(box, Color(0.45, 0.75, 1.0) if ready else Color(0.3, 0.3, 0.35), false, 2.0)
-		overlay.draw_string(font, Vector2(x + 6, y0 + 20), SLOT_KEYS[slot], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
+		overlay.draw_string(font, Vector2(x + 6, y0 + 20), settings.binding(SLOT_ACTIONS[slot]), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 		var label := "" if ready else ("%.1f" % cd if cd < 10.0 else "%d" % ceili(cd))
 		overlay.draw_string(font, Vector2(x + 30, y0 + 20), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
 		overlay.draw_string(font, Vector2(x + 6, y0 + 44), names[slot], HORIZONTAL_ALIGNMENT_LEFT, slot_w - 14, 13, Color(0.8, 0.85, 0.9))
@@ -1691,9 +1908,9 @@ func _draw_ability_bar(font: Font) -> void:
 	if attack_move_armed:
 		overlay.draw_string(font, Vector2(x0, y0 + 80), "Attack-move: left-click a point", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ENEMY_COLOR)
 	elif own_status.get("points", 0) > 0:
-		overlay.draw_string(font, Vector2(x0, y0 + 80), "%d ability point(s): Ctrl + Q/W/E/R" % own_status.points, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
+		overlay.draw_string(font, Vector2(x0, y0 + 80), "%d ability point(s): %s" % [own_status.points, " / ".join(LEVEL_ACTIONS.map(func(a): return settings.binding(a)))], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
 	elif own_status.get("ranked", false) and client.can_shop():
-		overlay.draw_string(font, Vector2(x0, y0 + 80), "[P] shop", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
+		overlay.draw_string(font, Vector2(x0, y0 + 80), "[%s] shop" % settings.binding("toggle_shop"), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
 	if blind_state == "playing":
 		var left := maxf(blind_seconds - client.blind_elapsed(), 0.0)
 		var txt := "Blind round %d / %d   %d:%02d" % [client.blind_round() + 1, client.blind_rounds(), int(left) / 60, int(left) % 60]
@@ -1710,11 +1927,20 @@ func _update_net_graph() -> void:
 		net_label.text = "MFTR — %s…  %s" % [phase if phase != "" else "disconnected", client.last_error()]
 		return
 	var s: Dictionary = client.net_stats()
-	net_label.text = "FPS %d   RTT %.0f ms   margin %.1f ms   interp %.0f ms\ncommands %d   late %d   corrections %d (last %.1f u)   on-screen correction %.1f u\nup %.1f KB   down %.1f KB   collision proxies %s\nenemy missiles %d   near-misses %d   ghost hits %d   phantom hits %d   K/D %d/%d\n[RMB] move / attack  [A+LMB] attack-move  [Q W E R] abilities  [D] Blink  [F] Barrier  [S] stop  [P] shop  [F1] net graph  [F2] proxies" % [
+	net_label.text = "FPS %d   RTT %.0f ms   margin %.1f ms   interp %.0f ms\ncommands %d   late %d   corrections %d (last %.1f u)   on-screen correction %.1f u\nup %.1f KB   down %.1f KB   collision proxies %s\nenemy missiles %d   near-misses %d   ghost hits %d   phantom hits %d   K/D %d/%d\n%s" % [
 		Engine.get_frames_per_second(), s.rtt_ms, s.margin_ms, s.interp_ms,
 		s.commands, s.late, s.corrections, s.last_correction, s.visible_correction,
 		s.kb_up, s.kb_down, "ON" if proxies_enabled else "OFF",
-		s.enemy_missiles, s.near_misses, s.ghost_hits, s.phantom_hits, s.kills, s.deaths,
+		s.enemy_missiles, s.near_misses, s.ghost_hits, s.phantom_hits, s.kills, s.deaths, _key_hints(),
+	]
+
+
+## The controls line under the net graph, from the current bindings.
+func _key_hints() -> String:
+	var b := func(a: String) -> String: return settings.binding(a).replace("Mouse ", "M-")
+	return "[%s] move / attack  [%s] attack-move  [%s %s %s %s] abilities  [%s] Blink  [%s] Barrier  [%s] stop  [%s] shop  [%s] camera lock  [Esc] settings" % [
+		b.call("move"), b.call("attack_move"), b.call("cast_q"), b.call("cast_w"), b.call("cast_e"), b.call("cast_r"),
+		b.call("cast_d"), b.call("cast_f"), b.call("stop"), b.call("toggle_shop"), b.call("camera_lock"),
 	]
 
 
@@ -2226,6 +2452,8 @@ func _update_spectator_camera() -> void:
 	var target: Vector2 = client.map_geometry().size / 2.0
 	if remote_info.has(spectate_target):
 		target = remote_info[spectate_target].pos
+	if _shot_look != null:
+		target = _shot_look
 	_place_camera(_to_world(target))
 
 
@@ -2479,6 +2707,10 @@ func _toggle_pause_menu() -> void:
 	resume.text = "Resume"
 	resume.pressed.connect(func(): pause_panel.visible = false)
 	v.add_child(resume)
+	var open_settings := Button.new()
+	open_settings.text = "Settings"
+	open_settings.pressed.connect(func(): pause_panel.visible = false; _open_settings())
+	v.add_child(open_settings)
 	var leave := Button.new()
 	leave.text = "Leave server"
 	leave.pressed.connect(_leave)
@@ -2489,6 +2721,117 @@ func _toggle_pause_menu() -> void:
 	v.add_child(quit)
 	await get_tree().process_frame
 	_center(pause_panel)
+
+
+func _open_settings() -> void:
+	if settings_panel == null:
+		settings_panel = preload("res://scripts/settings_panel.gd").new()
+		settings_panel.setup(settings)
+		overlay.get_parent().add_child(settings_panel)
+	settings_panel.open()
+
+
+## ---- Minimap and fog of war ----------------------------------------------------------------
+## The minimap (minimap.gd) and the fog: our team's vision grid from the extension a few times
+## a second, as a texture both the minimap and the world's shaders darken unseen ground with.
+
+const FOG_CELL_U := 50.0
+var fog_texture: ImageTexture
+var _fog_refresh := 0.0
+var _icon_refresh := 0.0
+
+
+## Map content (ground, cliffs, scenery, platforms) is also on render layer 2: the minimap's
+## one top-down render sees only that, never units or structures (those are icons).
+const MAP_LAYERS := 3
+var _terrain_pending := false
+
+
+## Paints the minimap's terrain: one orthographic render of the map from above, units left out.
+## The fog waits until it's taken (it would darken the picture).
+func _render_minimap_terrain() -> void:
+	_terrain_pending = true
+	RenderingServer.global_shader_parameter_set("fog_on", 0.0)
+	var region: Rect2 = minimap.region
+	var vp := SubViewport.new()
+	vp.size = Vector2i(1024, int(1024.0 * region.size.y / region.size.x))
+	vp.world_3d = get_viewport().world_3d
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	var eye := Camera3D.new()
+	eye.projection = Camera3D.PROJECTION_ORTHOGONAL
+	eye.keep_aspect = Camera3D.KEEP_HEIGHT
+	eye.size = region.size.y * UNITS_TO_METERS
+	eye.cull_mask = 2
+	eye.far = 200.0
+	var c := region.get_center() * UNITS_TO_METERS
+	eye.position = Vector3(c.x, 80.0, c.y)
+	eye.rotation_degrees = Vector3(-90, 0, 0)
+	vp.add_child(eye)
+	add_child(vp)
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	minimap.terrain = ImageTexture.create_from_image(vp.get_texture().get_image())
+	minimap.queue_redraw()
+	vp.queue_free()
+	_terrain_pending = false
+
+
+func _build_minimap(geo: Dictionary) -> void:
+	minimap = preload("res://scripts/minimap.gd").new()
+	overlay.get_parent().add_child(minimap)
+	minimap.setup(geo)
+	minimap.look.connect(func(p: Vector2, held: bool): cam.peek(p, held))
+	minimap.move_to.connect(func(p: Vector2):
+		if not client.is_spectator():
+			client.move_to(p)
+			_show_click_marker(_to_world(p), Color(0.45, 0.75, 1.0)))
+	RenderingServer.global_shader_parameter_set("fog_size", geo.size * UNITS_TO_METERS)
+
+
+func _update_minimap(delta: float, playing: bool) -> void:
+	if minimap == null:
+		return
+	minimap.visible = playing and settings.minimap_shown and blind_state != "rating"
+	_fog_refresh -= delta
+	if playing and _fog_refresh <= 0.0 and not _terrain_pending:
+		_fog_refresh = 0.15
+		var g: Dictionary = client.fog_grid(FOG_CELL_U)
+		var img := Image.create_from_data(int(g.cols), int(g.rows), false, Image.FORMAT_L8, g.data)
+		if fog_texture == null or fog_texture.get_size() != Vector2(img.get_size()):
+			fog_texture = ImageTexture.create_from_image(img)
+			RenderingServer.global_shader_parameter_set("fog_map", fog_texture.get_rid())
+		else:
+			fog_texture.update(img)
+		RenderingServer.global_shader_parameter_set("fog_on", 0.0 if client.is_spectator() else 1.0)
+		minimap.fog_texture = fog_texture
+	if not minimap.visible:
+		return
+	minimap.layout(overlay.size, settings.minimap_size)
+	_icon_refresh -= delta
+	if _icon_refresh <= 0.0:
+		_icon_refresh = 0.05
+		var icons := []
+		for id in remote_info:
+			var u: Dictionary = remote_info[id]
+			if u.get("health", 1.0) <= 0.0:
+				continue
+			var team := "ally" if u.get("ally", false) else "enemy"
+			icons.append({"pos": u.pos, "kind": u.get("kind", ""), "team": team, "champion": u.get("champion", ""),
+				"color": CHAMPION_COLORS.get(u.get("champion", ""), Color.GRAY)})
+		if own_body != null and not own_status.get("dead", false):
+			icons.append({"pos": client.own_position(), "kind": "champion", "team": "own", "champion": own_champion,
+				"color": CHAMPION_COLORS.get(own_champion, Color.GRAY)})
+		# Champions above everything else.
+		icons.sort_custom(func(a, b): return a.kind != "champion" and b.kind == "champion")
+		minimap.icons = icons
+		var corners := []
+		var r := get_viewport().get_visible_rect().size
+		for c in [Vector2(0, 0), Vector2(r.x, 0), Vector2(r.x, r.y), Vector2(0, r.y)]:
+			var hit = _ground_point(c)
+			if hit != null:
+				corners.append(Vector2(hit.x, hit.z) / UNITS_TO_METERS)
+		minimap.view_poly = PackedVector2Array(corners) if corners.size() == 4 else PackedVector2Array()
+		minimap.refresh()
 
 
 ## Disconnect and start over in the menu (a fresh scene: nothing of the match is left).

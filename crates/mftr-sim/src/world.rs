@@ -3065,6 +3065,7 @@ mod tests {
     use crate::ability::Cc;
     use crate::champion::EMBER;
     use crate::lane;
+    use crate::map::bridge_point;
     use crate::time::SUBTICKS;
 
     fn cmd(player: u8, seq: u32, tick: u32, sub: u8, target: (f32, f32)) -> Command {
@@ -4068,15 +4069,18 @@ mod tests {
         assert_eq!(w.game().waves_spawned, 5, "0:15, 0:45, 1:15, 1:45, 2:15");
         // Lane minions stay on the lane (nobody wandered off into a corner).
         for u in w.units().iter().filter(|u| u.kind == UnitKind::Minion) {
-            assert!(u.state.pos.y > 600.0 && u.state.pos.y < 2400.0, "{:?}", u.state.pos);
+            let across = crate::map::bridge_lane_point(u.state.pos).y;
+            assert!(across > 600.0 && across < 2400.0, "{:?}", u.state.pos);
         }
     }
 
     #[test]
     fn turrets_answer_a_champion_attacking_an_allied_champion() {
         let mut w = bridge_world();
-        let ally = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, Vec2::new(4700.0, 1500.0));
-        let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Vesper, Vec2::new(5300.0, 1500.0));
+        let ally =
+            w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, bridge_point(Vec2::new(4700.0, 1500.0)));
+        let enemy =
+            w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Vesper, bridge_point(Vec2::new(5300.0, 1500.0)));
         w.step(&[attack(1, 1, 1, ally)]);
         let mut ev = w.take_events();
         ev.extend(run_until_quiet(&mut w, 90));
@@ -4115,7 +4119,7 @@ mod tests {
     #[test]
     fn a_push_destroys_structures_in_order_and_ends_the_match() {
         let mut w = bridge_world();
-        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(450.0, 1500.0));
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, bridge_point(Vec2::new(450.0, 1500.0)));
         {
             let u = w.unit_mut(me).unwrap();
             u.stats.attack_damage = 900.0;
@@ -4123,7 +4127,7 @@ mod tests {
             u.stats.health_regen = 1.0e5;
             u.state.health = 1.0e7;
         }
-        let goal = QPoint::from_vec2(Vec2::new(10_750.0, 1500.0));
+        let goal = QPoint::from_vec2(bridge_point(Vec2::new(10_750.0, 1500.0)));
         let mut ev = Vec::new();
         let mut seq = 0;
         for k in 1..=(30 * 600u32) {
@@ -4198,7 +4202,7 @@ mod tests {
         assert!(w.unit(relic.id).unwrap().state.alive(), "back after 40 s");
         // The Bridge is ARAM's: back in the fountain, only regeneration.
         let u = w.unit_mut(me).unwrap();
-        u.state = UnitState { health: 100.0, ..UnitState::new(Vec2::new(400.0, 1500.0), 325.0) };
+        u.state = UnitState { health: 100.0, ..UnitState::new(bridge_point(Vec2::new(400.0, 1500.0)), 325.0) };
         run_until_quiet(&mut w, 30);
         let hp = w.unit(me).unwrap().state.health;
         assert!((hp - (100.0 + 1.5)).abs() < 1.0, "{hp}");
@@ -4212,7 +4216,7 @@ mod tests {
         let mut w = World::new(5);
         w.set_map(Arc::new(map));
         w.start_match();
-        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, Vec2::new(400.0, 1500.0));
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, bridge_point(Vec2::new(400.0, 1500.0)));
         w.unit_mut(me).unwrap().state.health = 100.0;
         run_until_quiet(&mut w, 30);
         let hp = w.unit(me).unwrap().state.health;
@@ -4694,7 +4698,7 @@ mod tests {
         use crate::items::*;
         let mut w = ranked_world();
         w.set_map(MapId::Bridge.shared());
-        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(400.0, 1500.0));
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, bridge_point(Vec2::new(400.0, 1500.0)));
         let ad = w.unit(me).unwrap().stats.attack_damage;
         w.step(&[shop(0, 1, 1, CommandKind::Buy(LONG_KNIFE))]);
         w.step(&[]);
@@ -4707,7 +4711,7 @@ mod tests {
         assert_eq!(p.items, [LEECH_FANG, 0, 0, 0, 0, 0], "the knife went into the fang; no gold for the grimoire");
         assert!((p.gold - (gold + 4.0 * TICK_DT - 550.0)).abs() < 1e-3);
         // Out of the fountain: no shopping. Dead: shopping again.
-        w.unit_mut(me).unwrap().state.pos = Vec2::new(3000.0, 1500.0);
+        w.unit_mut(me).unwrap().state.pos = bridge_point(Vec2::new(3000.0, 1500.0));
         w.step(&[shop(0, 4, 4, CommandKind::Sell(0)), shop(0, 5, 4, CommandKind::Buy(BOOTS))]);
         assert_eq!(w.unit(me).unwrap().state.progress.items, [LEECH_FANG, 0, 0, 0, 0, 0]);
         w.unit_mut(me).unwrap().state.respawn_at = Some(SimTime::end_of(Tick(200)));
@@ -5003,7 +5007,8 @@ mod tests {
             for p in 0..6u8 {
                 if rng.next_u32().is_multiple_of(29) {
                     seq += 1;
-                    let t = (rng.range_f32(3000.0, 9000.0), rng.range_f32(900.0, 2100.0));
+                    let t = bridge_point(Vec2::new(rng.range_f32(3000.0, 9000.0), rng.range_f32(900.0, 2100.0)));
+                    let t = (t.x, t.y);
                     let sub = (rng.next_u32() % SUBTICKS as u32) as u8;
                     cmds.push(match rng.next_u32() % 7 {
                         0 => cast_slot(p, seq, k, sub, (rng.next_u32() % 4) as u8, t),
@@ -5032,7 +5037,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x1f78_5961_6255_1274;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x650e_b09f_e5ec_ead0;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.

@@ -68,38 +68,7 @@ impl MftrModel {
         skeleton.reset_bone_poses();
         let skin = skeleton.create_skin_from_rest_transforms();
 
-        let mut mesh = ArrayMesh::new_gd();
-        for prim in self.pack.model.meshes.iter().flatten() {
-            let n = prim.positions.len();
-            let normals = smooth_normals(&prim.positions, &prim.indices);
-            let mut arrays = VarArray::new();
-            arrays.resize(ArrayType::MAX.ord() as usize, &Variant::nil());
-            let verts: PackedVector3Array = prim.positions.iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect();
-            let norms: PackedVector3Array = normals.iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect();
-            arrays.set(ArrayType::VERTEX.ord() as usize, &verts.to_variant());
-            arrays.set(ArrayType::NORMAL.ord() as usize, &norms.to_variant());
-            if prim.colors.len() == n {
-                let colors: PackedColorArray =
-                    prim.colors.iter().map(|c| Color::from_rgba(c[0], c[1], c[2], c[3])).collect();
-                arrays.set(ArrayType::COLOR.ord() as usize, &colors.to_variant());
-            }
-            if prim.joints.len() == n && prim.weights.len() == n {
-                let map = &lib.joint_to_bone;
-                let bones: PackedInt32Array = prim
-                    .joints
-                    .iter()
-                    .flat_map(|j| j.map(|x| map.get(x as usize).copied().unwrap_or(0) as i32))
-                    .collect();
-                let weights: PackedFloat32Array = prim.weights.iter().flat_map(|w| *w).collect();
-                arrays.set(ArrayType::BONES.ord() as usize, &bones.to_variant());
-                arrays.set(ArrayType::WEIGHTS.ord() as usize, &weights.to_variant());
-            }
-            // glTF fronts are counter-clockwise; Godot's are clockwise.
-            let index: PackedInt32Array =
-                prim.indices.chunks(3).flat_map(|t| [t[0] as i32, t[2] as i32, t[1] as i32]).collect();
-            arrays.set(ArrayType::INDEX.ord() as usize, &index.to_variant());
-            mesh.add_surface_from_arrays(PrimitiveType::TRIANGLES, &arrays);
-        }
+        let mesh = self.build_mesh(true);
         let mut mesh_node = MeshInstance3D::new_alloc();
         mesh_node.set_name("Mesh");
         mesh_node.set_mesh(&mesh);
@@ -113,6 +82,19 @@ impl MftrModel {
         root.set_name("Model");
         root.add_child(&skeleton);
         root
+    }
+
+    /// A static copy of the mesh, without bone weights (map props: drawn in batches with
+    /// `MultiMeshInstance3D`, they have nothing to animate).
+    #[func]
+    fn static_mesh(&self) -> Gd<ArrayMesh> {
+        self.build_mesh(false)
+    }
+
+    /// The sidecar's kind: `champion`, `library`, `minion`, `rig` or `prop`.
+    #[func]
+    fn kind(&self) -> GString {
+        GString::from(self.pack.kind.as_str())
     }
 
     /// The pack's VFX (A4b, `<id>.vfx.ron`): `[{ event, kit, ramp: PackedColorArray, count, size,
@@ -240,6 +222,47 @@ impl MftrAnimator {
             })
             .map(|s| GString::from(s.as_str()))
             .collect()
+    }
+}
+
+impl MftrModel {
+    /// The mesh with its vertex colors and one surface per material slot (`surface_slots`);
+    /// `skinned` adds the bone weights for the skeleton `instantiate` builds.
+    fn build_mesh(&self, skinned: bool) -> Gd<ArrayMesh> {
+        let lib = &self.pack.library;
+        let mut mesh = ArrayMesh::new_gd();
+        for prim in self.pack.model.meshes.iter().flatten() {
+            let n = prim.positions.len();
+            let normals = smooth_normals(&prim.positions, &prim.indices);
+            let mut arrays = VarArray::new();
+            arrays.resize(ArrayType::MAX.ord() as usize, &Variant::nil());
+            let verts: PackedVector3Array = prim.positions.iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect();
+            let norms: PackedVector3Array = normals.iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect();
+            arrays.set(ArrayType::VERTEX.ord() as usize, &verts.to_variant());
+            arrays.set(ArrayType::NORMAL.ord() as usize, &norms.to_variant());
+            if prim.colors.len() == n {
+                let colors: PackedColorArray =
+                    prim.colors.iter().map(|c| Color::from_rgba(c[0], c[1], c[2], c[3])).collect();
+                arrays.set(ArrayType::COLOR.ord() as usize, &colors.to_variant());
+            }
+            if skinned && prim.joints.len() == n && prim.weights.len() == n {
+                let map = &lib.joint_to_bone;
+                let bones: PackedInt32Array = prim
+                    .joints
+                    .iter()
+                    .flat_map(|j| j.map(|x| map.get(x as usize).copied().unwrap_or(0) as i32))
+                    .collect();
+                let weights: PackedFloat32Array = prim.weights.iter().flat_map(|w| *w).collect();
+                arrays.set(ArrayType::BONES.ord() as usize, &bones.to_variant());
+                arrays.set(ArrayType::WEIGHTS.ord() as usize, &weights.to_variant());
+            }
+            // glTF fronts are counter-clockwise; Godot's are clockwise.
+            let index: PackedInt32Array =
+                prim.indices.chunks(3).flat_map(|t| [t[0] as i32, t[2] as i32, t[1] as i32]).collect();
+            arrays.set(ArrayType::INDEX.ord() as usize, &index.to_variant());
+            mesh.add_surface_from_arrays(PrimitiveType::TRIANGLES, &arrays);
+        }
+        mesh
     }
 }
 

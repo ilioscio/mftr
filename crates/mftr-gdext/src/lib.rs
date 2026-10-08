@@ -714,6 +714,65 @@ impl MatchClient {
         d
     }
 
+    /// What our team sees, for the minimap and the fog drawn over the world: `{ cols, rows,
+    /// cell, data }`, one byte per `cell`-unit square of the map (row-major from the map's
+    /// origin), 255 seen and 0 not. The sim's rules (03 §10): each allied unit sees its radius,
+    /// walls block sight, brush hides from outside it. A spectator sees everything.
+    #[func]
+    fn fog_grid(&self, cell: f32) -> VarDictionary {
+        use mftr_sim::vision::vision_radius;
+        let map = self.session.map();
+        let cell = cell.max(25.0);
+        let (cols, rows) = ((map.size.x / cell).ceil().max(1.0) as usize, (map.size.y / cell).ceil().max(1.0) as usize);
+        let mut data = vec![0u8; cols * rows];
+        let now = self.now();
+        let team = self.session.team();
+        let mut sources: Vec<(Vec2, f32)> = self
+            .session
+            .remote_render_units(now)
+            .iter()
+            .filter(|u| u.team == team && u.health > 0.0)
+            .map(|u| (u.pos, vision_radius(u.kind)))
+            .collect();
+        if self.session.own_state_now().is_some_and(|s| s.alive())
+            && let Some(own) = self.session.own_render_position(now)
+        {
+            sources.push((own, mftr_sim::vision::VISION_CHAMPION));
+        }
+        if self.session.is_spectator() {
+            data.fill(255);
+        } else {
+            for (s, r) in sources.into_iter().filter(|(_, r)| *r > 0.0) {
+                let brush = map.brush_at(s);
+                let (c0, c1) =
+                    (((s.x - r) / cell).floor().max(0.0) as usize, (((s.x + r) / cell).ceil() as usize).min(cols));
+                let (r0, r1) =
+                    (((s.y - r) / cell).floor().max(0.0) as usize, (((s.y + r) / cell).ceil() as usize).min(rows));
+                for row in r0..r1 {
+                    for col in c0..c1 {
+                        let i = row * cols + col;
+                        if data[i] != 0 {
+                            continue;
+                        }
+                        let p = Vec2::new((col as f32 + 0.5) * cell, (row as f32 + 0.5) * cell);
+                        if (p - s).length_sq() <= r * r
+                            && map.brush_at(p).is_none_or(|b| Some(b) == brush)
+                            && map.line_of_sight(s, p)
+                        {
+                            data[i] = 255;
+                        }
+                    }
+                }
+            }
+        }
+        let mut d = VarDictionary::new();
+        d.set("cols", cols as i64);
+        d.set("rows", rows as i64);
+        d.set("cell", cell);
+        d.set("data", &PackedByteArray::from(data.as_slice()));
+        d
+    }
+
     /// The action (`q`…`f`) a champion's dash or lunge sits on, or "" (A4b: dash VFX).
     #[func]
     fn action_info(&self, champion: GString, action: GString) -> VarDictionary {

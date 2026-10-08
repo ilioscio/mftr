@@ -26,7 +26,7 @@ pub fn sidecar_path(glb: &Path) -> PathBuf {
 
 /// A validated pack, parsed and ready to animate: the model (mesh data) and its clip library.
 pub struct Loaded {
-    /// The sidecar's `kind`: `champion`, `library`, `minion` or `rig`.
+    /// The sidecar's `kind`: `champion`, `library`, `minion`, `rig` or `prop`.
     pub kind: String,
     pub model: glb::Model,
     pub library: pose::Library,

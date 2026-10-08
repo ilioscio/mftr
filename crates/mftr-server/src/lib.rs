@@ -1234,11 +1234,19 @@ mod tests {
         assert_eq!(check.mismatch, None);
         // A tampered command changes the outcome, and the check notices.
         let mut tampered = parsed.clone();
-        let cmds = tampered.entries.iter_mut().find_map(|e| match e {
-            ReplayEntry::Commands { commands, tick } if tick.0 > 3000 => Some(commands),
-            _ => None,
-        });
-        cmds.unwrap()[0].kind = mftr_sim::CommandKind::MoveTo(QPoint::from_vec2(Vec2::new(6000.0, 300.0)));
+        // Every movement order between ticks 3000 and 3600 is sent elsewhere.
+        let far = mftr_sim::map::bridge_point(Vec2::new(9000.0, 1000.0));
+        for e in tampered.entries.iter_mut() {
+            if let ReplayEntry::Commands { commands, tick } = e
+                && (3000..3600).contains(&tick.0)
+            {
+                for c in commands.iter_mut() {
+                    if matches!(c.kind, mftr_sim::CommandKind::MoveTo(_) | mftr_sim::CommandKind::AttackMove(_)) {
+                        c.kind = mftr_sim::CommandKind::MoveTo(QPoint::from_vec2(far));
+                    }
+                }
+            }
+        }
         assert!(tampered.verify().mismatch.is_some());
     }
 

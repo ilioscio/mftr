@@ -255,7 +255,8 @@ impl Bot {
             }
             goal -= dir * 100.0;
         }
-        let goal = goal + Vec2::new(0.0, self.rng.range_f32(-120.0, 120.0));
+        // A little spread across the lane, so bots don't stack on one line.
+        let goal = goal + Vec2::new(-dir.y, dir.x) * self.rng.range_f32(-120.0, 120.0);
         self.go_to(CommandKind::AttackMove(QPoint::from_vec2(goal)))
     }
 
