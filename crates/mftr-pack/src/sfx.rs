@@ -3,8 +3,9 @@
 //! hand-written recipe; a community pack may ship recorded sounds instead.
 //!
 //! Events are those of the VFX (`<action>.<phase>`, including `fire`, with the extra phase `cast`
-//! for a windup's start), plus `unit.<what>` (`foot`, `death`, `respawn`, `recall`, `emote`) and the shared
-//! hard-CC accent `cc.hard` (05 §7: hard CC has a learnable signature). Several sounds on one
+//! for a windup's start), plus `unit.<what>` (`foot`, `death`, `respawn`, `recall`, `emote`), the shared
+//! hard-CC accent `cc.hard` (05 §7: hard CC has a learnable signature) and the match's end,
+//! `match.victory` and `match.defeat` (played flat, not in the world). Several sounds on one
 //! event are variants: the client picks one, never the same twice in a row.
 //!
 //! Ogg is decoded by `lewton` (memory-safe Rust, 11 §4) with every cap checked before the samples
@@ -27,6 +28,7 @@ pub const RATES: (u32, u32) = (8_000, 48_000);
 pub const ACTIONS: &[&str] = &["attack", "q", "w", "e", "r", "d", "f", "*"];
 pub const PHASES: &[&str] = &["cast", "release", "impact", "detonate", "start", "land", "fire"];
 pub const UNIT_EVENTS: &[&str] = &["foot", "death", "respawn", "recall", "emote"];
+pub const MATCH_EVENTS: &[&str] = &["victory", "defeat"];
 
 #[derive(Clone, Debug, DeRon)]
 pub struct SfxFile {
@@ -73,6 +75,8 @@ fn event_ok(event: &str) -> Result<(), String> {
     match event.split_once('.') {
         Some(("unit", what)) if UNIT_EVENTS.contains(&what) => Ok(()),
         Some(("unit", what)) => Err(format!("unknown unit event `{what}` (allowed: {})", UNIT_EVENTS.join(", "))),
+        Some(("match", what)) if MATCH_EVENTS.contains(&what) => Ok(()),
+        Some(("match", what)) => Err(format!("unknown match event `{what}` (allowed: {})", MATCH_EVENTS.join(", "))),
         Some((action, phase)) => {
             if !ACTIONS.contains(&action) {
                 Err(format!("unknown action `{action}`"))
@@ -82,7 +86,7 @@ fn event_ok(event: &str) -> Result<(), String> {
                 Ok(())
             }
         }
-        None => Err("events are `<action>.<phase>`, `unit.<what>` or `cc.hard`".into()),
+        None => Err("events are `<action>.<phase>`, `unit.<what>`, `match.<what>` or `cc.hard`".into()),
     }
 }
 
@@ -227,12 +231,14 @@ mod tests {
             (name: "bow_draw", events: ["attack.cast", "q.cast"], volume: 0.6, pitch: 0.05),
             (name: "step_1", events: ["unit.foot"], volume: 0.3),
             (name: "snare", events: ["cc.hard"], volume: 0.9),
+            (name: "fanfare", events: ["match.victory"], volume: 0.8),
         ])"#;
         assert!(check(&parse(ok).unwrap()).is_empty());
         for (bad, needle) in [
             (r#"(sounds: [(name: "Bad Name", events: ["q.cast"], volume: 0.5)])"#, "names are"),
             (r#"(sounds: [(name: "a", events: ["q.explode"], volume: 0.5)])"#, "unknown phase"),
             (r#"(sounds: [(name: "a", events: ["unit.dance"], volume: 0.5)])"#, "unknown unit event"),
+            (r#"(sounds: [(name: "a", events: ["match.draw"], volume: 0.5)])"#, "unknown match event"),
             (r#"(sounds: [(name: "a", events: ["q.cast"], volume: 2.0)])"#, "volume"),
             (r#"(sounds: [(name: "a", events: ["q.cast"], volume: 0.5, pitch: 0.9)])"#, "pitch"),
             (r#"(sounds: [(name: "a", events: [], volume: 0.5)])"#, "no events"),

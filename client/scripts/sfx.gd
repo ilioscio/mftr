@@ -13,6 +13,7 @@ const UNIT_SIZE := 9.0            # meters at which a sound plays at its own vol
 const MAX_DISTANCE := 40.0
 
 var _voices: Array[AudioStreamPlayer3D] = []
+var _flat: AudioStreamPlayer                # match-wide sounds (the end-of-match fanfare)
 var _listener: AudioListener3D
 var _last := {}                   # event key -> the variant played last
 var _rng := RandomNumberGenerator.new()
@@ -31,6 +32,8 @@ func _ready() -> void:
 		p.panning_strength = 0.6
 		add_child(p)
 		_voices.append(p)
+	_flat = AudioStreamPlayer.new()
+	add_child(_flat)
 
 
 ## Follows the camera's look point (call every frame).
@@ -54,6 +57,17 @@ func play(key: String, variants: Array, pos: Vector3) -> void:
 	v.volume_db = linear_to_db(maxf(float(pick.volume), 0.001))
 	v.global_position = pos
 	v.play()
+
+
+## Plays one of `variants` flat, not placed in the world (the end-of-match fanfare).
+func play_flat(variants: Array) -> void:
+	if variants.is_empty():
+		return
+	var pick: Dictionary = variants[_rng.randi() % variants.size()]
+	_flat.stream = pick.stream
+	_flat.pitch_scale = 1.0
+	_flat.volume_db = linear_to_db(maxf(float(pick.volume), 0.001))
+	_flat.play()
 
 
 ## A silent voice, else the one furthest through its sound.
