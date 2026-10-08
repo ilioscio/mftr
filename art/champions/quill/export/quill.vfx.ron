@@ -1,0 +1,29 @@
+// Quill's VFX (A11): starlight. Star-white bolts from her armillary staff, Arc Shot lobbing a
+// star that bursts on its true radius, Static Field crackling in a cyan ring, dust for her Recoil
+// hop, and Starfall Lance's white-hot shaft. Instances of the client's VFX kit (05 §5.1);
+// hand-authored; validated by `mftr-tools pack validate`.
+(
+    effects: [
+        (event: "attack.release", kit: "flare", ramp: [(0.92, 1.0, 1.0), (0.62, 0.9, 1.0), (0.3, 0.55, 0.7)], count: 7, lifetime: 0.12),
+        (event: "attack.projectile", kit: "orb", ramp: [(0.95, 1.0, 1.0), (0.66, 0.92, 1.0), (0.32, 0.56, 0.72)]),
+        (event: "attack.impact", kit: "burst", ramp: [(0.95, 1.0, 1.0), (0.62, 0.9, 1.0), (0.26, 0.46, 0.6)], count: 12, speed: 3.0),
+
+        // Q Arc Shot: a star lobbed high, bursting where it falls.
+        (event: "q.projectile", kit: "lob", ramp: [(0.95, 1.0, 1.0), (0.7, 0.94, 1.0), (0.4, 0.7, 0.9)]),
+        (event: "q.detonate", kit: "burst", ramp: [(1.0, 1.0, 1.0), (0.7, 0.94, 1.0), (0.34, 0.58, 0.8), (0.16, 0.24, 0.32)], count: 24, speed: 4.2),
+        (event: "q.detonate", kit: "ring", ramp: [(0.95, 1.0, 1.0), (0.6, 0.88, 1.0), (0.3, 0.5, 0.66)]),
+
+        // W Static Field: a crackling cyan ring and sparks.
+        (event: "w.detonate", kit: "ring", ramp: [(0.86, 1.0, 1.0), (0.4, 0.9, 1.0), (0.2, 0.5, 0.7)], count: 32, speed: 0.6),
+        (event: "w.detonate", kit: "flare", ramp: [(0.9, 1.0, 1.0), (0.45, 0.92, 1.0), (0.22, 0.5, 0.7)], count: 16, speed: 3.0),
+
+        // E Recoil: dust at the hop and the landing.
+        (event: "e.start", kit: "dust", ramp: [(0.62, 0.58, 0.5), (0.5, 0.46, 0.4), (0.38, 0.36, 0.33)], count: 10),
+        (event: "e.land", kit: "dust", ramp: [(0.62, 0.58, 0.5), (0.5, 0.46, 0.4), (0.38, 0.36, 0.33)], count: 12, speed: 1.2),
+
+        // R Starfall Lance: the star flares as it fires, a white-hot lance, a blinding burst.
+        (event: "r.release", kit: "flare", ramp: [(1.0, 1.0, 1.0), (0.8, 0.96, 1.0), (0.4, 0.7, 0.9)], count: 20, size: 1.6, lifetime: 0.2),
+        (event: "r.projectile", kit: "arrow", ramp: [(1.0, 1.0, 1.0), (0.8, 0.96, 1.0), (0.44, 0.72, 0.92)]),
+        (event: "r.impact", kit: "burst", ramp: [(1.0, 1.0, 1.0), (0.82, 0.96, 1.0), (0.42, 0.66, 0.86), (0.18, 0.26, 0.34)], count: 28, speed: 5.0),
+    ],
+)

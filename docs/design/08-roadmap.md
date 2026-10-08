@@ -575,6 +575,19 @@ The first of the other eight champions (6 in the A list). Designed without an ow
 
 **Left for later:** the owner's approval of his concept; polish.
 
+### A slice 11 status (2026-10-07): Quill ✅ done (concept awaiting approval)
+- **Look:** a stargazer scholar on `biped` v1, 3,266 triangles.
+  - A long teal coat with brass buttons, team lapels and coat tails (`extra_coat`).
+  - Brass goggles pushed up on her forehead.
+  - A tall staff topped with a brass armillary sphere around a glowing star, aimed per pose.
+- **Clips:** all 32, every `fire` checked (Starfall Lance's at 18).
+- **Effects and sounds:**
+  - VFX: starlight bolts, Arc Shot's lobbed star, Static Field's ring, Recoil dust, Starfall Lance.
+  - 10 sounds, 55 KB.
+- **Checked in Godot:** the whole kit fired its effects and sounds.
+
+**Left for later:** the owner's approval of her concept; polish.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.
