@@ -1013,8 +1013,13 @@ func _update_remotes(delta: float) -> void:
 			p.y = 0.0
 			if not body.has_meta("faced"):
 				# Face down the lane, toward the enemy's side of the map.
-				var mid: float = client.map_geometry().size.x / 2.0
-				body.rotation.y = PI / 2.0 if u.pos.x < mid else -PI / 2.0
+				var dir := Vector2(1, 0)
+				if _lane_axis.size() == 2:
+					dir = _lane_axis[1]
+					var half: float = (client.map_geometry().size / 2.0 - _lane_axis[0]).dot(dir)
+					if (u.pos - _lane_axis[0]).dot(dir) > half:
+						dir = -dir
+				body.rotation.y = atan2(dir.x, dir.y)
 				body.set_meta("faced", true)
 		elif u.minion:
 			p.y = 0.45
@@ -1096,6 +1101,7 @@ func _make_minion(color: Color, collision_radius_u: float, kind := "") -> MeshIn
 ## Walls (extruded, vision-blocking) and brush (low translucent tufts) from the map the server
 ## announced. The same polygons drive collision, pathing and vision in the simulation.
 var _map_built := false
+var _lane_axis := []                      # a lane map's [blue fountain, unit direction to red's]
 
 
 ## The ground covers the map and the scenery around it (`margin_u` past every edge).
@@ -1127,12 +1133,16 @@ func _build_map() -> void:
 		return [model.static_mesh(), mats])
 	for c in dressing.get_children():
 		c.layers = MAP_LAYERS
-	if size.x != size.y:
-		# A lane map: the dirt lane runs along its middle.
+	if geo.fountains.size() == 2:
+		# A lane map: the road runs from one fountain to the other, at whatever angle.
+		var a: Vector2 = geo.fountains[0].center
+		var b: Vector2 = geo.fountains[1].center
 		var gm: ShaderMaterial = ground.material_override
 		gm.set_shader_parameter("lane_mode", 1.0)
-		gm.set_shader_parameter("lane_z", size.y / 2.0 * UNITS_TO_METERS)
+		gm.set_shader_parameter("lane_origin", (a + b) / 2.0 * UNITS_TO_METERS)
+		gm.set_shader_parameter("lane_dir", (b - a).normalized())
 		gm.set_shader_parameter("lane_width", 13.0)
+		_lane_axis = [a, (b - a).normalized()]
 	for f in geo.fountains:
 		# The spawn platform (a prop the size of the fountain's circle), else a tinted disk.
 		var platform := _prop_node("fountain", ALLY_COLOR if f.ally else ENEMY_COLOR)
@@ -1155,15 +1165,6 @@ func _build_map() -> void:
 	wall_mat.shader = load("res://shaders/wall.gdshader")
 	var brush_mat := ShaderMaterial.new()
 	brush_mat.shader = load("res://shaders/brush.gdshader")
-	# On lane maps the land past the map's edges is raised to the cliffs' height, so the forest
-	# runs on without a drop (the fountain ends sit under a cliff).
-	if size.x > size.y * 1.5:
-		var m := 2600.0
-		for r in [Rect2(-m, -m, size.x + 2.0 * m, m), Rect2(-m, size.y, size.x + 2.0 * m, m), Rect2(-m, 0, m, size.y), Rect2(size.x, 0, m, size.y)]:
-			var poly := PackedVector2Array([r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)])
-			var land := _extrude(poly, 1.4, wall_mat)
-			land.layers = MAP_LAYERS
-			add_child(land)
 	for poly in geo.walls:
 		if _prop_model("rock_1") != null and preload("res://scripts/scenery.gd").is_outcrop(poly):
 			continue  # drawn as a rock cluster by the scenery

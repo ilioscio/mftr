@@ -291,6 +291,8 @@ Four more placeholder champions (original kits, D36), so all six M2 archetypes e
   +50% per consecutive champion hit up to +150%); The Bridge's fountain doesn't heal.
 - **Match end:** the client returns to champion select after long matches (16-bit sequences had
   wrapped), and a fanfare plays for victory and defeat.
+- **The Bridge canted** (D54, proposed): the lane runs diagonally from blue at the bottom left to
+  red at the top right, on a square map like the reference ARAM's; the minimap is square.
 - **The Bridge dressed** (05 §3): castle-tower turrets with team roofs, a Gatehouse, a crystal
   shrine Base, a fountain platform, relic pads, rubble; forest on raised cliffs and past the map,
   rocks, tall grass in the brush, a cobbled road. Map props are a new pack kind (`prop`).
@@ -361,7 +363,8 @@ Four more placeholder champions (original kits, D36), built from the existing sh
 | Phantom hits | 2–5% of near-misses (2% without Multishot) | — |
 | Hard resets, fog leaks | 0, 0 | 0 |
 
-The same check runs in CI as a 40 s lab test. **Left for the M3 exit:** playtesters rating Mayhem fun.
+The same check runs in CI as a 60 s lab test (40 s before The Bridge was canted, D54: the
+diagonal lane changes how soon the fights start). **Left for the M3 exit:** playtesters rating Mayhem fun.
 
 ## A — Characters & Animation (parallel track)
 Runs alongside M3/M4 and replaces the placeholder shapes with real champions ([10](10-characters-and-animation.md), [11](11-content-packs-and-mods.md)).

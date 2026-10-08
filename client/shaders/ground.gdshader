@@ -11,9 +11,11 @@ uniform vec3 dirt : source_color = vec3(0.45, 0.37, 0.26);
 uniform vec3 dirt_dark : source_color = vec3(0.34, 0.28, 0.2);
 uniform vec3 cobble : source_color = vec3(0.47, 0.45, 0.41);
 uniform float lane_width = 9.0;
-// 0: a diagonal lane (the M1 arena); 1: a horizontal lane at z = lane_z (The Bridge).
+// 0: a diagonal lane (the M1 arena); 1: a lane through lane_origin along lane_dir (lane maps,
+// at any angle; meters, world x/z).
 uniform float lane_mode = 0.0;
-uniform float lane_z = 15.0;
+uniform vec2 lane_origin = vec2(0.0);
+uniform vec2 lane_dir = vec2(1.0, 0.0);
 // The size of a "texel" of grain, in meters.
 uniform float texel = 0.0625;
 
@@ -108,7 +110,8 @@ void fragment() {
 	// (Literal colors are linear; these are sRGB 0.72/0.68/0.42 and 0.66/0.5/0.62.)
 	grass = mix(grass, mix(vec3(0.48, 0.42, 0.15), vec3(0.39, 0.21, 0.34), hash(q + 3.0)), flower * 0.8);
 	// The road: a dirt band with ragged, grassy edges.
-	float d = lane_mode > 0.5 ? abs(p.y - lane_z) : abs(p.x - p.y) / sqrt(2.0);
+	vec2 rel = p - lane_origin;
+	float d = lane_mode > 0.5 ? abs(rel.x * lane_dir.y - rel.y * lane_dir.x) : abs(p.x - p.y) / sqrt(2.0);
 	float edge = lane_width * 0.5 + (fbm(p * 0.25) - 0.5) * 3.0 + (fbm(q * 1.7) - 0.5) * 0.7;
 	float lane = 1.0 - smoothstep(edge - 0.35, edge + 0.35, d);
 	vec3 road = mix(mix(dirt_dark, dirt, 0.55), dirt, smoothstep(0.3, 0.7, fbm(p * 0.45 + 7.0)));

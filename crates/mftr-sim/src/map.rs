@@ -345,23 +345,49 @@ fn arena() -> Map {
     Map::new(MapId::Arena, walls, brush, Some(Vec2::new(MAP_SIZE, MAP_SIZE)))
 }
 
-/// Bridge dimensions.
-pub const BRIDGE_SIZE: Vec2 = Vec2::new(12_000.0, 3_000.0);
+/// The Bridge is authored along a straight lane (`x` along it, 12,000 u; `y` across, 3,000 u),
+/// then laid diagonally on a square map: blue at the bottom left, red at the top right, the lane
+/// canted across the screen like the reference ARAM's (06 §2).
+pub const BRIDGE_LANE: Vec2 = Vec2::new(12_000.0, 3_000.0);
+/// The square the lane is laid on: its bounding box, (12,000 + 3,000) / √2.
+pub const BRIDGE_SIZE: Vec2 = Vec2::new(10_607.0, 10_607.0);
 
-/// The point-symmetric image of `p` on The Bridge (red's side of blue's layout): the map is
-/// symmetric under a half turn about its center, so both teams play the same map.
+/// The point-symmetric image of `p` (lane coordinates) on The Bridge (red's side of blue's
+/// layout): the map is symmetric under a half turn about its center, so both teams play the
+/// same map.
 fn mirror(p: Vec2) -> Vec2 {
-    Vec2::new(BRIDGE_SIZE.x - p.x, BRIDGE_SIZE.y - p.y)
+    Vec2::new(BRIDGE_LANE.x - p.x, BRIDGE_LANE.y - p.y)
 }
 
-/// The Bridge (ARAM, 06 §2): one straight lane from blue (west) to red (east), cliffs along
-/// both sides with brush alcoves, two rocks for cover mid-lane, health relics, and each team's
-/// fountain, Base, two base turrets, Gatehouse, gatehouse turret, inner and outer turret.
-/// Point-symmetric, so neither side is favored, and the lane runs across the screen, so the
-/// camera's up/down asymmetry (D13) favors nobody either.
+/// A point of The Bridge's lane coordinates on the map: a rotation by 45° about the centers,
+/// so the lane runs from the bottom left (blue) to the top right (red).
+pub fn bridge_point(p: Vec2) -> Vec2 {
+    let (u, v) = (p.x - BRIDGE_LANE.x / 2.0, p.y - BRIDGE_LANE.y / 2.0);
+    let k = std::f32::consts::FRAC_1_SQRT_2;
+    Vec2::new(BRIDGE_SIZE.x / 2.0 + (u + v) * k, BRIDGE_SIZE.y / 2.0 + (v - u) * k)
+}
+
+/// The inverse of `bridge_point`: a map point in The Bridge's lane coordinates.
+pub fn bridge_lane_point(p: Vec2) -> Vec2 {
+    let (x, y) = (p.x - BRIDGE_SIZE.x / 2.0, p.y - BRIDGE_SIZE.y / 2.0);
+    let k = std::f32::consts::FRAC_1_SQRT_2;
+    Vec2::new(BRIDGE_LANE.x / 2.0 + (x - y) * k, BRIDGE_LANE.y / 2.0 + (x + y) * k)
+}
+
+/// The Bridge (ARAM, 06 §2): one straight lane from blue to red, cliffs along both sides with
+/// brush alcoves, two rocks for cover mid-lane, health relics, and each team's fountain, Base,
+/// two base turrets, Gatehouse, gatehouse turret, inner and outer turret. Point-symmetric, so
+/// neither side is favored by the layout. The lane is canted on the screen (D54): the camera's
+/// up/down asymmetry (D13) gives blue, looking up-screen, a little more view ahead, as in the
+/// reference game.
 fn bridge() -> Map {
+    // Everything past the lane's rectangle is cliff, out to well past the square's corners.
+    const E: f32 = 9000.0;
+    let (lx, ly) = (BRIDGE_LANE.x, BRIDGE_LANE.y);
     let top = poly(&[
-        (2200.0, 0.0),
+        (-E, -E),
+        (lx + E, -E),
+        (lx + E, 0.0),
         (9800.0, 0.0),
         (9800.0, 450.0),
         (9300.0, 700.0),
@@ -372,8 +398,12 @@ fn bridge() -> Map {
         (4400.0, 650.0),
         (2700.0, 700.0),
         (2200.0, 450.0),
+        (2200.0, 0.0),
+        (-E, 0.0),
     ]);
     let bottom: Vec<Vec2> = top.iter().map(|&p| mirror(p)).collect();
+    let behind_blue = poly(&[(-E, 0.0), (0.0, 0.0), (0.0, ly), (-E, ly)]);
+    let behind_red: Vec<Vec2> = behind_blue.iter().map(|&p| mirror(p)).collect();
     let rock = |c: Vec2| -> Vec<Vec2> {
         // A hexagon of radius 120, axis-aligned so it mirrors exactly.
         let (r, h) = (120.0, 120.0 * 0.866_025_4);
@@ -382,14 +412,28 @@ fn bridge() -> Map {
             .map(|&(x, y)| Vec2::new(c.x + x, c.y + y))
             .collect()
     };
-    let walls = vec![top, bottom, rock(Vec2::new(5300.0, 1150.0)), rock(mirror(Vec2::new(5300.0, 1150.0)))];
+    let lay = |poly: Vec<Vec2>| -> Vec<Vec2> { poly.into_iter().map(bridge_point).collect() };
+    let walls = vec![
+        top,
+        bottom,
+        behind_blue,
+        behind_red,
+        rock(Vec2::new(5300.0, 1150.0)),
+        rock(mirror(Vec2::new(5300.0, 1150.0))),
+    ]
+    .into_iter()
+    .map(lay)
+    .collect();
     let alcove = |x0: f32, y0: f32, x1: f32, y1: f32| rect(x0, y0, x1, y1);
     let brush = vec![
         alcove(4500.0, 780.0, 5000.0, 1050.0),
         alcove(7000.0, 1950.0, 7500.0, 2220.0),
         alcove(7000.0, 780.0, 7500.0, 1050.0),
         alcove(4500.0, 1950.0, 5000.0, 2220.0),
-    ];
+    ]
+    .into_iter()
+    .map(lay)
+    .collect();
     let mut map = Map::new(MapId::Bridge, walls, brush, Some(BRIDGE_SIZE));
     let blue = [
         (UnitKind::Turret, Vec2::new(5000.0, 1350.0), 1),
@@ -402,20 +446,22 @@ fn bridge() -> Map {
     ];
     let mut placements = Vec::new();
     for (kind, pos, tier) in blue {
-        placements.push(Placement { kind, team: Team::Blue, pos, tier });
-        placements.push(Placement { kind, team: Team::Red, pos: mirror(pos), tier });
+        placements.push(Placement { kind, team: Team::Blue, pos: bridge_point(pos), tier });
+        placements.push(Placement { kind, team: Team::Red, pos: bridge_point(mirror(pos)), tier });
     }
     for pos in [Vec2::new(5600.0, 950.0), Vec2::new(5600.0, 2050.0)] {
-        placements.push(Placement { kind: UnitKind::Relic, team: Team::Blue, pos, tier: 0 });
-        placements.push(Placement { kind: UnitKind::Relic, team: Team::Blue, pos: mirror(pos), tier: 0 });
+        placements.push(Placement { kind: UnitKind::Relic, team: Team::Blue, pos: bridge_point(pos), tier: 0 });
+        placements.push(Placement { kind: UnitKind::Relic, team: Team::Blue, pos: bridge_point(mirror(pos)), tier: 0 });
     }
     let lane_blue = vec![Vec2::new(2900.0, 1500.0), Vec2::new(9100.0, 1500.0), Vec2::new(10_750.0, 1500.0)];
-    let lane_red: Vec<Vec2> = lane_blue.iter().map(|&p| mirror(p)).collect();
+    let lane_red: Vec<Vec2> = lane_blue.iter().map(|&p| bridge_point(mirror(p))).collect();
+    let lane_blue: Vec<Vec2> = lane_blue.into_iter().map(bridge_point).collect();
+    let (spawn, home, fountain) = (Vec2::new(1700.0, 1500.0), Vec2::new(450.0, 1500.0), Vec2::new(300.0, 1500.0));
     map.layout = Layout {
         lanes: [lane_blue, lane_red],
-        wave_spawn: [Vec2::new(1700.0, 1500.0), mirror(Vec2::new(1700.0, 1500.0))],
-        champion_spawn: [Vec2::new(450.0, 1500.0), mirror(Vec2::new(450.0, 1500.0))],
-        fountains: [Some((Vec2::new(300.0, 1500.0), 600.0)), Some((mirror(Vec2::new(300.0, 1500.0)), 600.0))],
+        wave_spawn: [bridge_point(spawn), bridge_point(mirror(spawn))],
+        champion_spawn: [bridge_point(home), bridge_point(mirror(home))],
+        fountains: [Some((bridge_point(fountain), 600.0)), Some((bridge_point(mirror(fountain)), 600.0))],
         fountain_heals: false,
         placements,
     };
@@ -532,6 +578,34 @@ mod tests {
         assert!(m.line_of_sight(Vec2::new(2200.0, 1900.0), Vec2::new(2700.0, 1900.0)));
         assert_eq!(m.brush_at(Vec2::new(1800.0, 2500.0)), Some(0));
         assert_eq!(m.brush_at(Vec2::new(2000.0, 2000.0)), None);
+    }
+
+    /// The Bridge lies diagonally on its square (blue bottom left, red top right), stays
+    /// point-symmetric, and every structure, spawn and relic stands on walkable ground.
+    #[test]
+    fn the_bridge_is_canted_symmetric_and_walkable() {
+        let m = MapId::Bridge.shared();
+        let back = bridge_lane_point(bridge_point(Vec2::new(1234.0, 567.0)));
+        assert!((back - Vec2::new(1234.0, 567.0)).length() < 0.01);
+        let (blue, red) = (m.layout.champion_spawn[0], m.layout.champion_spawn[1]);
+        assert!(blue.x < red.x && blue.y > red.y, "blue bottom left, red top right: {blue:?} {red:?}");
+        let center = BRIDGE_SIZE * 0.5;
+        for p in &m.layout.placements {
+            let twin = center * 2.0 - p.pos;
+            assert!(
+                m.layout
+                    .placements
+                    .iter()
+                    .any(|q| q.kind == p.kind && q.tier == p.tier && (q.pos - twin).length() < 0.1),
+                "{p:?} has no mirror image"
+            );
+            if p.kind != UnitKind::Relic {
+                assert!(m.walkable(p.pos + Vec2::new(0.0, 0.0), 1.0), "{p:?} stands in a wall");
+            }
+        }
+        for s in m.layout.champion_spawn.iter().chain(&m.layout.wave_spawn) {
+            assert!(m.in_bounds(*s, 100.0) && m.walkable(*s, 60.0), "{s:?}");
+        }
     }
 
     #[test]

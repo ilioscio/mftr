@@ -16,6 +16,10 @@ const CLIFF_M := 1.4
 
 var _walls: Array = []
 var _size := Vector2.ZERO
+# A lane map's axis (from blue's fountain to red's), and the unit vector across it pointing
+# toward the camera (screen down, +y).
+var _lane_mid := Vector2.ZERO
+var _across := Vector2.ZERO
 
 var _batches := {}                        # prop id -> [Transform3D, Color]
 var _rng := RandomNumberGenerator.new()
@@ -29,21 +33,31 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 	_walls = walls
 	_size = size
 	var brush: Array = geo.brush
-	var lane_map := size.x > size.y * 1.5
-	var near_side := size.y  # the camera looks from +y: that side's edge is closest to it
+	var fountains: Array = geo.get("fountains", [])
+	var lane_map := fountains.size() == 2
+	if lane_map:
+		var a: Vector2 = fountains[0].center
+		var b: Vector2 = fountains[1].center
+		_lane_mid = (a + b) / 2.0
+		var dir := (b - a).normalized()
+		_across = Vector2(-dir.y, dir.x)
+		if _across.y < 0.0:
+			_across = -_across
+	else:
+		_lane_mid = size / 2.0
+		_across = Vector2(0, 1)
 
-	# Forest: a jittered grid over everything that isn't walkable ground.
+	# Forest: a jittered grid over everything that isn't walkable ground, out past the map.
 	var step := 260.0
-	var y0 := -OUTSIDE_U if lane_map else -900.0
-	var y1 := size.y + (OUTSIDE_U if lane_map else 900.0)
-	var y := y0
-	while y < y1:
-		var x := -900.0
-		while x < size.x + 900.0:
+	var margin := OUTSIDE_U if lane_map else 900.0
+	var y := -margin
+	while y < size.y + margin:
+		var x := -margin
+		while x < size.x + margin:
 			var p := Vector2(x + _rng.randf_range(-110, 110), y + _rng.randf_range(-110, 110))
 			var edge := _edge_distance(p, walls, size)
 			if edge > 0.0:
-				_forest_at(p, edge, p.y > size.y / 2.0, lane_map)
+				_forest_at(p, edge, (p - _lane_mid).dot(_across) > 0.0, lane_map)
 			x += step
 		y += step
 	# Small walls (outcrops in the lane) are drawn as rock clusters (`is_outcrop`).
@@ -89,7 +103,7 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 		var p := Vector2(_rng.randf_range(0, size.x), _rng.randf_range(0, size.y))
 		if _edge_distance(p, walls, size) > 0.0:
 			continue
-		var from_mid := absf(p.y - size.y / 2.0) / (size.y / 2.0) if lane_map else 1.0
+		var from_mid := clampf(absf((p - _lane_mid).dot(_across)) / 1500.0, 0.0, 1.0) if lane_map else 1.0
 		if _rng.randf() < from_mid * 0.9:
 			_add("grass_1", p, _rng.randf_range(0.7, 1.2))
 	_flush(materials_for)
@@ -150,11 +164,9 @@ func _out_distance(p: Vector2, size: Vector2) -> float:
 	return Vector2(dx, dy).length()
 
 
-## The ground's height under `p`: cliff tops (inside a wall, not an outcrop) and the raised land
-## past a lane map's edges stand CLIFF_M high.
+## The ground's height under `p`: cliff tops (inside a wall, not an outcrop) stand CLIFF_M high.
+## A lane map's walls reach well past its edges, so the land beyond is cliff too.
 func _height_at(p: Vector2) -> float:
-	if _size.x > _size.y * 1.5 and (p.x < 0 or p.y < 0 or p.x > _size.x or p.y > _size.y):
-		return CLIFF_M
 	for poly in _walls:
 		if not is_outcrop(poly) and Geometry2D.is_point_in_polygon(p, poly):
 			return CLIFF_M

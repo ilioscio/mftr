@@ -456,7 +456,7 @@ mod tests {
         let r = run(&LabConfig {
             profile: LinkProfile::MID,
             clients: 10,
-            seconds: 40.0,
+            seconds: 60.0,
             seed: 1,
             fps: 60.0,
             warmup: 5.0,
