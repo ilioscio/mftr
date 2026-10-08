@@ -1242,6 +1242,99 @@ mod tests {
         assert!(tampered.verify().mismatch.is_some());
     }
 
+    /// ARAM has no fountain healing after leaving base, so a bot low on health must not sit
+    /// out the fight waiting for health that never comes (behind a turret or in the fountain):
+    /// it takes a relic or keeps fighting from behind its wave. Measured as the longest time
+    /// any bot spends alive, below half health, with no enemy unit within 1,500 u.
+    #[test]
+    fn aram_bots_low_on_health_do_not_sit_out_the_fight() {
+        let cfg = ServerConfig { seed: 11, bots: 10, scenario: Scenario::Aram, ..Default::default() };
+        let mut core = ServerCore::new(cfg, 0.0);
+        let mut streak: std::collections::HashMap<mftr_sim::UnitId, u32> = Default::default();
+        let mut worst = (0u32, mftr_sim::UnitId(0));
+        for _ in 0..(10 * 60 * 30) {
+            let k = core.game.world.tick().next();
+            let mut due = Vec::new();
+            for bot in &mut core.bots {
+                due.extend(bot.think(&core.game.world, k));
+            }
+            core.game.step(due);
+            if core.game.world.game().winner.is_some() {
+                break;
+            }
+            if !k.0.is_multiple_of(30) {
+                continue;
+            }
+            let units = core.game.world.units();
+            for c in units.iter().filter(|u| u.kind == mftr_sim::UnitKind::Champion) {
+                let out = c.state.alive()
+                    && c.state.health < 0.5 * c.stats.max_health
+                    && !units.iter().any(|e| {
+                        e.team != c.team
+                            && e.state.alive()
+                            && matches!(e.kind, mftr_sim::UnitKind::Champion | mftr_sim::UnitKind::Minion)
+                            && e.state.pos.distance(c.state.pos) <= 1500.0
+                    });
+                let n = streak.entry(c.id).or_default();
+                *n = if out { *n + 1 } else { 0 };
+                if *n > worst.0 {
+                    worst = (*n, c.id);
+                }
+            }
+        }
+        assert!(worst.0 <= 40, "a bot sat out the fight low on health for {} s ({:?})", worst.0, worst.1);
+    }
+
+    /// A match that ends the real way (bots push until a Base falls, with a connected player
+    /// who idles) starts again: the server keeps serving through the restart, with and without
+    /// champion select.
+    #[test]
+    fn a_match_that_ends_naturally_starts_again_with_a_player_connected() {
+        for lobby in [false, true] {
+            let bots = if lobby { 10 } else { 9 };
+            let cfg = ServerConfig { seed: 6, bots, lobby, scenario: Scenario::Aram, ..Default::default() };
+            let mut core = ServerCore::new(cfg, 0.0);
+            let mut seq = 0u16;
+            let mut packet = |core: &mut ServerCore, msg: ClientMessage, t: f64| {
+                seq += 1;
+                let bytes = encode_client(&PacketHeader { seq, ack: 0, ack_bits: 0 }, &msg);
+                core.handle_packet(1, &bytes, t);
+            };
+            let idle = ClientMessage::Input { client_time_us: 0, event_ack: 0, snapshot_ack: 0, commands: Vec::new() };
+            packet(&mut core, hello_msg(0, false), 0.0);
+            if lobby {
+                packet(&mut core, ClientMessage::Lobby(msg::LobbyAction::Ready(true)), 0.0);
+            }
+            let mut t = 0.0;
+            let (mut ended, mut after) = (None, Vec::new());
+            for _ in 0..(60 * 60 * 30) {
+                t += 1.0 / 30.0;
+                if ((t * 30.0) as u32).is_multiple_of(15) {
+                    packet(&mut core, idle.clone(), t);
+                }
+                let out = core.step(t);
+                if ended.is_none() && core.world().game().winner.is_some() {
+                    ended = Some(t);
+                }
+                if let Some(e) = ended {
+                    after.extend(out.into_iter().filter(|(to, _)| *to == 1).map(|(_, b)| decode_server(&b).unwrap().1));
+                    if t > e + 30.0 {
+                        break;
+                    }
+                }
+            }
+            assert!(ended.is_some(), "a Base falls");
+            let lobbies = after.iter().filter(|m| matches!(m, ServerMessage::Lobby(_))).count();
+            let snapshots = after.iter().filter(|m| matches!(m, ServerMessage::Snapshot(_))).count();
+            if lobby {
+                assert!(lobbies > 0, "champion select again");
+            } else {
+                assert!(core.world().game().winner.is_none(), "a new match");
+                assert!(snapshots > 500, "still served: {snapshots}");
+            }
+        }
+    }
+
     /// Joins and leaves at any point (before, between and after commands) replay exactly.
     #[test]
     fn replays_handle_joins_and_leaves() {

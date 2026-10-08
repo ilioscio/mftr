@@ -835,9 +835,9 @@ pub enum Brain {
     RigTurret { range: u16 },
     /// Lane minion: walk the team's lane, fight what it meets (01 §4).
     Laner { next: u8 },
-    /// Lane turret (01 §3): keeps its target while valid; `heat` counts consecutive shots on
-    /// the same champion (each one hits harder).
-    Tower { heat: u8, last: UnitId },
+    /// Lane turret (01 §3): keeps its target while valid; `heat` counts consecutive shots at
+    /// champions (each one hits harder) until it cools at `cools_at`.
+    Tower { heat: u8, cools_at: SimTime },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1423,7 +1423,7 @@ impl World {
         u.tier = p.tier;
         if p.kind == UnitKind::Turret {
             u.attack = Some(lane::TURRET_ATTACK);
-            u.brain = Some(Brain::Tower { heat: 0, last: UnitId(0) });
+            u.brain = Some(Brain::Tower { heat: 0, cools_at: SimTime(0) });
         }
         self.units.push(u);
         id
@@ -1496,6 +1496,11 @@ impl World {
         }
         self.game.waves_spawned += 1;
         self.game.next_wave_at = self.game.next_wave_at.map(|t| t.plus(lane::WAVE_INTERVAL));
+        // Turrets hit harder as the match goes on.
+        let damage = lane::turret_damage(self.game.waves_spawned);
+        for u in self.units.iter_mut().filter(|u| u.kind == UnitKind::Turret) {
+            u.stats.attack_damage = damage;
+        }
     }
 
     pub fn despawn(&mut self, id: UnitId) {
@@ -1563,7 +1568,7 @@ impl World {
                 u.state.progress = progress;
                 match u.brain {
                     Some(Brain::Patrol { a, b, .. }) => u.brain = Some(Brain::Patrol { a, b, toward_b: true }),
-                    Some(Brain::Tower { .. }) => u.brain = Some(Brain::Tower { heat: 0, last: UnitId(0) }),
+                    Some(Brain::Tower { .. }) => u.brain = Some(Brain::Tower { heat: 0, cools_at: SimTime(0) }),
                     _ => {}
                 }
                 self.events.push(SimEvent::Respawned { unit: u.id, pos: u.home, at: s0 });
@@ -1868,10 +1873,10 @@ impl World {
                     h.write_u8(4);
                     h.write_u8(next);
                 }
-                Some(Brain::Tower { heat, last }) => {
+                Some(Brain::Tower { heat, cools_at }) => {
                     h.write_u8(5);
                     h.write_u8(heat);
-                    h.write_u32(last.0);
+                    h.write_u64(cools_at.0);
                 }
             }
         }
@@ -2103,7 +2108,7 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
             let (mut power, share) = lane::turret_shot(
                 &mut unit.brain,
                 stats.attack_damage,
-                target.id,
+                t,
                 target.kind,
                 target.range,
                 target.max_health,
@@ -2967,8 +2972,8 @@ pub fn gain_xp(p: &mut Progress, xp: u32) {
     }
 }
 
-/// Phase 4 on lane maps: fountains heal their team's champions (predicted too: it's map data)
-/// and burn enemies (server only); a champion touching a relic takes it.
+/// Phase 4 on lane maps: fountains heal their team's champions where the map says so (predicted
+/// too: it's map data) and burn enemies (server only); a champion touching a relic takes it.
 fn fountains_and_relics(units: &mut [Unit], map: &Map, prediction: bool, s1: SimTime, events: &mut Vec<SimEvent>) {
     let layout = &map.layout;
     if layout.fountains.iter().all(Option::is_none) {
@@ -2981,6 +2986,9 @@ fn fountains_and_relics(units: &mut [Unit], map: &Map, prediction: bool, s1: Sim
                 continue;
             }
             if u.team as usize == i {
+                if !layout.fountain_heals {
+                    continue;
+                }
                 let max = u.stats.max_health;
                 u.state.health = (u.state.health + max * lane::FOUNTAIN_HEAL * TICK_DT).min(max);
             } else if !prediction {
@@ -4082,6 +4090,26 @@ mod tests {
         assert!(dmg.windows(2).any(|p| p[1] > p[0]), "{dmg:?}");
     }
 
+    /// D53: +50% per consecutive champion shot up to +150%; the heat survives a switch of target
+    /// and minion shots, and cools 5 s after the last champion shot. Damage grows per wave.
+    #[test]
+    fn turret_heat_ramps_to_two_and_a_half_times_and_cools_after_five_seconds() {
+        let mut brain = Some(Brain::Tower { heat: 0, cools_at: SimTime(0) });
+        let at = |ms: u64| SimTime(ms * crate::time::SUBTICKS_PER_SECOND / 1000);
+        let mut shot = |ms: u64, kind: UnitKind| lane::turret_shot(&mut brain, 100.0, at(ms), kind, 550.0, 1000.0).0;
+        let ramp: Vec<f32> =
+            [1_000, 2_200, 3_400, 4_600, 5_800].iter().map(|&ms| shot(ms, UnitKind::Champion)).collect();
+        assert_eq!(ramp, vec![100.0, 150.0, 200.0, 250.0, 250.0]);
+        // A minion shot in between leaves the heat alone.
+        assert_eq!(shot(7_000, UnitKind::Minion), 700.0, "70% of a caster");
+        assert_eq!(shot(8_000, UnitKind::Champion), 250.0);
+        // Five seconds without a champion shot: cold again.
+        assert_eq!(shot(13_000, UnitKind::Champion), 100.0);
+        assert_eq!(lane::turret_damage(0), 185.0);
+        assert_eq!(lane::turret_damage(10), 230.0);
+        assert_eq!(lane::turret_damage(40), 293.0);
+    }
+
     /// A strong champion pushing alone takes every red structure strictly in lane order, and
     /// the Base falling ends the match.
     #[test]
@@ -4155,7 +4183,7 @@ mod tests {
     }
 
     #[test]
-    fn relics_heal_and_respawn_and_the_fountain_heals_its_own_team() {
+    fn relics_heal_and_respawn_and_the_bridge_fountain_does_not_heal() {
         let mut w = bridge_world();
         let relic = w.units().iter().find(|u| u.kind == UnitKind::Relic).unwrap().clone();
         let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, relic.state.pos + Vec2::new(-200.0, 0.0));
@@ -4168,9 +4196,24 @@ mod tests {
         assert!(!w.unit(relic.id).unwrap().state.alive(), "taken");
         run_until_quiet(&mut w, 30 * 41);
         assert!(w.unit(relic.id).unwrap().state.alive(), "back after 40 s");
-        // In the fountain: 15% of max health per second.
+        // The Bridge is ARAM's: back in the fountain, only regeneration.
         let u = w.unit_mut(me).unwrap();
         u.state = UnitState { health: 100.0, ..UnitState::new(Vec2::new(400.0, 1500.0), 325.0) };
+        run_until_quiet(&mut w, 30);
+        let hp = w.unit(me).unwrap().state.health;
+        assert!((hp - (100.0 + 1.5)).abs() < 1.0, "{hp}");
+    }
+
+    /// On a map whose fountains heal: 15% of max health per second.
+    #[test]
+    fn a_healing_fountain_heals_its_own_team() {
+        let mut map = (*MapId::Bridge.shared()).clone();
+        map.layout.fountain_heals = true;
+        let mut w = World::new(5);
+        w.set_map(Arc::new(map));
+        w.start_match();
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Ember, Vec2::new(400.0, 1500.0));
+        w.unit_mut(me).unwrap().state.health = 100.0;
         run_until_quiet(&mut w, 30);
         let hp = w.unit(me).unwrap().state.health;
         assert!((hp - (100.0 + 90.0 + 1.5)).abs() < 1.0, "{hp}");
@@ -4989,7 +5032,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x7b30_4292_5883_4f7d;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x1f78_5961_6255_1274;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.

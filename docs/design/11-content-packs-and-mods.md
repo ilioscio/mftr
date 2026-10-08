@@ -76,7 +76,8 @@ Godot has the same trap. Its native resources (`.tscn`, `.tres`, `.res`, `.scn`)
 - `events` are any of:
   - the VFX events (§3.1), with the extra phase `cast`;
   - `unit.<foot|death|respawn|recall|emote>`;
-  - `cc.hard`.
+  - `cc.hard`;
+  - `match.<victory|defeat>`.
 - `volume` is 0–1.
 - `pitch` is the random spread per play, 0–0.25.
 - Up to 4 sounds may share an event, as variants.

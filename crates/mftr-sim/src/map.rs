@@ -79,6 +79,9 @@ pub struct Layout {
     pub champion_spawn: [Vec2; 2],
     /// Fountain circles (center, radius) per team.
     pub fountains: [Option<(Vec2, f32)>; 2],
+    /// Whether a fountain heals its team. Not on The Bridge: ARAM has no fountain healing after
+    /// you leave base (06 §2), and a champion only gets hurt after leaving and respawns whole.
+    pub fountain_heals: bool,
     pub placements: Vec<Placement>,
 }
 
@@ -413,6 +416,7 @@ fn bridge() -> Map {
         wave_spawn: [Vec2::new(1700.0, 1500.0), mirror(Vec2::new(1700.0, 1500.0))],
         champion_spawn: [Vec2::new(450.0, 1500.0), mirror(Vec2::new(450.0, 1500.0))],
         fountains: [Some((Vec2::new(300.0, 1500.0), 600.0)), Some((mirror(Vec2::new(300.0, 1500.0)), 600.0))],
+        fountain_heals: false,
         placements,
     };
     map

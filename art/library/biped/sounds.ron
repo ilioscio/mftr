@@ -72,5 +72,28 @@
             (wave: "square", freq: (196.0, 190.0), env: (0.0, 0.05, 0.4), gain: 0.5, duty: 0.125),
             (wave: "sine", freq: (98.0, 92.0), env: (0.0, 0.05, 0.5), gain: 0.8, punch: 0.5),
         ]),
+        // The match's end, played flat when a Base falls: a brassy rising arpeggio into a held
+        // major chord with a timpani roll for victory; a falling minor line for defeat.
+        (name: "victory", events: ["match.victory"], volume: 0.7, echo: (delay: 0.11, feedback: 0.25), layers: [
+            (wave: "square", freq: (392.0, 392.0), env: (0.01, 0.08, 0.06), gain: 0.28, duty: 0.25, lowpass: (3500.0, 2500.0), delay: 0.0),
+            (wave: "square", freq: (523.3, 523.3), env: (0.01, 0.08, 0.06), gain: 0.28, duty: 0.25, lowpass: (3500.0, 2500.0), delay: 0.13),
+            (wave: "square", freq: (659.3, 659.3), env: (0.01, 0.08, 0.06), gain: 0.28, duty: 0.25, lowpass: (3500.0, 2500.0), delay: 0.26),
+            (wave: "square", freq: (523.3, 523.3), env: (0.02, 0.9, 0.9), gain: 0.24, duty: 0.3, vibrato: (0.08, 5.5), lowpass: (3200.0, 1800.0), delay: 0.39),
+            (wave: "square", freq: (659.3, 659.3), env: (0.02, 0.9, 0.9), gain: 0.2, duty: 0.3, vibrato: (0.08, 5.5), lowpass: (3200.0, 1800.0), delay: 0.39),
+            (wave: "square", freq: (784.0, 784.0), env: (0.02, 0.9, 0.9), gain: 0.2, duty: 0.3, vibrato: (0.08, 5.5), lowpass: (3200.0, 1800.0), delay: 0.39),
+            (wave: "square", freq: (1046.5, 1046.5), env: (0.02, 0.9, 0.9), gain: 0.14, duty: 0.3, vibrato: (0.08, 5.5), lowpass: (3200.0, 1800.0), delay: 0.39),
+            (wave: "triangle", freq: (130.8, 130.8), env: (0.02, 0.9, 0.9), gain: 0.35, delay: 0.39),
+            (wave: "sine", freq: (110.0, 60.0), env: (0.0, 0.02, 0.4), gain: 0.7, punch: 0.6, delay: 0.39),
+            (wave: "noise", freq: (2500.0, 600.0), env: (0.0, 0.02, 0.3), gain: 0.25, lowpass: (2500.0, 600.0), delay: 0.39),
+        ]),
+        (name: "defeat", events: ["match.defeat"], volume: 0.6, echo: (delay: 0.14, feedback: 0.3), layers: [
+            (wave: "triangle", freq: (659.3, 659.3), env: (0.02, 0.12, 0.1), gain: 0.35, vibrato: (0.1, 5.0), delay: 0.0),
+            (wave: "triangle", freq: (523.3, 523.3), env: (0.02, 0.12, 0.1), gain: 0.35, vibrato: (0.1, 5.0), delay: 0.22),
+            (wave: "triangle", freq: (440.0, 440.0), env: (0.02, 0.12, 0.1), gain: 0.35, vibrato: (0.1, 5.0), delay: 0.44),
+            (wave: "square", freq: (220.0, 220.0), env: (0.05, 0.8, 1.0), gain: 0.3, duty: 0.4, vibrato: (0.15, 4.0), lowpass: (1400.0, 600.0), delay: 0.66),
+            (wave: "square", freq: (261.6, 261.6), env: (0.05, 0.8, 1.0), gain: 0.24, duty: 0.4, vibrato: (0.15, 4.0), lowpass: (1400.0, 600.0), delay: 0.66),
+            (wave: "square", freq: (329.6, 329.6), env: (0.05, 0.8, 1.0), gain: 0.2, duty: 0.4, vibrato: (0.15, 4.0), lowpass: (1400.0, 600.0), delay: 0.66),
+            (wave: "sine", freq: (110.0, 55.0), env: (0.0, 0.05, 0.8), gain: 0.6, delay: 0.66),
+        ]),
     ],
 )

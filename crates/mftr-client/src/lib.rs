@@ -36,6 +36,9 @@ pub use effects::{AreaRender, BoltRender};
 use missiles::MissileBook;
 pub use missiles::{DodgeStats, MissileRender, OwnMissileDisplay, Side, Threat};
 
+/// Packets past the welcome after which none from before it can still arrive (the receive
+/// window tracks 32 behind the newest).
+const STALE_WINDOW: u32 = 64;
 /// Units farther than this from the own champion can't block it within a prediction horizon.
 const PROXY_RANGE: f32 = 600.0;
 /// Attack targets and attack-move candidates: every visible unit this close is a proxy, so
@@ -265,6 +268,11 @@ pub struct ClientSession {
     mode: msg::GameMode,
     /// The welcome's packet sequence: champion select sent after it means the match is over.
     welcome_seq: u16,
+    /// Packets accepted since the welcome (saturating). Sequences are 16 bits, so after a long
+    /// match "sent after the welcome" can't be read from them; but the receive window drops
+    /// anything more than 32 behind the newest, so once this passes `STALE_WINDOW` no packet
+    /// from before the welcome can arrive at all.
+    since_welcome: u32,
     /// The map from the welcome: prediction runs with the same walls and pathing as the server.
     map: std::sync::Arc<mftr_sim::map::Map>,
     /// Predicted world containing only our own unit.
@@ -338,6 +346,7 @@ impl ClientSession {
             lobby: None,
             mode: msg::GameMode::Empty,
             welcome_seq: 0,
+            since_welcome: 0,
             map: mftr_sim::map::MapId::Open.shared(),
             world: World::from_units(Tick(0), Vec::new()),
             history: VecDeque::new(),
@@ -753,6 +762,7 @@ impl ClientSession {
         if !self.recv.record(header.seq) {
             return; // duplicate
         }
+        self.since_welcome = self.since_welcome.saturating_add(1);
         self.send.on_ack(header.ack, header.ack_bits);
         match message {
             ServerMessage::Welcome {
@@ -773,6 +783,7 @@ impl ClientSession {
             } => {
                 if matches!(self.phase, Phase::Connecting | Phase::Lobby) {
                     self.welcome_seq = header.seq;
+                    self.since_welcome = 0;
                     self.mode = mode;
                     self.token = token;
                     self.spectator = spectator;
@@ -794,7 +805,8 @@ impl ClientSession {
             ServerMessage::Lobby(l) => {
                 // The match ended and the server holds champion select again (packets from the
                 // select before our welcome may still arrive late: those don't count).
-                if matches!(self.phase, Phase::Joining | Phase::Playing) && seq_greater(header.seq, self.welcome_seq) {
+                let after_welcome = self.since_welcome > STALE_WINDOW || seq_greater(header.seq, self.welcome_seq);
+                if matches!(self.phase, Phase::Joining | Phase::Playing) && after_welcome {
                     self.back_to_lobby();
                 }
                 if matches!(self.phase, Phase::Connecting | Phase::Lobby) {

@@ -109,6 +109,7 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 - `unit.death` and `unit.respawn`.
 - `unit.recall` and `unit.emote`. These are authored but have no in-game trigger yet.
 - `cc.hard`: the **shared hard-CC accent**, a clang over a low gong. It plays on top of any hard-CC hit or detonation, the same for every champion, so lockdown has one learnable sound.
+- `match.victory` and `match.defeat`: a fanfare when a Base falls, from the shared library, played flat (not placed in the world).
 
 **Variants.** Several sounds on one event are variants. One plays at random, never the same twice in a row, with the sound's random pitch spread. A champion's own `action.phase` wins, then its `*.phase`, then the shared library's (`biped_library.sfx.ron`).
 

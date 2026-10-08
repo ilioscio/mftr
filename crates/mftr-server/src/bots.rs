@@ -4,8 +4,9 @@
 //!
 //! Behavior: follow its minion wave down the lane, staying out of enemy turret range unless
 //! allied minions are tanking; fight enemy champions in reach with its whole kit; heal and
-//! shield hurt allies; retreat to the fountain when low; shop its build path in the fountain or
-//! while dead; spend ability points (ultimate first).
+//! shield hurt allies; when low, take a safe health relic, or go home where the fountain heals
+//! (not in ARAM: there it keeps fighting from behind its wave); shop its build path in the
+//! fountain or while dead; spend ability points (ultimate first).
 
 use mftr_sim::ability::{Effect, SLOTS};
 use mftr_sim::champion::max_rank;
@@ -18,9 +19,13 @@ use mftr_sim::{Command, CommandKind, PlayerId, QPoint, SimTime, SubTick, Team, T
 const THINK_EVERY: u32 = 6;
 /// Engage enemy champions this close.
 const ENGAGE: f32 = 900.0;
-/// Retreat below this share of max health; stop retreating above `HEALED`.
+/// Retreat below this share of max health; stop retreating above `HEALED` (a fountain that
+/// heals) or `RELIEVED` (relics only).
 const LOW: f32 = 0.3;
 const HEALED: f32 = 0.9;
+const RELIEVED: f32 = 0.5;
+/// How far a low bot walks for a health relic.
+const RELIC_REACH: f32 = 2500.0;
 /// Turret danger zone: its range plus a margin.
 const TURRET_DANGER: f32 = TURRET_ATTACK.range + 150.0;
 
@@ -107,42 +112,45 @@ impl Bot {
         let ready = |slot: u8| st.can_cast(t, slot);
         let hidden = world.hidden(team);
         let visible = |u: &&Unit| u.state.alive() && !hidden.contains(&u.id);
-        let fountain = world.map().layout.fountains[team as usize].map_or(me.home, |(c, _)| c);
+        let fountain = world.map().layout.fountains[team as usize].map(|(c, _)| c);
+        let heals_home = fountain.is_some() && world.map().layout.fountain_heals;
 
-        // Retreat when low, until healed.
+        // Low: take a safe health relic, else go home where the fountain heals. ARAM's doesn't
+        // (no fountain healing after leaving base): waiting there or behind a turret for health
+        // that never comes leaves the team a player short, so a bot keeps fighting from behind
+        // its wave instead (`cautious`) until a relic is up.
         if hp < LOW {
             self.retreating = true;
         }
+        if self.retreating && hp > if heals_home { HEALED } else { RELIEVED } {
+            self.retreating = false;
+        }
+        let mut cautious = false;
         if self.retreating {
-            if hp > HEALED {
-                self.retreating = false;
-            } else {
-                if ready(5) && hp < LOW {
-                    return Some(cast(5, st.pos));
-                }
-                // ARAM has no recall: fall back to a health relic or behind the nearest allied
-                // turret; the fountain only when nothing else stands.
-                let relic = world
-                    .units()
-                    .iter()
-                    .filter(|u| u.kind == UnitKind::Relic && u.state.alive())
-                    .filter(|u| u.state.pos.distance(st.pos) < 2500.0)
-                    .min_by(|a, b| a.state.pos.distance(st.pos).total_cmp(&b.state.pos.distance(st.pos)));
-                let cover = world
-                    .units()
-                    .iter()
-                    .filter(|u| u.team == team && u.kind == UnitKind::Turret && u.state.alive())
-                    .min_by(|a, b| a.state.pos.distance(st.pos).total_cmp(&b.state.pos.distance(st.pos)));
-                let to = match (relic, cover) {
-                    (Some(r), _) => r.state.pos,
-                    (None, Some(t)) if hp > 0.15 => t.state.pos + (fountain - t.state.pos).normalize_or_zero() * 250.0,
-                    _ => fountain,
-                };
-                if to.distance(st.pos) < 100.0 && hp > 0.5 {
-                    self.retreating = false;
-                } else {
-                    return self.go_to(CommandKind::MoveTo(QPoint::from_vec2(to)));
-                }
+            if ready(5) && hp < LOW {
+                return Some(cast(5, st.pos));
+            }
+            let enemies: Vec<Vec2> = world
+                .units()
+                .iter()
+                .filter(visible)
+                .filter(|u| u.team != team && u.kind == UnitKind::Champion)
+                .map(|u| u.state.pos)
+                .collect();
+            // A relic is safe outside enemy turret cover and with no enemy champion nearer to it.
+            let relic = world
+                .units()
+                .iter()
+                .filter(|u| u.kind == UnitKind::Relic && u.state.alive())
+                .map(|u| (u.state.pos, u.state.pos.distance(st.pos)))
+                .filter(|&(pos, d)| {
+                    d < RELIC_REACH && !self.unsafe_at(world, team, pos) && enemies.iter().all(|e| e.distance(pos) > d)
+                })
+                .min_by(|a, b| a.1.total_cmp(&b.1));
+            match (relic, fountain) {
+                (Some((pos, _)), _) => return self.go_to(CommandKind::MoveTo(QPoint::from_vec2(pos))),
+                (None, Some(home)) if heals_home => return self.go_to(CommandKind::MoveTo(QPoint::from_vec2(home))),
+                _ => cautious = true,
             }
         }
 
@@ -176,11 +184,13 @@ impl Bot {
             && !self.unsafe_at(world, team, e.state.pos)
         {
             let d = e.state.pos.distance(st.pos);
+            // A cautious bot fights what it can reach from where it stands, but doesn't chase.
+            let reach = me.attack.map_or(0.0, |a| a.range) + e.gameplay_radius;
             let in_range = |slot: u8| match champ.ability(slot).map(|a| a.effect) {
                 Some(Effect::Line(s)) => d <= s.range * 0.9,
                 Some(Effect::Area(a)) if a.range == 0.0 => d <= a.radius * 0.8,
                 Some(Effect::Area(a)) => d <= a.range,
-                Some(Effect::Lunge(l)) => d <= l.range,
+                Some(Effect::Lunge(l)) => d <= l.range && !cautious,
                 _ => false,
             };
             let shots: Vec<u8> = (0..4u8).filter(|s| ready(*s) && in_range(*s)).collect();
@@ -195,7 +205,9 @@ impl Bot {
             if hp < 0.4 && ready(5) {
                 return Some(cast(5, st.pos));
             }
-            return self.go_to(CommandKind::Attack(e.id));
+            if !cautious || d <= reach {
+                return self.go_to(CommandKind::Attack(e.id));
+            }
         }
 
         // Siege: hit an exposed enemy structure in reach when it's safe (its turret shoots the
@@ -207,7 +219,9 @@ impl Bot {
             .filter(|u| u.state.pos.distance(st.pos) <= ENGAGE)
             .filter(|u| !self.unsafe_at(world, team, u.state.pos))
             .min_by(|a, b| a.state.pos.distance(st.pos).total_cmp(&b.state.pos.distance(st.pos)));
-        if let Some(target) = siege {
+        if let Some(target) = siege
+            && !cautious
+        {
             return self.go_to(CommandKind::Attack(target.id));
         }
 
@@ -223,8 +237,9 @@ impl Bot {
             .iter()
             .filter(|u| u.team == team && u.kind == UnitKind::Minion && u.state.alive())
             .max_by(|a, b| progress(a.state.pos).total_cmp(&progress(b.state.pos)));
+        let behind = if cautious { 550.0 } else { 150.0 };
         let mut goal = match front {
-            Some(m) => m.state.pos - dir * 150.0,
+            Some(m) => m.state.pos - dir * behind,
             // No wave: wait by the frontmost allied turret.
             None => world
                 .units()

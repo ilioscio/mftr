@@ -1522,6 +1522,8 @@ func _update_combat_text(delta: float) -> void:
 		elif n.kind == "match_ended":
 			match_banner = "VICTORY" if n.won else "DEFEAT"
 			match_banner_age = 0.0
+			if champion_model != null:
+				sfx.play_flat(_sfx_table("").get("match.victory" if n.won else "match.defeat", []))
 			continue
 		elif n.kind == "blinked":
 			_blink_marks(_to_world(n.from), _to_world(n.to))
