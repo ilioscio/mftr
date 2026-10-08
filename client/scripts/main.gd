@@ -154,6 +154,9 @@ func _ready() -> void:
 		elif args[i] == "--dump-portraits" and i + 1 < args.size():
 			_dump_portraits(args[i + 1])
 			return
+		elif args[i] == "--shop-pick" and i + 1 < args.size():
+			_shop_pick = int(args[i + 1])
+			i += 1
 		elif args[i] == "--shot-settings" and i + 1 < args.size():
 			_shot_settings = int(args[i + 1])
 			i += 1
@@ -2172,7 +2175,7 @@ func _draw_bottom_hud(font: Font) -> void:
 	var A := 66.0 * k                     # ability icon
 	var S := 50.0 * k                     # spell icon
 	var G := 7.0 * k                      # gap
-	var I := Vector2(64.0, 43.0) * k      # item box
+	var I := Vector2(43.0, 43.0) * k      # item box
 	var pad := 12.0 * k
 	var stats_w := 156.0 * k if ranked else 0.0
 	var port := 100.0 * k
@@ -2661,13 +2664,19 @@ func _update_fx(delta: float) -> void:
 
 
 ## ---- Shop (01 §11) ------------------------------------------------------------------------------
-## Opens with P anywhere; buying and selling only work while dead or in the own fountain (the
-## sim decides, the panel just greys things out). Click an item to buy it (owned components are
-## used and discounted), click an inventory slot to sell it for 70%. Undo works until you leave.
+## Opens with G anywhere; buying and selling only work while dead or in the own fountain (the
+## sim decides, the panel just greys things out). Laid out like the reference game's: the items
+## by tier on the left (click to look, right-click or double-click to buy); on the right the
+## chosen item, its build path (the tree of components, the ones we own marked) and what it
+## builds into, with Buy at our price (owned components are used and discounted). Click an
+## inventory slot to sell it for 70%. Undo works until you leave.
+
+const ItemIcons := preload("res://scripts/item_icons.gd")
+const SHOP_NODE := 52.0                  # a build-path node, px
+const SHOP_GAP := Vector2(10, 26)        # between build-path nodes
 
 var shop_panel: PanelContainer
 var shop_title: Label
-var shop_grid: GridContainer
 var shop_inventory: HBoxContainer
 var shop_stats: Label
 var shop_undo: Button
@@ -2675,6 +2684,13 @@ var shop_buttons := {}                  # item id -> Button
 var shop_slot_buttons := []
 var item_names := {}                    # item id -> name
 var _shop_refresh := 0.0
+var _catalog := {}                      # item id -> catalog entry (latest)
+var _shop_pick := 0                     # the item shown on the right
+var _shop_detail_sig := ""
+var _shop_detail: VBoxContainer
+var _shop_tree: Control
+var _shop_tree_nodes := []              # [{ id, pos, parent, owned }]
+var _shop_buy: Button
 
 
 func _toggle_shop() -> void:
@@ -2685,76 +2701,129 @@ func _toggle_shop() -> void:
 
 
 func _build_shop() -> void:
+	ItemIcons.art_root = _art_root()
 	shop_panel = PanelContainer.new()
 	shop_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	shop_panel.position = Vector2(16, 64)
-	shop_panel.custom_minimum_size = Vector2(920, 0)
+	shop_panel.custom_minimum_size = Vector2(1000, 0)
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 14)
 	shop_panel.add_child(margin)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", 8)
 	margin.add_child(v)
 	shop_title = Label.new()
 	shop_title.theme_type_variation = "TitleLabel"
 	v.add_child(shop_title)
+	var body := HBoxContainer.new()
+	body.add_theme_constant_override("separation", 14)
+	v.add_child(body)
+
+	# The items, by tier.
+	var grids := VBoxContainer.new()
+	grids.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grids.add_theme_constant_override("separation", 6)
+	body.add_child(grids)
 	var tiers := ["COMPONENTS", "UPGRADES AND BOOTS", "LEGENDARY"]
 	var catalog: Array = client.shop_catalog()
 	for it in catalog:
 		item_names[it.id] = it.name
+		_catalog[it.id] = it
+	if _shop_pick == 0 and catalog.size() > 0:
+		_shop_pick = catalog[catalog.size() - 1].id
 	for tier in 3:
 		var l := Label.new()
 		l.text = tiers[tier]
 		l.theme_type_variation = "HeaderLabel"
-		v.add_child(l)
-		shop_grid = GridContainer.new()
-		shop_grid.columns = 5
-		shop_grid.add_theme_constant_override("h_separation", 6)
-		shop_grid.add_theme_constant_override("v_separation", 6)
-		v.add_child(shop_grid)
+		grids.add_child(l)
+		var grid := GridContainer.new()
+		grid.columns = 8
+		grid.add_theme_constant_override("h_separation", 6)
+		grid.add_theme_constant_override("v_separation", 6)
+		grids.add_child(grid)
 		for it in catalog:
 			if it.tier != tier:
 				continue
+			var id: int = it.id
 			var b := Button.new()
-			b.custom_minimum_size = Vector2(172, 46)
-			b.add_theme_font_size_override("font_size", 12)
-			b.clip_text = true
+			b.custom_minimum_size = Vector2(66, 84)
+			_tight(b)
+			b.icon = ItemIcons.icon(it)
+			b.expand_icon = true
+			b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+			b.add_theme_font_size_override("font_size", 13)
+			b.add_theme_color_override("font_color", Color(1.0, 0.84, 0.4))
 			b.focus_mode = Control.FOCUS_NONE
-			b.pressed.connect(func(): client.buy(it.id); _shop_refresh = 0.0)
-			shop_grid.add_child(b)
-			shop_buttons[it.id] = b
+			b.pressed.connect(func(): _shop_pick = id; _shop_detail_sig = ""; _shop_refresh = 0.0)
+			b.gui_input.connect(func(e): _shop_item_input(e, id))
+			grid.add_child(b)
+			shop_buttons[id] = b
+
+	# The chosen item: its build path and what it builds into.
+	var side := PanelContainer.new()
+	side.custom_minimum_size = Vector2(380, 0)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.07, 0.085, 0.11)
+	sb.set_corner_radius_all(5)
+	sb.set_content_margin_all(12)
+	side.add_theme_stylebox_override("panel", sb)
+	body.add_child(side)
+	_shop_detail = VBoxContainer.new()
+	_shop_detail.add_theme_constant_override("separation", 8)
+	side.add_child(_shop_detail)
+
+	# Inventory, undo, our stats.
 	var inv_label := Label.new()
 	inv_label.text = "INVENTORY  ·  click to sell for 70%"
 	inv_label.theme_type_variation = "HeaderLabel"
 	v.add_child(inv_label)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	v.add_child(row)
 	shop_inventory = HBoxContainer.new()
 	shop_inventory.add_theme_constant_override("separation", 6)
-	v.add_child(shop_inventory)
+	row.add_child(shop_inventory)
 	for slot in 6:
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(140, 32)
-		b.add_theme_font_size_override("font_size", 12)
-		b.clip_text = true
+		b.custom_minimum_size = Vector2(54, 54)
+		_tight(b)
+		b.expand_icon = true
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(func(): client.sell(slot); _shop_refresh = 0.0)
 		shop_inventory.add_child(b)
 		shop_slot_buttons.append(b)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 16)
-	v.add_child(row)
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(10, 0)
+	row.add_child(gap)
 	shop_undo = Button.new()
 	shop_undo.text = "Undo"
 	shop_undo.focus_mode = Control.FOCUS_NONE
-	shop_undo.custom_minimum_size = Vector2(90, 30)
+	shop_undo.custom_minimum_size = Vector2(90, 0)
 	shop_undo.pressed.connect(func(): client.undo_trade(); _shop_refresh = 0.0)
 	row.add_child(shop_undo)
 	shop_stats = Label.new()
 	shop_stats.theme_type_variation = "HintLabel"
-	shop_stats.add_theme_font_size_override("font_size", 15)
+	shop_stats.add_theme_font_size_override("font_size", 14)
+	shop_stats.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	shop_stats.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	shop_stats.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(shop_stats)
 	shop_panel.visible = false
 	overlay.get_parent().add_child(shop_panel)
+
+
+## Right-click or double-click buys; a left click (the button's press) only looks.
+func _shop_item_input(e: InputEvent, id: int) -> void:
+	if e is InputEventMouseButton and e.is_pressed():
+		var mb := e as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_RIGHT or (mb.button_index == MOUSE_BUTTON_LEFT and mb.double_click):
+			_shop_pick = id
+			client.buy(id)
+			_shop_detail_sig = ""
+			_shop_refresh = 0.0
 
 
 func _update_shop(delta: float) -> void:
@@ -2768,22 +2837,26 @@ func _update_shop(delta: float) -> void:
 	var gold: int = own_status.get("gold", 0)
 	shop_title.text = "Shop   ·   %d gold%s" % [gold, "" if open else "   (closed: return to your fountain, or shop while dead)"]
 	for it in client.shop_catalog():
+		_catalog[it.id] = it
 		var b: Button = shop_buttons[it.id]
-		var price: int = it.price
-		b.text = "%s  %d\n%s" % [it.name, price, it.stats]
-		b.tooltip_text = "%s (%d total)\n%s" % [it.name, it.cost, it.stats]
-		if it.recipe.size() > 0:
-			var parts := []
-			for r in it.recipe:
-				parts.append(item_names.get(r, "?"))
-			b.tooltip_text += "\nBuilds from: " + ", ".join(parts)
-		b.disabled = not open or not it.affordable
-		b.modulate = Color(0.75, 1.0, 0.75) if it.owned else Color.WHITE
+		b.text = "%d" % it.price
+		b.tooltip_text = "%s  ·  %d gold\n%s" % [it.name, it.price, it.stats]
+		# Never disabled: any item can be looked at; what we can't buy now is dimmed.
+		b.modulate = Color(1, 1, 1) if open and it.affordable else Color(0.55, 0.55, 0.6)
+		# The item on the right is framed in gold.
+		if it.id == _shop_pick:
+			b.add_theme_stylebox_override("normal", _shop_pick_box())
+			b.add_theme_stylebox_override("disabled", _shop_pick_box())
+		else:
+			b.add_theme_stylebox_override("normal", _icon_box("normal"))
+			b.add_theme_stylebox_override("disabled", _icon_box("disabled"))
 	var inv: Array = own_status.get("items", [])
 	for slot in shop_slot_buttons.size():
 		var id: int = inv[slot] if slot < inv.size() else 0
 		var b: Button = shop_slot_buttons[slot]
-		b.text = item_names.get(id, "—") if id != 0 else "—"
+		b.icon = ItemIcons.icon(_catalog[id]) if id != 0 and _catalog.has(id) else null
+		b.text = "" if id != 0 else "—"
+		b.tooltip_text = "Sell %s for 70%%" % item_names.get(id, "?") if id != 0 else ""
 		b.disabled = not open or id == 0
 	shop_undo.disabled = not open or not own_status.get("can_undo", false)
 	if not own_status.is_empty() and own_status.has("attack_damage"):
@@ -2792,23 +2865,221 @@ func _update_shop(delta: float) -> void:
 			roundi(own_status.magic_resist), own_status.attack_speed, roundi(own_status.move_speed),
 			roundi(own_status.ability_haste), roundi(own_status.max_health),
 		]
+	_update_shop_detail(open, inv)
+
+
+static var _pick_box: StyleBoxFlat
+static var _icon_boxes := {}
+
+
+## The theme's button looks with tight margins, so an icon fills its button.
+static func _icon_box(state: String) -> StyleBox:
+	if not _icon_boxes.has(state):
+		var base: StyleBox = ThemeDB.get_default_theme().get_stylebox(state, "Button")
+		var box: StyleBox = base.duplicate()
+		box.set_content_margin_all(3)
+		_icon_boxes[state] = box
+	return _icon_boxes[state]
+
+
+static func _tight(b: Button) -> void:
+	for state in ["normal", "hover", "pressed", "disabled", "hover_pressed"]:
+		b.add_theme_stylebox_override(state, _icon_box(state))
+
+
+static func _shop_pick_box() -> StyleBoxFlat:
+	if _pick_box == null:
+		_pick_box = StyleBoxFlat.new()
+		_pick_box.bg_color = Color(0.2, 0.16, 0.08)
+		_pick_box.border_color = Color(0.95, 0.8, 0.45)
+		_pick_box.set_border_width_all(2)
+		_pick_box.set_corner_radius_all(4)
+		_pick_box.set_content_margin_all(3)
+	return _pick_box
+
+
+## The right side: the chosen item, its build path and what it builds into. Rebuilt when the
+## choice, the inventory or what we can afford changes.
+func _update_shop_detail(open: bool, inv: Array) -> void:
+	var it: Dictionary = _catalog.get(_shop_pick, {})
+	if it.is_empty():
+		return
+	var sig := "%d|%s|%s|%s|%d" % [_shop_pick, inv, open, it.affordable, it.price]
+	if sig == _shop_detail_sig:
+		return
+	_shop_detail_sig = sig
+	for c in _shop_detail.get_children():
+		c.queue_free()
+
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
+	var big := TextureRect.new()
+	big.texture = ItemIcons.icon(it)
+	big.custom_minimum_size = Vector2(64, 64)
+	big.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	head.add_child(big)
+	var names := VBoxContainer.new()
+	names.alignment = BoxContainer.ALIGNMENT_CENTER
+	var name := Label.new()
+	name.text = it.name
+	name.add_theme_font_override("font", _bold_font())
+	name.add_theme_font_size_override("font_size", 20)
+	name.add_theme_color_override("font_color", Color(0.95, 0.88, 0.7))
+	names.add_child(name)
+	var cost := Label.new()
+	cost.text = "%d gold" % it.cost if it.price == it.cost else "%d gold  ·  %d for you" % [it.cost, it.price]
+	cost.add_theme_color_override("font_color", Color(1.0, 0.84, 0.4))
+	names.add_child(cost)
+	head.add_child(names)
+	_shop_detail.add_child(head)
+	var stats := Label.new()
+	stats.text = String(it.stats).replace(", ", "\n")
+	stats.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stats.custom_minimum_size = Vector2(356, 0)
+	_shop_detail.add_child(stats)
+
+	_shop_detail.add_child(HSeparator.new())
+	var path := Label.new()
+	path.text = "BUILD PATH" if not it.recipe.is_empty() else "BUILD PATH  ·  a basic component"
+	path.theme_type_variation = "HeaderLabel"
+	_shop_detail.add_child(path)
+	_shop_tree = Control.new()
+	_shop_tree.draw.connect(_draw_shop_tree)
+	_shop_detail.add_child(_shop_tree)
+	_layout_shop_tree(_shop_pick, inv)
+
+	var into := []
+	for other in _catalog.values():
+		if other.recipe.has(_shop_pick):
+			into.append(other)
+	if not into.is_empty():
+		var into_label := Label.new()
+		into_label.text = "BUILDS INTO"
+		into_label.theme_type_variation = "HeaderLabel"
+		_shop_detail.add_child(into_label)
+		var row := HFlowContainer.new()
+		row.add_theme_constant_override("h_separation", 6)
+		row.add_theme_constant_override("v_separation", 6)
+		for other in into:
+			row.add_child(_shop_node_button(other, false))
+		_shop_detail.add_child(row)
+
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_shop_detail.add_child(spacer)
+	_shop_buy = Button.new()
+	_shop_buy.text = "Buy  ·  %d gold" % it.price
+	_shop_buy.theme_type_variation = "PrimaryButton"
+	_shop_buy.custom_minimum_size = Vector2(0, 44)
+	_shop_buy.focus_mode = Control.FOCUS_NONE
+	_shop_buy.disabled = not open or not it.affordable
+	var id: int = _shop_pick
+	_shop_buy.pressed.connect(func(): client.buy(id); _shop_detail_sig = ""; _shop_refresh = 0.0)
+	_shop_detail.add_child(_shop_buy)
+
+
+## A small item button for the build path and "builds into": click to look at that item.
+func _shop_node_button(it: Dictionary, owned: bool) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(SHOP_NODE, SHOP_NODE)
+	_tight(b)
+	b.icon = ItemIcons.icon(it)
+	b.expand_icon = true
+	b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	b.focus_mode = Control.FOCUS_NONE
+	b.tooltip_text = "%s  ·  %d gold%s\n%s" % [it.name, it.cost, "  (owned)" if owned else "", it.stats]
+	var id: int = it.id
+	b.pressed.connect(func(): _shop_pick = id; _shop_detail_sig = ""; _shop_refresh = 0.0)
+	b.gui_input.connect(func(e): _shop_item_input(e, id))
+	return b
+
+
+## The build path as a tree: the item on top, its components under it, theirs under them. The
+## components we own (each owned item used once, the way buying uses them) are marked, and
+## their own components aren't needed, so they're dimmed.
+func _layout_shop_tree(root: int, inv: Array) -> void:
+	_shop_tree_nodes.clear()
+	var have := {}
+	for id in inv:
+		if id != 0:
+			have[id] = have.get(id, 0) + 1
+	var depth := [0]
+	var place := func(this: Callable, id: int, level: int, left: float, parent: int, covered: bool) -> float:
+		depth[0] = maxi(depth[0], level)
+		var owned := false
+		if level > 0 and not covered and have.get(id, 0) > 0:
+			have[id] -= 1
+			owned = true
+		var index := _shop_tree_nodes.size()
+		_shop_tree_nodes.append({"id": id, "pos": Vector2.ZERO, "parent": parent, "owned": owned, "covered": covered})
+		var kids: Array = _catalog.get(id, {}).get("recipe", [])
+		var width := 0.0
+		for k in kids:
+			if width > 0.0:
+				width += SHOP_GAP.x
+			width += this.call(this, int(k), level + 1, left + width, index, covered or owned)
+		width = maxf(width, SHOP_NODE)
+		_shop_tree_nodes[index].pos = Vector2(left + width / 2.0 - SHOP_NODE / 2.0, level * (SHOP_NODE + SHOP_GAP.y))
+		return width
+	var total: float = place.call(place, root, 0, 0.0, -1, false)
+	var area := 356.0
+	var shift := maxf(0.0, (area - total) / 2.0)
+	_shop_tree.custom_minimum_size = Vector2(area, (depth[0] + 1) * (SHOP_NODE + SHOP_GAP.y) - SHOP_GAP.y)
+	for n in _shop_tree_nodes:
+		n.pos.x += shift
+		var it: Dictionary = _catalog.get(n.id, {})
+		if it.is_empty():
+			continue
+		var b := _shop_node_button(it, n.owned)
+		b.position = n.pos
+		b.size = Vector2(SHOP_NODE, SHOP_NODE)
+		if n.covered:
+			b.modulate = Color(1, 1, 1, 0.35)
+		_shop_tree.add_child(b)
+	_shop_tree.queue_redraw()
+
+
+func _draw_shop_tree() -> void:
+	var half := SHOP_NODE / 2.0
+	for n in _shop_tree_nodes:
+		if n.parent < 0:
+			continue
+		var p: Dictionary = _shop_tree_nodes[n.parent]
+		var a: Vector2 = p.pos + Vector2(half, SHOP_NODE)
+		var c: Vector2 = n.pos + Vector2(half, 0)
+		var mid := a.y + SHOP_GAP.y / 2.0
+		var col := Color(0.78, 0.65, 0.38, 0.35 if n.covered else 0.85)
+		_shop_tree.draw_polyline(PackedVector2Array([a, Vector2(a.x, mid), Vector2(c.x, mid), c]), col, 2.0)
+	for n in _shop_tree_nodes:
+		if n.owned:
+			# Owned: a green frame and a check in the corner.
+			var r := Rect2(n.pos, Vector2(SHOP_NODE, SHOP_NODE)).grow(2.0)
+			_shop_tree.draw_rect(r, Color(0.45, 0.85, 0.5), false, 2.0)
+			var tip: Vector2 = n.pos + Vector2(SHOP_NODE - 2.0, 2.0)
+			_shop_tree.draw_colored_polygon(PackedVector2Array([tip + Vector2(-14, 0), tip, tip + Vector2(0, 14)]), Color(0.45, 0.85, 0.5))
 
 
 func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 	if item_names.is_empty():
+		ItemIcons.art_root = _art_root()
 		for it in client.shop_catalog():
 			item_names[it.id] = it.name
+			_catalog[it.id] = it
 	var inv: Array = own_status.items
-	var I := Vector2(64.0, 43.0) * k
+	var I := Vector2(43.0, 43.0) * k
 	var gap := 5.0 * k
 	for slot in 6:
 		var p := origin + Vector2((slot % 3) * (I.x + gap), (slot / 3) * (I.y + gap))
 		var box := Rect2(p, I)
 		var id: int = inv[slot]
-		overlay.draw_rect(box, Color(0.11, 0.12, 0.15) if id != 0 else Color(0.075, 0.085, 0.105))
-		overlay.draw_rect(box, Hud.GOLD if id != 0 else Color(0.25, 0.27, 0.31), false, 1.0 * k)
-		if id != 0:
+		overlay.draw_rect(box, Color(0.075, 0.085, 0.105))
+		if id != 0 and _catalog.has(id):
+			# The item's icon, square, centered in the slot.
+			var side := minf(box.size.x, box.size.y)
+			overlay.draw_texture_rect(ItemIcons.icon(_catalog[id]), Rect2(box.get_center() - Vector2(side, side) / 2.0, Vector2(side, side)), false)
+		elif id != 0:
 			overlay.draw_multiline_string(font, p + Vector2(4.0 * k, 15.0 * k), item_names.get(id, "?"), HORIZONTAL_ALIGNMENT_CENTER, I.x - 8.0 * k, roundi(11.0 * k), 2, Hud.TEXT)
+		overlay.draw_rect(box, Hud.GOLD if id != 0 else Color(0.25, 0.27, 0.31), false, 1.0 * k)
 	# Gold under the items.
 	var gy := origin.y + 2.0 * (I.y + gap) + 2.0 * k
 	var ic := 16.0 * k

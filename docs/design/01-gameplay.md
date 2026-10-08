@@ -170,6 +170,9 @@ Two per champion, chosen before the match. *(start)* list:
 - Legendary items have **unique passives** that can't stack with themselves.
 - Supports have a **support item quest** that upgrades as they earn income, and it grants wards.
 - The shop has recommended builds (data-driven, community-editable). Undo is allowed until you leave the fountain.
+- **As built:** the items by tier with their icons and prices (click to look, right-click or
+  double-click to buy); the chosen item's build path as a tree of its components, the ones you
+  own marked and the rest of their branch dimmed, what it builds into, and Buy at your price.
 
 ## 12. Death, respawn & recall
 
