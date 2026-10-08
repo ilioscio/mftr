@@ -16,7 +16,9 @@ var minimap_shown := true
 var minimap_size := 100.0                # 50–160 %
 
 ## Rebindable actions, in the order the settings list them: [action, label, default].
-## A default is a key name with modifiers (`Alt+Q`) or a mouse button (`Mouse Right`).
+## A default is a key name with modifiers (`Alt+Q`) or a mouse button (`Mouse Right`); an action
+## may have several, separated by " / ". Level-ups take Ctrl too: Alt+R is also the NVIDIA and
+## AMD overlays' hotkey, which some players' drivers swallow before the game sees it.
 const BINDINGS := [
 	["cast_q", "Ability Q", "Q"],
 	["cast_w", "Ability W", "W"],
@@ -24,10 +26,10 @@ const BINDINGS := [
 	["cast_r", "Ability R (ultimate)", "R"],
 	["cast_d", "Spell D (Blink)", "D"],
 	["cast_f", "Spell F (Barrier)", "F"],
-	["level_q", "Level up Q", "Alt+Q"],
-	["level_w", "Level up W", "Alt+W"],
-	["level_e", "Level up E", "Alt+E"],
-	["level_r", "Level up R", "Alt+R"],
+	["level_q", "Level up Q", "Alt+Q / Ctrl+Q"],
+	["level_w", "Level up W", "Alt+W / Ctrl+W"],
+	["level_e", "Level up E", "Alt+E / Ctrl+E"],
+	["level_r", "Level up R", "Alt+R / Ctrl+R"],
 	["move", "Move / attack", "Mouse Right"],
 	["attack_move", "Attack-move (then click)", "A"],
 	["stop", "Stop", "S"],
@@ -89,6 +91,11 @@ func binding(action: String) -> String:
 	return "None"
 
 
+## The first of an action's bindings (for short hints).
+func primary_binding(action: String) -> String:
+	return binding(action).split(" / ")[0]
+
+
 func set_binding(action: String, text: String) -> void:
 	_binds[action] = text
 	apply_bindings()
@@ -108,9 +115,10 @@ func apply_bindings() -> void:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action)
 		InputMap.action_erase_events(action)
-		var ev := event_from_text(binding(action))
-		if ev != null:
-			InputMap.action_add_event(action, ev)
+		for text in binding(action).split(" / "):
+			var ev := event_from_text(text)
+			if ev != null:
+				InputMap.action_add_event(action, ev)
 
 
 ## `Alt+Q`, `Ctrl+Shift+F5`, `Space`, `Mouse Right`, `None` → an input event (null for None).

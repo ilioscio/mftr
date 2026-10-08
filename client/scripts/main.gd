@@ -37,6 +37,12 @@ var click_marker: MeshInstance3D
 var click_marker_age := 1.0
 var net_label: Label
 var overlay: Control
+var ability_tip
+# The ability bar's boxes and level-up buttons this frame (overlay coordinates), for hover and
+# clicks; the whole bar's panel swallows clicks so they don't move the champion.
+var _bar_rect := Rect2()
+var _ability_boxes: Array[Rect2] = []
+var _level_buttons := {}                  # slot -> Rect2, while the slot can rank up
 var show_net_graph := true
 var proxies_enabled := true
 var attack_move_armed := false
@@ -118,6 +124,9 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-shop":
 			_shot_shop = true
+		elif args[i] == "--hover-slot" and i + 1 < args.size():
+			_shot_hover = int(args[i + 1])
+			i += 1
 		elif args[i] == "--shot-lobby":
 			_shot_lobby = true
 		elif args[i] == "--menu-join":
@@ -224,6 +233,7 @@ var _shot_lobby := false                 # `--shot-lobby`: reroll in champion se
 var _menu_auto_join := false             # `--menu-join`: join the first remembered server from the menu
 var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
 var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
+var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
 
 
 func _update_shot(delta: float) -> void:
@@ -311,6 +321,8 @@ func _build_world() -> void:
 	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	overlay.draw.connect(_draw_overlay)
 	hud.add_child(overlay)
+	ability_tip = preload("res://scripts/ability_tooltip.gd").new()
+	hud.add_child(ability_tip)
 	net_label = Label.new()
 	net_label.position = Vector2(16, 16)
 	net_label.add_theme_font_size_override("font_size", 16)
@@ -801,6 +813,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if blind_panel != null and blind_panel.visible:
 		return  # rating between rounds: the game ignores input
+	if event is InputEventMouseButton and event.is_pressed() and _bar_rect.has_point(overlay.get_local_mouse_position()):
+		# Clicks on the ability bar are the bar's: a "+" levels its ability, the rest do nothing
+		# (they mustn't walk the champion under the HUD).
+		if (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+			for slot in _level_buttons:
+				if _level_buttons[slot].has_point(overlay.get_local_mouse_position()):
+					client.level_up(slot)
+		return
 	if event.is_action_pressed("move"):
 		attack_move_armed = false
 		var p = _cursor_ground()
@@ -935,6 +955,7 @@ func _process(delta: float) -> void:
 	_update_net_graph()
 	_update_minimap(delta, playing)
 	_update_shot(delta)
+	_update_ability_tip()
 	overlay.queue_redraw()
 
 
@@ -1863,7 +1884,10 @@ func _draw_ability_bar(font: Font) -> void:
 	var limit: float = minimap.position.x - 12.0 if minimap != null and minimap.visible else overlay.size.x
 	var x0 := overlay.size.x / 2.0 - slot_w * 3.0 - maxf(0.0, right - limit)
 	var y0 := overlay.size.y - 92.0
-	overlay.draw_rect(Rect2(x0 - 10, y0 - 34, slot_w * 6.0 + 20, 120), Color(0, 0, 0, 0.55))
+	_bar_rect = Rect2(x0 - 10, y0 - 34, slot_w * 6.0 + 20, 120)
+	_ability_boxes.clear()
+	_level_buttons.clear()
+	overlay.draw_rect(_bar_rect, Color(0, 0, 0, 0.55))
 	var hp: float = own_status.health
 	var mx: float = own_status.max_health
 	var header := "%s   %d / %d" % [own_status.champion, roundi(hp), roundi(mx)]
@@ -1879,9 +1903,10 @@ func _draw_ability_bar(font: Font) -> void:
 		var cd: float = cds[slot]
 		var ready := cd <= 0.0
 		var box := Rect2(x, y0, slot_w - 8, 54)
+		_ability_boxes.append(box)
 		overlay.draw_rect(box, Color(0.18, 0.2, 0.24) if ready else Color(0.1, 0.1, 0.12))
 		overlay.draw_rect(box, Color(0.45, 0.75, 1.0) if ready else Color(0.3, 0.3, 0.35), false, 2.0)
-		overlay.draw_string(font, Vector2(x + 6, y0 + 20), settings.binding(SLOT_ACTIONS[slot]), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
+		overlay.draw_string(font, Vector2(x + 6, y0 + 20), settings.primary_binding(SLOT_ACTIONS[slot]), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 		var label := "" if ready else ("%.1f" % cd if cd < 10.0 else "%d" % ceili(cd))
 		overlay.draw_string(font, Vector2(x + 30, y0 + 20), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
 		overlay.draw_string(font, Vector2(x + 6, y0 + 44), names[slot], HORIZONTAL_ALIGNMENT_LEFT, slot_w - 14, 13, Color(0.8, 0.85, 0.9))
@@ -1894,7 +1919,12 @@ func _draw_ability_bar(font: Font) -> void:
 			if rank == 0:
 				overlay.draw_rect(box, Color(0, 0, 0, 0.55))
 			if own_status.can_rank[slot]:
-				overlay.draw_string(font, Vector2(x + slot_w - 30, y0 + 20), "+", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.85, 0.3))
+				var btn := Rect2(x + slot_w - 36, y0 + 3, 24, 22)
+				_level_buttons[slot] = btn
+				var hot := btn.has_point(overlay.get_local_mouse_position())
+				overlay.draw_rect(btn, Color(0.45, 0.34, 0.08) if hot else Color(0.28, 0.21, 0.05))
+				overlay.draw_rect(btn, Color(1.0, 0.85, 0.3), false, 1.5)
+				overlay.draw_string(font, btn.position + Vector2(0, 18), "+", HORIZONTAL_ALIGNMENT_CENTER, btn.size.x, 20, Color(1.0, 0.9, 0.45))
 	if own_status.get("ranked", false) and own_status.has("items"):
 		_draw_inventory(font, Vector2(x0 + slot_w * 6.0 + 24, y0 - 34))
 	if match_banner != "":
@@ -1908,13 +1938,30 @@ func _draw_ability_bar(font: Font) -> void:
 	if attack_move_armed:
 		overlay.draw_string(font, Vector2(x0, y0 + 80), "Attack-move: left-click a point", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ENEMY_COLOR)
 	elif own_status.get("points", 0) > 0:
-		overlay.draw_string(font, Vector2(x0, y0 + 80), "%d ability point(s): %s" % [own_status.points, " / ".join(LEVEL_ACTIONS.map(func(a): return settings.binding(a)))], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
+		overlay.draw_string(font, Vector2(x0, y0 + 80), "%d ability point(s): %s" % [own_status.points, " / ".join(LEVEL_ACTIONS.map(func(a): return settings.primary_binding(a))) + " or click +"], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
 	elif own_status.get("ranked", false) and client.can_shop():
-		overlay.draw_string(font, Vector2(x0, y0 + 80), "[%s] shop" % settings.binding("toggle_shop"), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
+		overlay.draw_string(font, Vector2(x0, y0 + 80), "[%s] shop" % settings.primary_binding("toggle_shop"), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
 	if blind_state == "playing":
 		var left := maxf(blind_seconds - client.blind_elapsed(), 0.0)
 		var txt := "Blind round %d / %d   %d:%02d" % [client.blind_round() + 1, client.blind_rounds(), int(left) / 60, int(left) % 60]
 		overlay.draw_string(font, Vector2(16, 34), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
+
+
+## The hovered ability's tooltip (or `--hover-slot`'s, for scripted captures).
+func _update_ability_tip() -> void:
+	var slot := -1
+	if not own_status.is_empty() and overlay.visible:
+		var m := overlay.get_local_mouse_position()
+		for i in _ability_boxes.size():
+			if _ability_boxes[i].has_point(m):
+				slot = i
+		if slot < 0 and _shot_hover >= 0 and _shot_hover < _ability_boxes.size():
+			slot = _shot_hover
+	if slot < 0:
+		ability_tip.hide()
+		return
+	var level_key: String = settings.primary_binding(LEVEL_ACTIONS[slot]) if slot < 4 else ""
+	ability_tip.show_for(client.ability_info(slot), settings.primary_binding(SLOT_ACTIONS[slot]), level_key, _ability_boxes[slot], overlay.size)
 
 
 func _update_net_graph() -> void:
@@ -1937,7 +1984,7 @@ func _update_net_graph() -> void:
 
 ## The controls line under the net graph, from the current bindings.
 func _key_hints() -> String:
-	var b := func(a: String) -> String: return settings.binding(a).replace("Mouse ", "M-")
+	var b := func(a: String) -> String: return settings.primary_binding(a).replace("Mouse ", "M-")
 	return "[%s] move / attack  [%s] attack-move  [%s %s %s %s] abilities  [%s] Blink  [%s] Barrier  [%s] stop  [%s] shop  [%s] camera lock  [Esc] settings" % [
 		b.call("move"), b.call("attack_move"), b.call("cast_q"), b.call("cast_w"), b.call("cast_e"), b.call("cast_r"),
 		b.call("cast_d"), b.call("cast_f"), b.call("stop"), b.call("toggle_shop"), b.call("camera_lock"),

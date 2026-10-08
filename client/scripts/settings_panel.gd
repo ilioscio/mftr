@@ -141,7 +141,7 @@ func _keys_tab() -> Control:
 		_bind_buttons[action] = btn
 		_row(g, b[1], btn)
 	var hint := Label.new()
-	hint.text = "Click a binding, then press the new key (Alt, Ctrl and Shift combine) or mouse button. Esc cancels, Backspace clears."
+	hint.text = "Click a binding, then press the new key (Alt, Ctrl and Shift combine) or mouse button. Esc cancels, Backspace clears. If Alt+R doesn't level your ultimate, a graphics overlay (NVIDIA, AMD) has probably taken it: use Ctrl+R, click the ability's + on the bar, or rebind it."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.add_theme_font_size_override("font_size", 13)
 	hint.add_theme_color_override("font_color", Color(0.65, 0.68, 0.72))

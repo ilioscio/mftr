@@ -297,8 +297,9 @@ Four more placeholder champions (original kits, D36), so all six M2 archetypes e
   shrine Base, a fountain platform, relic pads, rubble; forest on raised cliffs and past the map,
   rocks, tall grass in the brush, a cobbled road. Map props are a new pack kind (`prop`).
 - **Controls and interface:** Esc → Settings (camera, minimap, rebindable keys; level-ups on
-  Alt + Q/W/E/R, the shop on G, Esc closes the shop); a free camera with edge scrolling, a lock
-  and centering; the minimap; the fog of war drawn over the world.
+  Alt or Ctrl + Q/W/E/R or a click on the ability's +, the shop on G, Esc closes the shop); a
+  free camera with edge scrolling, a lock and centering; the minimap; the fog of war drawn over
+  the world; ability tooltips with scaling and the next rank's changes, generated from the sim.
 
 ## M3 — ARAM: Mayhem
 - Augment draft system with ~60 augments across tiers and archetypes (rule breakers, size, ability transformers, quests, spell replacements).
