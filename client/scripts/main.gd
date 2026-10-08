@@ -45,6 +45,8 @@ var sun: DirectionalLight3D
 var atmosphere                            # cloud shadows and motes (atmosphere.gd), per map
 var _look_point := Vector3.ZERO           # where the camera looks, on the ground
 var _graphics_applied := []
+var _audio_applied := []
+var _focused := true
 var backdrop: CanvasLayer
 var ability_tip
 # The ability bar's boxes and level-up buttons this frame (overlay coordinates), for hover and
@@ -145,6 +147,9 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-shop":
 			_shot_shop = true
+		elif args[i] == "--shot-settings" and i + 1 < args.size():
+			_shot_settings = int(args[i + 1])
+			i += 1
 		elif args[i] == "--shot-numbers":
 			_shot_numbers = true
 		elif args[i] == "--shot-charge":
@@ -263,6 +268,7 @@ var _menu_auto_join := false             # `--menu-join`: join the first remembe
 var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
 var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
 var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
+var _shot_settings := -1                  # `--shot-settings N`: open Settings on tab N
 var _shot_numbers := false                # `--shot-numbers`: sample damage numbers, for review
 var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
@@ -328,6 +334,9 @@ func _update_shot(delta: float) -> void:
 			color = Color(1.0, 0.3, 0.28)
 			text = "-" + text
 		floaters.append({ "pos": own_body.position + Vector3(2.0, 0, 0), "text": text, "color": color, "age": 0.0, "size": clampf(19.0 + x[1] / 28.0, 19.0, 34.0), "drift": randf_range(-0.6, 0.6), "life": 1.0 })
+	elif _shot_settings >= 0 and _shot_moved and settings_panel == null:
+		_open_settings()
+		settings_panel.tabs.current_tab = _shot_settings
 	elif _shot_moved and _shot_timer > _shot_at:
 		get_viewport().get_texture().get_image().save_png(_shot_path)
 		print("MFTR: saved screenshot to ", _shot_path)
@@ -425,6 +434,23 @@ func _build_world() -> void:
 	net_label.add_theme_font_size_override("font_size", 16)
 	net_label.add_theme_color_override("font_shadow_color", Color.BLACK)
 	hud.add_child(net_label)
+
+
+## The Audio settings, applied when they change (or the window gains or loses focus).
+func _apply_audio() -> void:
+	var muted: bool = settings.mute_in_background and not _focused
+	var want := [settings.master_volume, settings.effects_volume, settings.interface_volume, muted]
+	if want == _audio_applied:
+		return
+	_audio_applied = want
+	sfx.apply_volumes(settings.master_volume, settings.effects_volume, settings.interface_volume, muted)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_focused = false
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		_focused = true
 
 
 ## The Graphics settings, applied when they change.
@@ -1118,6 +1144,7 @@ func _process(delta: float) -> void:
 	if atmosphere != null:
 		atmosphere.update(delta, _look_point)
 	_apply_graphics()
+	_apply_audio()
 	_update_ability_tip()
 	_hud_dt = delta
 	overlay.queue_redraw()

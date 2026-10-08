@@ -19,8 +19,34 @@ var _last := {}                   # event key -> the variant played last
 var _rng := RandomNumberGenerator.new()
 
 
+## The mix: game effects and interface sounds each on their own bus under Master, so Settings
+## can set their volumes apart.
+const EFFECTS_BUS := "Effects"
+const INTERFACE_BUS := "Interface"
+
+
+static func ensure_buses() -> void:
+	for bus in [EFFECTS_BUS, INTERFACE_BUS]:
+		if AudioServer.get_bus_index(bus) < 0:
+			AudioServer.add_bus()
+			var i := AudioServer.bus_count - 1
+			AudioServer.set_bus_name(i, bus)
+			AudioServer.set_bus_send(i, "Master")
+
+
+## Volumes in percent (0 mutes), and whether the game is muted while in the background.
+static func apply_volumes(master: float, effects: float, interface: float, muted: bool) -> void:
+	ensure_buses()
+	for pair in [["Master", master], [EFFECTS_BUS, effects], [INTERFACE_BUS, interface]]:
+		var i := AudioServer.get_bus_index(pair[0])
+		var v: float = pair[1] / 100.0
+		AudioServer.set_bus_volume_db(i, linear_to_db(maxf(v, 0.0001)))
+		AudioServer.set_bus_mute(i, v <= 0.0 or (muted and pair[0] == "Master"))
+
+
 func _ready() -> void:
 	_rng.randomize()
+	ensure_buses()
 	_listener = AudioListener3D.new()
 	add_child(_listener)
 	_listener.make_current()
@@ -30,9 +56,11 @@ func _ready() -> void:
 		p.max_distance = MAX_DISTANCE
 		p.attenuation_filter_db = 0.0   # no distance muffling: the mix stays crisp
 		p.panning_strength = 0.6
+		p.bus = EFFECTS_BUS
 		add_child(p)
 		_voices.append(p)
 	_flat = AudioStreamPlayer.new()
+	_flat.bus = INTERFACE_BUS
 	add_child(_flat)
 
 
