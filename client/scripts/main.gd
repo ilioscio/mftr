@@ -7,7 +7,10 @@ extends Node3D
 ## User args (after `--`) skip the menu: a server address (`host:port#fingerprint` pins the
 ## server's key, otherwise it is trusted on first use), `--champion NAME`,
 ## `--spectate` to watch (Tab cycles champions), `--shot-lobby` for a champion-select capture,
-## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots (`--zoom <factor>` brings the camera closer, `--look X,Y` aims it at a map point), and the blind playtest
+## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots (`--zoom <factor>` brings the camera closer, `--look X,Y` aims it at a map point; `--shot-menu`
+## captures the start menu, `--hover-slot N` shows an ability's tooltip, `--keep-points` leaves
+## the starting points unspent, `--shot-charge` fights in mid, `--shot-numbers` shows sample
+## damage numbers), and the blind playtest
 ## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`. `--menu-join`
 ## (scripted checks) opens the menu and joins the first remembered server through it.
 
@@ -56,6 +59,7 @@ var _chips := {}                          # unit -> lagging health (the bars' da
 var _hud_dt := 0.0
 var _bold: FontVariation
 const Hud := preload("res://scripts/hud.gd")
+const AbilityTooltip := preload("res://scripts/ability_tooltip.gd")
 var show_net_graph := false             # F1: the full network graph (the HUD shows fps and ping)
 var proxies_enabled := true
 var attack_move_armed := false
@@ -141,6 +145,10 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-shop":
 			_shot_shop = true
+		elif args[i] == "--shot-numbers":
+			_shot_numbers = true
+		elif args[i] == "--shot-charge":
+			_shot_charge = true
 		elif args[i] == "--shot-menu":
 			_shot_menu = true
 		elif args[i] == "--keep-points":
@@ -255,6 +263,8 @@ var _menu_auto_join := false             # `--menu-join`: join the first remembe
 var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
 var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
 var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
+var _shot_numbers := false                # `--shot-numbers`: sample damage numbers, for review
+var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
 var _shot_keep_points := false            # `--keep-points`: don't spend the starting points
 
@@ -299,6 +309,25 @@ func _update_shot(delta: float) -> void:
 		_show_click_marker(_to_world(own + inward * 600.0 - side * 500.0), OWN_COLOR)
 	elif _shot_moved and _shot_timer > 1.7 and _shot_timer - delta <= 1.7:
 		client.cast(4, own + side * 400.0)
+	elif _shot_charge and _shot_moved and _shot_timer > 2.0 and _shot_timer <= _shot_at:
+		# Into the fight: keep attack-moving to mid, casting at whatever's ahead.
+		settings.camera_locked = true
+		if fmod(_shot_timer, 1.0) < delta:
+			client.attack_move(size / 2.0)
+			var aim := own + inward * 600.0
+			client.cast(int(_shot_timer) % 3, aim)
+	elif _shot_numbers and _shot_moved and _shot_timer <= _shot_at and fmod(_shot_timer, 0.18) < delta and own_body != null:
+		var samples := [["physical", 64.0, false, false], ["magic", 212.0, false, false], ["true", 40.0, false, false], ["physical", 118.0, false, true], ["magic", 90.0, true, false]]
+		var x: Array = samples[int(_shot_timer / 0.18) % samples.size()]
+		var color: Color = {"physical": Color(1.0, 0.62, 0.24), "magic": Color(0.45, 0.68, 1.0), "true": Color(1, 1, 1)}[x[0]]
+		var text := "%d" % roundi(x[1])
+		if x[2]:
+			color = Color(0.42, 0.95, 0.5)
+			text = "+" + text
+		elif x[3]:
+			color = Color(1.0, 0.3, 0.28)
+			text = "-" + text
+		floaters.append({ "pos": own_body.position + Vector3(2.0, 0, 0), "text": text, "color": color, "age": 0.0, "size": clampf(19.0 + x[1] / 28.0, 19.0, 34.0), "drift": randf_range(-0.6, 0.6), "life": 1.0 })
 	elif _shot_moved and _shot_timer > _shot_at:
 		get_viewport().get_texture().get_image().save_png(_shot_path)
 		print("MFTR: saved screenshot to ", _shot_path)
@@ -1861,23 +1890,33 @@ func _name_of(id: int) -> String:
 	return "Unit %d" % id
 
 
-## Confirmed damage only (03a §7): numbers float up from the unit that took it.
+## Confirmed damage only (03a §7): numbers float up from the unit that took it. Only what
+## concerns us shows (what we deal, take and heal; a spectator, the champion they follow), so
+## a teamfight isn't buried in minions' numbers. Colored by damage type like the tooltips,
+## bigger for bigger hits; damage we take is red.
 func _update_combat_text(delta: float) -> void:
+	var me := client.own_unit_id() if not client.is_spectator() else spectate_target
 	for c in client.take_combat_text():
+		if not c.heal:
+			_flash(c.target)
+		if c.source != me and c.target != me:
+			continue
 		var p = _unit_world_pos(c.target)
 		if p == null:
 			continue
 		var total: float = c.amount + c.absorbed
-		var color := Color(0.75, 0.55, 1.0) if c.kind == "magic" else Color(1.0, 0.65, 0.3)
-		if c.target == client.own_unit_id():
-			color = Color(1.0, 0.3, 0.3)
+		if total < 0.5:
+			continue
+		var color: Color = {"physical": Color(1.0, 0.62, 0.24), "magic": Color(0.45, 0.68, 1.0), "true": Color(1, 1, 1)}.get(c.kind, Color(1.0, 0.62, 0.24))
 		var text := "%d" % roundi(total)
-		if not c.heal:
-			_flash(c.target)
 		if c.heal:
-			color = Color(0.4, 1.0, 0.45)
+			color = Color(0.42, 0.95, 0.5)
 			text = "+" + text
-		floaters.append({ "pos": p, "text": text, "color": color, "age": 0.0 })
+		elif c.target == me:
+			color = Color(1.0, 0.3, 0.28)
+			text = "-" + text
+		var size := clampf(19.0 + total / 28.0, 19.0, 34.0)
+		floaters.append({ "pos": p, "text": text, "color": color, "age": 0.0, "size": size, "drift": randf_range(-0.6, 0.6), "life": 1.0 })
 	for n in client.take_notices():
 		var text := ""
 		if n.kind == "died":
@@ -1906,7 +1945,7 @@ func _update_combat_text(delta: float) -> void:
 			notices.append({ "text": text, "age": 0.0 })
 	for f in floaters:
 		f.age += delta
-	floaters = floaters.filter(func(f): return f.age < 0.9)
+	floaters = floaters.filter(func(f): return f.age < f.get("life", 0.9))
 	match_banner_age += delta
 	if match_banner != "" and match_banner_age > 10.0:
 		match_banner = ""
@@ -1944,6 +1983,7 @@ func _draw_overlay() -> void:
 		var hp: float = own_status.get("health", 0.0)
 		var mx: float = own_status.get("max_health", 1.0)
 		_draw_bar(own_body.position + Vector3(0, 1.25, 0), Vector2(110, 12), hp, mx, own_status.get("shield", 0.0), Color(0.3, 0.82, 0.32), "own", own_status.get("level", 0), 100.0)
+		_draw_unit_label(font, own_body.position + Vector3(0, 1.25, 0), Vector2(110, 12), "", true, own_status)
 		_draw_augment_pips(font, own_body.position + Vector3(0, 1.25, 0), own_status.get("augments", []))
 	for id in remote_info:
 		var u: Dictionary = remote_info[id]
@@ -1959,18 +1999,49 @@ func _draw_overlay() -> void:
 		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color, id, u.level if champ else 0, 100.0 if champ else 0.0)
 		if champ:
 			_draw_augment_pips(font, remote_bodies[id].position + Vector3(0, lift, 0), u.get("augments", []))
+			_draw_unit_label(font, remote_bodies[id].position + Vector3(0, lift, 0), size, u.champion, u.ally, u)
+	var k := _hud_k()
 	for f in floaters:
-		var s = _screen(f.pos + Vector3(0, 1.5 + f.age * 0.8, 0))
-		if s != null:
-			var c: Color = f.color
-			c.a = clampf(1.5 - f.age * 1.5, 0.0, 1.0)
-			overlay.draw_string(font, s + Vector2(-40, 0), f.text, HORIZONTAL_ALIGNMENT_CENTER, 80, 20, c)
+		# Pops in large, settles, rises along a slight arc to one side, fades.
+		var life: float = f.get("life", 0.9)
+		var t: float = f.age / life
+		var rise := 1.6 + 1.1 * (1.0 - pow(1.0 - t, 2.0))
+		var s = _screen(f.pos + Vector3(f.get("drift", 0.0) * t, rise, 0))
+		if s == null:
+			continue
+		var c: Color = f.color
+		c.a = clampf((1.0 - t) * 3.0, 0.0, 1.0)
+		var pop := 1.0 + 0.45 * clampf(1.0 - f.age / 0.12, 0.0, 1.0)
+		var fs := roundi(f.get("size", 20.0) * pop * k)
+		var bold := _bold_font()
+		overlay.draw_string_outline(bold, s + Vector2(-80, 0), f.text, HORIZONTAL_ALIGNMENT_CENTER, 160, fs, maxi(4, fs / 5), Color(0, 0, 0, 0.85 * c.a))
+		overlay.draw_string(bold, s + Vector2(-80, 0), f.text, HORIZONTAL_ALIGNMENT_CENTER, 160, fs, c)
 	_draw_ability_bar(font)
 	_draw_top_right(font)
 	if _chips.size() > remote_info.size() + 32:
 		for key in _chips.keys():
 			if key is int and not remote_info.has(key):
 				_chips.erase(key)
+
+
+## Over a champion's bar: its name (enemies and allies; not our own), and an icon for each
+## status it's under (stunned, rooted, slowed) to the bar's right, the icons the tooltips use.
+func _draw_unit_label(font: Font, world: Vector3, size: Vector2, name: String, ally: bool, u: Dictionary) -> void:
+	var s = _screen(world)
+	if s == null:
+		return
+	var k := _hud_k()
+	var w := size * k
+	if name != "" and u.get("augments", []).is_empty():
+		var c := Color(0.75, 0.88, 1.0) if ally else Color(1.0, 0.72, 0.66)
+		Hud.text(overlay, font, s + Vector2(-w.x / 2.0, -w.y - 4.0 * k), name, roundi(13.0 * k), c, HORIZONTAL_ALIGNMENT_CENTER, w.x)
+	var x: float = s.x + w.x / 2.0 + 4.0 * k
+	var ic := 16.0 * k
+	for status in ["stunned", "rooted", "slowed"]:
+		if u.get(status, false):
+			var kind: String = {"stunned": "stun", "rooted": "root", "slowed": "slow"}[status]
+			overlay.draw_texture_rect(AbilityTooltip.icon(kind), Rect2(Vector2(x, s.y - w.y - (ic - w.y) / 2.0), Vector2(ic, ic)), false)
+			x += ic + 2.0 * k
 
 
 ## Augment indicators (06 §3: no invisible power): one tier-colored diamond per held augment,
@@ -2220,7 +2291,9 @@ func _draw_hud_messages(font: Font) -> void:
 		Hud.text(overlay, font, Vector2(_bar_rect.position.x, _bar_rect.position.y - 18.0 * k), hint, roundi(15.0 * k), hint_color, HORIZONTAL_ALIGNMENT_CENTER, _bar_rect.size.x)
 	if own_status.get("dead", false):
 		overlay.draw_rect(Rect2(Vector2.ZERO, overlay.size), Color(0.05, 0.06, 0.08, 0.45))
-		var r := Rect2(overlay.size.x / 2.0 - 170.0 * k, overlay.size.y * 0.36, 340.0 * k, 78.0 * k)
+		# Just above the HUD, out of the way of the fight we're watching.
+		var top: float = _bar_rect.position.y if _bar_rect.size.y > 0.0 else overlay.size.y
+		var r := Rect2(overlay.size.x / 2.0 - 140.0 * k, top - 128.0 * k, 280.0 * k, 78.0 * k)
 		Hud.panel(overlay, r, k)
 		Hud.text(overlay, font, r.position + Vector2(0, 26.0 * k), "RESPAWNING IN", roundi(14.0 * k), Hud.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 		Hud.text(overlay, bold, r.position + Vector2(0, 64.0 * k), "%d" % ceili(own_status.respawn_in), roundi(36.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
