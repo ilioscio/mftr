@@ -10,7 +10,7 @@
 //! Damage is never predicted: health changes and numbers come from the server.
 
 use crate::missiles::Side;
-use mftr_sim::{Area, Bolt, SUBTICKS, SimTime, Team, UnitId, Vec2};
+use mftr_sim::{Area, Bolt, SUBTICKS, SimDuration, SimTime, Team, UnitId, Vec2};
 use std::collections::BTreeMap;
 
 /// How long a detonation flash stays visible (seconds).
@@ -37,6 +37,8 @@ pub struct AreaRender {
     pub hard_cc: bool,
     /// The caster (its champion's VFX, A4b).
     pub owner: UnitId,
+    /// Spawn to detonation, which tells apart a kit's areas of the same radius.
+    pub delay: SimDuration,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -146,6 +148,7 @@ impl EffectBook {
                 detonated: at >= d,
                 hard_cc: a.cc.is_hard(),
                 owner: a.owner,
+                delay: SimDuration(a.detonate_at.0.saturating_sub(a.spawn_at.0)),
             });
         };
         for (&(seq, shot), a) in &self.predicted_areas {

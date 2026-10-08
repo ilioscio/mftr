@@ -94,16 +94,19 @@ fn line_action(champion: ChampionId, radius: f32) -> Option<&'static str> {
     })
 }
 
-/// The same for a delayed area of `radius`.
-fn area_action(champion: ChampionId, radius: f32) -> Option<&'static str> {
-    (0..SLOTS as u8).find_map(|slot| match champion.ability(slot)?.effect {
+/// The same for a delayed area of `radius` that detonates `delay` after it spawns; the delay
+/// tells apart areas of the same radius (Marrow's Siphon and Ossuary).
+fn area_action(champion: ChampionId, radius: f32, delay: mftr_sim::SimDuration) -> Option<&'static str> {
+    let fits = |slot: u8, timed: bool| match champion.ability(slot)?.effect {
         mftr_sim::ability::Effect::Area(a)
-            if (a.radius - radius).abs() < 0.5 || (a.radius * augments::WIDE_AREA - radius).abs() < 0.5 =>
+            if ((a.radius - radius).abs() < 0.5 || (a.radius * augments::WIDE_AREA - radius).abs() < 0.5)
+                && (!timed || a.delay == delay) =>
         {
             Some(ACTIONS[slot as usize])
         }
         _ => None,
-    })
+    };
+    (0..SLOTS as u8).find_map(|slot| fits(slot, true)).or_else(|| (0..SLOTS as u8).find_map(|slot| fits(slot, false)))
 }
 
 fn side_name(side: Side) -> &'static str {
@@ -560,7 +563,7 @@ impl MatchClient {
             let champion = champions.get(&a.owner).copied();
             d.set("owner", a.owner.0 as i64);
             d.set("champion", champion.map_or("", |c| c.def().name));
-            d.set("action", champion.and_then(|c| area_action(c, a.radius)).unwrap_or(""));
+            d.set("action", champion.and_then(|c| area_action(c, a.radius, a.delay)).unwrap_or(""));
             d.set("key", a.key as i64);
             d.set("center", Vector2::new(a.center.x, a.center.y));
             d.set("radius", a.radius);
@@ -1277,4 +1280,19 @@ fn item_text(it: &items::Item) -> String {
         items::Passive::None => {}
     }
     parts.join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mftr_sim::SimDuration;
+
+    #[test]
+    fn areas_of_one_radius_are_told_apart_by_their_delay() {
+        // Marrow's Siphon (a nova) and Ossuary are both 300 u wide.
+        assert_eq!(area_action(ChampionId::Marrow, 300.0, SimDuration(0)), Some("q"));
+        assert_eq!(area_action(ChampionId::Marrow, 300.0, SimDuration::from_millis(1300)), Some("r"));
+        // An unknown delay still falls back to the radius alone.
+        assert_eq!(area_action(ChampionId::Cairn, 180.0, SimDuration(7)), Some("e"));
+    }
 }
