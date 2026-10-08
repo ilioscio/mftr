@@ -1,0 +1,62 @@
+// Bastion's sounds (A8): stone and iron. Grinding windups, fists that land like falling rock,
+// Grapple's rattling chain and clanking hook, Bulwark's grinding rise and a rune shimmer,
+// Tremor's stomp and rolling rumble, Upheaval's build and eruption. Footsteps, death and respawn
+// come from the library. A recipe for `mftr-tools sfx build`.
+(
+    pack: "bastion",
+    sounds: [
+        (name: "grind", events: ["attack.cast"], volume: 0.3, pitch: 0.08, layers: [
+            (wave: "noise", freq: (400.0, 900.0), env: (0.12, 0.05, 0.1), gain: 0.7, lowpass: (900.0, 1500.0)),
+        ]),
+        (name: "rock_1", events: ["attack.fire"], volume: 0.6, pitch: 0.06, crush: (bits: 9, hold: 2), layers: [
+            (wave: "sine", freq: (110.0, 38.0), env: (0.0, 0.02, 0.22), gain: 1.0, punch: 0.8),
+            (wave: "noise", freq: (3000.0, 600.0), env: (0.0, 0.02, 0.15), gain: 0.7, lowpass: (3000.0, 600.0)),
+        ]),
+        (name: "rock_2", events: ["attack.fire"], volume: 0.6, pitch: 0.06, crush: (bits: 9, hold: 2), layers: [
+            (wave: "sine", freq: (100.0, 34.0), env: (0.0, 0.025, 0.24), gain: 1.0, punch: 0.9),
+            (wave: "noise", freq: (2600.0, 500.0), env: (0.0, 0.02, 0.16), gain: 0.7, lowpass: (2600.0, 500.0)),
+        ]),
+        (name: "chain_swing", events: ["q.cast"], volume: 0.4, layers: [
+            (wave: "metal", freq: (2600.0, 2200.0), env: (0.05, 0.15, 0.08), gain: 0.4, vibrato: (2.0, 16.0)),
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.05, 0.15, 0.08), gain: 0.3, lowpass: (1500.0, 3000.0)),
+        ]),
+        (name: "chain_fling", events: ["q.release"], volume: 0.5, layers: [
+            (wave: "metal", freq: (3000.0, 1800.0), env: (0.0, 0.2, 0.2), gain: 0.45, vibrato: (3.0, 24.0)),
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.0, 0.05, 0.25), gain: 0.4, lowpass: (4000.0, 1200.0)),
+        ]),
+        (name: "hook_clank", events: ["q.impact"], volume: 0.6, crush: (bits: 9, hold: 1), layers: [
+            (wave: "metal", freq: (1800.0, 1600.0), env: (0.0, 0.02, 0.2), gain: 0.6),
+            (wave: "sine", freq: (160.0, 70.0), env: (0.0, 0.01, 0.12), gain: 0.8, punch: 0.6),
+        ]),
+        (name: "bulwark", events: ["w.fire"], volume: 0.5, echo: (delay: 0.08, feedback: 0.3), layers: [
+            (wave: "noise", freq: (300.0, 700.0), env: (0.02, 0.15, 0.15), gain: 0.6, lowpass: (800.0, 1400.0)),
+            (wave: "sine", freq: (520.0, 780.0), env: (0.05, 0.15, 0.3), gain: 0.3, vibrato: (0.3, 7.0), delay: 0.05),
+            (wave: "triangle", freq: (1040.0, 1560.0), env: (0.05, 0.1, 0.3), gain: 0.15, delay: 0.1),
+        ]),
+        (name: "stomp", events: ["e.fire"], volume: 0.7, crush: (bits: 8, hold: 2), layers: [
+            (wave: "sine", freq: (85.0, 30.0), env: (0.0, 0.04, 0.35), gain: 1.0, punch: 1.0),
+            (wave: "noise", freq: (2000.0, 400.0), env: (0.0, 0.04, 0.25), gain: 0.6, lowpass: (2000.0, 400.0)),
+        ]),
+        (name: "tremor", events: ["e.detonate"], volume: 0.55, layers: [
+            (wave: "noise", freq: (500.0, 160.0), env: (0.02, 0.2, 0.35), gain: 0.8, lowpass: (900.0, 300.0)),
+            (wave: "sine", freq: (55.0, 40.0), env: (0.02, 0.2, 0.35), gain: 0.6, vibrato: (1.5, 13.0)),
+        ]),
+        (name: "upheaval_build", events: ["r.cast"], volume: 0.45, layers: [
+            (wave: "noise", freq: (250.0, 800.0), env: (0.2, 0.05, 0.05), gain: 0.7, lowpass: (300.0, 1000.0)),
+            (wave: "saw", freq: (40.0, 60.0), env: (0.2, 0.05, 0.05), gain: 0.4, lowpass: (300.0, 600.0)),
+        ]),
+        (name: "upheaval_slam", events: ["r.fire"], volume: 0.65, crush: (bits: 8, hold: 2), layers: [
+            (wave: "sine", freq: (90.0, 32.0), env: (0.0, 0.04, 0.3), gain: 1.0, punch: 1.0),
+            (wave: "noise", freq: (2500.0, 450.0), env: (0.0, 0.05, 0.25), gain: 0.6, lowpass: (2500.0, 450.0)),
+        ]),
+        (name: "eruption", events: ["r.detonate"], volume: 0.9, crush: (bits: 8, hold: 2), echo: (delay: 0.11, feedback: 0.35), layers: [
+            (wave: "sine", freq: (70.0, 25.0), env: (0.0, 0.06, 0.8), gain: 1.0, punch: 1.0),
+            (wave: "noise", freq: (2200.0, 220.0), env: (0.0, 0.08, 0.9), gain: 1.0, lowpass: (4500.0, 250.0), drive: 0.7),
+            (wave: "noise", freq: (400.0, 120.0), env: (0.05, 0.2, 0.5), gain: 0.4, highpass: 1500.0, delay: 0.05),
+        ]),
+        (name: "stone_grumble", events: ["unit.emote"], volume: 0.4, layers: [
+            (wave: "noise", freq: (300.0, 200.0), env: (0.1, 0.4, 0.3), gain: 0.7, lowpass: (600.0, 400.0)),
+            (wave: "saw", freq: (60.0, 50.0), env: (0.1, 0.4, 0.3), gain: 0.3, vibrato: (1.0, 6.0), lowpass: (300.0, 300.0)),
+        ]),
+    ],
+)

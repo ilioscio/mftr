@@ -1,0 +1,57 @@
+// Cairn's sounds (A12): wood, stone and wind. A creaking staff swing, knocks of stone where it
+// lands, Stone Lash's whip-crack and skittering shards, Shelter's warm rising chime, Rockfall's
+// falling whistle and heavy landing, Monolith's deep build and eruption, and a low chuckle for
+// his emote. Footsteps, death and respawn come from the library. A recipe for `mftr-tools sfx build`.
+(
+    pack: "cairn",
+    sounds: [
+        (name: "creak", events: ["attack.cast"], volume: 0.3, pitch: 0.08, layers: [
+            (wave: "noise", freq: (600.0, 1100.0), env: (0.1, 0.05, 0.08), gain: 0.6, lowpass: (1000.0, 1800.0)),
+            (wave: "triangle", freq: (180.0, 140.0), env: (0.08, 0.05, 0.06), gain: 0.2, vibrato: (0.4, 30.0)),
+        ]),
+        (name: "knock_1", events: ["attack.fire"], volume: 0.55, pitch: 0.06, crush: (bits: 10, hold: 1), layers: [
+            (wave: "sine", freq: (180.0, 60.0), env: (0.0, 0.01, 0.16), gain: 0.9, punch: 0.7),
+            (wave: "noise", freq: (4000.0, 900.0), env: (0.0, 0.01, 0.1), gain: 0.6, lowpass: (4000.0, 900.0)),
+        ]),
+        (name: "knock_2", events: ["attack.fire"], volume: 0.55, pitch: 0.06, crush: (bits: 10, hold: 1), layers: [
+            (wave: "sine", freq: (160.0, 54.0), env: (0.0, 0.012, 0.18), gain: 0.9, punch: 0.8),
+            (wave: "noise", freq: (3600.0, 800.0), env: (0.0, 0.01, 0.12), gain: 0.6, lowpass: (3600.0, 800.0)),
+        ]),
+        (name: "lash", events: ["q.release"], volume: 0.5, layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.0, 0.02, 0.12), gain: 0.8, highpass: 1500.0, lowpass: (9000.0, 3000.0)),
+            (wave: "sine", freq: (900.0, 300.0), env: (0.0, 0.01, 0.08), gain: 0.3),
+        ]),
+        (name: "shards", events: ["q.impact"], volume: 0.5, pitch: 0.06, crush: (bits: 9, hold: 1), layers: [
+            (wave: "noise", freq: (6000.0, 2000.0), env: (0.0, 0.01, 0.14), gain: 0.7, highpass: 1200.0),
+            (wave: "sine", freq: (220.0, 90.0), env: (0.0, 0.01, 0.1), gain: 0.6, punch: 0.5),
+        ]),
+        (name: "shelter", events: ["w.fire"], volume: 0.45, layers: [
+            (wave: "sine", freq: (440.0, 660.0), env: (0.02, 0.15, 0.35), gain: 0.4),
+            (wave: "sine", freq: (660.0, 990.0), env: (0.04, 0.15, 0.35), gain: 0.25, vibrato: (0.2, 6.0)),
+            (wave: "noise", freq: (500.0, 1200.0), env: (0.02, 0.15, 0.2), gain: 0.2, lowpass: (1200.0, 2400.0)),
+        ]),
+        (name: "rock_call", events: ["e.fire"], volume: 0.4, layers: [
+            (wave: "sine", freq: (1200.0, 400.0), env: (0.0, 0.2, 0.05), gain: 0.3),
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.0, 0.2, 0.05), gain: 0.25, lowpass: (3000.0, 900.0)),
+        ]),
+        (name: "rockfall", events: ["e.detonate"], volume: 0.7, crush: (bits: 9, hold: 2), layers: [
+            (wave: "sine", freq: (120.0, 40.0), env: (0.0, 0.02, 0.3), gain: 1.0, punch: 0.9),
+            (wave: "noise", freq: (3000.0, 500.0), env: (0.0, 0.03, 0.3), gain: 0.7, lowpass: (3000.0, 500.0)),
+            (wave: "sine", freq: (95.0, 34.0), env: (0.0, 0.02, 0.25), gain: 0.6, punch: 0.6, delay: 0.08),
+        ]),
+        (name: "monolith_strike", events: ["r.fire"], volume: 0.6, layers: [
+            (wave: "sine", freq: (90.0, 40.0), env: (0.0, 0.05, 0.3), gain: 0.9, punch: 0.8),
+            (wave: "noise", freq: (1200.0, 300.0), env: (0.0, 0.2, 0.2), gain: 0.5, lowpass: (1200.0, 300.0)),
+        ]),
+        (name: "monolith", events: ["r.detonate"], volume: 0.8, crush: (bits: 9, hold: 2), echo: (delay: 0.1, feedback: 0.3), layers: [
+            (wave: "sine", freq: (80.0, 28.0), env: (0.0, 0.03, 0.5), gain: 1.0, punch: 1.0),
+            (wave: "noise", freq: (4000.0, 400.0), env: (0.0, 0.05, 0.45), gain: 0.8, lowpass: (4000.0, 400.0)),
+            (wave: "square", freq: (60.0, 40.0), env: (0.0, 0.05, 0.35), gain: 0.2, duty: 0.4, lowpass: (600.0, 300.0)),
+        ]),
+        (name: "chuckle", events: ["unit.emote"], volume: 0.35, layers: [
+            (wave: "triangle", freq: (130.0, 120.0), env: (0.01, 0.06, 0.06), gain: 0.4, lowpass: (900.0, 900.0)),
+            (wave: "triangle", freq: (125.0, 115.0), env: (0.01, 0.06, 0.06), gain: 0.4, lowpass: (900.0, 900.0), delay: 0.18),
+            (wave: "triangle", freq: (120.0, 100.0), env: (0.01, 0.08, 0.1), gain: 0.4, lowpass: (900.0, 900.0), delay: 0.36),
+        ]),
+    ],
+)

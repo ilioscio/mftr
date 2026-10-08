@@ -332,3 +332,17 @@ fn actions_announce_their_fire_once_even_when_cut_at_the_windup_or_instant() {
     }
     assert!(anim.action_time().is_none(), "the pulse played out and blended away");
 }
+
+#[test]
+fn a_kit_with_several_dashes_plays_each_ones_clips() {
+    // A10: Shade has three (Shadow Step, Veil Step, Execution); the drive's slot picks the set.
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/shade/export/shade.glb");
+    let lib = mftr_pack::load_file(&path).unwrap().library;
+    for (slot, name) in [(0u8, "q_start"), (2, "e_start"), (3, "r_start")] {
+        let mut anim = Animator::new(&lib);
+        anim.update(&lib, &Drive { dt: 0.016, ..Default::default() });
+        anim.update(&lib, &Drive { dt: 0.016, dashing: true, dash_slot: Some(slot), ..Default::default() });
+        let playing = anim.flourish_clip().map(|c| lib.clips[c].name.clone());
+        assert_eq!(playing.as_deref(), Some(name), "slot {slot}");
+    }
+}

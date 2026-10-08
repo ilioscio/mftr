@@ -1,0 +1,33 @@
+// Cairn's VFX (A12): moss and stone. Stone chips where his staff lands (`attack.fire`), Stone
+// Lash's skittering line of shards, Shelter's green-gold ward rising on the ally, Rockfall's
+// stones dropping into a ring on its true radius, and Monolith's eruption of standing stone around
+// him (the shared hard-CC clang plays with its knock-up). Instances of the client's VFX kit
+// (05 §5.1); hand-authored next to the export; validated by `pack validate`.
+(
+    effects: [
+        // Basic attacks: stone chips and a puff of moss-green dust.
+        (event: "attack.fire", kit: "burst", ramp: [(0.74, 0.76, 0.7), (0.52, 0.54, 0.5), (0.34, 0.36, 0.32)], count: 12, speed: 3.0, lifetime: 0.3),
+        (event: "attack.fire", kit: "dust", ramp: [(0.46, 0.52, 0.38), (0.36, 0.42, 0.3), (0.26, 0.3, 0.22)], count: 6, speed: 0.9),
+
+        // Q Stone Lash: a whip-crack of shards along the line.
+        (event: "q.release", kit: "flare", ramp: [(0.8, 0.84, 0.72), (0.52, 0.6, 0.42), (0.3, 0.36, 0.26)], count: 10),
+        (event: "q.projectile", kit: "arrow", ramp: [(0.72, 0.74, 0.68), (0.5, 0.52, 0.48), (0.32, 0.34, 0.3)]),
+        (event: "q.impact", kit: "burst", ramp: [(0.8, 0.82, 0.76), (0.54, 0.58, 0.5), (0.34, 0.36, 0.32)], count: 14, speed: 3.4),
+
+        // W Shelter: a green-gold ward rising on the ally.
+        (event: "w.fire", kit: "flare", ramp: [(0.94, 1.0, 0.76), (0.6, 0.86, 0.44), (0.3, 0.52, 0.24)], count: 18, speed: 2.2, lifetime: 0.5),
+
+        // E Rockfall: his staff calls; the stones fall into a ring.
+        (event: "e.fire", kit: "flare", ramp: [(0.82, 0.9, 0.66), (0.52, 0.66, 0.4), (0.3, 0.4, 0.24)], count: 8, speed: 1.6),
+        (event: "e.detonate", kit: "burst", ramp: [(0.78, 0.8, 0.74), (0.54, 0.56, 0.52), (0.36, 0.37, 0.34), (0.24, 0.25, 0.23)], count: 22, speed: 4.0, lifetime: 0.45),
+        (event: "e.detonate", kit: "ring", ramp: [(0.7, 0.8, 0.56), (0.48, 0.58, 0.38), (0.3, 0.36, 0.24)], speed: 1.6),
+        (event: "e.detonate", kit: "dust", ramp: [(0.52, 0.5, 0.46), (0.4, 0.39, 0.36), (0.28, 0.27, 0.25)], count: 12, speed: 1.6, size: 1.2),
+
+        // R Monolith: the staff strikes the ground; stone erupts in a ring on the area's delay.
+        (event: "r.fire", kit: "dust", ramp: [(0.52, 0.5, 0.46), (0.4, 0.39, 0.36), (0.28, 0.27, 0.25)], count: 12, speed: 1.4),
+        (event: "r.fire", kit: "ring", ramp: [(0.8, 0.92, 0.6), (0.5, 0.66, 0.38), (0.28, 0.38, 0.22)], speed: 0.6),
+        (event: "r.detonate", kit: "burst", ramp: [(0.8, 0.82, 0.78), (0.56, 0.58, 0.54), (0.38, 0.39, 0.36), (0.26, 0.27, 0.25)], count: 40, speed: 6.0, lifetime: 0.6),
+        (event: "r.detonate", kit: "ring", ramp: [(0.86, 0.96, 0.66), (0.54, 0.7, 0.4), (0.3, 0.4, 0.24)]),
+        (event: "r.detonate", kit: "dust", ramp: [(0.5, 0.48, 0.45), (0.38, 0.37, 0.35), (0.27, 0.26, 0.25)], count: 18, speed: 2.4, size: 1.6),
+    ],
+)

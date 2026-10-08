@@ -210,6 +210,7 @@ impl MftrAnimator {
             dt,
             speed,
             dashing: flag("dashing"),
+            dash_slot: (int("dash_slot") >= 0 && unit.contains_key("dash_slot")).then(|| int("dash_slot") as u8),
             stunned: flag("stunned"),
             rooted: flag("rooted"),
             dead: flag("dead"),

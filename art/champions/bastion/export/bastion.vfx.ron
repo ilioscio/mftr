@@ -1,0 +1,30 @@
+// Bastion's VFX (A8): stone. Chips and dust where his fists land (`attack.fire`), an iron chain
+// for Grapple, a rune-blue shimmer when Bulwark rises, Tremor's dust ring on its true radius, and
+// Upheaval's eruption of rock (the shared hard-CC clang plays with its knock-up). Instances of
+// the client's VFX kit (05 §5.1); hand-authored next to the export; validated by `pack validate`.
+(
+    effects: [
+        // Basic attacks: stone chips and dust.
+        (event: "attack.fire", kit: "burst", ramp: [(0.76, 0.78, 0.82), (0.52, 0.55, 0.6), (0.34, 0.36, 0.4), (0.24, 0.25, 0.27)], count: 14, speed: 3.2, lifetime: 0.35),
+        (event: "attack.fire", kit: "dust", ramp: [(0.56, 0.54, 0.5), (0.44, 0.42, 0.4), (0.32, 0.31, 0.3)], count: 8, speed: 1.0),
+
+        // Q Grapple: an iron chain flung out, a clanking catch.
+        (event: "q.release", kit: "flare", ramp: [(0.86, 0.88, 0.92), (0.56, 0.58, 0.62), (0.32, 0.33, 0.36)], count: 8),
+        (event: "q.projectile", kit: "arrow", ramp: [(0.7, 0.72, 0.76), (0.46, 0.48, 0.52), (0.3, 0.31, 0.34)]),
+        (event: "q.impact", kit: "burst", ramp: [(0.9, 0.92, 0.95), (0.6, 0.62, 0.66), (0.36, 0.37, 0.4)], count: 14, speed: 3.5),
+
+        // W Bulwark: a rune-blue shimmer rising around him.
+        (event: "w.fire", kit: "flare", ramp: [(0.86, 0.97, 1.0), (0.55, 0.85, 1.0), (0.25, 0.5, 0.75)], count: 18, speed: 2.4, lifetime: 0.5),
+
+        // E Tremor: the stomp kicks up dust; a ring on the area's edge.
+        (event: "e.fire", kit: "dust", ramp: [(0.56, 0.54, 0.5), (0.44, 0.42, 0.4), (0.32, 0.31, 0.3)], count: 12, speed: 1.6, size: 1.2),
+        (event: "e.detonate", kit: "ring", ramp: [(0.8, 0.78, 0.72), (0.56, 0.54, 0.5), (0.36, 0.35, 0.33)], speed: 2.0),
+        (event: "e.detonate", kit: "burst", ramp: [(0.76, 0.78, 0.82), (0.52, 0.55, 0.6), (0.3, 0.31, 0.33)], count: 16, speed: 3.0),
+
+        // R Upheaval: the fists hit, then the ground erupts on the area's delay.
+        (event: "r.fire", kit: "dust", ramp: [(0.56, 0.54, 0.5), (0.44, 0.42, 0.4), (0.32, 0.31, 0.3)], count: 12, speed: 1.4),
+        (event: "r.detonate", kit: "burst", ramp: [(0.82, 0.84, 0.88), (0.56, 0.58, 0.62), (0.38, 0.39, 0.42), (0.26, 0.27, 0.29)], count: 36, speed: 6.0, lifetime: 0.6),
+        (event: "r.detonate", kit: "ring", ramp: [(0.86, 0.95, 1.0), (0.5, 0.75, 0.95), (0.3, 0.4, 0.5)]),
+        (event: "r.detonate", kit: "dust", ramp: [(0.5, 0.48, 0.45), (0.38, 0.37, 0.35), (0.27, 0.26, 0.25)], count: 16, speed: 2.4, size: 1.5),
+    ],
+)

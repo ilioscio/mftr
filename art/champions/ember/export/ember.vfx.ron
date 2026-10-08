@@ -1,0 +1,31 @@
+// Ember's VFX (A7): fire. Fireballs from bare hands, a white-hot Ember Lance, Cinder Bloom's
+// burst of embers and ash on its true radius, a flash where he Flickers in, and a spinning gold
+// Binding Sigil. Instances of the client's VFX kit (05 §5.1); hand-authored next to the export;
+// validated by `mftr-tools pack validate`.
+(
+    effects: [
+        // Basic attack: a fireball.
+        (event: "attack.release", kit: "flare", ramp: [(1.0, 0.95, 0.7), (1.0, 0.62, 0.2), (0.8, 0.28, 0.08)], count: 8, lifetime: 0.12),
+        (event: "attack.projectile", kit: "orb", ramp: [(1.0, 0.86, 0.45), (1.0, 0.5, 0.12), (0.6, 0.2, 0.06)]),
+        (event: "attack.impact", kit: "burst", ramp: [(1.0, 0.95, 0.7), (1.0, 0.55, 0.15), (0.7, 0.22, 0.06), (0.25, 0.18, 0.16)], count: 14, speed: 3.2),
+
+        // Q Ember Lance: white-hot at the core, a long fiery trail, a sharp burst.
+        (event: "q.release", kit: "flare", ramp: [(1.0, 1.0, 0.9), (1.0, 0.75, 0.3), (0.9, 0.35, 0.08)], count: 12, size: 1.4, lifetime: 0.14),
+        (event: "q.projectile", kit: "arrow", ramp: [(1.0, 0.98, 0.8), (1.0, 0.62, 0.18), (0.75, 0.25, 0.06)]),
+        (event: "q.impact", kit: "burst", ramp: [(1.0, 1.0, 0.85), (1.0, 0.65, 0.2), (0.8, 0.28, 0.06), (0.3, 0.2, 0.18)], count: 20, speed: 4.2),
+
+        // W Cinder Bloom: embers erupt, a ring of fire on the edge, ash drifting.
+        (event: "w.detonate", kit: "burst", ramp: [(1.0, 0.95, 0.6), (1.0, 0.55, 0.12), (0.7, 0.2, 0.05), (0.22, 0.18, 0.17)], count: 30, speed: 4.8, lifetime: 0.55),
+        (event: "w.detonate", kit: "ring", ramp: [(1.0, 0.8, 0.35), (0.95, 0.42, 0.1), (0.4, 0.2, 0.12)]),
+        (event: "w.detonate", kit: "dust", ramp: [(0.36, 0.32, 0.3), (0.26, 0.24, 0.23), (0.18, 0.17, 0.17)], count: 12, speed: 1.4, size: 1.1),
+
+        // E Flicker: a flash where he reappears.
+        (event: "e.fire", kit: "flare", ramp: [(1.0, 0.95, 0.75), (1.0, 0.6, 0.2), (0.7, 0.25, 0.08)], count: 16, size: 1.3, speed: 3.0, lifetime: 0.2),
+
+        // R Binding Sigil: a spinning gold sigil, a ring where it binds.
+        (event: "r.release", kit: "flare", ramp: [(1.0, 0.96, 0.75), (1.0, 0.8, 0.35), (0.8, 0.5, 0.15)], count: 12, size: 1.3),
+        (event: "r.projectile", kit: "net", ramp: [(1.0, 0.86, 0.4), (1.0, 0.6, 0.18), (0.6, 0.3, 0.1)]),
+        (event: "r.impact", kit: "ring", ramp: [(1.0, 0.9, 0.5), (1.0, 0.62, 0.2), (0.5, 0.3, 0.15)], count: 18),
+        (event: "r.impact", kit: "burst", ramp: [(1.0, 0.95, 0.7), (1.0, 0.7, 0.25), (0.6, 0.3, 0.1)], count: 14),
+    ],
+)

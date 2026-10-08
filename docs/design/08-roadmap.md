@@ -511,6 +511,125 @@ Minions as tiny hooded figures, distinct from champions at a glance (the owner's
 - polish of the block-out swings;
 - the maul's head twisting about its haft between keys (the aim fixes the haft, not the roll).
 
+### A slice 7 status (2026-10-07): Ember ✅ done (concept awaiting approval)
+The first of the other eight champions (6 in the A list). Designed without an owner brief; `concept.md` is a draft.
+- **Look:** a lean pyromancer on `biped` v1, 2,920 triangles.
+  - A charcoal long coat with gold-trimmed edges, and coat tails on an `extra_coat` chain (2 bones).
+  - A tall ember-orange collar flaring behind his head.
+  - Glowing ember cuffs and a chest rune (`emissive`); the team accent on a sash and forearm bands.
+  - Short dark hair and amber eyes.
+- **Clips:** all 30, every `fire` checked against his kit. Flicker (a blink) plays as a pulse.
+- **Effects and sounds:**
+  - VFX: fireballs, a white-hot lance, Cinder Bloom's embers and ring, the Flicker flash, a spinning gold Binding Sigil.
+  - 14 sounds, 75 KB.
+- **Runtime:** blinks now announce themselves as instant casts too, so Flicker and the Blink utility spell animate and get their `fire` effects.
+- **Checked in Godot** in an Ember mirror duel: his whole kit fired its effects and sounds (fireball, Bloom, Lance, both blinks, Sigil), with the Sigil's spinning frame on screen.
+
+**Left for later:** the owner's approval of his concept; polish.
+
+### A slice 8 status (2026-10-07): Bastion ✅ done (concept awaiting approval)
+- **Look:** a stone guardian of rounded masonry, the widest silhouette on the roster (the `large` shape, ×1.08 and ×1.12 wider again); 2,596 triangles.
+  - Boulder shoulders with moss, iron bands.
+  - A slab shield on the left arm, and a chain grapple wound round the right fist down to a hook.
+  - No face: a glowing rune visor in a rock head, and pale rune lines on the chest and forearms.
+  - The team accent on a hanging banner, the shield emblem and the shoulder paint.
+- **Clips:** all 29, every `fire` checked; Bulwark (instant) plays as an upper-body pulse.
+- **Effects and sounds:**
+  - VFX: stone chips, the chain, Bulwark's shimmer, Tremor's ring, Upheaval's eruption.
+  - 13 sounds, 73 KB.
+- **Checked in Godot:** the whole kit fired its effects and sounds, with Upheaval's eruption (and the hard-CC clang) on screen.
+
+**Left for later:** the owner's approval of his concept; polish.
+
+### A slice 9 status (2026-10-07): Lumen ✅ done (concept awaiting approval)
+- **Look:** a serene light-priestess on `biped` v1, 2,566 triangles.
+  - A floor-length ivory robe in two tiers with a gold hem, a capelet and bell sleeves.
+  - A halo of twelve glowing gold segments floating behind her head.
+  - The team-colored stole down her front.
+  - Pale gold hair in a ponytail.
+- **Clips:** all 30. Her heal and shield are instant, so they play as upper-body pulses.
+- **Effects and sounds:**
+  - VFX: gold motes, the heal and shield glows, Lull's lilac orb, Binding Halo's golden ring.
+  - 9 bell-like sounds, 48 KB.
+- **Checked in Godot:** the whole kit fired its effects and sounds, with Binding Halo's ring (and the hard-CC clang) on screen.
+
+**Left for later:** the owner's approval of her concept; polish.
+
+### A slice 10 status (2026-10-07): Shade ✅ done (concept awaiting approval)
+- **Look:** a lithe shadow assassin on `biped` v1, 2,682 triangles.
+  - Violet-black leathers.
+  - A dark mask over his lower face.
+  - A curved dagger in each hand, aimed per pose.
+  - A team-colored scarf streaming behind him on an `extra_scarf` chain.
+- **Clips:** all 35, including three dash sets (Shadow Step, Veil Step, Execution).
+- **Runtime, several dashes:**
+  - The animator keeps a start / travel / land set per dash slot.
+  - Dashes and lunges now emit an instant `CastStarted`, so the client knows each unit's dash slot. Our own dash notes its slot at the key press.
+  - Dash start and land effects use that slot's events.
+- **Effects and sounds:**
+  - VFX: slash glints, Veil Step smoke, Fan of Blades' ring of steel, strike bursts.
+  - 10 sounds, 48 KB.
+- **Checked in Godot:**
+  - Fan of Blades, the Blink pulse, Veil Step (its own landing) and Shadow Step (its own start and strike) fired their effects and sounds.
+  - Execution wasn't seen live: the bot kept out of its range.
+
+**Left for later:** the owner's approval of his concept; polish.
+
+### A slice 11 status (2026-10-07): Quill ✅ done (concept awaiting approval)
+- **Look:** a stargazer scholar on `biped` v1, 3,266 triangles.
+  - A long teal coat with brass buttons, team lapels and coat tails (`extra_coat`).
+  - Brass goggles pushed up on her forehead.
+  - A tall staff topped with a brass armillary sphere around a glowing star, aimed per pose.
+- **Clips:** all 32, every `fire` checked (Starfall Lance's at 18).
+- **Effects and sounds:**
+  - VFX: starlight bolts, Arc Shot's lobbed star, Static Field's ring, Recoil dust, Starfall Lance.
+  - 10 sounds, 55 KB.
+- **Checked in Godot:** the whole kit fired its effects and sounds.
+
+**Left for later:** the owner's approval of her concept; polish.
+
+### A slice 12 status (2026-10-07): Cairn ✅ done (concept awaiting approval)
+- **Look:** an antlered earth-warden on `biped` v1, 2,922 triangles.
+  - Antlers rising from his brow; grey hair tied back; green paint down his cheeks.
+  - A moss-green cloak (`extra_cloak`) over bark-brown leathers.
+  - A staff topped with a small cairn of stacked stones and team ribbons, aimed per pose.
+- **Clips:** all 29, every `fire` checked.
+- **Effects and sounds:**
+  - VFX: stone chips, Stone Lash's shards, Shelter's ward, Rockfall's stones and ring, Monolith's eruption.
+  - 11 sounds, 55 KB.
+- **Checked in Godot:** Shelter (instant), Stone Lash, Rockfall (its call, landing and root) and Monolith's strike fired their effects and sounds.
+
+**Left for later:** the owner's approval of his concept; polish.
+
+### A slice 13 status (2026-10-07): Marrow ✅ done (concept awaiting approval)
+- **Look:** a bone-witch on `biped` v1, 2,644 triangles.
+  - A crown of bone spikes; skull-capped pauldrons; a corset of bone ribs.
+  - Ash-plum robes with a ragged skirt; a tattered shawl (`extra_cloak`).
+  - Grave-green light at her wrists. She casts from bare hands.
+- **Clips:** all 30, every `fire` checked.
+- **Client fix:** areas are named by radius and delay. Before, Ossuary (300 u, delayed) played Siphon's (a 300 u nova) detonation.
+- **Effects and sounds:**
+  - VFX: grave-green bolts, Siphon's ring, Grasping Bones' shards, Grave Pact's rush, Ossuary's pit of bone.
+  - 9 sounds, 48 KB.
+- **Checked in Godot:** the whole kit fired its effects and sounds, Ossuary's detonation included.
+
+**Left for later:** the owner's approval of her concept; polish.
+
+### A slice 14 status (2026-10-07): Wren ✅ done (concept awaiting approval)
+- **Look:** a feathered scout on `biped` v1, 3,076 triangles.
+  - A peaked russet cap with a long team-colored feather.
+  - A tan jerkin, an olive capelet (`extra_cape`), tall boots, and a quiver at her hip.
+  - A hand crossbow, aimed per pose.
+- **Clips:** all 32, including Pounce's start / travel / land set.
+- **Effects and sounds:**
+  - VFX: crossbow bolts, Ricochet, Caltrops' lob and scatter, Pounce's dust, Hail of Arrows' volley.
+  - 11 sounds, 53 KB.
+- **Checked in Godot:** the whole kit fired its effects and sounds, Pounce's start and landing included.
+
+**Left for later:** the owner's approval of her concept; polish.
+
+With A14 every champion in the roster has a model, clips, effects and sounds.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.

@@ -54,6 +54,14 @@ fn committed_exports_are_clean() {
         "library/biped/export/biped_library.glb",
         "champions/vesper/export/vesper.glb",
         "champions/rook/export/rook.glb",
+        "champions/ember/export/ember.glb",
+        "champions/bastion/export/bastion.glb",
+        "champions/lumen/export/lumen.glb",
+        "champions/shade/export/shade.glb",
+        "champions/quill/export/quill.glb",
+        "champions/cairn/export/cairn.glb",
+        "champions/marrow/export/marrow.glb",
+        "champions/wren/export/wren.glb",
     ]
     .map(String::from)
     .to_vec();
@@ -288,6 +296,14 @@ fn generated_sounds_are_built_from_the_current_recipe() {
         ("library/biped/sounds.ron", "library/biped/export/biped_library.sfx.ron"),
         ("champions/vesper/sounds.ron", "champions/vesper/export/vesper.sfx.ron"),
         ("champions/rook/sounds.ron", "champions/rook/export/rook.sfx.ron"),
+        ("champions/ember/sounds.ron", "champions/ember/export/ember.sfx.ron"),
+        ("champions/bastion/sounds.ron", "champions/bastion/export/bastion.sfx.ron"),
+        ("champions/lumen/sounds.ron", "champions/lumen/export/lumen.sfx.ron"),
+        ("champions/shade/sounds.ron", "champions/shade/export/shade.sfx.ron"),
+        ("champions/quill/sounds.ron", "champions/quill/export/quill.sfx.ron"),
+        ("champions/cairn/sounds.ron", "champions/cairn/export/cairn.sfx.ron"),
+        ("champions/marrow/sounds.ron", "champions/marrow/export/marrow.sfx.ron"),
+        ("champions/wren/sounds.ron", "champions/wren/export/wren.sfx.ron"),
     ] {
         let text = std::fs::read_to_string(art(recipe)).unwrap();
         let file = mftr_pack::sfx::parse(&std::fs::read_to_string(art(binding)).unwrap()).unwrap();

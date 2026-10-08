@@ -73,6 +73,9 @@ pub struct Drive {
     /// Ground speed in u/s (as displayed).
     pub speed: f32,
     pub dashing: bool,
+    /// Which ability slot the dash is (0 = q … 3 = r), when known: picks that slot's dash clips
+    /// for kits with several (A10). `None` plays the first.
+    pub dash_slot: Option<u8>,
     pub stunned: bool,
     pub rooted: bool,
     pub dead: bool,
@@ -111,7 +114,9 @@ pub struct Animator {
     walk: Option<usize>,
     run: Option<usize>,
     run_fast: Option<usize>,
-    /// The kit's dash clips (`<slot>_start`, `<slot>_travel`, `<slot>_land`), if it has them.
+    /// The kit's dash clips per slot: `(slot, <slot>_start, <slot>_travel, <slot>_land)`.
+    dashes: Vec<(u8, Option<usize>, usize, Option<usize>)>,
+    /// The dash playing (chosen when it starts, so its landing matches).
     dash: Option<(Option<usize>, usize, Option<usize>)>,
     stunned: Option<usize>,
     rooted: Option<usize>,
@@ -145,12 +150,15 @@ pub struct Animator {
 
 impl Animator {
     pub fn new(lib: &Library) -> Animator {
-        let suffixed =
-            |suffix: &str| lib.clips.iter().position(|c| c.name.len() == 1 + suffix.len() && c.name.ends_with(suffix));
-        let dash = suffixed("_travel").map(|travel| {
-            let slot = &lib.clips[travel].name[..1];
-            (lib.clip(&format!("{slot}_start")), travel, lib.clip(&format!("{slot}_land")))
-        });
+        let dashes: Vec<(u8, Option<usize>, usize, Option<usize>)> = ["q", "w", "e", "r"]
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| {
+                let travel = lib.clip(&format!("{s}_travel"))?;
+                Some((i as u8, lib.clip(&format!("{s}_start")), travel, lib.clip(&format!("{s}_land"))))
+            })
+            .collect();
+        let dash = dashes.first().map(|&(_, s, t, l)| (s, t, l));
         Animator {
             idle: lib.clip("idle"),
             idle_ready: lib.clip("idle_ready"),
@@ -158,6 +166,7 @@ impl Animator {
             walk: lib.clip("walk"),
             run: lib.clip("run"),
             run_fast: lib.clip("run_fast"),
+            dashes,
             dash,
             stunned: lib.clip("cc_stunned"),
             rooted: lib.clip("cc_rooted"),
@@ -430,6 +439,11 @@ impl Animator {
             pulse: false,
         };
         let blocked = d.dead || d.stunned;
+        if d.dashing && !self.was_dashing {
+            // A new dash: that slot's clips (or the kit's first set).
+            let pick = self.dashes.iter().find(|(s, ..)| Some(*s) == d.dash_slot).or(self.dashes.first());
+            self.dash = pick.map(|&(_, s, t, l)| (s, t, l));
+        }
         if let Some((start, travel, land)) = self.dash.filter(|_| !blocked) {
             if d.dashing && !self.was_dashing {
                 self.flourish = Some(match start {

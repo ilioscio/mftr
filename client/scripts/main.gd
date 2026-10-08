@@ -563,7 +563,9 @@ func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
 	if dashing != bool(body.get_meta("was_dashing", false)):
 		body.set_meta("was_dashing", dashing)
 		var champ: String = info.get("champion", "")
-		_vfx_play(champ, client.dash_action(champ), "start" if dashing else "land", body.global_position)
+		var slot := int(body.get_meta("dash_slot", -1))
+		var action: String = ["q", "w", "e", "r", "d", "f"][slot] if slot >= 0 else client.dash_action(champ)
+		_vfx_play(champ, action, "start" if dashing else "land", body.global_position)
 	if not _models_shown(body) or delta <= 0.0:
 		return
 	var rig: Dictionary = body.get_meta("rig")
@@ -583,6 +585,7 @@ func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
 		rig.yaw += clampf(diff, -TURN_RATE * delta, TURN_RATE * delta)
 		rig.model.rotation.y = rig.yaw
 	info["hit"] = body.get_meta("hit", false)
+	info["dash_slot"] = int(body.get_meta("dash_slot", -1))
 	body.set_meta("hit", false)
 	for e in rig.animator.drive(rig.skeleton, info, rig.speed, delta):
 		var champ: String = info.get("champion", "")
@@ -599,6 +602,17 @@ func _flash(id: int) -> void:
 	if body != null:
 		body.set_meta("flash", 1.0)
 		body.set_meta("hit", true)   # minions flinch (10 §5.4)
+
+
+## Which of a kit's dashes a body is doing (A10): the animator picks that slot's clips, and the
+## dash effects that slot's. True if `slot` is a dash or lunge.
+func _note_dash(body: Node3D, champion: String, slot: int) -> bool:
+	if body == null or champion == "" or slot >= SLOT_ACTIONS.size():
+		return false
+	if client.action_info(champion, ["q", "w", "e", "r", "d", "f"][slot]).get("shape", "") != "dash":
+		return false
+	body.set_meta("dash_slot", slot)
+	return true
 
 
 ## `<action>.fire` (A6): an animation passed its `fire` marker, the moment a melee blow lands, a
@@ -796,6 +810,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			var aim = _cursor_ground()
 			if aim != null:
 				client.cast(slot, aim)
+				# Our own dash is predicted before its event arrives: note its slot now.
+				_note_dash(own_body, own_status.get("champion", ""), slot)
 			return
 	if event.is_action_pressed("attack_move"):
 		attack_move_armed = true
@@ -874,7 +890,11 @@ func _process(delta: float) -> void:
 	# Casts without a windup (A6): the drive never shows them, so play them on the event.
 	for c in client.take_instant_casts():
 		var caster = _body_of(int(c.unit))
-		if caster != null and _models_shown(caster):
+		if caster == null or not _models_shown(caster):
+			continue
+		var who: String = own_status.get("champion", "") if caster == own_body else remote_info.get(int(c.unit), {}).get("champion", "")
+		# Dashes and lunges have their own start / travel / land clips: note which (A10).
+		if not _note_dash(caster, who, int(c.slot)):
 			caster.get_meta("rig").animator.pulse(int(c.slot))
 	_update_remotes(delta)
 	_update_hover()
