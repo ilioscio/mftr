@@ -595,6 +595,19 @@ mod tests {
     /// connected through it all.
     #[test]
     fn champion_select_after_each_match_end_to_end() {
+        champion_select_after_a_match(0.0);
+    }
+
+    /// The same after a 20-minute match: the server has sent more than 32,768 packets since
+    /// the Welcome, so 16-bit packet sequences no longer tell whether champion select is news.
+    #[test]
+    fn champion_select_after_a_long_match_end_to_end() {
+        champion_select_after_a_match(20.0 * 60.0);
+    }
+
+    /// Plays a first match for `linger` seconds (its structures held whole, so nobody wins),
+    /// then wins it at once.
+    fn champion_select_after_a_match(linger: f64) {
         use mftr_net::msg::LobbyAction;
         use mftr_sim::{UnitId, UnitKind, Vec2};
         let cfg = ServerConfig { seed: 5, bots: 10, lobby: true, scenario: Scenario::Aram, ..Default::default() };
@@ -607,8 +620,8 @@ mod tests {
         let (mut t, mut next_hello, mut next_attack) = (0.0, 0.0, 0.0);
         // Matches played, the champion of each, and the reroll in the second champion select.
         let (mut matches, mut champions, mut rerolled) = (0, Vec::new(), None);
-        let (mut base, mut was_playing) = (None, false);
-        while t < 60.0 && champions.len() < 2 {
+        let (mut base, mut was_playing, mut rig_at) = (None, false, f64::INFINITY);
+        while t < 60.0 + linger && champions.len() < 2 {
             for (key, link) in [(1, &mut up), (2, &mut wup)] {
                 while let Some(p) = link.recv(t) {
                     for (to, bytes) in server.handle_packet(key, &p, t) {
@@ -648,6 +661,19 @@ mod tests {
                     champions.push(session.champion());
                     matches += 1;
                     if matches == 1 {
+                        rig_at = t + linger;
+                    }
+                }
+                Phase::Playing if matches == 1 && base.is_none() && t < rig_at => {
+                    let w = server.world_mut();
+                    let ids: Vec<UnitId> = w.units().iter().filter(|u| u.kind.is_structure()).map(|u| u.id).collect();
+                    for id in ids {
+                        let u = w.unit_mut(id).unwrap();
+                        u.state.health = u.stats.max_health;
+                    }
+                }
+                Phase::Playing if matches == 1 && base.is_none() => {
+                    {
                         // End this match quickly: only the enemy Base is left, and we stand by it.
                         let team = session.team();
                         let w = server.world_mut();
@@ -691,7 +717,7 @@ mod tests {
             if watcher.phase() == Phase::Playing && watcher.should_send(t) {
                 wup.send(watcher.input_packet(t), t);
             }
-            t += 0.001;
+            t += if matches == 1 && t < rig_at { 1.0 / 60.0 } else { 0.001 };
         }
         assert_eq!(champions.len(), 2, "two matches by {t:.1} s");
         assert!(rerolled.is_some(), "a second champion select, with rerolls");
@@ -729,6 +755,79 @@ mod tests {
         let drawn = session.own_render_position(t).unwrap();
         assert!(drawn.distance(server_pos) < 50.0, "drawn {drawn:?}, server {server_pos:?}");
         assert!(watcher.is_spectator(), "the spectator is still watching");
+    }
+
+    /// Nothing blocks where a destroyed structure stood, on the server or in prediction (dead
+    /// units aren't sent, so they never become collision proxies): walking straight through
+    /// its spot needs no correction.
+    #[test]
+    fn walking_through_a_destroyed_turret_is_predicted() {
+        use mftr_sim::{SimTime, UnitKind, Vec2};
+        let cfg = ServerConfig { seed: 3, scenario: Scenario::Aram, ..Default::default() };
+        let mut server = ServerCore::new(cfg, 0.0);
+        let mut session = ClientSession::new();
+        let (mut up, mut down) = (SimLink::new(LinkProfile::GOOD, 9), SimLink::new(LinkProfile::GOOD, 10));
+        let (mut t, mut next_hello) = (0.0, 0.0);
+        let mut plan: Option<(Vec2, Vec2)> = None;
+        let mut ordered = false;
+        while t < 20.0 {
+            while let Some(p) = up.recv(t) {
+                for (to, bytes) in server.handle_packet(1, &p, t) {
+                    if to == 1 {
+                        down.send(bytes, t);
+                    }
+                }
+            }
+            if t >= server.next_tick_due() {
+                for (to, bytes) in server.step(t) {
+                    if to == 1 {
+                        down.send(bytes, t);
+                    }
+                }
+            }
+            while let Some(p) = down.recv(t) {
+                session.handle_packet(&p, t);
+            }
+            session.update(t);
+            if matches!(session.phase(), Phase::Connecting) && t >= next_hello {
+                up.send(session.hello_packet(t), t);
+                next_hello = t + 0.25;
+            }
+            if session.phase() == Phase::Playing {
+                if plan.is_none() {
+                    // Our own outer turret falls, and we stand just behind where it stood.
+                    let team = session.team();
+                    let w = server.world_mut();
+                    let turret =
+                        w.units().iter().find(|u| u.kind == UnitKind::Turret && u.team == team && u.tier == 1).unwrap();
+                    let (id, pos) = (turret.id, turret.state.pos);
+                    let u = w.unit_mut(id).unwrap();
+                    u.state.health = 0.0;
+                    u.state.respawn_at = Some(SimTime(u64::MAX));
+                    let ahead = if team == Team::Blue { 1.0 } else { -1.0 };
+                    w.unit_mut(session.unit()).unwrap().state.pos = pos - Vec2::new(500.0 * ahead, 0.0);
+                    plan = Some((pos, pos + Vec2::new(500.0 * ahead, 0.0)));
+                    session.stats.corrections.clear();
+                } else if let Some((_, goal)) = plan
+                    && !ordered
+                    && t > 3.0
+                {
+                    // Straight through the turret's spot, once the teleport has been absorbed.
+                    session.stats.corrections.clear();
+                    session.move_to(goal, t);
+                    ordered = true;
+                }
+                if session.should_send(t) {
+                    up.send(session.input_packet(t), t);
+                }
+            }
+            t += 0.001;
+        }
+        let (spot, goal) = plan.expect("playing");
+        let server_pos = server.world().unit(session.unit()).unwrap().state.pos;
+        assert!(server_pos.distance(goal) < 5.0, "the server walked us through {spot:?}: at {server_pos:?}");
+        let big: Vec<f32> = session.stats.corrections.iter().copied().filter(|c| *c > 1.0).collect();
+        assert!(big.is_empty(), "prediction detoured around the dead turret: {big:?}");
     }
 
     /// M3 slices 2 and 3: a Titan with Multishot, Echo and Broadside casts over a jittery link.
