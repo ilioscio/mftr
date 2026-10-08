@@ -13,6 +13,22 @@ uniform float lane_z = 15.0;
 
 varying vec3 world_pos;
 
+// Fog of war (the minimap's vision grid): ground our team doesn't see is darkened and cooled.
+global uniform sampler2D fog_map : filter_linear;
+global uniform vec2 fog_size;
+global uniform float fog_on;
+
+vec3 fogged(vec3 c, vec3 wp) {
+	if (fog_on < 0.5 || fog_size.x <= 0.0) {
+		return c;
+	}
+	vec2 uv = wp.xz / fog_size;
+	float seen = (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) ? 0.0 : texture(fog_map, uv).r;
+	vec3 dark = mix(vec3(dot(c, vec3(0.3, 0.55, 0.15))), c, 0.45) * vec3(0.42, 0.46, 0.58);
+	return mix(dark, c, seen);
+}
+
+
 float hash(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
 	p += dot(p, p + 45.32);
@@ -56,6 +72,6 @@ void fragment() {
 	// Subtle 1 m grid to help judge distances in the sandbox.
 	vec2 g = abs(fract(p) - 0.5);
 	float grid = 1.0 - smoothstep(0.47, 0.5, max(g.x, g.y));
-	ALBEDO = ground * (1.0 - 0.06 * (1.0 - grid));
+	ALBEDO = fogged(ground * (1.0 - 0.06 * (1.0 - grid)), world_pos);
 	ROUGHNESS = 1.0;
 }

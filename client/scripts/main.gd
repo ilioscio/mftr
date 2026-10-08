@@ -25,6 +25,7 @@ const ALLY_COLOR := Color(0.3, 0.85, 0.8)
 const HARD_CC_COLOR := Color(1.0, 0.85, 0.25)
 const SLOT_KEYS := ["Q", "W", "E", "R", "D", "F"]
 const SLOT_ACTIONS := ["cast_q", "cast_w", "cast_e", "cast_r", "cast_d", "cast_f"]
+const LEVEL_ACTIONS := ["level_q", "level_w", "level_e", "level_r"]
 
 var client: MatchClient
 var camera: Camera3D
@@ -69,6 +70,12 @@ const PARTICLE_KITS := ["flare", "burst", "ring", "dust"]
 # falling back to the shared library's (as the VFX do).
 var sfx: Node3D
 var _sfx_tables := {}                    # champion name -> { event: [sound] }
+# Player settings (Esc → Settings): camera, minimap, keybinds. The camera rig scrolls the view.
+var settings = preload("res://scripts/settings.gd").new()
+var cam = preload("res://scripts/camera_rig.gd").new()
+var settings_panel: Control
+var minimap: Control
+var _was_dead := false
 
 
 func _ready() -> void:
@@ -774,10 +781,18 @@ func _cursor_ground():
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.is_pressed() and not event.is_echo() and (event as InputEventKey).keycode == KEY_ESCAPE:
-		if menu_panel == null:
+		# Esc closes what's open, innermost first: settings, the shop, then the pause menu.
+		if settings_panel != null and settings_panel.visible:
+			settings_panel.close()
+		elif shop_panel != null and shop_panel.visible:
+			_toggle_shop()
+		elif menu_panel == null:
 			_toggle_pause_menu()
 		return
 	if menu_panel != null or (pause_panel != null and pause_panel.visible):
+		return
+	if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_MIDDLE:
+		cam.drag(event.is_pressed(), (event as InputEventMouseButton).position)
 		return
 	if blind_panel != null and blind_panel.visible:
 		return  # rating between rounds: the game ignores input
@@ -801,19 +816,27 @@ func _unhandled_input(event: InputEvent) -> void:
 			client.attack_move(p)
 			_show_click_marker(_to_world(p), ENEMY_COLOR)
 		return
+	# Level-ups (default Alt + Q/W/E/R, 01 §13) before casts: both match exactly, modifiers
+	# included, so Alt+Q never also casts Q.
+	for slot in 4:
+		if event.is_action_pressed(LEVEL_ACTIONS[slot], false, true):
+			client.level_up(slot)
+			return
 	for slot in SLOT_ACTIONS.size():
-		if event.is_action_pressed(SLOT_ACTIONS[slot]):
-			# Ctrl + Q/W/E/R spends an ability point (01 §13).
-			if slot < 4 and event is InputEventKey and (event as InputEventKey).ctrl_pressed:
-				client.level_up(slot)
-				return
+		if event.is_action_pressed(SLOT_ACTIONS[slot], false, true):
 			var aim = _cursor_ground()
 			if aim != null:
 				client.cast(slot, aim)
 				# Our own dash is predicted before its event arrives: note its slot now.
 				_note_dash(own_body, own_status.get("champion", ""), slot)
 			return
-	if event.is_action_pressed("attack_move"):
+	if event.is_action_pressed("camera_lock"):
+		settings.camera_locked = not settings.camera_locked
+		settings.save()
+	elif event.is_action_pressed("toggle_minimap"):
+		settings.minimap_shown = not settings.minimap_shown
+		settings.save()
+	elif event.is_action_pressed("attack_move"):
 		attack_move_armed = true
 	elif event.is_action_pressed("stop"):
 		attack_move_armed = false
@@ -884,7 +907,7 @@ func _process(delta: float) -> void:
 		own_body.position = own
 		# Titan and Pebble: the model grows and shrinks with the hitbox (honest hitboxes).
 		own_body.scale = Vector3.ONE * (float(own_status.get("hitbox", CHAMPION_RADIUS_U)) / CHAMPION_RADIUS_U)
-		_place_camera(own)
+		_update_camera(delta, dead)
 		_show_statuses(own_body, own_status.get("stunned", false), own_status.get("rooted", false), own_status.get("shield", 0.0), own_status.get("slowed", false))
 		_animate(own_body, own_status, delta)
 	# Casts without a windup (A6): the drive never shows them, so play them on the event.
@@ -905,8 +928,24 @@ func _process(delta: float) -> void:
 	_update_fx(delta)
 	_update_click_marker(delta)
 	_update_net_graph()
+	_update_minimap(delta, playing)
 	_update_shot(delta)
 	overlay.queue_redraw()
+
+
+## The rig moves the look point (edge, keys, drag, lock, Space); the camera frames it (D13).
+func _update_camera(delta: float, dead: bool) -> void:
+	if _was_dead and not dead:
+		cam.center(client.own_position())  # back from the dead: look at the champion
+	_was_dead = dead
+	var free := menu_panel == null and (pause_panel == null or not pause_panel.visible) and (settings_panel == null or not settings_panel.visible)
+	if _shot_path != "":
+		cam.center(client.own_position())  # scripted captures follow the champion
+	var units_per_px := CAMERA_DISTANCE_U / camera_zoom * 2.0 * tan(deg_to_rad(CAMERA_VFOV_DEG) / 2.0) / maxf(1.0, get_viewport().get_visible_rect().size.y)
+	cam.update(delta, settings, client.own_position(), client.map_geometry().size, get_viewport(), units_per_px, free)
+	_place_camera(_to_world(cam.focus))
+	var confine: bool = settings.confine_cursor and free and _shot_path == ""
+	Input.mouse_mode = Input.MOUSE_MODE_CONFINED if confine else Input.MOUSE_MODE_VISIBLE
 
 
 func _place_camera(target: Vector3) -> void:
@@ -1049,6 +1088,7 @@ func _build_map() -> void:
 	var geo: Dictionary = client.map_geometry()
 	var size: Vector2 = geo.size
 	_size_ground(size)
+	_build_minimap(geo)
 	if size.x != size.y:
 		# A lane map: the dirt lane runs along its middle.
 		var gm: ShaderMaterial = ground.material_override
@@ -1644,7 +1684,10 @@ func _draw_ability_bar(font: Font) -> void:
 	var names: Array = own_status.abilities
 	var cds: Array = own_status.cooldowns
 	var slot_w := 120.0
-	var x0 := overlay.size.x / 2.0 - slot_w * 3.0
+	# Centered, unless the inventory beside it would run under the minimap.
+	var right := overlay.size.x / 2.0 + slot_w * 3.0 + 24.0 + 300.0
+	var limit: float = minimap.position.x - 12.0 if minimap != null and minimap.visible else overlay.size.x
+	var x0 := overlay.size.x / 2.0 - slot_w * 3.0 - maxf(0.0, right - limit)
 	var y0 := overlay.size.y - 92.0
 	overlay.draw_rect(Rect2(x0 - 10, y0 - 34, slot_w * 6.0 + 20, 120), Color(0, 0, 0, 0.55))
 	var hp: float = own_status.health
@@ -1664,7 +1707,7 @@ func _draw_ability_bar(font: Font) -> void:
 		var box := Rect2(x, y0, slot_w - 8, 54)
 		overlay.draw_rect(box, Color(0.18, 0.2, 0.24) if ready else Color(0.1, 0.1, 0.12))
 		overlay.draw_rect(box, Color(0.45, 0.75, 1.0) if ready else Color(0.3, 0.3, 0.35), false, 2.0)
-		overlay.draw_string(font, Vector2(x + 6, y0 + 20), SLOT_KEYS[slot], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
+		overlay.draw_string(font, Vector2(x + 6, y0 + 20), settings.binding(SLOT_ACTIONS[slot]), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 		var label := "" if ready else ("%.1f" % cd if cd < 10.0 else "%d" % ceili(cd))
 		overlay.draw_string(font, Vector2(x + 30, y0 + 20), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
 		overlay.draw_string(font, Vector2(x + 6, y0 + 44), names[slot], HORIZONTAL_ALIGNMENT_LEFT, slot_w - 14, 13, Color(0.8, 0.85, 0.9))
@@ -1691,9 +1734,9 @@ func _draw_ability_bar(font: Font) -> void:
 	if attack_move_armed:
 		overlay.draw_string(font, Vector2(x0, y0 + 80), "Attack-move: left-click a point", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ENEMY_COLOR)
 	elif own_status.get("points", 0) > 0:
-		overlay.draw_string(font, Vector2(x0, y0 + 80), "%d ability point(s): Ctrl + Q/W/E/R" % own_status.points, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
+		overlay.draw_string(font, Vector2(x0, y0 + 80), "%d ability point(s): %s" % [own_status.points, " / ".join(LEVEL_ACTIONS.map(func(a): return settings.binding(a)))], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
 	elif own_status.get("ranked", false) and client.can_shop():
-		overlay.draw_string(font, Vector2(x0, y0 + 80), "[P] shop", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
+		overlay.draw_string(font, Vector2(x0, y0 + 80), "[%s] shop" % settings.binding("toggle_shop"), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
 	if blind_state == "playing":
 		var left := maxf(blind_seconds - client.blind_elapsed(), 0.0)
 		var txt := "Blind round %d / %d   %d:%02d" % [client.blind_round() + 1, client.blind_rounds(), int(left) / 60, int(left) % 60]
@@ -1710,11 +1753,20 @@ func _update_net_graph() -> void:
 		net_label.text = "MFTR — %s…  %s" % [phase if phase != "" else "disconnected", client.last_error()]
 		return
 	var s: Dictionary = client.net_stats()
-	net_label.text = "FPS %d   RTT %.0f ms   margin %.1f ms   interp %.0f ms\ncommands %d   late %d   corrections %d (last %.1f u)   on-screen correction %.1f u\nup %.1f KB   down %.1f KB   collision proxies %s\nenemy missiles %d   near-misses %d   ghost hits %d   phantom hits %d   K/D %d/%d\n[RMB] move / attack  [A+LMB] attack-move  [Q W E R] abilities  [D] Blink  [F] Barrier  [S] stop  [P] shop  [F1] net graph  [F2] proxies" % [
+	net_label.text = "FPS %d   RTT %.0f ms   margin %.1f ms   interp %.0f ms\ncommands %d   late %d   corrections %d (last %.1f u)   on-screen correction %.1f u\nup %.1f KB   down %.1f KB   collision proxies %s\nenemy missiles %d   near-misses %d   ghost hits %d   phantom hits %d   K/D %d/%d\n%s" % [
 		Engine.get_frames_per_second(), s.rtt_ms, s.margin_ms, s.interp_ms,
 		s.commands, s.late, s.corrections, s.last_correction, s.visible_correction,
 		s.kb_up, s.kb_down, "ON" if proxies_enabled else "OFF",
-		s.enemy_missiles, s.near_misses, s.ghost_hits, s.phantom_hits, s.kills, s.deaths,
+		s.enemy_missiles, s.near_misses, s.ghost_hits, s.phantom_hits, s.kills, s.deaths, _key_hints(),
+	]
+
+
+## The controls line under the net graph, from the current bindings.
+func _key_hints() -> String:
+	var b := func(a: String) -> String: return settings.binding(a).replace("Mouse ", "M-")
+	return "[%s] move / attack  [%s] attack-move  [%s %s %s %s] abilities  [%s] Blink  [%s] Barrier  [%s] stop  [%s] shop  [%s] camera lock  [Esc] settings" % [
+		b.call("move"), b.call("attack_move"), b.call("cast_q"), b.call("cast_w"), b.call("cast_e"), b.call("cast_r"),
+		b.call("cast_d"), b.call("cast_f"), b.call("stop"), b.call("toggle_shop"), b.call("camera_lock"),
 	]
 
 
@@ -2479,6 +2531,10 @@ func _toggle_pause_menu() -> void:
 	resume.text = "Resume"
 	resume.pressed.connect(func(): pause_panel.visible = false)
 	v.add_child(resume)
+	var open_settings := Button.new()
+	open_settings.text = "Settings"
+	open_settings.pressed.connect(func(): pause_panel.visible = false; _open_settings())
+	v.add_child(open_settings)
 	var leave := Button.new()
 	leave.text = "Leave server"
 	leave.pressed.connect(_leave)
@@ -2489,6 +2545,82 @@ func _toggle_pause_menu() -> void:
 	v.add_child(quit)
 	await get_tree().process_frame
 	_center(pause_panel)
+
+
+func _open_settings() -> void:
+	if settings_panel == null:
+		settings_panel = preload("res://scripts/settings_panel.gd").new()
+		settings_panel.setup(settings)
+		overlay.get_parent().add_child(settings_panel)
+	settings_panel.open()
+
+
+## ---- Minimap and fog of war ----------------------------------------------------------------
+## The minimap (minimap.gd) and the fog: our team's vision grid from the extension a few times
+## a second, as a texture both the minimap and the world's shaders darken unseen ground with.
+
+const FOG_CELL_U := 50.0
+var fog_texture: ImageTexture
+var _fog_refresh := 0.0
+var _icon_refresh := 0.0
+
+
+func _build_minimap(geo: Dictionary) -> void:
+	minimap = preload("res://scripts/minimap.gd").new()
+	overlay.get_parent().add_child(minimap)
+	minimap.setup(geo)
+	minimap.look.connect(func(p: Vector2, held: bool): cam.peek(p, held))
+	minimap.move_to.connect(func(p: Vector2):
+		if not client.is_spectator():
+			client.move_to(p)
+			_show_click_marker(_to_world(p), Color(0.45, 0.75, 1.0)))
+	RenderingServer.global_shader_parameter_set("fog_size", geo.size * UNITS_TO_METERS)
+
+
+func _update_minimap(delta: float, playing: bool) -> void:
+	if minimap == null:
+		return
+	minimap.visible = playing and settings.minimap_shown and blind_state != "rating"
+	_fog_refresh -= delta
+	if playing and _fog_refresh <= 0.0:
+		_fog_refresh = 0.15
+		var g: Dictionary = client.fog_grid(FOG_CELL_U)
+		var img := Image.create_from_data(int(g.cols), int(g.rows), false, Image.FORMAT_L8, g.data)
+		if fog_texture == null or fog_texture.get_size() != Vector2(img.get_size()):
+			fog_texture = ImageTexture.create_from_image(img)
+			RenderingServer.global_shader_parameter_set("fog_map", fog_texture.get_rid())
+		else:
+			fog_texture.update(img)
+		RenderingServer.global_shader_parameter_set("fog_on", 0.0 if client.is_spectator() else 1.0)
+		minimap.fog_texture = fog_texture
+	if not minimap.visible:
+		return
+	minimap.layout(overlay.size, settings.minimap_size)
+	_icon_refresh -= delta
+	if _icon_refresh <= 0.0:
+		_icon_refresh = 0.05
+		var icons := []
+		for id in remote_info:
+			var u: Dictionary = remote_info[id]
+			if u.get("health", 1.0) <= 0.0:
+				continue
+			var team := "ally" if u.get("ally", false) else "enemy"
+			icons.append({"pos": u.pos, "kind": u.get("kind", ""), "team": team, "champion": u.get("champion", ""),
+				"color": CHAMPION_COLORS.get(u.get("champion", ""), Color.GRAY)})
+		if own_body != null and not own_status.get("dead", false):
+			icons.append({"pos": client.own_position(), "kind": "champion", "team": "own", "champion": own_champion,
+				"color": CHAMPION_COLORS.get(own_champion, Color.GRAY)})
+		# Champions above everything else.
+		icons.sort_custom(func(a, b): return a.kind != "champion" and b.kind == "champion")
+		minimap.icons = icons
+		var corners := []
+		var r := get_viewport().get_visible_rect().size
+		for c in [Vector2(0, 0), Vector2(r.x, 0), Vector2(r.x, r.y), Vector2(0, r.y)]:
+			var hit = _ground_point(c)
+			if hit != null:
+				corners.append(Vector2(hit.x, hit.z) / UNITS_TO_METERS)
+		minimap.view_poly = PackedVector2Array(corners) if corners.size() == 4 else PackedVector2Array()
+		minimap.refresh()
 
 
 ## Disconnect and start over in the menu (a fresh scene: nothing of the match is left).

@@ -9,6 +9,22 @@ uniform vec3 grass_high : source_color = vec3(0.30, 0.55, 0.22);
 varying vec3 world_pos;
 varying vec3 world_normal;
 
+// Fog of war (the minimap's vision grid): ground our team doesn't see is darkened and cooled.
+global uniform sampler2D fog_map : filter_linear;
+global uniform vec2 fog_size;
+global uniform float fog_on;
+
+vec3 fogged(vec3 c, vec3 wp) {
+	if (fog_on < 0.5 || fog_size.x <= 0.0) {
+		return c;
+	}
+	vec2 uv = wp.xz / fog_size;
+	float seen = (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) ? 0.0 : texture(fog_map, uv).r;
+	vec3 dark = mix(vec3(dot(c, vec3(0.3, 0.55, 0.15))), c, 0.45) * vec3(0.42, 0.46, 0.58);
+	return mix(dark, c, seen);
+}
+
+
 float hash(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
 	p += dot(p, p + 45.32);
@@ -42,7 +58,7 @@ void fragment() {
 		blades *= 0.6 + 0.4 * h;
 	}
 	vec3 c = mix(grass_low, grass_high, clamp(blades * 0.8 + h * 0.5, 0.0, 1.0));
-	ALBEDO = c;
+	ALBEDO = fogged(c, world_pos);
 	ALPHA = 0.72 + 0.2 * blades;
 	ROUGHNESS = 1.0;
 }
