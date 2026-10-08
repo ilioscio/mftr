@@ -14,6 +14,9 @@ var confine_cursor := true               # keep the cursor in the window while p
 ## Minimap (bottom right): shown, and its size as a share of the default.
 var minimap_shown := true
 var minimap_size := 100.0                # 50–160 %
+var shadows := true                      # the sun's shadows
+var bloom := true                        # glow around bright things
+var atmosphere := true                   # cloud shadows and floating motes
 
 ## Rebindable actions, in the order the settings list them: [action, label, default].
 ## A default is a key name with modifiers (`Alt+Q`) or a mouse button (`Mouse Right`); an action
@@ -61,6 +64,9 @@ func load_file() -> void:
 		confine_cursor = cfg.get_value("camera", "confine_cursor", confine_cursor)
 		minimap_shown = cfg.get_value("minimap", "shown", minimap_shown)
 		minimap_size = clampf(cfg.get_value("minimap", "size", minimap_size), 50.0, 160.0)
+		shadows = cfg.get_value("graphics", "shadows", shadows)
+		bloom = cfg.get_value("graphics", "bloom", bloom)
+		atmosphere = cfg.get_value("graphics", "atmosphere", atmosphere)
 		_binds = cfg.get_value("keys", "binds", {})
 	apply_bindings()
 
@@ -73,6 +79,9 @@ func save() -> void:
 	cfg.set_value("camera", "confine_cursor", confine_cursor)
 	cfg.set_value("minimap", "shown", minimap_shown)
 	cfg.set_value("minimap", "size", minimap_size)
+	cfg.set_value("graphics", "shadows", shadows)
+	cfg.set_value("graphics", "bloom", bloom)
+	cfg.set_value("graphics", "atmosphere", atmosphere)
 	cfg.set_value("keys", "binds", _binds)
 	cfg.save(PATH)
 

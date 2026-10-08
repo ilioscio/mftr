@@ -2,6 +2,7 @@
 // it's an area rather than a wall. Units inside are hidden by the server, not by this shader.
 shader_type spatial;
 render_mode diffuse_lambert, specular_disabled, cull_back, depth_draw_always, blend_mix;
+#include "res://shaders/clouds.gdshaderinc"
 
 uniform vec3 grass_low : source_color = vec3(0.10, 0.28, 0.12);
 uniform vec3 grass_high : source_color = vec3(0.30, 0.55, 0.22);
@@ -45,6 +46,7 @@ void vertex() {
 }
 
 void fragment() {
+	cloud_sun = cloud_shade(world_pos);
 	float sway = sin(TIME * 1.3 + (world_pos.x + world_pos.z) * 0.7) * 0.12;
 	float h = clamp(world_pos.y / 0.55, 0.0, 1.0);
 	float blades;
@@ -62,4 +64,10 @@ void fragment() {
 	ALBEDO = fogged(c, world_pos);
 	ALPHA = 0.72 + 0.2 * blades;
 	ROUGHNESS = 1.0;
+}
+
+void light() {
+	// Lambert, with cloud shadows dimming the sun.
+	float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
+	DIFFUSE_LIGHT += ndl * ATTENUATION * LIGHT_COLOR / PI * (LIGHT_IS_DIRECTIONAL ? cloud_sun : 1.0);
 }

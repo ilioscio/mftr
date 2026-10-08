@@ -4,6 +4,7 @@
 // contrast, so gameplay reads on top (05 §1 value hierarchy).
 shader_type spatial;
 render_mode diffuse_lambert, specular_disabled;
+#include "res://shaders/clouds.gdshaderinc"
 
 uniform vec3 grass_a : source_color = vec3(0.21, 0.35, 0.16);
 uniform vec3 grass_b : source_color = vec3(0.29, 0.43, 0.19);
@@ -98,6 +99,7 @@ void vertex() {
 }
 
 void fragment() {
+	cloud_sun = cloud_shade(world_pos);
 	vec2 p = world_pos.xz;
 	vec2 q = floor(p / texel) * texel;     // chunky texels
 	float large = fbm(p * 0.06);
@@ -138,4 +140,10 @@ void fragment() {
 	}
 	ALBEDO = fogged(ground, world_pos);
 	ROUGHNESS = 1.0;
+}
+
+void light() {
+	// Lambert, with cloud shadows dimming the sun.
+	float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
+	DIFFUSE_LIGHT += ndl * ATTENUATION * LIGHT_COLOR / PI * (LIGHT_IS_DIRECTIONAL ? cloud_sun : 1.0);
 }

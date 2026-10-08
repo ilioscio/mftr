@@ -5,6 +5,7 @@
 // fog of war darkens what our team doesn't see.
 shader_type spatial;
 render_mode specular_disabled;
+#include "res://shaders/clouds.gdshaderinc"
 
 // 0 skin, 1 cloth, 2 metal, 3 emissive, 4 accent, 5 accent_glow (`MftrModel.surface_slots`).
 uniform int slot = 1;
@@ -52,6 +53,7 @@ void vertex() {
 }
 
 void fragment() {
+	cloud_sun = cloud_shade(world_pos);
 	NORMAL = normalize(cross(dFdy(VERTEX), dFdx(VERTEX)));
 	vec3 c = COLOR.rgb * tint;
 	if (slot == 4) {
@@ -76,5 +78,5 @@ void fragment() {
 void light() {
 	float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
 	float band = ndl > 0.7 ? 1.0 : (ndl > 0.35 ? 0.68 : 0.38);
-	DIFFUSE_LIGHT += band * ATTENUATION * LIGHT_COLOR / PI;
+	DIFFUSE_LIGHT += band * ATTENUATION * LIGHT_COLOR / PI * (LIGHT_IS_DIRECTIONAL ? cloud_sun : 1.0);
 }

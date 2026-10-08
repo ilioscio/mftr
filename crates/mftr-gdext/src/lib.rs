@@ -893,15 +893,20 @@ impl MatchClient {
                 for row in r0..r1 {
                     for col in c0..c1 {
                         let i = row * cols + col;
-                        if data[i] != 0 {
+                        if data[i] == 255 {
                             continue;
                         }
+                        // How far inside the vision circle the cell is, over about one cell:
+                        // the client's linear filtering then draws a smooth circle edge
+                        // instead of the cells' stair steps.
                         let p = Vec2::new((col as f32 + 0.5) * cell, (row as f32 + 0.5) * cell);
-                        if (p - s).length_sq() <= r * r
+                        let inside = ((r - (p - s).length()) / cell + 0.5).clamp(0.0, 1.0);
+                        let v = (inside * 255.0).round() as u8;
+                        if v > data[i]
                             && map.brush_at(p).is_none_or(|b| Some(b) == brush)
                             && map.line_of_sight(s, p)
                         {
-                            data[i] = 255;
+                            data[i] = v;
                         }
                     }
                 }

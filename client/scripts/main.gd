@@ -37,6 +37,11 @@ var click_marker: MeshInstance3D
 var click_marker_age := 1.0
 var net_label: Label
 var overlay: Control
+var world_env: Environment
+var sun: DirectionalLight3D
+var atmosphere                            # cloud shadows and motes (atmosphere.gd), per map
+var _look_point := Vector3.ZERO           # where the camera looks, on the ground
+var _graphics_applied := []
 var backdrop: CanvasLayer
 var ability_tip
 # The ability bar's boxes and level-up buttons this frame (overlay coordinates), for hover and
@@ -301,19 +306,57 @@ func _update_shot(delta: float) -> void:
 
 
 func _build_world() -> void:
+	# Light (05 §5): a warm late-afternoon sun with soft shadows, a cool sky fill so shade reads
+	# blue rather than grey, a filmic tonemap, bloom on what glows (crystals, braziers,
+	# missiles), a light haze with depth, and a gentle grade.
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	e.background_mode = Environment.BG_COLOR
 	e.background_color = Color(0.08, 0.09, 0.1)
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.55, 0.6, 0.65)
-	e.ambient_light_energy = 0.6
+	e.ambient_light_color = Color(0.56, 0.66, 0.82)
+	e.ambient_light_energy = 0.62
+	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	e.tonemap_exposure = 1.25
+	e.tonemap_white = 4.0
+	e.glow_enabled = true
+	e.glow_intensity = 0.55
+	e.glow_strength = 1.0
+	e.glow_bloom = 0.0
+	e.glow_hdr_threshold = 0.9
+	e.glow_hdr_scale = 2.0
+	e.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
+	for i in 7:
+		e.set_glow_level(i, 1.0 if i in [1, 2, 3] else 0.0)
+	# Haze only toward the top of the screen (farther from the camera), none near the action.
+	e.fog_enabled = true
+	e.fog_mode = Environment.FOG_MODE_DEPTH
+	e.fog_light_color = Color(0.6, 0.68, 0.78)
+	e.fog_light_energy = 1.0
+	e.fog_density = 0.35
+	e.fog_depth_begin = 24.0
+	e.fog_depth_end = 60.0
+	e.fog_depth_curve = 1.6
+	e.fog_sky_affect = 0.0
+	e.adjustment_enabled = true
+	e.adjustment_contrast = 1.08
+	e.adjustment_saturation = 1.18
 	env.environment = e
+	world_env = e
 	add_child(env)
 
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-60, -35, 0)
-	sun.light_energy = 1.1
+	sun = DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-52, -38, 0)
+	sun.light_color = Color(1.0, 0.94, 0.84)
+	sun.light_energy = 1.25
+	sun.shadow_enabled = true
+	sun.shadow_opacity = 0.72
+	sun.shadow_blur = 1.6
+	sun.shadow_bias = 0.04
+	sun.shadow_normal_bias = 1.2
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	sun.directional_shadow_max_distance = 45.0
+	sun.directional_shadow_split_1 = 0.4
 	add_child(sun)
 
 	ground = MeshInstance3D.new()
@@ -353,6 +396,18 @@ func _build_world() -> void:
 	net_label.add_theme_font_size_override("font_size", 16)
 	net_label.add_theme_color_override("font_shadow_color", Color.BLACK)
 	hud.add_child(net_label)
+
+
+## The Graphics settings, applied when they change.
+func _apply_graphics() -> void:
+	var want := [settings.shadows, settings.bloom, settings.atmosphere, atmosphere != null]
+	if want == _graphics_applied:
+		return
+	_graphics_applied = want
+	sun.shadow_enabled = settings.shadows
+	world_env.glow_enabled = settings.bloom
+	if atmosphere != null:
+		atmosphere.set_enabled(settings.atmosphere, settings.atmosphere)
 
 
 ## The menus' backdrop and logo, behind every screen that isn't the match itself.
@@ -1031,6 +1086,9 @@ func _process(delta: float) -> void:
 	_update_net_graph()
 	_update_minimap(delta, playing)
 	_update_shot(delta)
+	if atmosphere != null:
+		atmosphere.update(delta, _look_point)
+	_apply_graphics()
 	_update_ability_tip()
 	_hud_dt = delta
 	overlay.queue_redraw()
@@ -1056,6 +1114,7 @@ func _place_camera(target: Vector3) -> void:
 	var pitch := deg_to_rad(CAMERA_PITCH_DEG)
 	var dist := CAMERA_DISTANCE_U * UNITS_TO_METERS / camera_zoom
 	var look := Vector3(target.x, 0.0, target.z)
+	_look_point = look
 	camera.position = look + Vector3(0, sin(pitch) * dist, cos(pitch) * dist)
 	camera.look_at(look, Vector3.UP)
 	if sfx != null:
@@ -1217,6 +1276,9 @@ func _build_map() -> void:
 	_size_ground(size, 2600.0)
 	ground.layers = MAP_LAYERS
 	_build_minimap(geo)
+	atmosphere = preload("res://scripts/atmosphere.gd").new()
+	add_child(atmosphere)
+	atmosphere.setup(size / 2.0 * UNITS_TO_METERS)
 	# The dressing: forest, rocks, tall grass (art/props), where the packs are present.
 	var dressing := preload("res://scripts/scenery.gd").new()
 	dressing.name = "Scenery"
@@ -3161,6 +3223,8 @@ var _terrain_pending := false
 func _render_minimap_terrain() -> void:
 	_terrain_pending = true
 	RenderingServer.global_shader_parameter_set("fog_on", 0.0)
+	if atmosphere != null:
+		atmosphere.suspend(true)
 	var region: Rect2 = minimap.region
 	var vp := SubViewport.new()
 	vp.size = Vector2i(1024, int(1024.0 * region.size.y / region.size.x))
@@ -3172,6 +3236,14 @@ func _render_minimap_terrain() -> void:
 	eye.size = region.size.y * UNITS_TO_METERS
 	eye.cull_mask = 2
 	eye.far = 200.0
+	# A flat, clear look for the map: no haze from 80 m up, no grade, no bloom.
+	var plain := Environment.new()
+	plain.background_mode = Environment.BG_COLOR
+	plain.background_color = Color(0.08, 0.09, 0.1)
+	plain.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	plain.ambient_light_color = Color(0.55, 0.6, 0.65)
+	plain.ambient_light_energy = 0.6
+	eye.environment = plain
 	var c := region.get_center() * UNITS_TO_METERS
 	eye.position = Vector3(c.x, 80.0, c.y)
 	eye.rotation_degrees = Vector3(-90, 0, 0)
@@ -3180,6 +3252,8 @@ func _render_minimap_terrain() -> void:
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
 	minimap.terrain = ImageTexture.create_from_image(vp.get_texture().get_image())
+	if atmosphere != null:
+		atmosphere.suspend(false)
 	minimap.queue_redraw()
 	vp.queue_free()
 	_terrain_pending = false

@@ -27,6 +27,7 @@ func setup(s) -> void:
 	v.add_child(tabs)
 	tabs.add_child(_camera_tab())
 	tabs.add_child(_interface_tab())
+	tabs.add_child(_graphics_tab())
 	tabs.add_child(_keys_tab())
 	var done := Button.new()
 	done.text = "Done"
@@ -116,6 +117,14 @@ func _interface_tab() -> Control:
 	var g := _grid("Interface")
 	_row(g, "Show the minimap", _check(settings.minimap_shown, func(v): settings.minimap_shown = v))
 	_row(g, "Minimap size", _slider(settings.minimap_size, 50, 160, func(v): settings.minimap_size = v, "%"))
+	return g
+
+
+func _graphics_tab() -> Control:
+	var g := _grid("Graphics")
+	_row(g, "Shadows", _check(settings.shadows, func(v): settings.shadows = v), "The sun's shadows. Off is faster on older graphics cards.")
+	_row(g, "Bloom", _check(settings.bloom, func(v): settings.bloom = v), "A soft glow around bright things: crystals, fire, spells.")
+	_row(g, "Clouds and motes", _check(settings.atmosphere, func(v): settings.atmosphere = v), "Cloud shadows drifting over the map, and motes floating in the light.")
 	return g
 
 
