@@ -8,7 +8,7 @@ pub const MAX_SIDECAR_BYTES: usize = 256 * 1024;
 #[derive(Clone, Debug, DeRon)]
 pub struct Sidecar {
     pub id: String,
-    /// "champion", "library" or "rig".
+    /// "champion", "library", "minion", "rig" or "prop".
     pub kind: String,
     pub archetype: String,
     pub rig_version: u32,

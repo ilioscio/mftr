@@ -66,10 +66,34 @@ fn committed_exports_are_clean() {
     .map(String::from)
     .to_vec();
     files.extend(["melee", "caster", "siege", "super"].map(|k| format!("minions/{k}/export/{k}.glb")));
+    files.extend(MAP_PROPS.map(|k| format!("props/{k}/export/{k}.glb")));
     for f in &files {
         let r = validate_file(&art(f));
         assert!(r.findings.is_empty(), "{f}: {:#?}", r.findings);
     }
+}
+
+/// The Bridge's dressing and structures (art/props).
+const MAP_PROPS: [&str; 11] =
+    ["turret", "gatehouse", "base", "pine_1", "pine_2", "pine_3", "rock_1", "rock_2", "rock_3", "grass_1", "bush_1"];
+
+/// A prop is static: its model loads (one `root` bone, no clips), and the same model claiming to
+/// be a prop while carrying a biped skeleton and clips is refused.
+#[test]
+fn props_are_static_models_on_a_root_bone() {
+    let loaded = mftr_pack::load_file(&art("props/turret/export/turret.glb")).unwrap();
+    assert_eq!(loaded.kind, "prop");
+    assert_eq!(loaded.library.rig.names, vec!["root".to_string()]);
+    assert!(loaded.library.clips.is_empty());
+    let glb = std::fs::read(art("minions/melee/export/melee.glb")).unwrap();
+    let side = std::fs::read_to_string(art("minions/melee/export/melee.anims.ron")).unwrap();
+    let side =
+        side.replace("kind: \"minion\"", "kind: \"prop\"").replace("archetype: \"biped\"", "archetype: \"prop\"");
+    let r = mftr_pack::validate(&glb, &side);
+    let errors: Vec<&str> =
+        r.findings.iter().filter(|f| f.level == mftr_pack::Level::Error).map(|f| f.msg.as_str()).collect();
+    assert!(errors.iter().any(|e| e.contains("only `root` and `part_")), "{errors:?}");
+    assert!(errors.iter().any(|e| e.contains("no clips")), "{errors:?}");
 }
 
 #[test]

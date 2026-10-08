@@ -19,7 +19,8 @@ vec3 fogged(vec3 c, vec3 wp) {
 		return c;
 	}
 	vec2 uv = wp.xz / fog_size;
-	float seen = (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) ? 0.0 : texture(fog_map, uv).r;
+	// Past the map (scenery), the nearest edge of the map decides.
+	float seen = texture(fog_map, clamp(uv, vec2(0.002), vec2(0.998))).r;
 	vec3 dark = mix(vec3(dot(c, vec3(0.3, 0.55, 0.15))), c, 0.45) * vec3(0.42, 0.46, 0.58);
 	return mix(dark, c, seen);
 }

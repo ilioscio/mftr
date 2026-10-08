@@ -7,7 +7,7 @@ extends Node3D
 ## User args (after `--`) skip the menu: a server address (`host:port#fingerprint` pins the
 ## server's key, otherwise it is trusted on first use), `--champion NAME`,
 ## `--spectate` to watch (Tab cycles champions), `--shot-lobby` for a champion-select capture,
-## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots (`--zoom <factor>` brings the camera closer), and the blind playtest
+## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots (`--zoom <factor>` brings the camera closer, `--look X,Y` aims it at a map point), and the blind playtest
 ## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`. `--menu-join`
 ## (scripted checks) opens the menu and joins the first remembered server through it.
 
@@ -111,6 +111,10 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--zoom" and i + 1 < args.size():
 			camera_zoom = maxf(0.05, float(args[i + 1]))
+			i += 1
+		elif args[i] == "--look" and i + 1 < args.size():
+			var xy := args[i + 1].split(",")
+			_shot_look = Vector2(float(xy[0]), float(xy[1]))
 			i += 1
 		elif args[i] == "--shot-shop":
 			_shot_shop = true
@@ -219,6 +223,7 @@ var _shot_shop := false                  # `--shot-shop`: buy from the fountain,
 var _shot_lobby := false                 # `--shot-lobby`: reroll in champion select, capture it
 var _menu_auto_join := false             # `--menu-join`: join the first remembered server from the menu
 var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
+var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
 
 
 func _update_shot(delta: float) -> void:
@@ -940,7 +945,8 @@ func _update_camera(delta: float, dead: bool) -> void:
 	_was_dead = dead
 	var free := menu_panel == null and (pause_panel == null or not pause_panel.visible) and (settings_panel == null or not settings_panel.visible)
 	if _shot_path != "":
-		cam.center(client.own_position())  # scripted captures follow the champion
+		# Scripted captures follow the champion, or look where `--look` says.
+		cam.center(client.own_position() if _shot_look == null else _shot_look)
 	var units_per_px := CAMERA_DISTANCE_U / camera_zoom * 2.0 * tan(deg_to_rad(CAMERA_VFOV_DEG) / 2.0) / maxf(1.0, get_viewport().get_visible_rect().size.y)
 	cam.update(delta, settings, client.own_position(), client.map_geometry().size, get_viewport(), units_per_px, free)
 	_place_camera(_to_world(cam.focus))
@@ -1001,7 +1007,14 @@ func _update_remotes(delta: float) -> void:
 			remote_bodies[id] = b
 		var body: Node3D = remote_bodies[id]
 		var p := _to_world(u.pos)
-		if u.minion:
+		if body.has_meta("prop"):
+			p.y = 0.0
+			if not body.has_meta("faced"):
+				# Face down the lane, toward the enemy's side of the map.
+				var mid: float = client.map_geometry().size.x / 2.0
+				body.rotation.y = PI / 2.0 if u.pos.x < mid else -PI / 2.0
+				body.set_meta("faced", true)
+		elif u.minion:
 			p.y = 0.45
 		elif u.turret:
 			p.y = 1.2
@@ -1012,6 +1025,10 @@ func _update_remotes(delta: float) -> void:
 			body.scale = Vector3.ONE * (float(u.gameplay_radius) / CHAMPION_RADIUS_U)
 		if body.has_node("Protected"):
 			body.get_node("Protected").visible = u.protected
+			if body.has_node("Model") and (not body.has_meta("shown_protected") or body.get_meta("shown_protected") != u.protected):
+				body.set_meta("shown_protected", u.protected)
+				for m in body.get_node("Model").get_meta("prop_mats", []):
+					m.set_shader_parameter("protected_glow", 1.0 if u.protected else 0.0)
 		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO))
 		_show_statuses(body, u.stunned, u.rooted, u.shield, u.get("slowed", false))
 		if u.champion != "" or (u.minion and body.has_meta("rig")):
@@ -1076,9 +1093,10 @@ func _make_minion(color: Color, collision_radius_u: float, kind := "") -> MeshIn
 var _map_built := false
 
 
-func _size_ground(size_u: Vector2) -> void:
+## The ground covers the map and the scenery around it (`margin_u` past every edge).
+func _size_ground(size_u: Vector2, margin_u := 0.0) -> void:
 	var plane := PlaneMesh.new()
-	plane.size = size_u * UNITS_TO_METERS
+	plane.size = (size_u + Vector2(margin_u, margin_u) * 2.0) * UNITS_TO_METERS
 	ground.mesh = plane
 	ground.position = Vector3(size_u.x, 0, size_u.y) * (UNITS_TO_METERS / 2.0)
 
@@ -1087,8 +1105,20 @@ func _build_map() -> void:
 	_map_built = true
 	var geo: Dictionary = client.map_geometry()
 	var size: Vector2 = geo.size
-	_size_ground(size)
+	_size_ground(size, 2600.0)
 	_build_minimap(geo)
+	# The dressing: forest, rocks, tall grass (art/props), where the packs are present.
+	var dressing := preload("res://scripts/scenery.gd").new()
+	dressing.name = "Scenery"
+	add_child(dressing)
+	dressing.build(geo, func(id: String):
+		var model := _prop_model(id)
+		if model == null:
+			return null
+		var mats := _prop_materials(model, Color.WHITE, true)
+		for m in mats:
+			m.set_shader_parameter("sway", 0.05 if id.begins_with("grass") else (0.012 if id.begins_with("pine") else 0.0))
+		return [model.static_mesh(), mats])
 	if size.x != size.y:
 		# A lane map: the dirt lane runs along its middle.
 		var gm: ShaderMaterial = ground.material_override
@@ -1110,9 +1140,15 @@ func _build_map() -> void:
 	var brush_mat := ShaderMaterial.new()
 	brush_mat.shader = load("res://shaders/brush.gdshader")
 	for poly in geo.walls:
+		if _prop_model("rock_1") != null and preload("res://scripts/scenery.gd").is_outcrop(poly):
+			continue  # drawn as a rock cluster by the scenery
 		add_child(_extrude(poly, 1.4, wall_mat))
 	for poly in geo.brush:
-		add_child(_extrude(poly, 0.55, brush_mat))
+		var b := _extrude(poly, 0.55, brush_mat)
+		# Tall grass props fill the brush when they're present (the block isn't drawn then).
+		if _prop_model("grass_1") != null:
+			continue
+		add_child(b)
 
 
 ## CSGPolygon3D extrudes along local -Z; rotating +90° about X lays the polygon on the ground
@@ -1130,7 +1166,79 @@ func _extrude(poly: PackedVector2Array, height: float, mat: Material) -> CSGPoly
 	return csg
 
 
-func _make_turret(color: Color, collision_radius_u: float) -> MeshInstance3D:
+## ---- Map props (art/props: structures, trees, rocks) ------------------------------------------
+## Static models from packs, validated like the champions (11 §4), drawn with the prop shader.
+
+var _prop_models := {}                    # id -> MftrModel (or null without a pack)
+
+
+func _prop_model(id: String) -> MftrModel:
+	if not _prop_models.has(id):
+		var path := _art_path("props/%s/export/%s.glb" % [id, id])
+		_prop_models[id] = MftrModel.load(path) if FileAccess.file_exists(path) else null
+	return _prop_models[id]
+
+
+func _prop_materials(model: MftrModel, team: Color, tinted := false) -> Array:
+	var mats := []
+	for slot in model.surface_slots():
+		var m := ShaderMaterial.new()
+		m.shader = load("res://shaders/prop.gdshader")
+		m.set_shader_parameter("slot", MINION_SLOTS.find(slot))
+		m.set_shader_parameter("team_accent", team)
+		m.set_shader_parameter("instance_tint", tinted)
+		mats.append(m)
+	return mats
+
+
+## One prop as a node (null without its pack).
+func _prop_node(id: String, team: Color) -> MeshInstance3D:
+	var model := _prop_model(id)
+	if model == null:
+		return null
+	var n := MeshInstance3D.new()
+	n.mesh = model.static_mesh()
+	var mats := _prop_materials(model, team)
+	for i in mats.size():
+		n.set_surface_override_material(i, mats[i])
+	n.set_meta("prop_mats", mats)
+	return n
+
+
+## A structure from its prop (turned to face down the lane when placed); null without one.
+func _structure_prop(id: String, color: Color, dome_radius: float, dome_lift: float) -> Node3D:
+	var model := _prop_node(id, color)
+	if model == null:
+		return null
+	var root := Node3D.new()
+	model.name = "Model"
+	root.add_child(model)
+	# Protected (an earlier structure in its lane stands): a pale ward ring on the ground and a
+	# cold sheen on the stone, instead of a dome hiding the model.
+	var ward := MeshInstance3D.new()
+	ward.name = "Protected"
+	var ring := TorusMesh.new()
+	ring.inner_radius = dome_radius - 0.08
+	ring.outer_radius = dome_radius
+	ring.rings = 48
+	ward.mesh = ring
+	ward.position.y = 0.04
+	ward.scale = Vector3(1.0, 0.15, 1.0)
+	ward.material_override = _unshaded(Color(0.75, 0.88, 1.0), 0.35)
+	ward.visible = false
+	root.add_child(ward)
+	root.set_meta("prop", id)
+	return root
+
+
+func _make_turret(color: Color, collision_radius_u: float) -> Node3D:
+	var built := _structure_prop("turret", color, 1.5, 1.6)
+	if built != null:
+		return built
+	return _make_turret_shape(color, collision_radius_u)
+
+
+func _make_turret_shape(color: Color, collision_radius_u: float) -> MeshInstance3D:
 	var body := MeshInstance3D.new()
 	var cyl := CylinderMesh.new()
 	cyl.top_radius = collision_radius_u * UNITS_TO_METERS * 0.6
@@ -1175,6 +1283,9 @@ func _make_protected_dome(radius_m: float, lift: float) -> MeshInstance3D:
 
 
 func _make_gatehouse(color: Color) -> Node3D:
+	var built := _structure_prop("gatehouse", color, 2.0, 0.0)
+	if built != null:
+		return built
 	var root := Node3D.new()
 	for side in [-1.0, 1.0]:
 		var pillar := MeshInstance3D.new()
@@ -1205,6 +1316,9 @@ func _make_gatehouse(color: Color) -> Node3D:
 
 
 func _make_base(color: Color) -> Node3D:
+	var built := _structure_prop("base", color, 2.6, 0.0)
+	if built != null:
+		return built
 	var root := Node3D.new()
 	var plinth := MeshInstance3D.new()
 	var cyl := CylinderMesh.new()
@@ -1622,6 +1736,8 @@ func _draw_overlay() -> void:
 		var color := Color(0.3, 0.7, 0.95) if u.ally else Color(0.9, 0.25, 0.2)
 		var size := Vector2(104, 11) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
 		var lift := 1.25 if champ else (2.6 if structure else 0.6)
+		if remote_bodies[id].has_meta("prop"):
+			lift = {"turret": 7.0, "gatehouse": 5.4, "base": 6.2}.get(u.kind, 3.0)
 		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color)
 		if champ:
 			_draw_augment_pips(font, remote_bodies[id].position + Vector3(0, lift, 0), u.get("augments", []))
@@ -2278,6 +2394,8 @@ func _update_spectator_camera() -> void:
 	var target: Vector2 = client.map_geometry().size / 2.0
 	if remote_info.has(spectate_target):
 		target = remote_info[spectate_target].pos
+	if _shot_look != null:
+		target = _shot_look
 	_place_camera(_to_world(target))
 
 

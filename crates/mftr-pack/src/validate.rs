@@ -89,15 +89,53 @@ pub fn validate_model(model: &Model, glb_len: usize, side: &Sidecar) -> Report {
         glb_len
     ));
     check_header(&mut r, side);
-    check_mesh(&mut r, model, glb_len, side.kind == "minion");
+    check_mesh(&mut r, model, glb_len, &side.kind);
+    if side.kind == "prop" {
+        check_prop(&mut r, model);
+        return r;
+    }
     let joints = check_skeleton(&mut r, model);
     check_clips(&mut r, model, side, &joints);
     r
 }
 
+/// A map prop (structures, trees, rocks): one skinned mesh on a `root` bone (and optional
+/// `part_*` bones), no clips.
+fn check_prop(r: &mut Report, m: &Model) {
+    let skinned = m.nodes.iter().filter(|n| n.skin.is_some() && n.mesh.is_some()).count();
+    if m.skins.len() != 1 || skinned != 1 {
+        r.err(format!("expected one skinned mesh and one skin, found {skinned} and {}", m.skins.len()));
+        return;
+    }
+    let names: Vec<&str> = m.skins[0].iter().map(|&j| m.nodes[j].name.as_str()).collect();
+    if !names.contains(&"root") {
+        r.err("a prop needs a `root` bone");
+    }
+    for n in &names {
+        if *n != "root" && !n.starts_with("part_") {
+            r.err(format!("prop bone `{n}`: only `root` and `part_<name>`"));
+        }
+    }
+    if names.len() > 1 + rules::PROP_PARTS_MAX {
+        r.err(format!("{} bones, a prop has at most {}", names.len(), 1 + rules::PROP_PARTS_MAX));
+    }
+    if !m.animations.is_empty() {
+        r.err("a prop carries no clips");
+    }
+}
+
 fn check_header(r: &mut Report, side: &Sidecar) {
-    if !matches!(side.kind.as_str(), "champion" | "library" | "minion" | "rig") {
-        r.err(format!("sidecar kind `{}` must be champion, library, minion or rig", side.kind));
+    if !matches!(side.kind.as_str(), "champion" | "library" | "minion" | "rig" | "prop") {
+        r.err(format!("sidecar kind `{}` must be champion, library, minion, rig or prop", side.kind));
+    }
+    if side.kind == "prop" {
+        if side.archetype != "prop" {
+            r.err(format!("a prop's archetype is `prop`, not `{}`", side.archetype));
+        }
+        if side.fps != rules::FPS {
+            r.err(format!("clips must be authored at {} fps, not {}", rules::FPS, side.fps));
+        }
+        return;
     }
     if side.kind == "minion" && rules::minion_kind(&side.id).is_none() {
         r.err(format!("minion `{}` must be one of {}", side.id, rules::MINION_IDS.join(", ")));
@@ -113,11 +151,17 @@ fn check_header(r: &mut Report, side: &Sidecar) {
     }
 }
 
-fn check_mesh(r: &mut Report, m: &Model, bytes: usize, minion: bool) {
+fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
     let tris = m.triangles();
-    let target = if minion { rules::MINION_TRIANGLES_TARGET } else { rules::TRIANGLES_TARGET };
-    if tris > rules::TRIANGLES_MAX {
-        r.err(format!("{tris} triangles, over the {} cap", rules::TRIANGLES_MAX));
+    let prop = kind == "prop";
+    let target = match kind {
+        "minion" => rules::MINION_TRIANGLES_TARGET,
+        "prop" => rules::PROP_TRIANGLES_TARGET,
+        _ => rules::TRIANGLES_TARGET,
+    };
+    let max = if prop { rules::PROP_TRIANGLES_MAX } else { rules::TRIANGLES_MAX };
+    if tris > max {
+        r.err(format!("{tris} triangles, over the {max} cap"));
     } else if tris < target.0 || tris > target.1 {
         r.warn(format!("{tris} triangles, outside the {}–{} target", target.0, target.1));
     }
@@ -140,7 +184,7 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, minion: bool) {
     let accent = m.materials.iter().position(|n| n == "accent");
     let accent_used =
         m.meshes.iter().flatten().any(|p| p.material.is_some() && p.material == accent && p.triangles > 0);
-    if !accent_used {
+    if !accent_used && !prop {
         r.err("no triangles use the `accent` (team color) slot (05 §1.3)");
     }
 
