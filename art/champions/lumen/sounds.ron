@@ -1,0 +1,53 @@
+// Lumen's sounds (A9): light. Bell-like chimes and soft tones: a small chime for each mote, a
+// rising major arpeggio for Mending Light, a shimmering pad for Aegis, Lull's gentle descending
+// tones, and Binding Halo's ringing bell (the shared hard-CC clang plays with its root).
+// Footsteps, death and respawn come from the library. A recipe for `mftr-tools sfx build`.
+(
+    pack: "lumen",
+    sounds: [
+        (name: "mote", events: ["attack.release"], volume: 0.35, pitch: 0.08, layers: [
+            (wave: "sine", freq: (1320.0, 1320.0), env: (0.0, 0.02, 0.15), gain: 0.5),
+            (wave: "triangle", freq: (1980.0, 1980.0), env: (0.0, 0.01, 0.1), gain: 0.25),
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.0, 0.02, 0.1), gain: 0.2, highpass: 3000.0),
+        ]),
+        (name: "mote_hit", events: ["attack.impact"], volume: 0.4, pitch: 0.06, layers: [
+            (wave: "sine", freq: (990.0, 880.0), env: (0.0, 0.02, 0.2), gain: 0.5),
+            (wave: "noise", freq: (8000.0, 3000.0), env: (0.0, 0.0, 0.06), gain: 0.4, highpass: 2000.0),
+        ]),
+        (name: "mending", events: ["q.fire"], volume: 0.5, echo: (delay: 0.1, feedback: 0.35), layers: [
+            (wave: "sine", freq: (523.0, 523.0), env: (0.01, 0.06, 0.25), gain: 0.4),
+            (wave: "sine", freq: (659.0, 659.0), env: (0.01, 0.06, 0.25), gain: 0.4, delay: 0.08),
+            (wave: "sine", freq: (784.0, 784.0), env: (0.01, 0.06, 0.3), gain: 0.4, delay: 0.16),
+            (wave: "triangle", freq: (1047.0, 1047.0), env: (0.01, 0.08, 0.4), gain: 0.3, delay: 0.24),
+        ]),
+        (name: "aegis", events: ["w.fire"], volume: 0.5, layers: [
+            (wave: "triangle", freq: (440.0, 660.0), env: (0.05, 0.2, 0.3), gain: 0.35, vibrato: (0.4, 9.0)),
+            (wave: "sine", freq: (880.0, 1320.0), env: (0.05, 0.2, 0.3), gain: 0.25, vibrato: (0.4, 7.0)),
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.05, 0.1, 0.25), gain: 0.15, highpass: 4000.0),
+        ]),
+        (name: "lull", events: ["e.release"], volume: 0.45, echo: (delay: 0.12, feedback: 0.3), layers: [
+            (wave: "sine", freq: (784.0, 784.0), env: (0.02, 0.08, 0.2), gain: 0.4),
+            (wave: "sine", freq: (659.0, 659.0), env: (0.02, 0.08, 0.2), gain: 0.4, delay: 0.12),
+            (wave: "sine", freq: (523.0, 523.0), env: (0.02, 0.1, 0.3), gain: 0.4, delay: 0.24),
+        ]),
+        (name: "lull_hit", events: ["e.impact"], volume: 0.4, layers: [
+            (wave: "sine", freq: (440.0, 330.0), env: (0.0, 0.05, 0.3), gain: 0.5, vibrato: (0.5, 6.0)),
+            (wave: "noise", freq: (2000.0, 800.0), env: (0.0, 0.02, 0.15), gain: 0.25, lowpass: (3000.0, 1000.0)),
+        ]),
+        (name: "halo_draw", events: ["r.cast"], volume: 0.4, layers: [
+            (wave: "sine", freq: (392.0, 784.0), env: (0.15, 0.05, 0.1), gain: 0.4),
+            (wave: "triangle", freq: (784.0, 1568.0), env: (0.15, 0.05, 0.1), gain: 0.2),
+        ]),
+        (name: "halo_bell", events: ["r.detonate"], volume: 0.65, echo: (delay: 0.14, feedback: 0.4), layers: [
+            (wave: "sine", freq: (330.0, 330.0), env: (0.0, 0.05, 0.9), gain: 0.6),
+            (wave: "sine", freq: (660.0, 660.0), env: (0.0, 0.04, 0.7), gain: 0.35),
+            (wave: "triangle", freq: (990.0, 990.0), env: (0.0, 0.03, 0.5), gain: 0.25),
+            (wave: "noise", freq: (6000.0, 2000.0), env: (0.0, 0.0, 0.05), gain: 0.4, highpass: 2000.0),
+        ]),
+        (name: "hum", events: ["unit.emote"], volume: 0.35, layers: [
+            (wave: "sine", freq: (523.0, 523.0), env: (0.1, 0.25, 0.1), gain: 0.4, vibrato: (0.2, 5.0)),
+            (wave: "sine", freq: (587.0, 587.0), env: (0.05, 0.2, 0.1), gain: 0.4, delay: 0.45, vibrato: (0.2, 5.0)),
+            (wave: "sine", freq: (659.0, 659.0), env: (0.05, 0.4, 0.3), gain: 0.4, delay: 0.8, vibrato: (0.2, 5.0)),
+        ]),
+    ],
+)

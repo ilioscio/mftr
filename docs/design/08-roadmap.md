@@ -541,6 +541,20 @@ The first of the other eight champions (6 in the A list). Designed without an ow
 
 **Left for later:** the owner's approval of his concept; polish.
 
+### A slice 9 status (2026-10-07): Lumen ✅ done (concept awaiting approval)
+- **Look:** a serene light-priestess on `biped` v1, 2,566 triangles.
+  - A floor-length ivory robe in two tiers with a gold hem, a capelet and bell sleeves.
+  - A halo of twelve glowing gold segments floating behind her head.
+  - The team-colored stole down her front.
+  - Pale gold hair in a ponytail.
+- **Clips:** all 30. Her heal and shield are instant, so they play as upper-body pulses.
+- **Effects and sounds:**
+  - VFX: gold motes, the heal and shield glows, Lull's lilac orb, Binding Halo's golden ring.
+  - 9 bell-like sounds, 48 KB.
+- **Checked in Godot:** the whole kit fired its effects and sounds, with Binding Halo's ring (and the hard-CC clang) on screen.
+
+**Left for later:** the owner's approval of her concept; polish.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.
