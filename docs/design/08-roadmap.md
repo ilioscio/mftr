@@ -601,6 +601,20 @@ The first of the other eight champions (6 in the A list). Designed without an ow
 
 **Left for later:** the owner's approval of his concept; polish.
 
+### A slice 13 status (2026-10-07): Marrow ✅ done (concept awaiting approval)
+- **Look:** a bone-witch on `biped` v1, 2,644 triangles.
+  - A crown of bone spikes; skull-capped pauldrons; a corset of bone ribs.
+  - Ash-plum robes with a ragged skirt; a tattered shawl (`extra_cloak`).
+  - Grave-green light at her wrists. She casts from bare hands.
+- **Clips:** all 30, every `fire` checked.
+- **Client fix:** areas are named by radius and delay. Before, Ossuary (300 u, delayed) played Siphon's (a 300 u nova) detonation.
+- **Effects and sounds:**
+  - VFX: grave-green bolts, Siphon's ring, Grasping Bones' shards, Grave Pact's rush, Ossuary's pit of bone.
+  - 9 sounds, 48 KB.
+- **Checked in Godot:** the whole kit fired its effects and sounds, Ossuary's detonation included.
+
+**Left for later:** the owner's approval of her concept; polish.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.
