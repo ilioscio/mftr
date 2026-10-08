@@ -41,6 +41,7 @@ var click_marker_age := 1.0
 var net_label: Label
 var overlay: Control
 var world_env: Environment
+var portraits                             # champion portraits from their models (portraits.gd)
 var sun: DirectionalLight3D
 var atmosphere                            # cloud shadows and motes (atmosphere.gd), per map
 var _look_point := Vector3.ZERO           # where the camera looks, on the ground
@@ -110,6 +111,9 @@ func _ready() -> void:
 	_build_world()
 	_build_backdrop()
 	_load_champion_model()
+	portraits = preload("res://scripts/portraits.gd").new()
+	add_child(portraits)
+	portraits.setup(func(c: String): return _model_for(c), champion_model, CHAMPION_COLORS)
 	vfx = preload("res://scripts/vfx.gd").new()
 	add_child(vfx)
 	sfx = preload("res://scripts/sfx.gd").new()
@@ -147,6 +151,9 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-shop":
 			_shot_shop = true
+		elif args[i] == "--dump-portraits" and i + 1 < args.size():
+			_dump_portraits(args[i + 1])
+			return
 		elif args[i] == "--shot-settings" and i + 1 < args.size():
 			_shot_settings = int(args[i + 1])
 			i += 1
@@ -163,6 +170,8 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-lobby":
 			_shot_lobby = true
+		elif args[i] == "--shot-loading":
+			_shot_loading = true
 		elif args[i] == "--menu-join":
 			_menu_auto_join = true
 		elif args[i] == "--spectate":
@@ -264,6 +273,7 @@ var _shot_moved := false
 var _shot_at := 1.05                     # `--shot-at <seconds>` after joining
 var _shot_shop := false                  # `--shot-shop`: buy from the fountain, show the shop
 var _shot_lobby := false                 # `--shot-lobby`: reroll in champion select, capture it
+var _shot_loading := false                # `--shot-loading`: ready up, capture the loading screen
 var _menu_auto_join := false             # `--menu-join`: join the first remembered server from the menu
 var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
 var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
@@ -283,11 +293,21 @@ func _update_shot(delta: float) -> void:
 			print("MFTR: saved screenshot to ", _shot_path)
 			get_tree().quit()
 		return
+	if _shot_path != "" and _shot_loading:
+		_shot_timer += delta
+		if client.phase() == "lobby" and _shot_timer > 2.0 and not _lobby_ready:
+			client.lobby_ready(true)
+			_lobby_ready = true
+		if loading_panel != null and _loading_age > 1.2:
+			get_viewport().get_texture().get_image().save_png(_shot_path)
+			print("MFTR: saved screenshot to ", _shot_path)
+			get_tree().quit()
+		return
 	if _shot_path != "" and _shot_lobby and client.phase() == "lobby":
 		_shot_timer += delta
 		if _shot_timer > 0.6 and _shot_timer - delta <= 0.6:
 			client.lobby_reroll()
-		elif _shot_timer > 1.6:
+		elif _shot_timer > 3.0:
 			get_viewport().get_texture().get_image().save_png(_shot_path)
 			print("MFTR: saved screenshot to ", _shot_path)
 			get_tree().quit()
@@ -425,6 +445,7 @@ func _build_world() -> void:
 	overlay = Control.new()
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	overlay.draw.connect(_draw_overlay)
 	hud.add_child(overlay)
 	ability_tip = preload("res://scripts/ability_tooltip.gd").new()
@@ -434,6 +455,22 @@ func _build_world() -> void:
 	net_label.add_theme_font_size_override("font_size", 16)
 	net_label.add_theme_color_override("font_shadow_color", Color.BLACK)
 	hud.add_child(net_label)
+
+
+## `--dump-portraits DIR`: render every champion's portraits to DIR as PNGs, then quit (review).
+func _dump_portraits(dir: String) -> void:
+	var names: PackedStringArray = client.champion_names()
+	portraits.prepare(Array(names))
+	for n in names:
+		while not portraits.is_done(n):
+			portraits.portrait(n)
+			await portraits.rendered
+		for kind in ["bust", "round", "small", "full"]:
+			var t: Texture2D = portraits.portrait(n, kind)
+			if t != null:
+				t.get_image().save_png("%s/%s_%s.png" % [dir, n.to_lower(), kind])
+	print("MFTR: portraits saved to ", dir)
+	get_tree().quit()
 
 
 ## The Audio settings, applied when they change (or the window gains or loses focus).
@@ -507,7 +544,7 @@ func _build_backdrop() -> void:
 
 
 func _update_backdrop(phase: String) -> void:
-	backdrop.visible = phase != "playing"
+	backdrop.visible = phase != "playing" or loading_panel != null
 	var logo: Control = backdrop.get_node("Logo")
 	logo.visible = menu_panel != null or phase in ["", "connecting"]
 	logo.position = Vector2((overlay.size.x - logo.size.x) / 2.0, overlay.size.y * 0.06)
@@ -1103,6 +1140,7 @@ func _process(delta: float) -> void:
 	own_status = client.own_status() if playing else {}
 	_update_shop(delta)
 	_update_lobby(delta, phase)
+	_update_loading(delta)
 	_save_session(delta, playing)
 	var spectating: bool = playing and client.is_spectator()
 	if spectating:
@@ -2002,6 +2040,8 @@ func _screen(p: Vector3):
 ## Health bars, damage numbers, the ability bar and the kill feed (2D, over the 3D view).
 ## Bar sizes follow the familiarity targets of R01 §6.
 func _draw_overlay() -> void:
+	if loading_panel != null and loading_panel.modulate.a > 0.5:
+		return  # the loading screen covers the match until it fades
 	var font := ThemeDB.fallback_font
 	if client.phase() == "playing" and client.is_spectator():
 		var who: String = remote_info[spectate_target].champion if remote_info.has(spectate_target) else "the map"
@@ -2173,9 +2213,13 @@ func _draw_bottom_hud(font: Font) -> void:
 	var pr := port / 2.0 - 6.0 * k
 	var tint: Color = CHAMPION_COLORS.get(champ, Color(0.5, 0.5, 0.55))
 	overlay.draw_circle(pc, pr + 5.0 * k, Color(0, 0, 0, 0.9))
-	overlay.draw_circle(pc, pr, tint.darkened(0.35))
-	overlay.draw_circle(pc + Vector2(-pr * 0.25, -pr * 0.3), pr * 0.62, tint.lightened(0.05))
-	Hud.text(overlay, bold, pc + Vector2(-pr, pr * 0.36), champ.left(1), roundi(pr * 1.05), Color(1, 1, 1, 0.92), HORIZONTAL_ALIGNMENT_CENTER, pr * 2.0)
+	var face: Texture2D = portraits.portrait(champ, "round")
+	if face != null:
+		overlay.draw_texture_rect(face, Rect2(pc - Vector2(pr, pr), Vector2(pr, pr) * 2.0), false)
+	else:
+		overlay.draw_circle(pc, pr, tint.darkened(0.35))
+		overlay.draw_circle(pc + Vector2(-pr * 0.25, -pr * 0.3), pr * 0.62, tint.lightened(0.05))
+		Hud.text(overlay, bold, pc + Vector2(-pr, pr * 0.36), champ.left(1), roundi(pr * 1.05), Color(1, 1, 1, 0.92), HORIZONTAL_ALIGNMENT_CENTER, pr * 2.0)
 	overlay.draw_arc(pc, pr + 2.5 * k, 0.0, TAU, 64, Hud.GOLD_DIM, 3.5 * k, true)
 	if ranked:
 		var xp_frac := float(own_status.xp) / maxf(float(own_status.xp_next), 1.0)
@@ -2814,12 +2858,14 @@ func _save_session(delta: float, playing: bool) -> void:
 	cfg.save(_session_path())
 
 
-var lobby_panel: PanelContainer
+var lobby_panel: Control
 var lobby_box: VBoxContainer
 var _lobby_refresh := 0.0
 var _lobby_ready := false
 var _lobby_sig := ""                      # the lobby as last drawn (rebuilt when it changes)
 var _lobby_timer: Label
+var _last_lobby := {}                     # the lobby as last seen, for the loading screen
+var _portraits_seen := 0                  # portraits rendered so far (rebuilds the lobby)
 
 
 func _update_lobby(delta: float, phase: String) -> void:
@@ -2828,166 +2874,365 @@ func _update_lobby(delta: float, phase: String) -> void:
 			lobby_panel.queue_free()
 			lobby_panel = null
 			_lobby_sig = ""
+			# Into the match: the loading screen reveals both teams.
+			if phase in ["joining", "playing"] and not _last_lobby.is_empty():
+				_show_loading(_last_lobby)
+		_last_lobby = {}
 		return
 	if lobby_panel == null:
-		lobby_panel = PanelContainer.new()
-		lobby_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-		lobby_panel.custom_minimum_size = Vector2(780, 0)
+		lobby_panel = Control.new()
+		lobby_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		var margin := MarginContainer.new()
+		margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		for side in ["left", "right", "top", "bottom"]:
-			margin.add_theme_constant_override("margin_" + side, 18)
+			margin.add_theme_constant_override("margin_" + side, 28)
 		lobby_panel.add_child(margin)
 		lobby_box = VBoxContainer.new()
-		lobby_box.add_theme_constant_override("separation", 10)
+		lobby_box.add_theme_constant_override("separation", 14)
 		margin.add_child(lobby_box)
 		overlay.get_parent().add_child(lobby_panel)
+		if not portraits.rendered.is_connected(_on_portrait):
+			portraits.rendered.connect(_on_portrait)
 	_lobby_refresh -= delta
 	if _lobby_refresh > 0.0:
 		return
 	_lobby_refresh = 0.2
-	lobby_panel.position = (overlay.size - lobby_panel.size) / 2.0
 	var l: Dictionary = client.lobby_state()
 	if l.is_empty():
 		return
+	_last_lobby = l
+	portraits.prepare(l.slots.map(func(x): return x.champion) + Array(l.bench))
 	if _lobby_timer != null and is_instance_valid(_lobby_timer):
 		_lobby_timer.text = "%d" % ceili(l.starts_in)
 	# Rebuild only when something but the countdown changed, so buttons keep their hover and
 	# a click isn't lost to a rebuild.
-	var sig := str(l.slots) + str(l.bench)
+	var sig := str(l.slots) + str(l.bench) + str(_portraits_seen)
 	if sig == _lobby_sig:
 		return
 	_lobby_sig = sig
 	for c in lobby_box.get_children():
 		c.queue_free()
+	var me := {}
+	for slot in l.slots:
+		if slot.you:
+			me = slot
+
+	# Top: the mode on the left, the countdown in the middle.
 	var top := HBoxContainer.new()
-	top.add_theme_constant_override("separation", 16)
 	var titles := VBoxContainer.new()
 	titles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	titles.size_flags_stretch_ratio = 1.0
 	var title := Label.new()
 	title.text = "Champion select"
 	title.theme_type_variation = "TitleLabel"
 	titles.add_child(title)
 	var sub := Label.new()
-	sub.text = "ARAM  ·  ALL RANDOM  ·  The Bridge"
+	sub.text = "%s  ·  ALL RANDOM  ·  The Bridge" % client.game_type().to_upper()
 	sub.theme_type_variation = "HeaderLabel"
 	titles.add_child(sub)
 	top.add_child(titles)
+	var clock := VBoxContainer.new()
+	clock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	clock.alignment = BoxContainer.ALIGNMENT_CENTER
 	_lobby_timer = Label.new()
 	_lobby_timer.text = "%d" % ceili(l.starts_in)
 	_lobby_timer.theme_type_variation = "TitleLabel"
-	_lobby_timer.add_theme_font_size_override("font_size", 40)
-	_lobby_timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	top.add_child(_lobby_timer)
+	_lobby_timer.add_theme_font_size_override("font_size", 46)
+	_lobby_timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	clock.add_child(_lobby_timer)
+	var until := Label.new()
+	until.text = "THE MATCH STARTS WHEN EVERYONE IS READY"
+	until.theme_type_variation = "HintLabel"
+	until.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	clock.add_child(until)
+	top.add_child(clock)
+	var right := Control.new()
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(right)
 	lobby_box.add_child(top)
-	lobby_box.add_child(HSeparator.new())
-	var cols := HBoxContainer.new()
-	cols.add_theme_constant_override("separation", 24)
-	lobby_box.add_child(cols)
-	var me := {}
-	for team in ["blue", "red"]:
-		var col := VBoxContainer.new()
-		col.custom_minimum_size = Vector2(350, 0)
-		col.add_theme_constant_override("separation", 6)
-		var head := Label.new()
-		head.text = "BLUE TEAM" if team == "blue" else "RED TEAM"
-		head.theme_type_variation = "HeaderLabel"
-		head.add_theme_color_override("font_color", OWN_COLOR.lightened(0.2) if team == "blue" else ENEMY_COLOR.lightened(0.1))
-		col.add_child(head)
-		for slot in l.slots:
-			if slot.team != team:
-				continue
-			if slot.you:
-				me = slot
-			col.add_child(_lobby_card(slot, OWN_COLOR if team == "blue" else ENEMY_COLOR))
-		cols.add_child(col)
-	lobby_box.add_child(HSeparator.new())
+
+	# The bench, across the top: champions anyone on the team can swap theirs for.
+	var bench := HBoxContainer.new()
+	bench.alignment = BoxContainer.ALIGNMENT_CENTER
+	bench.add_theme_constant_override("separation", 10)
+	var bench_label := Label.new()
+	bench_label.text = "BENCH" if l.bench.size() > 0 else "BENCH  ·  rerolled champions land here for the team to take"
+	bench_label.theme_type_variation = "HeaderLabel"
+	bench.add_child(bench_label)
+	for name in l.bench:
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(64, 64)
+		b.focus_mode = Control.FOCUS_NONE
+		b.tooltip_text = "Swap your champion for %s" % name
+		b.icon = portraits.portrait(name, "bust")
+		b.expand_icon = true
+		b.text = "" if b.icon != null else String(name).left(2)
+		b.pressed.connect(func(): client.lobby_take(name); _lobby_refresh = 0.0)
+		bench.add_child(b)
+	lobby_box.add_child(bench)
+
+	# The middle: our team, our champion large, the enemy hidden.
+	var mid := HBoxContainer.new()
+	mid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	mid.add_theme_constant_override("separation", 24)
+	lobby_box.add_child(mid)
+	var ours := VBoxContainer.new()
+	ours.custom_minimum_size = Vector2(320, 0)
+	ours.add_theme_constant_override("separation", 8)
+	var ours_head := Label.new()
+	ours_head.text = "YOUR TEAM"
+	ours_head.theme_type_variation = "HeaderLabel"
+	ours_head.add_theme_color_override("font_color", OWN_COLOR.lightened(0.25))
+	ours.add_child(ours_head)
+	var enemies := 0
+	for slot in l.slots:
+		if slot.ally:
+			ours.add_child(_lobby_card(slot, OWN_COLOR))
+		else:
+			enemies += 1
+	mid.add_child(ours)
+
+	var center := VBoxContainer.new()
+	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center.alignment = BoxContainer.ALIGNMENT_CENTER
+	var splash := TextureRect.new()
+	splash.texture = portraits.portrait(me.get("champion", ""), "full")
+	splash.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	splash.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	splash.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	splash.custom_minimum_size = Vector2(0, 240)
+	# Feathered into the backdrop: no hard rectangle around the champion.
+	var feather := ShaderMaterial.new()
+	feather.shader = _feather_shader()
+	splash.material = feather
+	center.add_child(splash)
+	var name_label := Label.new()
+	name_label.text = String(me.get("champion", "")).to_upper()
+	name_label.theme_type_variation = "TitleLabel"
+	name_label.add_theme_font_size_override("font_size", 40)
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	center.add_child(name_label)
 	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 12)
-	lobby_box.add_child(actions)
-	if l.bench.size() > 0:
-		var label := Label.new()
-		label.text = "BENCH"
-		label.theme_type_variation = "HeaderLabel"
-		actions.add_child(label)
-		for name in l.bench:
-			var b := Button.new()
-			b.text = name
-			b.tooltip_text = "Swap your champion for %s" % name
-			b.focus_mode = Control.FOCUS_NONE
-			b.pressed.connect(func(): client.lobby_take(name); _lobby_refresh = 0.0)
-			actions.add_child(b)
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	actions.add_child(spacer)
+	actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	actions.add_theme_constant_override("separation", 14)
 	var reroll := Button.new()
 	reroll.text = "⟳  Reroll (%d)" % me.get("rerolls", 0)
 	reroll.disabled = me.get("rerolls", 0) == 0
 	reroll.focus_mode = Control.FOCUS_NONE
+	reroll.custom_minimum_size = Vector2(150, 44)
+	reroll.tooltip_text = "Trade your champion for a random one; yours goes to the bench."
 	reroll.pressed.connect(func(): client.lobby_reroll(); _lobby_refresh = 0.0)
 	actions.add_child(reroll)
 	var ready := Button.new()
 	_lobby_ready = me.get("ready", false)
 	ready.text = "Not ready" if _lobby_ready else "Ready"
 	ready.theme_type_variation = "Button" if _lobby_ready else "PrimaryButton"
-	ready.custom_minimum_size = Vector2(130, 0)
+	ready.custom_minimum_size = Vector2(200, 44)
 	ready.focus_mode = Control.FOCUS_NONE
 	ready.pressed.connect(func(): client.lobby_ready(not _lobby_ready); _lobby_refresh = 0.0)
 	actions.add_child(ready)
+	center.add_child(actions)
+	mid.add_child(center)
+
+	var theirs := VBoxContainer.new()
+	theirs.custom_minimum_size = Vector2(320, 0)
+	theirs.add_theme_constant_override("separation", 8)
+	var theirs_head := Label.new()
+	theirs_head.text = "ENEMY TEAM"
+	theirs_head.theme_type_variation = "HeaderLabel"
+	theirs_head.add_theme_color_override("font_color", ENEMY_COLOR.lightened(0.15))
+	theirs_head.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	theirs.add_child(theirs_head)
+	for i in enemies:
+		theirs.add_child(_lobby_card({}, ENEMY_COLOR))
+	mid.add_child(theirs)
 
 
-## One champion-select slot: the champion's color and initial, its name, who plays it, and a
-## check when ready. Ours has a gold rim.
+static var _feather: Shader
+
+
+static func _feather_shader() -> Shader:
+	if _feather == null:
+		_feather = Shader.new()
+		_feather.code = """
+shader_type canvas_item;
+void fragment() {
+	vec4 c = texture(TEXTURE, UV);
+	vec2 d = (UV - vec2(0.5, 0.48)) * vec2(2.0, 1.85);
+	c.a *= 1.0 - smoothstep(0.62, 1.0, length(d));
+	COLOR = c;
+}
+"""
+	return _feather
+
+
+## A portrait arrived: champion select (and the loading screen) show it on their next refresh.
+func _on_portrait(_champion: String) -> void:
+	_portraits_seen += 1
+
+
+## One champion-select slot: the champion's portrait, its name, who plays it, and whether
+## they're ready; ours has a gold rim. An empty slot is a hidden enemy.
 func _lobby_card(slot: Dictionary, team: Color) -> Control:
+	var hidden := slot.is_empty()
+	var you: bool = slot.get("you", false)
 	var card := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.07, 0.085, 0.11) if not slot.you else Color(0.12, 0.1, 0.06)
-	sb.border_color = Color(0.78, 0.65, 0.38) if slot.you else Color(0.16, 0.18, 0.22)
+	sb.bg_color = Color(0.12, 0.1, 0.06, 0.92) if you else Color(0.05, 0.065, 0.085, 0.88)
+	sb.border_color = Color(0.78, 0.65, 0.38) if you else Color(0.16, 0.18, 0.22)
 	sb.set_border_width_all(1)
-	sb.border_width_left = 4
+	if hidden:
+		sb.border_width_right = 4
+	else:
+		sb.border_width_left = 4
 	sb.set_corner_radius_all(4)
-	sb.content_margin_left = 10
-	sb.content_margin_right = 10
-	sb.content_margin_top = 6
-	sb.content_margin_bottom = 6
+	sb.set_content_margin_all(6)
 	card.add_theme_stylebox_override("panel", sb)
-	sb.border_color = Color(0.78, 0.65, 0.38) if slot.you else Color(0.16, 0.18, 0.22)
+	if not you:
+		sb.border_color = team.darkened(0.35)
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
+	row.add_theme_constant_override("separation", 12)
 	card.add_child(row)
-	var portrait := Control.new()
-	portrait.custom_minimum_size = Vector2(38, 38)
-	var tint: Color = CHAMPION_COLORS.get(slot.champion, Color(0.5, 0.5, 0.55))
-	var initial: String = String(slot.champion).left(1)
-	portrait.draw.connect(func():
-		var c := portrait.size / 2.0
-		portrait.draw_circle(c, 19.0, team.darkened(0.3))
-		portrait.draw_circle(c, 17.0, tint.darkened(0.25))
-		portrait.draw_circle(c + Vector2(-4, -5), 11.0, tint.lightened(0.05))
-		portrait.draw_string(_bold_font(), Vector2(0, c.y + 7.0), initial, HORIZONTAL_ALIGNMENT_CENTER, portrait.size.x, 20, Color(1, 1, 1, 0.92)))
-	row.add_child(portrait)
+	var face := TextureRect.new()
+	face.custom_minimum_size = Vector2(64, 64)
+	face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	if not hidden:
+		face.texture = portraits.portrait(slot.champion, "bust")
+	if face.texture == null:
+		# A hidden enemy (or a portrait still rendering): a dark silhouette with a mark.
+		var shade := ColorRect.new()
+		shade.color = Color(0.09, 0.1, 0.13)
+		shade.custom_minimum_size = Vector2(64, 64)
+		var q := Label.new()
+		q.text = "?" if hidden else String(slot.champion).left(1)
+		q.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		q.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		q.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		q.add_theme_font_size_override("font_size", 26)
+		q.add_theme_color_override("font_color", Color(0.4, 0.43, 0.5))
+		shade.add_child(q)
+		row.add_child(shade)
+	else:
+		row.add_child(face)
 	var names := VBoxContainer.new()
+	names.alignment = BoxContainer.ALIGNMENT_CENTER
 	names.add_theme_constant_override("separation", -2)
 	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var champ := Label.new()
-	champ.text = slot.champion
+	champ.text = "Hidden" if hidden else slot.champion
 	champ.add_theme_font_override("font", _bold_font())
 	champ.add_theme_font_size_override("font_size", 17)
-	if slot.you:
+	if you:
 		champ.add_theme_color_override("font_color", Color(1.0, 0.88, 0.6))
+	elif hidden:
+		champ.add_theme_color_override("font_color", Color(0.45, 0.48, 0.54))
 	names.add_child(champ)
 	var who := Label.new()
-	who.text = "You" if slot.you else ("Bot" if slot.bot else "Player %d" % slot.player)
-	if slot.you:
-		who.text += "   ·   %d reroll%s" % [slot.rerolls, "" if slot.rerolls == 1 else "s"]
+	if hidden:
+		who.text = "Picking…"
+	else:
+		who.text = "You" if you else ("Bot" if slot.bot else "Player %d" % slot.player)
+		if you:
+			who.text += "   ·   %d reroll%s" % [slot.rerolls, "" if slot.rerolls == 1 else "s"]
 	who.theme_type_variation = "HintLabel"
 	names.add_child(who)
 	row.add_child(names)
-	var check := Label.new()
-	check.text = "READY" if slot.ready else ""
-	check.theme_type_variation = "HeaderLabel"
-	check.add_theme_color_override("font_color", Color(0.45, 0.85, 0.5))
-	row.add_child(check)
+	if not hidden and slot.ready:
+		var check := Label.new()
+		check.text = "READY"
+		check.theme_type_variation = "HeaderLabel"
+		check.add_theme_color_override("font_color", Color(0.45, 0.85, 0.5))
+		row.add_child(check)
 	return card
+
+
+## ---- The loading screen -----------------------------------------------------------------------
+## Between champion select and the match: both teams' champions as tall cards, ours on top,
+## until the map is built (a few seconds at most), then it fades.
+
+var loading_panel: Control
+var _loading_age := 0.0
+const LOADING_MIN_S := 3.0
+
+
+func _show_loading(l: Dictionary) -> void:
+	if loading_panel != null:
+		loading_panel.queue_free()
+	_loading_age = 0.0
+	loading_panel = Control.new()
+	loading_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	loading_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	var v := VBoxContainer.new()
+	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_theme_constant_override("separation", 18)
+	loading_panel.add_child(v)
+	var title := Label.new()
+	title.text = "THE BRIDGE  ·  %s" % client.game_type().to_upper()
+	title.theme_type_variation = "TitleLabel"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(title)
+	for ally in [true, false]:
+		var row := HBoxContainer.new()
+		row.alignment = BoxContainer.ALIGNMENT_CENTER
+		row.add_theme_constant_override("separation", 14)
+		for slot in l.slots:
+			if slot.ally == ally:
+				row.add_child(_loading_card(slot, OWN_COLOR if ally else ENEMY_COLOR))
+		v.add_child(row)
+	var tip := Label.new()
+	tip.text = "Loading the map…"
+	tip.theme_type_variation = "HintLabel"
+	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(tip)
+	overlay.get_parent().add_child(loading_panel)
+
+
+func _loading_card(slot: Dictionary, team: Color) -> Control:
+	var card := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.04, 0.05, 0.07, 0.95)
+	sb.border_color = Color(0.78, 0.65, 0.38) if slot.you else team.darkened(0.25)
+	sb.set_border_width_all(2 if slot.you else 1)
+	sb.border_width_bottom = 4
+	sb.set_corner_radius_all(4)
+	card.add_theme_stylebox_override("panel", sb)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 2)
+	card.add_child(v)
+	var face := TextureRect.new()
+	face.custom_minimum_size = Vector2(150, 225)
+	face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	face.texture = portraits.portrait(slot.champion, "full")
+	v.add_child(face)
+	var champ := Label.new()
+	champ.text = slot.champion
+	champ.add_theme_font_override("font", _bold_font())
+	champ.add_theme_font_size_override("font_size", 16)
+	champ.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if slot.you:
+		champ.add_theme_color_override("font_color", Color(1.0, 0.88, 0.6))
+	v.add_child(champ)
+	var who := Label.new()
+	who.text = "You" if slot.you else ("Bot" if slot.bot else "Player %d" % slot.player)
+	who.theme_type_variation = "HintLabel"
+	who.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(who)
+	return card
+
+
+func _update_loading(delta: float) -> void:
+	if loading_panel == null:
+		return
+	_loading_age += delta
+	var done := _map_built and _loading_age >= LOADING_MIN_S
+	if done:
+		loading_panel.modulate.a -= delta / 0.4
+		if loading_panel.modulate.a <= 0.0:
+			loading_panel.queue_free()
+			loading_panel = null
 
 
 var spectate_target := -1
@@ -3374,7 +3619,7 @@ func _build_minimap(geo: Dictionary) -> void:
 func _update_minimap(delta: float, playing: bool) -> void:
 	if minimap == null:
 		return
-	minimap.visible = playing and settings.minimap_shown and blind_state != "rating"
+	minimap.visible = playing and settings.minimap_shown and blind_state != "rating" and loading_panel == null
 	_fog_refresh -= delta
 	if playing and _fog_refresh <= 0.0 and not _terrain_pending:
 		_fog_refresh = 0.15
@@ -3400,10 +3645,11 @@ func _update_minimap(delta: float, playing: bool) -> void:
 				continue
 			var team := "ally" if u.get("ally", false) else "enemy"
 			icons.append({"pos": u.pos, "kind": u.get("kind", ""), "team": team, "champion": u.get("champion", ""),
-				"color": CHAMPION_COLORS.get(u.get("champion", ""), Color.GRAY)})
+				"color": CHAMPION_COLORS.get(u.get("champion", ""), Color.GRAY),
+				"face": portraits.portrait(u.get("champion", ""), "small")})
 		if own_body != null and not own_status.get("dead", false):
 			icons.append({"pos": client.own_position(), "kind": "champion", "team": "own", "champion": own_champion,
-				"color": CHAMPION_COLORS.get(own_champion, Color.GRAY)})
+				"color": CHAMPION_COLORS.get(own_champion, Color.GRAY), "face": portraits.portrait(own_champion, "small")})
 		# Champions above everything else.
 		icons.sort_custom(func(a, b): return a.kind != "champion" and b.kind == "champion")
 		minimap.icons = icons
