@@ -1242,6 +1242,49 @@ mod tests {
         assert!(tampered.verify().mismatch.is_some());
     }
 
+    /// ARAM has no fountain healing after leaving base, so a bot low on health must not sit
+    /// out the fight waiting for health that never comes (behind a turret or in the fountain):
+    /// it takes a relic or keeps fighting from behind its wave. Measured as the longest time
+    /// any bot spends alive, below half health, with no enemy unit within 1,500 u.
+    #[test]
+    fn aram_bots_low_on_health_do_not_sit_out_the_fight() {
+        let cfg = ServerConfig { seed: 11, bots: 10, scenario: Scenario::Aram, ..Default::default() };
+        let mut core = ServerCore::new(cfg, 0.0);
+        let mut streak: std::collections::HashMap<mftr_sim::UnitId, u32> = Default::default();
+        let mut worst = (0u32, mftr_sim::UnitId(0));
+        for _ in 0..(10 * 60 * 30) {
+            let k = core.game.world.tick().next();
+            let mut due = Vec::new();
+            for bot in &mut core.bots {
+                due.extend(bot.think(&core.game.world, k));
+            }
+            core.game.step(due);
+            if core.game.world.game().winner.is_some() {
+                break;
+            }
+            if !k.0.is_multiple_of(30) {
+                continue;
+            }
+            let units = core.game.world.units();
+            for c in units.iter().filter(|u| u.kind == mftr_sim::UnitKind::Champion) {
+                let out = c.state.alive()
+                    && c.state.health < 0.5 * c.stats.max_health
+                    && !units.iter().any(|e| {
+                        e.team != c.team
+                            && e.state.alive()
+                            && matches!(e.kind, mftr_sim::UnitKind::Champion | mftr_sim::UnitKind::Minion)
+                            && e.state.pos.distance(c.state.pos) <= 1500.0
+                    });
+                let n = streak.entry(c.id).or_default();
+                *n = if out { *n + 1 } else { 0 };
+                if *n > worst.0 {
+                    worst = (*n, c.id);
+                }
+            }
+        }
+        assert!(worst.0 <= 40, "a bot sat out the fight low on health for {} s ({:?})", worst.0, worst.1);
+    }
+
     /// Joins and leaves at any point (before, between and after commands) replay exactly.
     #[test]
     fn replays_handle_joins_and_leaves() {
