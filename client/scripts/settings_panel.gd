@@ -6,6 +6,7 @@ extends PanelContainer
 var settings
 var _waiting := ""                       # the action being rebound, or ""
 var _bind_buttons := {}                  # action -> Button
+var tabs: TabContainer
 
 
 func setup(s) -> void:
@@ -22,12 +23,13 @@ func setup(s) -> void:
 	title.text = "Settings"
 	title.theme_type_variation = "TitleLabel"
 	v.add_child(title)
-	var tabs := TabContainer.new()
+	tabs = TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(tabs)
 	tabs.add_child(_camera_tab())
 	tabs.add_child(_interface_tab())
 	tabs.add_child(_graphics_tab())
+	tabs.add_child(_audio_tab())
 	tabs.add_child(_keys_tab())
 	var done := Button.new()
 	done.text = "Done"
@@ -60,7 +62,8 @@ func _row(parent: Control, label: String, control: Control, hint := "") -> void:
 	l.tooltip_text = hint
 	l.mouse_filter = Control.MOUSE_FILTER_PASS
 	parent.add_child(l)
-	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# A checkbox stays its own size; everything else fills the row.
+	control.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN if control is CheckBox else Control.SIZE_EXPAND_FILL
 	control.tooltip_text = hint
 	parent.add_child(control)
 
@@ -77,6 +80,7 @@ func _grid(name_: String) -> GridContainer:
 func _check(on: bool, apply: Callable) -> CheckBox:
 	var c := CheckBox.new()
 	c.button_pressed = on
+	c.focus_mode = Control.FOCUS_NONE
 	c.toggled.connect(func(v): apply.call(v); settings.save())
 	return c
 
@@ -117,6 +121,18 @@ func _interface_tab() -> Control:
 	var g := _grid("Interface")
 	_row(g, "Show the minimap", _check(settings.minimap_shown, func(v): settings.minimap_shown = v))
 	_row(g, "Minimap size", _slider(settings.minimap_size, 50, 160, func(v): settings.minimap_size = v, "%"))
+	return g
+
+
+func _audio_tab() -> Control:
+	var g := _grid("Audio")
+	_row(g, "Master volume", _slider(settings.master_volume, 0, 100, func(v): settings.master_volume = v, "%"))
+	_row(g, "Effects", _slider(settings.effects_volume, 0, 100, func(v): settings.effects_volume = v, "%"),
+		"Abilities, attacks, impacts and footsteps.")
+	_row(g, "Interface", _slider(settings.interface_volume, 0, 100, func(v): settings.interface_volume = v, "%"),
+		"The victory and defeat fanfare, and other interface sounds.")
+	_row(g, "Mute in the background", _check(settings.mute_in_background, func(v): settings.mute_in_background = v),
+		"Silence the game while its window isn't focused.")
 	return g
 
 

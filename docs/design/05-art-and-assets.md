@@ -99,6 +99,15 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 
 - SVG icons (imported by Godot as scalable vectors), a single UI theme, procedural panel backgrounds.
 - Ability and item icons as SVG: a strong silhouette shape plus an element/color code. Many can share motifs.
+  **As built:** item icons are `art/items/icons/<name>.svg`, drawn on a backdrop in their tier's
+  colors (components slate, upgrades teal, legendaries gold on purple); an item without one gets
+  its main stat's glyph. Planned: icons rendered from item models.
+- **Champion portraits** are rendered by the client from each champion's own model (its idle
+  pose, a warm key and cool rim light, a backdrop in its identity color), so they follow every
+  change to a model: a bust, a round crop, a minimap icon and a full-body card. They're used in
+  champion select (styled after the reference game's ARAM select: our team as cards, our
+  champion large, the enemy hidden), on the loading screen that reveals both teams, the HUD and
+  the minimap.
 - Fonts: open-licensed (e.g. Inter, Noto for i18n), subset per language pack.
 - **Minimap** (bottom right; shown and sized in Settings): the map painted by one top-down render
   of its ground, cliffs and scenery, the fog of war over it, icons for champions (their initial

@@ -6,6 +6,8 @@
 
 global uniform vec2 cloud_offset;
 global uniform float cloud_strength;
+// 0 for things rendered outside the map (portraits), which no cloud passes over.
+uniform float cloud_receive = 1.0;
 
 varying float cloud_sun;
 
@@ -23,7 +25,7 @@ float cloud_noise(vec2 p) {
 
 // 1 in sunlight, down to 1 - cloud_strength under the thickest cloud.
 float cloud_shade(vec3 world) {
-	if (cloud_strength <= 0.0) {
+	if (cloud_strength <= 0.0 || cloud_receive <= 0.0) {
 		return 1.0;
 	}
 	// Turned so no octave lines up with the map's axes.

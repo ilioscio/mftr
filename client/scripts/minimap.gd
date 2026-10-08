@@ -39,6 +39,7 @@ func _ready() -> void:
 	_fog.material = mat
 	add_child(_fog)
 	_layer = Control.new()
+	_layer.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_layer.draw.connect(_draw_icons)
@@ -140,10 +141,15 @@ func _draw_icons() -> void:
 			"relic":
 				_layer.draw_circle(p, maxf(2.5, 3.5 * k), Color(0.3, 0.95, 0.45))
 			"champion":
-				var r := maxf(5.0, (9.5 if i.team == "own" else 8.0) * k)
+				var r := maxf(6.0, (11.0 if i.team == "own" else 9.5) * k)
 				_layer.draw_circle(p, r + 2.0, team_color)
-				_layer.draw_circle(p, r, i.color)
-				if font != null:
+				var face: Texture2D = i.get("face")
+				if face != null:
+					# The champion's portrait, rendered from its model (portraits.gd).
+					_layer.draw_texture_rect(face, Rect2(p - Vector2(r, r), Vector2(r, r) * 2.0), false)
+				else:
+					_layer.draw_circle(p, r, i.color)
+				if face == null and font != null:
 					var letter: String = i.champion.substr(0, 1)
 					var fs := int(maxf(9.0, 12.0 * k))
 					_layer.draw_string(font, p + Vector2(-r, fs * 0.36), letter, HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, fs, Color.WHITE)

@@ -17,6 +17,10 @@ var minimap_size := 100.0                # 50–160 %
 var shadows := true                      # the sun's shadows
 var bloom := true                        # glow around bright things
 var atmosphere := true                   # cloud shadows and floating motes
+var master_volume := 80.0                # 0–100 %
+var effects_volume := 100.0              # abilities, attacks, impacts: under Master
+var interface_volume := 100.0            # the fanfare and other interface sounds: under Master
+var mute_in_background := true           # silence while the window isn't focused
 
 ## Rebindable actions, in the order the settings list them: [action, label, default].
 ## A default is a key name with modifiers (`Alt+Q`) or a mouse button (`Mouse Right`); an action
@@ -67,6 +71,10 @@ func load_file() -> void:
 		shadows = cfg.get_value("graphics", "shadows", shadows)
 		bloom = cfg.get_value("graphics", "bloom", bloom)
 		atmosphere = cfg.get_value("graphics", "atmosphere", atmosphere)
+		master_volume = clampf(cfg.get_value("audio", "master", master_volume), 0.0, 100.0)
+		effects_volume = clampf(cfg.get_value("audio", "effects", effects_volume), 0.0, 100.0)
+		interface_volume = clampf(cfg.get_value("audio", "interface", interface_volume), 0.0, 100.0)
+		mute_in_background = cfg.get_value("audio", "mute_in_background", mute_in_background)
 		_binds = cfg.get_value("keys", "binds", {})
 	apply_bindings()
 
@@ -82,6 +90,10 @@ func save() -> void:
 	cfg.set_value("graphics", "shadows", shadows)
 	cfg.set_value("graphics", "bloom", bloom)
 	cfg.set_value("graphics", "atmosphere", atmosphere)
+	cfg.set_value("audio", "master", master_volume)
+	cfg.set_value("audio", "effects", effects_volume)
+	cfg.set_value("audio", "interface", interface_volume)
+	cfg.set_value("audio", "mute_in_background", mute_in_background)
 	cfg.set_value("keys", "binds", _binds)
 	cfg.save(PATH)
 
