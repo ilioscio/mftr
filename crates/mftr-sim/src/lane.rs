@@ -58,9 +58,16 @@ pub fn shared_xp(total: u32, sharers: usize) -> u32 {
     let n = sharers as f32;
     (total as f32 / n * (1.0 + 0.15 * (n - 1.0))).round() as u32
 }
-/// Consecutive turret shots on the same champion hit harder: +35% each, up to 5 steps.
-pub const TURRET_HEAT_STEP: f32 = 0.35;
-pub const TURRET_HEAT_MAX: u8 = 5;
+/// Turret shot damage (D53, the reference ARAM's outer turrets): 185 at the start, growing with
+/// every wave (~9 a minute) to 293 after 12 minutes.
+pub const TURRET_DAMAGE: f32 = 185.0;
+pub const TURRET_DAMAGE_PER_WAVE: f32 = 4.5;
+pub const TURRET_DAMAGE_MAX: f32 = 293.0;
+/// Consecutive turret shots on champions hit harder: +50% each, up to +150%. The heat cools
+/// 5 s after the last shot at a champion; switching champions keeps it, minions don't touch it.
+pub const TURRET_HEAT_STEP: f32 = 0.5;
+pub const TURRET_HEAT_MAX: u8 = 3;
+pub const TURRET_HEAT_COOL: SimDuration = SimDuration::from_millis(5000);
 pub const WAVE_INTERVAL: SimDuration = SimDuration::from_millis(30_000);
 pub const FIRST_WAVE: SimDuration = SimDuration::from_millis(15_000);
 pub const GATEHOUSE_RESPAWN: SimDuration = SimDuration::from_millis(300_000);
@@ -77,9 +84,14 @@ pub const TURRET_STATS: Stats = Stats {
     health_regen: 0.0,
     armor: 50.0,
     magic_resist: 50.0,
-    attack_damage: 160.0,
+    attack_damage: TURRET_DAMAGE,
     ..Stats::NONE
 };
+
+/// A turret's shot damage once `waves` waves have spawned.
+pub fn turret_damage(waves: u32) -> f32 {
+    (TURRET_DAMAGE + TURRET_DAMAGE_PER_WAVE * waves as f32).min(TURRET_DAMAGE_MAX)
+}
 pub const TURRET_ATTACK: AttackSpec =
     AttackSpec { range: 775.0, attack_speed: 0.83, windup_fraction: 0.15, bolt_speed: 1200.0 };
 pub const GATEHOUSE_STATS: Stats = Stats { max_health: 3000.0, armor: 20.0, magic_resist: 20.0, ..Stats::NONE };
@@ -339,24 +351,22 @@ pub fn tower_think(
     }
 }
 
-/// Damage of a turret shot at a target (01 §3): ramping on champions, a share of max health on
-/// minions (true damage). Updates the turret's heat.
+/// Damage of a turret shot fired at `t` (01 §3): ramping on champions, a share of max health
+/// on minions (true damage). Updates the turret's heat.
 pub fn turret_shot(
     brain: &mut Option<Brain>,
     base: f32,
-    target: UnitId,
+    t: SimTime,
     target_kind: UnitKind,
     target_range: f32,
     target_max_health: f32,
 ) -> (f32, bool) {
-    let Some(Brain::Tower { heat, last }) = brain.as_mut() else { return (base, false) };
+    let Some(Brain::Tower { heat, cools_at }) = brain.as_mut() else { return (base, false) };
     if target_kind == UnitKind::Minion {
-        *heat = 0;
-        *last = target;
         return (turret_minion_share(target_range) * target_max_health, true);
     }
-    *heat = if *last == target { (*heat + 1).min(TURRET_HEAT_MAX) } else { 0 };
-    *last = target;
+    *heat = if t < *cools_at { (*heat + 1).min(TURRET_HEAT_MAX) } else { 0 };
+    *cools_at = t.plus(TURRET_HEAT_COOL);
     (base * (1.0 + TURRET_HEAT_STEP * *heat as f32), false)
 }
 

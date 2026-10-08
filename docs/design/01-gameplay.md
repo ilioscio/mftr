@@ -35,14 +35,14 @@ Inspired by the classic 3-lane layout:
 | **Gatehouse** | 1 per lane | When destroyed: allied **Elite minions** spawn in that lane; respawns after 5:00 |
 | Base turret | 2 | Guard the Base |
 | **Base** | 1 | Spawns minion waves; destroying it wins the game |
-| Fountain | 1 | Spawn point. Fast regen, shop access, and a lethal defensive laser |
+| Fountain | 1 | Spawn point. Fast regen (not in ARAM: no fountain healing after you leave base), shop access, and a lethal defensive laser |
 
 Turrets must be destroyed in order down each lane. **Turret AI** priority:
 1. An enemy champion that damages an allied champion within turret range.
 2. The closest enemy minion, with siege minions before casters and melees.
 3. The closest enemy champion.
 
-Consecutive shots on a champion ramp up in damage. Turrets take reduced damage when no enemy minions are nearby (backdoor protection).
+Consecutive shots on a champion ramp up in damage: *(start, D53)* 185 per shot, growing about 9 a minute to 293, and +50% per consecutive champion hit up to +150%, cooling 5 s after the last one. Turrets take reduced damage when no enemy minions are nearby (backdoor protection).
 
 ## 4. Minions
 
