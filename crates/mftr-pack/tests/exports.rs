@@ -55,6 +55,7 @@ fn committed_exports_are_clean() {
         "champions/vesper/export/vesper.glb",
         "champions/rook/export/rook.glb",
         "champions/ember/export/ember.glb",
+        "champions/bastion/export/bastion.glb",
     ]
     .map(String::from)
     .to_vec();
@@ -290,6 +291,7 @@ fn generated_sounds_are_built_from_the_current_recipe() {
         ("champions/vesper/sounds.ron", "champions/vesper/export/vesper.sfx.ron"),
         ("champions/rook/sounds.ron", "champions/rook/export/rook.sfx.ron"),
         ("champions/ember/sounds.ron", "champions/ember/export/ember.sfx.ron"),
+        ("champions/bastion/sounds.ron", "champions/bastion/export/bastion.sfx.ron"),
     ] {
         let text = std::fs::read_to_string(art(recipe)).unwrap();
         let file = mftr_pack::sfx::parse(&std::fs::read_to_string(art(binding)).unwrap()).unwrap();

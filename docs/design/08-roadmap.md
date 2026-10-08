@@ -527,6 +527,20 @@ The first of the other eight champions (6 in the A list). Designed without an ow
 
 **Left for later:** the owner's approval of his concept; polish.
 
+### A slice 8 status (2026-10-07): Bastion ✅ done (concept awaiting approval)
+- **Look:** a stone guardian of rounded masonry, the widest silhouette on the roster (the `large` shape, ×1.08 and ×1.12 wider again); 2,596 triangles.
+  - Boulder shoulders with moss, iron bands.
+  - A slab shield on the left arm, and a chain grapple wound round the right fist down to a hook.
+  - No face: a glowing rune visor in a rock head, and pale rune lines on the chest and forearms.
+  - The team accent on a hanging banner, the shield emblem and the shoulder paint.
+- **Clips:** all 29, every `fire` checked; Bulwark (instant) plays as an upper-body pulse.
+- **Effects and sounds:**
+  - VFX: stone chips, the chain, Bulwark's shimmer, Tremor's ring, Upheaval's eruption.
+  - 13 sounds, 73 KB.
+- **Checked in Godot:** the whole kit fired its effects and sounds, with Upheaval's eruption (and the hard-CC clang) on screen.
+
+**Left for later:** the owner's approval of his concept; polish.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.
