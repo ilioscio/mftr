@@ -53,6 +53,12 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
   brush), never close to the lane on the camera's side. The ground shader draws grass with
   chunky texels, a dirt road with ruts, pebbles and a worn cobbled spine; cliffs have strata,
   moss and grassy tops, and the land past a lane map's edges is raised to them.
+- **Light, as built:** a warm late-afternoon sun with soft shadows over the view, a cool sky
+  fill (shade reads blue, not grey), a filmic tonemap with a gentle grade, bloom on what glows,
+  and haze only toward the far edge of the view. Cloud shadows drift across the map: a shared
+  shader include (`clouds.gdshaderinc`) dims the sun, not the fill, on terrain, props and
+  champions alike, procedurally (no textures). Pollen motes float in the light near the camera.
+  Shadows, bloom, and clouds with motes can each be turned off in Settings → Graphics.
 
 ## 4. Champions
 
@@ -99,7 +105,23 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
   on their identity color, ringed by team), minions, structures and relics, and the camera's view
   on the ground. Left click or drag looks there while held; right click moves.
 - **Fog of war** in the world as on the minimap: what the team doesn't see is darkened and cooled
-  (the client computes its team's vision with the sim's rules; units in it are never sent).
+  (the client computes its team's vision with the sim's rules; units in it are never sent). The
+  vision grid stores how far inside each vision circle a cell lies, so its edges are smooth
+  curves rather than the cells' stair steps.
+- **As built (the theme):** ink panels with a thin gold rim, slate buttons that warm to gold on
+  hover, one gold primary button per screen, recessed fields; one theme for every menu and
+  panel (`ui_theme.gd`), the same colors in the HUD (`hud.gd`). Menus sit on a procedural dusk
+  backdrop with the logo; champion select shows each team's champions as cards.
+- **The HUD:** one bottom panel scaled with the window: stats, a portrait with the level and an
+  XP ring, ability icons (a glyph per kind of effect on the champion's color) with cooldown
+  sweeps, key tabs, rank pips and level-up tabs, a segmented health bar, items and gold. Hovering
+  an ability shows its tooltip, generated from the sim's data: what it does, the numbers at the
+  current rank with their AD/AP scaling (colored by damage type; status effects with icons),
+  every rank, and what the next rank changes. The top right has K/D, the clock, fps and ping;
+  the full net graph is on F1.
+- **Over units:** health bars with a frame, 100-health ticks, a level box, a draining damage
+  chip; champions' names, and icons for stun, root and slow. Damage numbers show only what
+  concerns the player (dealt, taken, healed), colored by damage type, sized by the hit.
 
 ## 7. Audio
 

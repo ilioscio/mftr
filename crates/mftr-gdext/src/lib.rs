@@ -732,7 +732,13 @@ impl MatchClient {
         let Some(a) = spell.or_else(|| champ.ability(slot)) else { return d };
         let (stats, _) = items::champion_stats(champ.def(), &st.progress.stats_key());
         let ranked = slot < 4 && self.session.rules().ranked;
-        let max_rank: u8 = if !ranked { 1 } else if slot == 3 { 3 } else { 5 };
+        let max_rank: u8 = if !ranked {
+            1
+        } else if slot == 3 {
+            3
+        } else {
+            5
+        };
         let rank = if slot < 4 { st.progress.ranks[slot as usize] } else { 1 };
         d.set("name", a.name);
         d.set("rank", rank as i64);
@@ -745,7 +751,9 @@ impl MatchClient {
         d.set("haste", haste);
         d.set(
             "cooldowns",
-            &per_rank(&|r| a.cooldown_at(r).0 as f32 / mftr_sim::time::SUBTICKS_PER_SECOND as f32 * 100.0 / (100.0 + haste)),
+            &per_rank(&|r| {
+                a.cooldown_at(r).0 as f32 / mftr_sim::time::SUBTICKS_PER_SECOND as f32 * 100.0 / (100.0 + haste)
+            }),
         );
         let secs = |t: mftr_sim::SimDuration| t.0 as f32 / mftr_sim::time::SUBTICKS_PER_SECOND as f32;
         let now_rank = rank.max(1);
@@ -902,10 +910,7 @@ impl MatchClient {
                         let p = Vec2::new((col as f32 + 0.5) * cell, (row as f32 + 0.5) * cell);
                         let inside = ((r - (p - s).length()) / cell + 0.5).clamp(0.0, 1.0);
                         let v = (inside * 255.0).round() as u8;
-                        if v > data[i]
-                            && map.brush_at(p).is_none_or(|b| Some(b) == brush)
-                            && map.line_of_sight(s, p)
-                        {
+                        if v > data[i] && map.brush_at(p).is_none_or(|b| Some(b) == brush) && map.line_of_sight(s, p) {
                             data[i] = v;
                         }
                     }
