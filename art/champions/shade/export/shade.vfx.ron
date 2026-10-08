@@ -1,0 +1,27 @@
+// Shade's VFX (A10): shadow and steel. Violet-white glints where his slashes land, smoke where
+// he steps through the veil, a ring of blade glints for Fan of Blades on its true radius, and a
+// burst where Shadow Step and Execution strike. Instances of the client's VFX kit (05 §5.1);
+// hand-authored; validated by `mftr-tools pack validate`.
+(
+    effects: [
+        (event: "attack.fire", kit: "flare", ramp: [(0.95, 0.92, 1.0), (0.7, 0.6, 0.9), (0.4, 0.3, 0.55)], count: 8, speed: 3.0, lifetime: 0.12),
+        (event: "attack.fire", kit: "burst", ramp: [(0.95, 0.95, 1.0), (0.66, 0.6, 0.8), (0.3, 0.26, 0.38)], count: 8, speed: 2.6, lifetime: 0.25),
+
+        // Q Shadow Step: smoke at the launch, a strike on arrival.
+        (event: "q.start", kit: "dust", ramp: [(0.36, 0.28, 0.46), (0.24, 0.18, 0.3), (0.14, 0.11, 0.18)], count: 10, speed: 1.2),
+        (event: "q.land", kit: "burst", ramp: [(0.96, 0.94, 1.0), (0.7, 0.58, 0.92), (0.36, 0.26, 0.5)], count: 16, speed: 3.5),
+
+        // W Fan of Blades: a ring of glinting blades on the area's edge.
+        (event: "w.detonate", kit: "ring", ramp: [(0.96, 0.96, 1.0), (0.72, 0.7, 0.86), (0.4, 0.34, 0.52)], count: 24, speed: 2.4),
+        (event: "w.detonate", kit: "burst", ramp: [(0.96, 0.96, 1.0), (0.7, 0.66, 0.84), (0.34, 0.3, 0.42)], count: 14, speed: 4.0),
+
+        // E Veil Step: violet smoke where he vanishes and where he reappears.
+        (event: "e.start", kit: "dust", ramp: [(0.4, 0.3, 0.52), (0.26, 0.2, 0.34), (0.15, 0.12, 0.2)], count: 14, speed: 1.0, size: 1.3),
+        (event: "e.land", kit: "dust", ramp: [(0.4, 0.3, 0.52), (0.26, 0.2, 0.34), (0.15, 0.12, 0.2)], count: 14, speed: 1.2, size: 1.3),
+
+        // R Execution: a flare as he leaps, a violent burst and a ring as he lands.
+        (event: "r.start", kit: "flare", ramp: [(0.96, 0.92, 1.0), (0.66, 0.5, 0.9), (0.36, 0.24, 0.5)], count: 12, size: 1.3),
+        (event: "r.land", kit: "burst", ramp: [(1.0, 0.96, 1.0), (0.78, 0.6, 0.96), (0.46, 0.3, 0.62), (0.2, 0.14, 0.26)], count: 26, speed: 4.6),
+        (event: "r.land", kit: "ring", ramp: [(0.9, 0.8, 1.0), (0.6, 0.44, 0.84), (0.3, 0.22, 0.42)]),
+    ],
+)

@@ -555,6 +555,26 @@ The first of the other eight champions (6 in the A list). Designed without an ow
 
 **Left for later:** the owner's approval of her concept; polish.
 
+### A slice 10 status (2026-10-07): Shade ✅ done (concept awaiting approval)
+- **Look:** a lithe shadow assassin on `biped` v1, 2,682 triangles.
+  - Violet-black leathers.
+  - A dark mask over his lower face.
+  - A curved dagger in each hand, aimed per pose.
+  - A team-colored scarf streaming behind him on an `extra_scarf` chain.
+- **Clips:** all 35, including three dash sets (Shadow Step, Veil Step, Execution).
+- **Runtime, several dashes:**
+  - The animator keeps a start / travel / land set per dash slot.
+  - Dashes and lunges now emit an instant `CastStarted`, so the client knows each unit's dash slot. Our own dash notes its slot at the key press.
+  - Dash start and land effects use that slot's events.
+- **Effects and sounds:**
+  - VFX: slash glints, Veil Step smoke, Fan of Blades' ring of steel, strike bursts.
+  - 10 sounds, 48 KB.
+- **Checked in Godot:**
+  - Fan of Blades, the Blink pulse, Veil Step (its own landing) and Shadow Step (its own start and strike) fired their effects and sounds.
+  - Execution wasn't seen live: the bot kept out of its range.
+
+**Left for later:** the owner's approval of his concept; polish.
+
 ## M4 — Crossroads (full 5v5)
 - 3-lane map, jungle camps, river, wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
 - Claim (smite), wards and vision items, support item quest, turret plating.

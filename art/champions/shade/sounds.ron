@@ -1,0 +1,53 @@
+// Shade's sounds (A10): shadow and steel. Quick blade swishes and thin metallic slices, a
+// hushed rush of air for each step through the shadows, Fan of Blades' whirling ring of steel,
+// and Execution's rising hiss and heavy, ringing strike. Footsteps, death and respawn come from
+// the library. A recipe for `mftr-tools sfx build`.
+(
+    pack: "shade",
+    sounds: [
+        (name: "swish", events: ["attack.cast"], volume: 0.3, pitch: 0.1, layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.04, 0.02, 0.08), gain: 0.8, lowpass: (2000.0, 7000.0), highpass: 600.0),
+        ]),
+        (name: "slice_1", events: ["attack.fire"], volume: 0.5, pitch: 0.08, layers: [
+            (wave: "metal", freq: (4200.0, 3600.0), env: (0.0, 0.01, 0.1), gain: 0.4),
+            (wave: "noise", freq: (9000.0, 3000.0), env: (0.0, 0.01, 0.06), gain: 0.6, highpass: 2000.0),
+            (wave: "sine", freq: (220.0, 110.0), env: (0.0, 0.0, 0.05), gain: 0.4),
+        ]),
+        (name: "slice_2", events: ["attack.fire"], volume: 0.5, pitch: 0.08, layers: [
+            (wave: "metal", freq: (3800.0, 3200.0), env: (0.0, 0.01, 0.11), gain: 0.4),
+            (wave: "noise", freq: (8000.0, 2600.0), env: (0.0, 0.012, 0.06), gain: 0.6, highpass: 2000.0),
+            (wave: "sine", freq: (200.0, 100.0), env: (0.0, 0.0, 0.05), gain: 0.4),
+        ]),
+        (name: "shadow_rush", events: ["q.start", "e.start"], volume: 0.4, pitch: 0.08, layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.02, 0.05, 0.18), gain: 0.8, lowpass: (900.0, 3000.0), highpass: 250.0),
+            (wave: "sine", freq: (180.0, 90.0), env: (0.02, 0.05, 0.15), gain: 0.2),
+        ]),
+        (name: "strike", events: ["q.land"], volume: 0.55, pitch: 0.06, crush: (bits: 10, hold: 1), layers: [
+            (wave: "metal", freq: (3600.0, 3000.0), env: (0.0, 0.02, 0.15), gain: 0.45),
+            (wave: "noise", freq: (7000.0, 1500.0), env: (0.0, 0.01, 0.08), gain: 0.6, lowpass: (8000.0, 2000.0)),
+            (wave: "sine", freq: (160.0, 60.0), env: (0.0, 0.01, 0.1), gain: 0.7, punch: 0.6),
+        ]),
+        (name: "veil_land", events: ["e.land"], volume: 0.35, layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.0, 0.03, 0.15), gain: 0.6, lowpass: (2000.0, 600.0)),
+        ]),
+        (name: "fan", events: ["w.detonate"], volume: 0.6, crush: (bits: 9, hold: 1), layers: [
+            (wave: "metal", freq: (4000.0, 2600.0), env: (0.0, 0.05, 0.25), gain: 0.45, vibrato: (1.0, 20.0)),
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.0, 0.08, 0.2), gain: 0.6, lowpass: (6000.0, 1500.0), highpass: 800.0),
+            (wave: "metal", freq: (3000.0, 2400.0), env: (0.0, 0.02, 0.15), gain: 0.3, delay: 0.06),
+        ]),
+        (name: "execution_rise", events: ["r.start"], volume: 0.5, layers: [
+            (wave: "noise", freq: (22050.0, 22050.0), env: (0.05, 0.1, 0.15), gain: 0.7, lowpass: (600.0, 4500.0), highpass: 300.0),
+            (wave: "saw", freq: (160.0, 320.0), env: (0.05, 0.1, 0.1), gain: 0.25, lowpass: (800.0, 2000.0)),
+        ]),
+        (name: "execution", events: ["r.land"], volume: 0.75, crush: (bits: 8, hold: 2), echo: (delay: 0.09, feedback: 0.3), layers: [
+            (wave: "metal", freq: (3200.0, 2200.0), env: (0.0, 0.03, 0.35), gain: 0.5),
+            (wave: "sine", freq: (130.0, 40.0), env: (0.0, 0.03, 0.3), gain: 1.0, punch: 1.0),
+            (wave: "noise", freq: (6000.0, 800.0), env: (0.0, 0.02, 0.2), gain: 0.6, lowpass: (6000.0, 800.0)),
+        ]),
+        (name: "blade_spin", events: ["unit.emote"], volume: 0.35, layers: [
+            (wave: "metal", freq: (3000.0, 3000.0), env: (0.0, 0.01, 0.06), gain: 0.4),
+            (wave: "metal", freq: (3300.0, 3300.0), env: (0.0, 0.01, 0.06), gain: 0.4, delay: 0.25),
+            (wave: "metal", freq: (3600.0, 3600.0), env: (0.0, 0.01, 0.08), gain: 0.4, delay: 0.5),
+        ]),
+    ],
+)

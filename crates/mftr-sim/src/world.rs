@@ -2457,9 +2457,13 @@ fn try_cast(
             events.push(SimEvent::Shielded { unit: id, amount: s.amount, at: t, until: st.shield_until });
         }
     }
-    // Instant casts (supports, shields, blinks) still tell clients a cast happened so they can
-    // animate it (A6); `fire_at == at` marks it instant.
-    if matches!(ability.effect, Effect::Support(_) | Effect::Shield(_) | Effect::Blink(_)) {
+    // Instant casts (supports, shields, blinks, dashes, lunges) still tell clients a cast
+    // happened, so they can animate it (and tell one dash from another, A10); `fire_at == at`
+    // marks it instant.
+    if matches!(
+        ability.effect,
+        Effect::Support(_) | Effect::Shield(_) | Effect::Blink(_) | Effect::Dash(_) | Effect::Lunge(_)
+    ) {
         events.push(SimEvent::CastStarted { unit: id, slot, at: t, dir, point: target, fire_at: t, seq });
     }
     // A new cast ends any follow-through still running (10 §4.1).
@@ -3870,6 +3874,10 @@ mod tests {
         let v = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
         clump(&mut w, Vec2::new(1160.0, 1000.0), 1); // right in the dash path
         w.step(&[cast_slot(0, 1, 1, 0, 2, (2000.0, 1000.0))]); // Tumble: 325 u at 1000 u/s
+        // A10: a dash announces its slot as an instant cast, so clients pick its clips.
+        assert!(w.take_events().iter().any(
+            |ev| matches!(ev, SimEvent::CastStarted { unit, slot: 2, at, fire_at, .. } if *unit == v && at == fire_at)
+        ));
         for _ in 0..12 {
             w.step(&[]);
         }
