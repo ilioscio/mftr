@@ -1007,6 +1007,8 @@ func _update_remotes(delta: float) -> void:
 			remote_bodies[id] = b
 		var body: Node3D = remote_bodies[id]
 		var p := _to_world(u.pos)
+		if u.kind == "relic":
+			_relic_pad(u.pos)
 		if body.has_meta("prop"):
 			p.y = 0.0
 			if not body.has_meta("faced"):
@@ -1039,6 +1041,9 @@ func _update_remotes(delta: float) -> void:
 		if not seen.has(id):
 			var gone: Node3D = remote_bodies[id]
 			remote_bodies.erase(id)
+			# Structures are always visible: one that's gone fell. It leaves rubble.
+			if gone.has_meta("prop"):
+				_leave_rubble(gone)
 			# A minion last seen at 0 health died (rather than leaving our vision): it plays its
 			# death where it fell, then sinks away (A5).
 			if _models_shown(gone) and float(gone.get_meta("last_health", 1.0)) <= 0.0:
@@ -1106,6 +1111,7 @@ func _build_map() -> void:
 	var geo: Dictionary = client.map_geometry()
 	var size: Vector2 = geo.size
 	_size_ground(size, 2600.0)
+	ground.layers = MAP_LAYERS
 	_build_minimap(geo)
 	# The dressing: forest, rocks, tall grass (art/props), where the packs are present.
 	var dressing := preload("res://scripts/scenery.gd").new()
@@ -1119,6 +1125,8 @@ func _build_map() -> void:
 		for m in mats:
 			m.set_shader_parameter("sway", 0.05 if id.begins_with("grass") else (0.012 if id.begins_with("pine") else 0.0))
 		return [model.static_mesh(), mats])
+	for c in dressing.get_children():
+		c.layers = MAP_LAYERS
 	if size.x != size.y:
 		# A lane map: the dirt lane runs along its middle.
 		var gm: ShaderMaterial = ground.material_override
@@ -1126,6 +1134,14 @@ func _build_map() -> void:
 		gm.set_shader_parameter("lane_z", size.y / 2.0 * UNITS_TO_METERS)
 		gm.set_shader_parameter("lane_width", 13.0)
 	for f in geo.fountains:
+		# The spawn platform (a prop the size of the fountain's circle), else a tinted disk.
+		var platform := _prop_node("fountain", ALLY_COLOR if f.ally else ENEMY_COLOR)
+		if platform != null:
+			platform.position = Vector3(f.center.x * UNITS_TO_METERS, 0.0, f.center.y * UNITS_TO_METERS)
+			platform.scale = Vector3.ONE * (f.radius / 600.0)
+			platform.layers = MAP_LAYERS
+			add_child(platform)
+			continue
 		var disk := MeshInstance3D.new()
 		var cyl := CylinderMesh.new()
 		cyl.top_radius = f.radius * UNITS_TO_METERS
@@ -1139,16 +1155,28 @@ func _build_map() -> void:
 	wall_mat.shader = load("res://shaders/wall.gdshader")
 	var brush_mat := ShaderMaterial.new()
 	brush_mat.shader = load("res://shaders/brush.gdshader")
+	# On lane maps the land past the map's edges is raised to the cliffs' height, so the forest
+	# runs on without a drop (the fountain ends sit under a cliff).
+	if size.x > size.y * 1.5:
+		var m := 2600.0
+		for r in [Rect2(-m, -m, size.x + 2.0 * m, m), Rect2(-m, size.y, size.x + 2.0 * m, m), Rect2(-m, 0, m, size.y), Rect2(size.x, 0, m, size.y)]:
+			var poly := PackedVector2Array([r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)])
+			var land := _extrude(poly, 1.4, wall_mat)
+			land.layers = MAP_LAYERS
+			add_child(land)
 	for poly in geo.walls:
 		if _prop_model("rock_1") != null and preload("res://scripts/scenery.gd").is_outcrop(poly):
 			continue  # drawn as a rock cluster by the scenery
-		add_child(_extrude(poly, 1.4, wall_mat))
-	for poly in geo.brush:
-		var b := _extrude(poly, 0.55, brush_mat)
-		# Tall grass props fill the brush when they're present (the block isn't drawn then).
-		if _prop_model("grass_1") != null:
-			continue
-		add_child(b)
+		var wall := _extrude(poly, 1.4, wall_mat)
+		wall.layers = MAP_LAYERS
+		add_child(wall)
+	# Tall grass props fill the brush when they're present; else a swaying block of brush.
+	if _prop_model("grass_1") == null:
+		for poly in geo.brush:
+			var b := _extrude(poly, 0.55, brush_mat)
+			b.layers = MAP_LAYERS
+			add_child(b)
+	_render_minimap_terrain()
 
 
 ## CSGPolygon3D extrudes along local -Z; rotating +90° about X lays the polygon on the ground
@@ -1229,6 +1257,35 @@ func _structure_prop(id: String, color: Color, dome_radius: float, dome_lift: fl
 	root.add_child(ward)
 	root.set_meta("prop", id)
 	return root
+
+
+var _relic_pads := {}                     # rounded position -> the pad under a relic
+
+
+## A relic's pad stays where the relic floats, also while it's taken.
+func _relic_pad(at: Vector2) -> void:
+	var key := Vector2i(roundi(at.x), roundi(at.y))
+	if _relic_pads.has(key):
+		return
+	var pad := _prop_node("relic_pad", Color.WHITE)
+	_relic_pads[key] = pad
+	if pad != null:
+		pad.position = _to_world(at)
+		add_child(pad)
+
+
+func _leave_rubble(gone: Node3D) -> void:
+	var kind: String = gone.get_meta("prop")
+	var pile := _prop_node("rubble", Color.WHITE)
+	if pile != null:
+		pile.position = Vector3(gone.position.x, 0.0, gone.position.z)
+		pile.rotation.y = gone.rotation.y
+		pile.scale = Vector3.ONE * {"turret": 1.0, "gatehouse": 1.5, "base": 2.0}.get(kind, 1.0)
+		add_child(pile)
+	# A cloud of stone dust where it fell.
+	var dust := {"kit": "dust", "ramp": PackedColorArray([Color(0.62, 0.6, 0.55), Color(0.5, 0.48, 0.45), Color(0.36, 0.35, 0.33)]),
+		"count": 40, "size": 2.2, "speed": 3.0, "lifetime": 1.4}
+	vfx.play(dust, Vector3(gone.position.x, 0.0, gone.position.z))
 
 
 func _make_turret(color: Color, collision_radius_u: float) -> Node3D:
@@ -2683,6 +2740,41 @@ var _fog_refresh := 0.0
 var _icon_refresh := 0.0
 
 
+## Map content (ground, cliffs, scenery, platforms) is also on render layer 2: the minimap's
+## one top-down render sees only that, never units or structures (those are icons).
+const MAP_LAYERS := 3
+var _terrain_pending := false
+
+
+## Paints the minimap's terrain: one orthographic render of the map from above, units left out.
+## The fog waits until it's taken (it would darken the picture).
+func _render_minimap_terrain() -> void:
+	_terrain_pending = true
+	RenderingServer.global_shader_parameter_set("fog_on", 0.0)
+	var region: Rect2 = minimap.region
+	var vp := SubViewport.new()
+	vp.size = Vector2i(1024, int(1024.0 * region.size.y / region.size.x))
+	vp.world_3d = get_viewport().world_3d
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	var eye := Camera3D.new()
+	eye.projection = Camera3D.PROJECTION_ORTHOGONAL
+	eye.keep_aspect = Camera3D.KEEP_HEIGHT
+	eye.size = region.size.y * UNITS_TO_METERS
+	eye.cull_mask = 2
+	eye.far = 200.0
+	var c := region.get_center() * UNITS_TO_METERS
+	eye.position = Vector3(c.x, 80.0, c.y)
+	eye.rotation_degrees = Vector3(-90, 0, 0)
+	vp.add_child(eye)
+	add_child(vp)
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	minimap.terrain = ImageTexture.create_from_image(vp.get_texture().get_image())
+	minimap.queue_redraw()
+	vp.queue_free()
+	_terrain_pending = false
+
+
 func _build_minimap(geo: Dictionary) -> void:
 	minimap = preload("res://scripts/minimap.gd").new()
 	overlay.get_parent().add_child(minimap)
@@ -2700,7 +2792,7 @@ func _update_minimap(delta: float, playing: bool) -> void:
 		return
 	minimap.visible = playing and settings.minimap_shown and blind_state != "rating"
 	_fog_refresh -= delta
-	if playing and _fog_refresh <= 0.0:
+	if playing and _fog_refresh <= 0.0 and not _terrain_pending:
 		_fog_refresh = 0.15
 		var g: Dictionary = client.fog_grid(FOG_CELL_U)
 		var img := Image.create_from_data(int(g.cols), int(g.rows), false, Image.FORMAT_L8, g.data)

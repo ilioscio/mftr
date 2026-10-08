@@ -90,7 +90,7 @@ func _draw() -> void:
 	# Frame and terrain (a render of the map, or flat colors from its geometry).
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.1, 0.16, 0.11))
 	if terrain != null:
-		draw_texture_rect(terrain, Rect2(Vector2.ZERO, size), false)
+		draw_texture_rect(terrain, Rect2(Vector2.ZERO, size), false, Color(1.45, 1.45, 1.4))
 	else:
 		draw_rect(_to_px_rect(Rect2(Vector2.ZERO, map_size)), Color(0.24, 0.34, 0.2))
 		if map_size.x != map_size.y:

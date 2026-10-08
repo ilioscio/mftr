@@ -64,6 +64,9 @@ class Prop:
         """One flat face with its own vertices and a shade of `color` (±`var`). It faces `out`
         (a direction), or away from `center` (a point); else its winding stands."""
         pts = [Vector(p) for p in pts]
+        if getattr(self, "clamp_ground", False):
+            for q in pts:
+                q.z = max(q.z, 0.0)  # tumbled pieces rest on the ground, not in it
         if out is None and center is not None:
             out = sum(pts, Vector()) / len(pts) - Vector(center)
         if out is not None:

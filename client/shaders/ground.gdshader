@@ -104,8 +104,9 @@ void fragment() {
 	vec3 grass = mix(grass_a, grass_b, smoothstep(0.35, 0.65, large));
 	grass *= 0.86 + 0.2 * mid + 0.08 * (grain - 0.5);
 	// Flowers: a few bright specks in the grass.
-	float flower = step(0.992, hash(floor(p / (texel * 2.0))));
-	grass = mix(grass, mix(vec3(0.9, 0.85, 0.5), vec3(0.85, 0.6, 0.8), hash(q + 3.0)), flower * smoothstep(0.4, 0.6, large));
+	float flower = step(0.997, hash(q + 5.0)) * smoothstep(0.45, 0.7, large);
+	// (Literal colors are linear; these are sRGB 0.72/0.68/0.42 and 0.66/0.5/0.62.)
+	grass = mix(grass, mix(vec3(0.48, 0.42, 0.15), vec3(0.39, 0.21, 0.34), hash(q + 3.0)), flower * 0.8);
 	// The road: a dirt band with ragged, grassy edges.
 	float d = lane_mode > 0.5 ? abs(p.y - lane_z) : abs(p.x - p.y) / sqrt(2.0);
 	float edge = lane_width * 0.5 + (fbm(p * 0.25) - 0.5) * 3.0 + (fbm(q * 1.7) - 0.5) * 0.7;

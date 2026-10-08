@@ -10,6 +10,12 @@ extends Node3D
 
 const U := 0.01                           # game units to meters
 const OUTSIDE_U := 1700.0                 # how far the forest reaches past the map's edges
+## The cliffs' height (the client extrudes walls this tall); scenery on them stands on top, and
+## the land past the map is raised to it too.
+const CLIFF_M := 1.4
+
+var _walls: Array = []
+var _size := Vector2.ZERO
 
 var _batches := {}                        # prop id -> [Transform3D, Color]
 var _rng := RandomNumberGenerator.new()
@@ -20,6 +26,8 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 	_rng.seed = 1971
 	var size: Vector2 = geo.size
 	var walls: Array = geo.walls
+	_walls = walls
+	_size = size
 	var brush: Array = geo.brush
 	var lane_map := size.x > size.y * 1.5
 	var near_side := size.y  # the camera looks from +y: that side's edge is closest to it
@@ -142,6 +150,17 @@ func _out_distance(p: Vector2, size: Vector2) -> float:
 	return Vector2(dx, dy).length()
 
 
+## The ground's height under `p`: cliff tops (inside a wall, not an outcrop) and the raised land
+## past a lane map's edges stand CLIFF_M high.
+func _height_at(p: Vector2) -> float:
+	if _size.x > _size.y * 1.5 and (p.x < 0 or p.y < 0 or p.x > _size.x or p.y > _size.y):
+		return CLIFF_M
+	for poly in _walls:
+		if not is_outcrop(poly) and Geometry2D.is_point_in_polygon(p, poly):
+			return CLIFF_M
+	return 0.0
+
+
 func _bounds(poly: PackedVector2Array) -> Rect2:
 	var r := Rect2(poly[0], Vector2.ZERO)
 	for q in poly:
@@ -153,7 +172,7 @@ func _add(id: String, p: Vector2, scale: float) -> void:
 	if not _batches.has(id):
 		_batches[id] = []
 	var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU)).scaled(Vector3.ONE * scale)
-	var t := Transform3D(basis, Vector3(p.x * U, 0.0, p.y * U))
+	var t := Transform3D(basis, Vector3(p.x * U, _height_at(p), p.y * U))
 	var k := _rng.randf_range(0.88, 1.1) * (0.82 if id.begins_with("pine") else 1.0)
 	var tint := Color(k * _rng.randf_range(0.96, 1.04), k, k * _rng.randf_range(0.94, 1.04)) * 0.5
 	_batches[id].append([t, tint])

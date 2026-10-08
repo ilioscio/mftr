@@ -6,6 +6,9 @@ render_mode diffuse_lambert, specular_disabled;
 uniform vec3 rock : source_color = vec3(0.47, 0.45, 0.42);
 uniform vec3 rock_dark : source_color = vec3(0.3, 0.29, 0.29);
 uniform vec3 moss : source_color = vec3(0.30, 0.38, 0.24);
+// The cliff top's grass, matching the ground's.
+uniform vec3 top_a : source_color = vec3(0.2, 0.33, 0.15);
+uniform vec3 top_b : source_color = vec3(0.27, 0.41, 0.18);
 
 varying vec3 world_pos;
 
@@ -67,10 +70,10 @@ void fragment() {
 	c *= 0.84 + 0.2 * strata;
 	// Moss creeping down from the top edge.
 	c = mix(c, moss, smoothstep(1.1, 1.38, world_pos.y + (fbm(q * 2.3) - 0.5) * 0.5) * 0.8);
-	if (n.y > 0.6) {
-		// The cliff top is grassland, like the ground: the forest stands on it.
+	if (n.y > 0.6 || world_pos.y > 1.37) {
+		// The cliff top (1.4 m) is grassland, like the ground: the forest stands on it.
 		float g = fbm(q * 0.9 + 3.0);
-		c = mix(vec3(0.16, 0.27, 0.12), vec3(0.22, 0.34, 0.15), smoothstep(0.35, 0.65, g)) * (0.9 + 0.12 * fract(sin(dot(q, vec2(12.9898, 78.233))) * 43758.5453));
+		c = mix(top_a, top_b, smoothstep(0.35, 0.65, g)) * (0.9 + 0.12 * fract(sin(dot(q, vec2(12.9898, 78.233))) * 43758.5453));
 	}
 	ALBEDO = fogged(c, world_pos);
 	ROUGHNESS = 1.0;
