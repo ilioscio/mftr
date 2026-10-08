@@ -830,6 +830,58 @@ mod tests {
         assert!(big.is_empty(), "prediction detoured around the dead turret: {big:?}");
     }
 
+    /// The ultimate levels like any ability once it unlocks (level 6): the client's level-up
+    /// order for R reaches the server and ranks it up, predicted and confirmed.
+    #[test]
+    fn the_ultimate_levels_up_at_six_end_to_end() {
+        let cfg = ServerConfig { seed: 3, scenario: Scenario::Aram, ..Default::default() };
+        let mut server = ServerCore::new(cfg, 0.0);
+        let mut session = ClientSession::new();
+        let (mut up, mut down) = (SimLink::new(LinkProfile::GOOD, 11), SimLink::new(LinkProfile::GOOD, 12));
+        let (mut t, mut next_hello, mut leveled_at) = (0.0, 0.0, None);
+        while t < 8.0 {
+            while let Some(p) = up.recv(t) {
+                for (_, bytes) in server.handle_packet(1, &p, t) {
+                    down.send(bytes, t);
+                }
+            }
+            if t >= server.next_tick_due() {
+                for (_, bytes) in server.step(t) {
+                    down.send(bytes, t);
+                }
+            }
+            while let Some(p) = down.recv(t) {
+                session.handle_packet(&p, t);
+            }
+            session.update(t);
+            if matches!(session.phase(), Phase::Connecting) && t >= next_hello {
+                up.send(session.hello_packet(t), t);
+                next_hello = t + 0.25;
+            }
+            if session.phase() == Phase::Playing {
+                if leveled_at.is_none() && t > 2.0 {
+                    // Level 6 with one point to spend, as if it had just been reached.
+                    let me = server.world_mut().unit_mut(session.unit()).unwrap();
+                    me.state.progress.level = 6;
+                    me.state.progress.points = 1;
+                    leveled_at = Some(t);
+                } else if let Some(at) = leveled_at
+                    && t > at + 1.0
+                    && t - 0.001 <= at + 1.0
+                {
+                    session.level_up(3, t);
+                }
+                if session.should_send(t) {
+                    up.send(session.input_packet(t), t);
+                }
+            }
+            t += 0.001;
+        }
+        let rank = server.world().unit(session.unit()).unwrap().state.progress.ranks[3];
+        assert_eq!(rank, 1, "the server ranked R up");
+        assert_eq!(session.own_state_now().unwrap().progress.ranks[3], 1, "and the client shows it");
+    }
+
     /// M3 slices 2 and 3: a Titan with Multishot, Echo and Broadside casts over a jittery link.
     /// The client predicts the whole volley and the echo (keyed by cast and shot), each one is
     /// confirmed by the server's own, its hitbox grows with the server's, and prediction never

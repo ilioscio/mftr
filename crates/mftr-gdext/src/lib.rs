@@ -714,6 +714,156 @@ impl MatchClient {
         d
     }
 
+    /// Everything a tooltip says about our champion's ability in `slot` (0–3 Q W E R, 4–5 D F;
+    /// F may be an augment's spell), straight from the sim's data, so tooltips can't drift
+    /// from the game: `{ name, kind, rank, max_rank, cooldowns: [s per rank], range, radius,
+    /// speed, windup, delay, damage: { kind, base: [per rank], ad, ap, total }, heal: {…},
+    /// shield: {…}, cc: { kind, seconds, pct } }`, with absent parts left out. `total`s use the
+    /// champion's current attack damage and ability power at its current rank (rank 1 if
+    /// unlearned).
+    #[func]
+    fn ability_info(&self, slot: i64) -> VarDictionary {
+        use mftr_sim::ability::{Cc, Effect};
+        let mut d = VarDictionary::new();
+        let Some(st) = self.session.own_state_now() else { return d };
+        let champ = self.session.champion();
+        let slot = slot.clamp(0, 5) as u8;
+        let spell = if slot == 5 { augments::spell(&st.progress.augments) } else { None };
+        let Some(a) = spell.or_else(|| champ.ability(slot)) else { return d };
+        let (stats, _) = items::champion_stats(champ.def(), &st.progress.stats_key());
+        let ranked = slot < 4 && self.session.rules().ranked;
+        let max_rank: u8 = if !ranked {
+            1
+        } else if slot == 3 {
+            3
+        } else {
+            5
+        };
+        let rank = if slot < 4 { st.progress.ranks[slot as usize] } else { 1 };
+        d.set("name", a.name);
+        d.set("rank", rank as i64);
+        d.set("max_rank", max_rank as i64);
+        d.set("ranked", ranked);
+        let per_rank = |f: &dyn Fn(u8) -> f32| -> PackedFloat32Array { (1..=max_rank).map(f).collect() };
+        // Ability haste (items, augments, Hyper) shortens Q W E R as the sim does when casting.
+        let hyper = if slot < 3 && st.progress.hyper { mftr_sim::world::HYPER_HASTE } else { 0.0 };
+        let haste = if slot < 4 { stats.ability_haste + hyper } else { 0.0 };
+        d.set("haste", haste);
+        d.set(
+            "cooldowns",
+            &per_rank(&|r| {
+                a.cooldown_at(r).0 as f32 / mftr_sim::time::SUBTICKS_PER_SECOND as f32 * 100.0 / (100.0 + haste)
+            }),
+        );
+        let secs = |t: mftr_sim::SimDuration| t.0 as f32 / mftr_sim::time::SUBTICKS_PER_SECOND as f32;
+        let now_rank = rank.max(1);
+        let damage = |dmg: mftr_sim::ability::Damage| -> VarDictionary {
+            let mut m = VarDictionary::new();
+            m.set(
+                "kind",
+                match dmg.kind {
+                    DamageKind::Physical => "physical",
+                    DamageKind::Magic => "magic",
+                    DamageKind::True => "true",
+                },
+            );
+            m.set("base", &per_rank(&|r| dmg.base + a.bonus_damage_at(r)));
+            m.set("ad", dmg.ad_ratio);
+            m.set("ap", dmg.ap_ratio);
+            m.set("total", dmg.raw(stats.attack_damage, stats.ability_power) + a.bonus_damage_at(now_rank));
+            m
+        };
+        let cc = |c: Cc| -> Option<VarDictionary> {
+            let mut m = VarDictionary::new();
+            let (kind, t, pct) = match c {
+                Cc::None => return None,
+                Cc::Stun(t) => ("stun", secs(t), 0),
+                Cc::Root(t) => ("root", secs(t), 0),
+                Cc::Knockup(t) => ("knockup", secs(t), 0),
+                Cc::Pull(_) => ("pull", 0.0, 0),
+                Cc::Slow { pct, duration } => ("slow", secs(duration), pct),
+            };
+            m.set("kind", kind);
+            m.set("seconds", t);
+            m.set("pct", pct as i64);
+            Some(m)
+        };
+        let set_cc = |d: &mut VarDictionary, c: Cc| {
+            if let Some(m) = cc(c) {
+                d.set("cc", &m);
+            }
+        };
+        match a.effect {
+            Effect::Line(l) => {
+                d.set("kind", "line");
+                d.set("range", l.range);
+                d.set("radius", l.radius);
+                d.set("speed", l.speed);
+                d.set("windup", secs(l.windup));
+                if l.damage.base > 0.0 || l.damage.ad_ratio > 0.0 || l.damage.ap_ratio > 0.0 {
+                    d.set("damage", &damage(l.damage));
+                }
+                set_cc(&mut d, l.cc);
+            }
+            Effect::Area(r) => {
+                d.set("kind", if r.range == 0.0 { "nova" } else { "area" });
+                d.set("range", r.range);
+                d.set("radius", r.radius);
+                d.set("windup", secs(r.windup));
+                d.set("delay", secs(r.delay));
+                d.set("damage", &damage(r.damage));
+                set_cc(&mut d, r.cc);
+            }
+            Effect::Lunge(l) => {
+                d.set("kind", "lunge");
+                d.set("range", l.range);
+                d.set("speed", l.speed);
+                d.set("damage", &damage(l.damage));
+                set_cc(&mut d, l.cc);
+            }
+            Effect::Dash(x) => {
+                d.set("kind", "dash");
+                d.set("range", x.range);
+                d.set("speed", x.speed);
+            }
+            Effect::Blink(b) => {
+                d.set("kind", "blink");
+                d.set("range", b.range);
+            }
+            Effect::Shield(sh) => {
+                d.set("kind", "barrier");
+                let mut m = VarDictionary::new();
+                m.set("base", &per_rank(&|_| sh.amount));
+                m.set("ap", 0.0f32);
+                m.set("total", sh.amount);
+                m.set("seconds", secs(sh.duration));
+                d.set("shield", &m);
+            }
+            Effect::Support(sup) => {
+                d.set("kind", "support");
+                d.set("range", sup.range);
+                if sup.heal > 0.0 || sup.heal_missing > 0.0 {
+                    let extra = |r: u8| if sup.shield > 0.0 { 0.0 } else { a.bonus_damage_at(r) };
+                    let mut m = VarDictionary::new();
+                    m.set("base", &per_rank(&|r| sup.heal + extra(r)));
+                    m.set("ap", sup.heal_ap);
+                    m.set("missing_pct", sup.heal_missing * 100.0);
+                    m.set("total", sup.heal + sup.heal_ap * stats.ability_power + extra(now_rank));
+                    d.set("heal", &m);
+                }
+                if sup.shield > 0.0 {
+                    let mut m = VarDictionary::new();
+                    m.set("base", &per_rank(&|r| sup.shield + a.bonus_damage_at(r)));
+                    m.set("ap", sup.shield_ap);
+                    m.set("total", sup.shield + sup.shield_ap * stats.ability_power + a.bonus_damage_at(now_rank));
+                    m.set("seconds", secs(sup.duration));
+                    d.set("shield", &m);
+                }
+            }
+        }
+        d
+    }
+
     /// What our team sees, for the minimap and the fog drawn over the world: `{ cols, rows,
     /// cell, data }`, one byte per `cell`-unit square of the map (row-major from the map's
     /// origin), 255 seen and 0 not. The sim's rules (03 §10): each allied unit sees its radius,
@@ -751,15 +901,17 @@ impl MatchClient {
                 for row in r0..r1 {
                     for col in c0..c1 {
                         let i = row * cols + col;
-                        if data[i] != 0 {
+                        if data[i] == 255 {
                             continue;
                         }
+                        // How far inside the vision circle the cell is, over about one cell:
+                        // the client's linear filtering then draws a smooth circle edge
+                        // instead of the cells' stair steps.
                         let p = Vec2::new((col as f32 + 0.5) * cell, (row as f32 + 0.5) * cell);
-                        if (p - s).length_sq() <= r * r
-                            && map.brush_at(p).is_none_or(|b| Some(b) == brush)
-                            && map.line_of_sight(s, p)
-                        {
-                            data[i] = 255;
+                        let inside = ((r - (p - s).length()) / cell + 0.5).clamp(0.0, 1.0);
+                        let v = (inside * 255.0).round() as u8;
+                        if v > data[i] && map.brush_at(p).is_none_or(|b| Some(b) == brush) && map.line_of_sight(s, p) {
+                            data[i] = v;
                         }
                     }
                 }
@@ -836,8 +988,11 @@ impl MatchClient {
         let champ = self.session.champion();
         d.set("champion", champ.def().name);
         let mut names = VarArray::new();
+        // F may be an augment's spell in its place.
+        let spell = self.session.own_state_now().and_then(|s| augments::spell(&s.progress.augments));
         for slot in 0..SLOTS as u8 {
-            names.push(&champ.ability(slot).map_or("", |a| a.name).to_variant());
+            let a = if slot == 5 { spell.or_else(|| champ.ability(slot)) } else { champ.ability(slot) };
+            names.push(&a.map_or("", |a| a.name).to_variant());
         }
         d.set("abilities", &names);
         if let (Some(s), Some(t)) = (self.session.own_state_now(), self.session.input_sim_time(now)) {
@@ -1076,6 +1231,12 @@ impl MatchClient {
     #[func]
     fn set_collision_proxies(&mut self, enabled: bool) {
         self.session.set_collision_proxies(enabled);
+    }
+
+    /// Seconds since the match began (the sim's clock, predicted), for the HUD's game timer.
+    #[func]
+    fn match_seconds(&self) -> f64 {
+        self.session.input_sim_time(self.now()).map_or(0.0, |t| t.0 as f64 / mftr_sim::time::SUBTICKS_PER_SECOND as f64)
     }
 
     /// Net graph data (03 §14).

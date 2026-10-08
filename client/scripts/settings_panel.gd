@@ -11,12 +11,6 @@ var _bind_buttons := {}                  # action -> Button
 func setup(s) -> void:
 	settings = s
 	custom_minimum_size = Vector2(640, 560)
-	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color(0.07, 0.08, 0.1, 0.97)
-	bg.border_color = Color(0.75, 0.68, 0.45)
-	bg.set_border_width_all(2)
-	bg.set_corner_radius_all(4)
-	add_theme_stylebox_override("panel", bg)
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 18)
@@ -26,16 +20,18 @@ func setup(s) -> void:
 	margin.add_child(v)
 	var title := Label.new()
 	title.text = "Settings"
-	title.add_theme_font_size_override("font_size", 24)
+	title.theme_type_variation = "TitleLabel"
 	v.add_child(title)
 	var tabs := TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(tabs)
 	tabs.add_child(_camera_tab())
 	tabs.add_child(_interface_tab())
+	tabs.add_child(_graphics_tab())
 	tabs.add_child(_keys_tab())
 	var done := Button.new()
 	done.text = "Done"
+	done.theme_type_variation = "PrimaryButton"
 	done.pressed.connect(close)
 	v.add_child(done)
 
@@ -124,6 +120,14 @@ func _interface_tab() -> Control:
 	return g
 
 
+func _graphics_tab() -> Control:
+	var g := _grid("Graphics")
+	_row(g, "Shadows", _check(settings.shadows, func(v): settings.shadows = v), "The sun's shadows. Off is faster on older graphics cards.")
+	_row(g, "Bloom", _check(settings.bloom, func(v): settings.bloom = v), "A soft glow around bright things: crystals, fire, spells.")
+	_row(g, "Clouds and motes", _check(settings.atmosphere, func(v): settings.atmosphere = v), "Cloud shadows drifting over the map, and motes floating in the light.")
+	return g
+
+
 func _keys_tab() -> Control:
 	var scroll := ScrollContainer.new()
 	scroll.name = "Keys"
@@ -141,10 +145,9 @@ func _keys_tab() -> Control:
 		_bind_buttons[action] = btn
 		_row(g, b[1], btn)
 	var hint := Label.new()
-	hint.text = "Click a binding, then press the new key (Alt, Ctrl and Shift combine) or mouse button. Esc cancels, Backspace clears."
+	hint.text = "Click a binding, then press the new key (Alt, Ctrl and Shift combine) or mouse button. Esc cancels, Backspace clears. If Alt+R doesn't level your ultimate, a graphics overlay (NVIDIA, AMD) has probably taken it: use Ctrl+R, click the ability's + on the bar, or rebind it."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.add_theme_font_size_override("font_size", 13)
-	hint.add_theme_color_override("font_color", Color(0.65, 0.68, 0.72))
+	hint.theme_type_variation = "HintLabel"
 	v.add_child(hint)
 	var reset := Button.new()
 	reset.text = "Reset keys to defaults"

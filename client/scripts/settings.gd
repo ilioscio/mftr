@@ -14,9 +14,14 @@ var confine_cursor := true               # keep the cursor in the window while p
 ## Minimap (bottom right): shown, and its size as a share of the default.
 var minimap_shown := true
 var minimap_size := 100.0                # 50–160 %
+var shadows := true                      # the sun's shadows
+var bloom := true                        # glow around bright things
+var atmosphere := true                   # cloud shadows and floating motes
 
 ## Rebindable actions, in the order the settings list them: [action, label, default].
-## A default is a key name with modifiers (`Alt+Q`) or a mouse button (`Mouse Right`).
+## A default is a key name with modifiers (`Alt+Q`) or a mouse button (`Mouse Right`); an action
+## may have several, separated by " / ". Level-ups take Ctrl too: Alt+R is also the NVIDIA and
+## AMD overlays' hotkey, which some players' drivers swallow before the game sees it.
 const BINDINGS := [
 	["cast_q", "Ability Q", "Q"],
 	["cast_w", "Ability W", "W"],
@@ -24,10 +29,10 @@ const BINDINGS := [
 	["cast_r", "Ability R (ultimate)", "R"],
 	["cast_d", "Spell D (Blink)", "D"],
 	["cast_f", "Spell F (Barrier)", "F"],
-	["level_q", "Level up Q", "Alt+Q"],
-	["level_w", "Level up W", "Alt+W"],
-	["level_e", "Level up E", "Alt+E"],
-	["level_r", "Level up R", "Alt+R"],
+	["level_q", "Level up Q", "Alt+Q / Ctrl+Q"],
+	["level_w", "Level up W", "Alt+W / Ctrl+W"],
+	["level_e", "Level up E", "Alt+E / Ctrl+E"],
+	["level_r", "Level up R", "Alt+R / Ctrl+R"],
 	["move", "Move / attack", "Mouse Right"],
 	["attack_move", "Attack-move (then click)", "A"],
 	["stop", "Stop", "S"],
@@ -59,6 +64,9 @@ func load_file() -> void:
 		confine_cursor = cfg.get_value("camera", "confine_cursor", confine_cursor)
 		minimap_shown = cfg.get_value("minimap", "shown", minimap_shown)
 		minimap_size = clampf(cfg.get_value("minimap", "size", minimap_size), 50.0, 160.0)
+		shadows = cfg.get_value("graphics", "shadows", shadows)
+		bloom = cfg.get_value("graphics", "bloom", bloom)
+		atmosphere = cfg.get_value("graphics", "atmosphere", atmosphere)
 		_binds = cfg.get_value("keys", "binds", {})
 	apply_bindings()
 
@@ -71,6 +79,9 @@ func save() -> void:
 	cfg.set_value("camera", "confine_cursor", confine_cursor)
 	cfg.set_value("minimap", "shown", minimap_shown)
 	cfg.set_value("minimap", "size", minimap_size)
+	cfg.set_value("graphics", "shadows", shadows)
+	cfg.set_value("graphics", "bloom", bloom)
+	cfg.set_value("graphics", "atmosphere", atmosphere)
 	cfg.set_value("keys", "binds", _binds)
 	cfg.save(PATH)
 
@@ -87,6 +98,11 @@ func binding(action: String) -> String:
 		if b[0] == action:
 			return b[2]
 	return "None"
+
+
+## The first of an action's bindings (for short hints).
+func primary_binding(action: String) -> String:
+	return binding(action).split(" / ")[0]
 
 
 func set_binding(action: String, text: String) -> void:
@@ -108,9 +124,10 @@ func apply_bindings() -> void:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action)
 		InputMap.action_erase_events(action)
-		var ev := event_from_text(binding(action))
-		if ev != null:
-			InputMap.action_add_event(action, ev)
+		for text in binding(action).split(" / "):
+			var ev := event_from_text(text)
+			if ev != null:
+				InputMap.action_add_event(action, ev)
 
 
 ## `Alt+Q`, `Ctrl+Shift+F5`, `Space`, `Mouse Right`, `None` → an input event (null for None).

@@ -7,7 +7,10 @@ extends Node3D
 ## User args (after `--`) skip the menu: a server address (`host:port#fingerprint` pins the
 ## server's key, otherwise it is trusted on first use), `--champion NAME`,
 ## `--spectate` to watch (Tab cycles champions), `--shot-lobby` for a champion-select capture,
-## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots (`--zoom <factor>` brings the camera closer, `--look X,Y` aims it at a map point), and the blind playtest
+## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots (`--zoom <factor>` brings the camera closer, `--look X,Y` aims it at a map point; `--shot-menu`
+## captures the start menu, `--hover-slot N` shows an ability's tooltip, `--keep-points` leaves
+## the starting points unspent, `--shot-charge` fights in mid, `--shot-numbers` shows sample
+## damage numbers), and the blind playtest
 ## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`. `--menu-join`
 ## (scripted checks) opens the menu and joins the first remembered server through it.
 
@@ -37,7 +40,27 @@ var click_marker: MeshInstance3D
 var click_marker_age := 1.0
 var net_label: Label
 var overlay: Control
-var show_net_graph := true
+var world_env: Environment
+var sun: DirectionalLight3D
+var atmosphere                            # cloud shadows and motes (atmosphere.gd), per map
+var _look_point := Vector3.ZERO           # where the camera looks, on the ground
+var _graphics_applied := []
+var backdrop: CanvasLayer
+var ability_tip
+# The ability bar's boxes and level-up buttons this frame (overlay coordinates), for hover and
+# clicks; the whole bar's panel swallows clicks so they don't move the champion.
+var _bar_rect := Rect2()
+var _ability_boxes: Array[Rect2] = []
+var _level_buttons := {}                  # slot -> Rect2, while the slot can rank up
+var _cd_total := [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # each cooldown's length, for the sweep
+var _ability_kinds := {}                  # slot -> icon kind
+var _ability_kinds_at := 0
+var _chips := {}                          # unit -> lagging health (the bars' damage chip)
+var _hud_dt := 0.0
+var _bold: FontVariation
+const Hud := preload("res://scripts/hud.gd")
+const AbilityTooltip := preload("res://scripts/ability_tooltip.gd")
+var show_net_graph := false             # F1: the full network graph (the HUD shows fps and ping)
 var proxies_enabled := true
 var attack_move_armed := false
 var own_status := {}
@@ -79,7 +102,11 @@ var _was_dead := false
 
 
 func _ready() -> void:
+	# The UI theme goes into the engine's default theme: our panels live under CanvasLayers,
+	# which a theme set on the window wouldn't reach.
+	ThemeDB.get_default_theme().merge_with(preload("res://scripts/ui_theme.gd").build())
 	_build_world()
+	_build_backdrop()
 	_load_champion_model()
 	vfx = preload("res://scripts/vfx.gd").new()
 	add_child(vfx)
@@ -118,6 +145,17 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-shop":
 			_shot_shop = true
+		elif args[i] == "--shot-numbers":
+			_shot_numbers = true
+		elif args[i] == "--shot-charge":
+			_shot_charge = true
+		elif args[i] == "--shot-menu":
+			_shot_menu = true
+		elif args[i] == "--keep-points":
+			_shot_keep_points = true
+		elif args[i] == "--hover-slot" and i + 1 < args.size():
+			_shot_hover = int(args[i + 1])
+			i += 1
 		elif args[i] == "--shot-lobby":
 			_shot_lobby = true
 		elif args[i] == "--menu-join":
@@ -224,9 +262,21 @@ var _shot_lobby := false                 # `--shot-lobby`: reroll in champion se
 var _menu_auto_join := false             # `--menu-join`: join the first remembered server from the menu
 var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
 var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
+var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
+var _shot_numbers := false                # `--shot-numbers`: sample damage numbers, for review
+var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
+var _shot_menu := false                   # `--shot-menu`: capture the start menu
+var _shot_keep_points := false            # `--keep-points`: don't spend the starting points
 
 
 func _update_shot(delta: float) -> void:
+	if _shot_path != "" and _shot_menu:
+		_shot_timer += delta
+		if _shot_timer > 1.2:
+			get_viewport().get_texture().get_image().save_png(_shot_path)
+			print("MFTR: saved screenshot to ", _shot_path)
+			get_tree().quit()
+		return
 	if _shot_path != "" and _shot_lobby and client.phase() == "lobby":
 		_shot_timer += delta
 		if _shot_timer > 0.6 and _shot_timer - delta <= 0.6:
@@ -245,7 +295,7 @@ func _update_shot(delta: float) -> void:
 	var inward := (size / 2.0 - own).normalized()
 	var side := Vector2(-inward.y, inward.x)
 	if not _shot_moved and _shot_timer > 1.0:
-		for slot in 3:
+		for slot in 0 if _shot_keep_points else 3:
 			client.level_up(slot)  # ranked modes start with points to spend
 		if _shot_shop:
 			for item in [7, 1, 3]:  # Boots, Long Knife, Vital Crystal from the fountain
@@ -259,6 +309,25 @@ func _update_shot(delta: float) -> void:
 		_show_click_marker(_to_world(own + inward * 600.0 - side * 500.0), OWN_COLOR)
 	elif _shot_moved and _shot_timer > 1.7 and _shot_timer - delta <= 1.7:
 		client.cast(4, own + side * 400.0)
+	elif _shot_charge and _shot_moved and _shot_timer > 2.0 and _shot_timer <= _shot_at:
+		# Into the fight: keep attack-moving to mid, casting at whatever's ahead.
+		settings.camera_locked = true
+		if fmod(_shot_timer, 1.0) < delta:
+			client.attack_move(size / 2.0)
+			var aim := own + inward * 600.0
+			client.cast(int(_shot_timer) % 3, aim)
+	elif _shot_numbers and _shot_moved and _shot_timer <= _shot_at and fmod(_shot_timer, 0.18) < delta and own_body != null:
+		var samples := [["physical", 64.0, false, false], ["magic", 212.0, false, false], ["true", 40.0, false, false], ["physical", 118.0, false, true], ["magic", 90.0, true, false]]
+		var x: Array = samples[int(_shot_timer / 0.18) % samples.size()]
+		var color: Color = {"physical": Color(1.0, 0.62, 0.24), "magic": Color(0.45, 0.68, 1.0), "true": Color(1, 1, 1)}[x[0]]
+		var text := "%d" % roundi(x[1])
+		if x[2]:
+			color = Color(0.42, 0.95, 0.5)
+			text = "+" + text
+		elif x[3]:
+			color = Color(1.0, 0.3, 0.28)
+			text = "-" + text
+		floaters.append({ "pos": own_body.position + Vector3(2.0, 0, 0), "text": text, "color": color, "age": 0.0, "size": clampf(19.0 + x[1] / 28.0, 19.0, 34.0), "drift": randf_range(-0.6, 0.6), "life": 1.0 })
 	elif _shot_moved and _shot_timer > _shot_at:
 		get_viewport().get_texture().get_image().save_png(_shot_path)
 		print("MFTR: saved screenshot to ", _shot_path)
@@ -266,19 +335,57 @@ func _update_shot(delta: float) -> void:
 
 
 func _build_world() -> void:
+	# Light (05 §5): a warm late-afternoon sun with soft shadows, a cool sky fill so shade reads
+	# blue rather than grey, a filmic tonemap, bloom on what glows (crystals, braziers,
+	# missiles), a light haze with depth, and a gentle grade.
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	e.background_mode = Environment.BG_COLOR
 	e.background_color = Color(0.08, 0.09, 0.1)
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.55, 0.6, 0.65)
-	e.ambient_light_energy = 0.6
+	e.ambient_light_color = Color(0.56, 0.66, 0.82)
+	e.ambient_light_energy = 0.62
+	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	e.tonemap_exposure = 1.25
+	e.tonemap_white = 4.0
+	e.glow_enabled = true
+	e.glow_intensity = 0.55
+	e.glow_strength = 1.0
+	e.glow_bloom = 0.0
+	e.glow_hdr_threshold = 0.9
+	e.glow_hdr_scale = 2.0
+	e.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
+	for i in 7:
+		e.set_glow_level(i, 1.0 if i in [1, 2, 3] else 0.0)
+	# Haze only toward the top of the screen (farther from the camera), none near the action.
+	e.fog_enabled = true
+	e.fog_mode = Environment.FOG_MODE_DEPTH
+	e.fog_light_color = Color(0.6, 0.68, 0.78)
+	e.fog_light_energy = 1.0
+	e.fog_density = 0.35
+	e.fog_depth_begin = 24.0
+	e.fog_depth_end = 60.0
+	e.fog_depth_curve = 1.6
+	e.fog_sky_affect = 0.0
+	e.adjustment_enabled = true
+	e.adjustment_contrast = 1.08
+	e.adjustment_saturation = 1.18
 	env.environment = e
+	world_env = e
 	add_child(env)
 
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-60, -35, 0)
-	sun.light_energy = 1.1
+	sun = DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-52, -38, 0)
+	sun.light_color = Color(1.0, 0.94, 0.84)
+	sun.light_energy = 1.25
+	sun.shadow_enabled = true
+	sun.shadow_opacity = 0.72
+	sun.shadow_blur = 1.6
+	sun.shadow_bias = 0.04
+	sun.shadow_normal_bias = 1.2
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	sun.directional_shadow_max_distance = 45.0
+	sun.directional_shadow_split_1 = 0.4
 	add_child(sun)
 
 	ground = MeshInstance3D.new()
@@ -311,11 +418,75 @@ func _build_world() -> void:
 	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	overlay.draw.connect(_draw_overlay)
 	hud.add_child(overlay)
+	ability_tip = preload("res://scripts/ability_tooltip.gd").new()
+	hud.add_child(ability_tip)
 	net_label = Label.new()
 	net_label.position = Vector2(16, 16)
 	net_label.add_theme_font_size_override("font_size", 16)
 	net_label.add_theme_color_override("font_shadow_color", Color.BLACK)
 	hud.add_child(net_label)
+
+
+## The Graphics settings, applied when they change.
+func _apply_graphics() -> void:
+	var want := [settings.shadows, settings.bloom, settings.atmosphere, atmosphere != null]
+	if want == _graphics_applied:
+		return
+	_graphics_applied = want
+	sun.shadow_enabled = settings.shadows
+	world_env.glow_enabled = settings.bloom
+	if atmosphere != null:
+		atmosphere.set_enabled(settings.atmosphere, settings.atmosphere)
+
+
+## The menus' backdrop and logo, behind every screen that isn't the match itself.
+func _build_backdrop() -> void:
+	backdrop = CanvasLayer.new()
+	backdrop.layer = -1
+	add_child(backdrop)
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var m := ShaderMaterial.new()
+	m.shader = load("res://shaders/backdrop.gdshader")
+	bg.material = m
+	backdrop.add_child(bg)
+	var logo := VBoxContainer.new()
+	logo.name = "Logo"
+	logo.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	logo.alignment = BoxContainer.ALIGNMENT_CENTER
+	var word := Label.new()
+	word.text = "MFTR"
+	var f := FontVariation.new()
+	f.base_font = ThemeDB.fallback_font
+	f.variation_embolden = 1.1
+	f.spacing_glyph = 18
+	word.add_theme_font_override("font", f)
+	word.add_theme_font_size_override("font_size", 92)
+	word.add_theme_color_override("font_color", Color(0.97, 0.9, 0.72))
+	word.add_theme_color_override("font_outline_color", Color(0.3, 0.2, 0.06))
+	word.add_theme_constant_override("outline_size", 6)
+	word.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+	word.add_theme_constant_override("shadow_offset_y", 5)
+	word.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	logo.add_child(word)
+	var tag := Label.new()
+	tag.text = "M O B A   F O R   T H E   R E S T   O F   U S"
+	tag.add_theme_font_size_override("font_size", 14)
+	tag.add_theme_color_override("font_color", Color(0.78, 0.65, 0.38))
+	tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	logo.add_child(tag)
+	backdrop.add_child(logo)
+
+
+func _update_backdrop(phase: String) -> void:
+	backdrop.visible = phase != "playing"
+	var logo: Control = backdrop.get_node("Logo")
+	logo.visible = menu_panel != null or phase in ["", "connecting"]
+	logo.position = Vector2((overlay.size.x - logo.size.x) / 2.0, overlay.size.y * 0.06)
+	var m: ShaderMaterial = (backdrop.get_child(0) as ColorRect).material
+	m.set_shader_parameter("aspect", overlay.size.x / maxf(overlay.size.y, 1.0))
 
 
 func _unshaded(color: Color, alpha := 1.0) -> StandardMaterial3D:
@@ -801,6 +972,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if blind_panel != null and blind_panel.visible:
 		return  # rating between rounds: the game ignores input
+	if event is InputEventMouseButton and event.is_pressed() and _bar_rect.has_point(overlay.get_local_mouse_position()):
+		# Clicks on the ability bar are the bar's: a "+" levels its ability, the rest do nothing
+		# (they mustn't walk the champion under the HUD).
+		if (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+			for slot in _level_buttons:
+				if _level_buttons[slot].has_point(overlay.get_local_mouse_position()):
+					client.level_up(slot)
+		return
 	if event.is_action_pressed("move"):
 		attack_move_armed = false
 		var p = _cursor_ground()
@@ -889,6 +1068,7 @@ func _process(delta: float) -> void:
 	if phase in ["lobby", "joining", "playing"]:
 		_remember_server()
 	_update_connecting(phase)
+	_update_backdrop(phase)
 	if playing and not _map_built:
 		_build_map()
 	if playing:
@@ -935,6 +1115,11 @@ func _process(delta: float) -> void:
 	_update_net_graph()
 	_update_minimap(delta, playing)
 	_update_shot(delta)
+	if atmosphere != null:
+		atmosphere.update(delta, _look_point)
+	_apply_graphics()
+	_update_ability_tip()
+	_hud_dt = delta
 	overlay.queue_redraw()
 
 
@@ -958,6 +1143,7 @@ func _place_camera(target: Vector3) -> void:
 	var pitch := deg_to_rad(CAMERA_PITCH_DEG)
 	var dist := CAMERA_DISTANCE_U * UNITS_TO_METERS / camera_zoom
 	var look := Vector3(target.x, 0.0, target.z)
+	_look_point = look
 	camera.position = look + Vector3(0, sin(pitch) * dist, cos(pitch) * dist)
 	camera.look_at(look, Vector3.UP)
 	if sfx != null:
@@ -1119,6 +1305,9 @@ func _build_map() -> void:
 	_size_ground(size, 2600.0)
 	ground.layers = MAP_LAYERS
 	_build_minimap(geo)
+	atmosphere = preload("res://scripts/atmosphere.gd").new()
+	add_child(atmosphere)
+	atmosphere.setup(size / 2.0 * UNITS_TO_METERS)
 	# The dressing: forest, rocks, tall grass (art/props), where the packs are present.
 	var dressing := preload("res://scripts/scenery.gd").new()
 	dressing.name = "Scenery"
@@ -1701,23 +1890,33 @@ func _name_of(id: int) -> String:
 	return "Unit %d" % id
 
 
-## Confirmed damage only (03a §7): numbers float up from the unit that took it.
+## Confirmed damage only (03a §7): numbers float up from the unit that took it. Only what
+## concerns us shows (what we deal, take and heal; a spectator, the champion they follow), so
+## a teamfight isn't buried in minions' numbers. Colored by damage type like the tooltips,
+## bigger for bigger hits; damage we take is red.
 func _update_combat_text(delta: float) -> void:
+	var me := client.own_unit_id() if not client.is_spectator() else spectate_target
 	for c in client.take_combat_text():
+		if not c.heal:
+			_flash(c.target)
+		if c.source != me and c.target != me:
+			continue
 		var p = _unit_world_pos(c.target)
 		if p == null:
 			continue
 		var total: float = c.amount + c.absorbed
-		var color := Color(0.75, 0.55, 1.0) if c.kind == "magic" else Color(1.0, 0.65, 0.3)
-		if c.target == client.own_unit_id():
-			color = Color(1.0, 0.3, 0.3)
+		if total < 0.5:
+			continue
+		var color: Color = {"physical": Color(1.0, 0.62, 0.24), "magic": Color(0.45, 0.68, 1.0), "true": Color(1, 1, 1)}.get(c.kind, Color(1.0, 0.62, 0.24))
 		var text := "%d" % roundi(total)
-		if not c.heal:
-			_flash(c.target)
 		if c.heal:
-			color = Color(0.4, 1.0, 0.45)
+			color = Color(0.42, 0.95, 0.5)
 			text = "+" + text
-		floaters.append({ "pos": p, "text": text, "color": color, "age": 0.0 })
+		elif c.target == me:
+			color = Color(1.0, 0.3, 0.28)
+			text = "-" + text
+		var size := clampf(19.0 + total / 28.0, 19.0, 34.0)
+		floaters.append({ "pos": p, "text": text, "color": color, "age": 0.0, "size": size, "drift": randf_range(-0.6, 0.6), "life": 1.0 })
 	for n in client.take_notices():
 		var text := ""
 		if n.kind == "died":
@@ -1746,7 +1945,7 @@ func _update_combat_text(delta: float) -> void:
 			notices.append({ "text": text, "age": 0.0 })
 	for f in floaters:
 		f.age += delta
-	floaters = floaters.filter(func(f): return f.age < 0.9)
+	floaters = floaters.filter(func(f): return f.age < f.get("life", 0.9))
 	match_banner_age += delta
 	if match_banner != "" and match_banner_age > 10.0:
 		match_banner = ""
@@ -1783,7 +1982,8 @@ func _draw_overlay() -> void:
 	if own_body != null and own_body.visible:
 		var hp: float = own_status.get("health", 0.0)
 		var mx: float = own_status.get("max_health", 1.0)
-		_draw_bar(own_body.position + Vector3(0, 1.25, 0), Vector2(104, 11), hp, mx, own_status.get("shield", 0.0), Color(0.3, 0.85, 0.35))
+		_draw_bar(own_body.position + Vector3(0, 1.25, 0), Vector2(110, 12), hp, mx, own_status.get("shield", 0.0), Color(0.3, 0.82, 0.32), "own", own_status.get("level", 0), 100.0)
+		_draw_unit_label(font, own_body.position + Vector3(0, 1.25, 0), Vector2(110, 12), "", true, own_status)
 		_draw_augment_pips(font, own_body.position + Vector3(0, 1.25, 0), own_status.get("augments", []))
 	for id in remote_info:
 		var u: Dictionary = remote_info[id]
@@ -1792,28 +1992,56 @@ func _draw_overlay() -> void:
 		var champ: bool = u.champion != ""
 		var structure: bool = u.kind in ["turret", "gatehouse", "base"]
 		var color := Color(0.3, 0.7, 0.95) if u.ally else Color(0.9, 0.25, 0.2)
-		var size := Vector2(104, 11) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
+		var size := Vector2(110, 12) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
 		var lift := 1.25 if champ else (2.6 if structure else 0.6)
 		if remote_bodies[id].has_meta("prop"):
 			lift = {"turret": 7.0, "gatehouse": 5.4, "base": 6.2}.get(u.kind, 3.0)
-		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color)
+		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color, id, u.level if champ else 0, 100.0 if champ else 0.0)
 		if champ:
 			_draw_augment_pips(font, remote_bodies[id].position + Vector3(0, lift, 0), u.get("augments", []))
-		if champ and u.level > 0:
-			var sp = _screen(remote_bodies[id].position + Vector3(0, lift, 0))
-			if sp != null:
-				overlay.draw_string(font, sp + Vector2(-size.x / 2.0 - 26, 0), "%d" % u.level, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
+			_draw_unit_label(font, remote_bodies[id].position + Vector3(0, lift, 0), size, u.champion, u.ally, u)
+	var k := _hud_k()
 	for f in floaters:
-		var s = _screen(f.pos + Vector3(0, 1.5 + f.age * 0.8, 0))
-		if s != null:
-			var c: Color = f.color
-			c.a = clampf(1.5 - f.age * 1.5, 0.0, 1.0)
-			overlay.draw_string(font, s + Vector2(-40, 0), f.text, HORIZONTAL_ALIGNMENT_CENTER, 80, 20, c)
+		# Pops in large, settles, rises along a slight arc to one side, fades.
+		var life: float = f.get("life", 0.9)
+		var t: float = f.age / life
+		var rise := 1.6 + 1.1 * (1.0 - pow(1.0 - t, 2.0))
+		var s = _screen(f.pos + Vector3(f.get("drift", 0.0) * t, rise, 0))
+		if s == null:
+			continue
+		var c: Color = f.color
+		c.a = clampf((1.0 - t) * 3.0, 0.0, 1.0)
+		var pop := 1.0 + 0.45 * clampf(1.0 - f.age / 0.12, 0.0, 1.0)
+		var fs := roundi(f.get("size", 20.0) * pop * k)
+		var bold := _bold_font()
+		overlay.draw_string_outline(bold, s + Vector2(-80, 0), f.text, HORIZONTAL_ALIGNMENT_CENTER, 160, fs, maxi(4, fs / 5), Color(0, 0, 0, 0.85 * c.a))
+		overlay.draw_string(bold, s + Vector2(-80, 0), f.text, HORIZONTAL_ALIGNMENT_CENTER, 160, fs, c)
 	_draw_ability_bar(font)
-	var y := 120.0
-	for n in notices:
-		overlay.draw_string(font, Vector2(overlay.size.x - 420, y), n.text, HORIZONTAL_ALIGNMENT_RIGHT, 400, 18, Color(1, 1, 1, clampf(4.0 - n.age, 0.0, 1.0)))
-		y += 24.0
+	_draw_top_right(font)
+	if _chips.size() > remote_info.size() + 32:
+		for key in _chips.keys():
+			if key is int and not remote_info.has(key):
+				_chips.erase(key)
+
+
+## Over a champion's bar: its name (enemies and allies; not our own), and an icon for each
+## status it's under (stunned, rooted, slowed) to the bar's right, the icons the tooltips use.
+func _draw_unit_label(font: Font, world: Vector3, size: Vector2, name: String, ally: bool, u: Dictionary) -> void:
+	var s = _screen(world)
+	if s == null:
+		return
+	var k := _hud_k()
+	var w := size * k
+	if name != "" and u.get("augments", []).is_empty():
+		var c := Color(0.75, 0.88, 1.0) if ally else Color(1.0, 0.72, 0.66)
+		Hud.text(overlay, font, s + Vector2(-w.x / 2.0, -w.y - 4.0 * k), name, roundi(13.0 * k), c, HORIZONTAL_ALIGNMENT_CENTER, w.x)
+	var x: float = s.x + w.x / 2.0 + 4.0 * k
+	var ic := 16.0 * k
+	for status in ["stunned", "rooted", "slowed"]:
+		if u.get(status, false):
+			var kind: String = {"stunned": "stun", "rooted": "root", "slowed": "slow"}[status]
+			overlay.draw_texture_rect(AbilityTooltip.icon(kind), Rect2(Vector2(x, s.y - w.y - (ic - w.y) / 2.0), Vector2(ic, ic)), false)
+			x += ic + 2.0 * k
 
 
 ## Augment indicators (06 §3: no invisible power): one tier-colored diamond per held augment,
@@ -1838,83 +2066,297 @@ func _draw_augment_pips(font: Font, world: Vector3, held: Array) -> void:
 		overlay.draw_string(font, c + Vector2(-6, 4), initial, HORIZONTAL_ALIGNMENT_CENTER, 12, 10, Color.WHITE)
 
 
-func _draw_bar(world: Vector3, size: Vector2, hp: float, max_hp: float, shield: float, color: Color) -> void:
+## A health bar over a unit: a dark frame, health with a lighter top, shield in white, recent
+## damage as a draining pale chip, ticks every 100 health for champions, and a level box.
+func _draw_bar(world: Vector3, size: Vector2, hp: float, max_hp: float, shield: float, color: Color, id = null, level := 0, tick := 0.0) -> void:
 	var s = _screen(world)
 	if s == null or max_hp <= 0.0:
 		return
+	var k := _hud_k()
+	size *= k
 	var origin: Vector2 = s - Vector2(size.x / 2.0, size.y)
-	var total := maxf(max_hp, hp + shield)
-	overlay.draw_rect(Rect2(origin - Vector2(1, 1), size + Vector2(2, 2)), Color(0, 0, 0, 0.8))
-	var w_hp := size.x * clampf(hp / total, 0.0, 1.0)
-	overlay.draw_rect(Rect2(origin, Vector2(w_hp, size.y)), color)
-	if shield > 0.0:
-		var w_sh := size.x * clampf(shield / total, 0.0, 1.0)
-		overlay.draw_rect(Rect2(origin + Vector2(w_hp, 0), Vector2(w_sh, size.y)), Color(0.95, 0.95, 0.95))
+	var chip := _chip_of(id, hp, max_hp) if id != null else hp
+	Hud.bar(overlay, Rect2(origin, size), hp, max_hp, color, shield, Color(0.95, 0.95, 0.95), tick, chip)
+	if level > 0:
+		var lb := Rect2(origin - Vector2(size.y + 9.0 * k, 3.0 * k), Vector2(size.y + 7.0 * k, size.y + 6.0 * k))
+		overlay.draw_rect(lb, Color(0.04, 0.05, 0.07, 0.95))
+		overlay.draw_rect(lb, Hud.GOLD_DIM, false, 1.0)
+		overlay.draw_string(ThemeDB.fallback_font, lb.position + Vector2(0, lb.size.y - 4.0 * k), "%d" % level, HORIZONTAL_ALIGNMENT_CENTER, lb.size.x, roundi(12.0 * k), Color.WHITE)
 
 
 func _draw_ability_bar(font: Font) -> void:
-	if own_status.is_empty() or not own_status.has("cooldowns"):
-		return
-	var names: Array = own_status.abilities
+	_bar_rect = Rect2()
+	_ability_boxes.clear()
+	_level_buttons.clear()
+	if not own_status.is_empty() and own_status.has("cooldowns"):
+		_draw_bottom_hud(font)
+	_draw_hud_messages(font)
+
+
+## The bottom panel (05 §6): stats, the portrait with level and XP, the abilities with their
+## cooldowns, ranks and level-up buttons, health, then items and gold. Centered, shifted left of
+## the minimap when they'd meet; scaled with the window (k = 1 at 1080 p).
+func _draw_bottom_hud(font: Font) -> void:
+	var k := _hud_k()
+	var bold := _bold_font()
+	var ranked: bool = own_status.get("ranked", false)
 	var cds: Array = own_status.cooldowns
-	var slot_w := 120.0
-	# Centered, unless the inventory beside it would run under the minimap.
-	var right := overlay.size.x / 2.0 + slot_w * 3.0 + 24.0 + 300.0
-	var limit: float = minimap.position.x - 12.0 if minimap != null and minimap.visible else overlay.size.x
-	var x0 := overlay.size.x / 2.0 - slot_w * 3.0 - maxf(0.0, right - limit)
-	var y0 := overlay.size.y - 92.0
-	overlay.draw_rect(Rect2(x0 - 10, y0 - 34, slot_w * 6.0 + 20, 120), Color(0, 0, 0, 0.55))
+	var mouse := overlay.get_local_mouse_position()
+	var A := 66.0 * k                     # ability icon
+	var S := 50.0 * k                     # spell icon
+	var G := 7.0 * k                      # gap
+	var I := Vector2(64.0, 43.0) * k      # item box
+	var pad := 12.0 * k
+	var stats_w := 156.0 * k if ranked else 0.0
+	var port := 100.0 * k
+	var abil_w := 4.0 * A + 3.0 * G + 14.0 * k + 2.0 * S + G
+	var items_w := 3.0 * I.x + 2.0 * 5.0 * k if ranked else 0.0
+	var w := pad + (stats_w + pad if ranked else 0.0) + port + pad + abil_w + (pad + items_w if ranked else 0.0) + pad
+	var h := 136.0 * k
+	var limit: float = minimap.position.x - 10.0 * k if minimap != null and minimap.visible else overlay.size.x
+	var x0 := minf(overlay.size.x / 2.0 - w / 2.0, limit - w)
+	x0 = maxf(x0, 6.0)
+	var y0 := overlay.size.y - h - 6.0 * k
+	_bar_rect = Rect2(x0, y0, w, h)
+	Hud.panel(overlay, _bar_rect, k)
+	var x := x0 + pad
+
+	# Stats: attack damage, ability power, armor, magic resist, attack speed, haste, move speed.
+	if ranked:
+		var sr := Rect2(x, y0 + pad, stats_w, h - pad * 2.0)
+		Hud.panel(overlay, sr, k, Hud.INK_2, Color(0, 0, 0, 0))
+		var rows := [
+			["ad", "%d" % roundi(own_status.attack_damage)], ["ap", "%d" % roundi(own_status.ability_power)],
+			["armor", "%d" % roundi(own_status.armor)], ["mr", "%d" % roundi(own_status.magic_resist)],
+			["as", "%.2f" % own_status.attack_speed], ["haste", "%d" % roundi(own_status.ability_haste)],
+			["ms", "%d" % roundi(own_status.move_speed)],
+		]
+		var cw := stats_w / 2.0
+		var rh := (sr.size.y - 8.0 * k) / 4.0
+		for i in rows.size():
+			var at := sr.position + Vector2(6.0 * k + (i % 2) * cw, 4.0 * k + (i / 2) * rh)
+			var ic := 16.0 * k
+			overlay.draw_texture_rect(Hud.stat_icon(rows[i][0]), Rect2(at + Vector2(0, (rh - ic) / 2.0), Vector2(ic, ic)), false)
+			overlay.draw_string(font, at + Vector2(ic + 5.0 * k, rh / 2.0 + 5.0 * k), rows[i][1], HORIZONTAL_ALIGNMENT_LEFT, -1, roundi(14.0 * k), Hud.TEXT)
+		x += stats_w + pad
+
+	# Portrait: the champion's color and initial, the XP ring, the level badge.
+	var champ: String = own_status.champion
+	var pc := Vector2(x + port / 2.0, y0 + h / 2.0 - 4.0 * k)
+	var pr := port / 2.0 - 6.0 * k
+	var tint: Color = CHAMPION_COLORS.get(champ, Color(0.5, 0.5, 0.55))
+	overlay.draw_circle(pc, pr + 5.0 * k, Color(0, 0, 0, 0.9))
+	overlay.draw_circle(pc, pr, tint.darkened(0.35))
+	overlay.draw_circle(pc + Vector2(-pr * 0.25, -pr * 0.3), pr * 0.62, tint.lightened(0.05))
+	Hud.text(overlay, bold, pc + Vector2(-pr, pr * 0.36), champ.left(1), roundi(pr * 1.05), Color(1, 1, 1, 0.92), HORIZONTAL_ALIGNMENT_CENTER, pr * 2.0)
+	overlay.draw_arc(pc, pr + 2.5 * k, 0.0, TAU, 64, Hud.GOLD_DIM, 3.5 * k, true)
+	if ranked:
+		var xp_frac := float(own_status.xp) / maxf(float(own_status.xp_next), 1.0)
+		if xp_frac > 0.0:
+			overlay.draw_arc(pc, pr + 2.5 * k, -PI / 2.0, -PI / 2.0 + TAU * clampf(xp_frac, 0.0, 1.0), 64, Color(0.68, 0.5, 1.0), 3.5 * k, true)
+		var lc := pc + Vector2(0, pr + 2.0 * k)
+		overlay.draw_circle(lc, 13.0 * k, Color(0.05, 0.06, 0.08))
+		overlay.draw_arc(lc, 13.0 * k, 0.0, TAU, 32, Hud.GOLD, 1.5 * k, true)
+		Hud.text(overlay, bold, lc + Vector2(-13.0 * k, 5.5 * k), "%d" % own_status.level, roundi(15.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 26.0 * k)
+	x += port + pad
+
+	# Abilities: Q W E R, then the D and F spells a little smaller.
+	_refresh_ability_kinds()
+	var names: Array = own_status.abilities
+	var top := y0 + 22.0 * k
+	for slot in 6:
+		var size := A if slot < 4 else S
+		var bx := x + slot * (A + G) if slot < 4 else x + 4.0 * A + 3.0 * G + 14.0 * k + (slot - 4) * (S + G)
+		var box := Rect2(bx, top + (A - size), size, size)
+		_ability_boxes.append(box)
+		var cd: float = cds[slot]
+		if cd <= 0.0:
+			_cd_total[slot] = 0.0
+		elif cd > _cd_total[slot]:
+			_cd_total[slot] = cd
+		var rank: int = own_status.ranks[slot] if slot < 4 and ranked else 1
+		var kind: String = _ability_kinds.get(slot, "line")
+		overlay.draw_rect(box.grow(2.0 * k), Color(0, 0, 0, 0.9))
+		overlay.draw_texture_rect(Hud.ability_icon(kind, tint if slot < 4 else Color(0.36, 0.42, 0.5)), box, false, Color(1, 1, 1) if rank > 0 else Color(0.4, 0.4, 0.42))
+		if rank == 0:
+			overlay.draw_rect(box, Color(0, 0, 0, 0.5))
+		elif cd > 0.0:
+			Hud.cooldown_sweep(overlay, box, cd / maxf(_cd_total[slot], 0.01))
+			var label := "%.1f" % cd if cd < 1.0 else "%d" % ceili(cd)
+			Hud.text(overlay, bold, box.position + Vector2(0, size / 2.0 + 8.0 * k), label, roundi(22.0 * k if slot < 4 else 18.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, size)
+		var hot := box.has_point(mouse)
+		var rim := Hud.GOLD if cd <= 0.0 and rank > 0 else Hud.GOLD_DIM
+		if hot:
+			rim = Color(1.0, 0.92, 0.65)
+		overlay.draw_rect(box, rim, false, 1.5 * k)
+		# The key, in a little tab at the bottom-left corner.
+		var key: String = settings.primary_binding(SLOT_ACTIONS[slot])
+		var kf := roundi(11.0 * k)
+		var kw := font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, kf).x + 8.0 * k
+		var kr := Rect2(box.position + Vector2(0, size - 15.0 * k), Vector2(kw, 15.0 * k))
+		overlay.draw_rect(kr, Color(0.03, 0.04, 0.05, 0.92))
+		overlay.draw_string(font, kr.position + Vector2(4.0 * k, 11.5 * k), key, HORIZONTAL_ALIGNMENT_LEFT, -1, kf, Hud.TEXT)
+		if slot < 4 and ranked:
+			# Rank pips under the icon; a level-up tab above it while a point can go here.
+			var pips := 3 if slot == 3 else 5
+			var pw := (size - (pips - 1) * 3.0 * k) / pips
+			for i in pips:
+				var c := Color(1.0, 0.82, 0.35) if i < rank else Color(0.2, 0.22, 0.26)
+				overlay.draw_rect(Rect2(box.position.x + i * (pw + 3.0 * k), box.end.y + 4.0 * k, pw, 4.0 * k), c)
+			if own_status.can_rank[slot]:
+				var btn := Rect2(box.position.x + size / 2.0 - 15.0 * k, y0 - 9.0 * k, 30.0 * k, 22.0 * k)
+				_level_buttons[slot] = btn
+				var on := btn.has_point(mouse)
+				var tri := PackedVector2Array([btn.position + Vector2(btn.size.x / 2.0, 3.0 * k), Vector2(btn.end.x - 4.0 * k, btn.end.y - 4.0 * k), Vector2(btn.position.x + 4.0 * k, btn.end.y - 4.0 * k)])
+				Hud.panel(overlay, btn, k, Color(0.3, 0.22, 0.05, 0.95) if not on else Color(0.5, 0.38, 0.1, 0.98), Hud.GOLD)
+				var pulse := 0.75 + 0.25 * sin(Time.get_ticks_msec() / 180.0)
+				overlay.draw_colored_polygon(tri, Color(1.0, 0.86, 0.4, pulse))
+		if slot == 5 and names[5] != "Barrier" and names[5] != "":
+			# An augment's spell in F's place: a gold corner mark.
+			overlay.draw_colored_polygon(PackedVector2Array([box.position + Vector2(size - 12.0 * k, 0), box.position + Vector2(size, 0), box.position + Vector2(size, 12.0 * k)]), Hud.GOLD)
+
+	# Health across the abilities' width, numbers on it.
 	var hp: float = own_status.health
 	var mx: float = own_status.max_health
-	var header := "%s   %d / %d" % [own_status.champion, roundi(hp), roundi(mx)]
-	if own_status.get("ranked", false):
-		header = "Lv %d  %s   %d / %d     %d gold" % [own_status.level, own_status.champion, roundi(hp), roundi(mx), own_status.gold]
-		var xp_frac := float(own_status.xp) / maxf(float(own_status.xp_next), 1.0)
-		overlay.draw_rect(Rect2(x0 - 10, y0 - 38, (slot_w * 6.0 + 20) * xp_frac, 4), Color(0.6, 0.45, 1.0))
-	if own_status.shield > 0.0:
-		header += "  (+%d shield)" % roundi(own_status.shield)
-	overlay.draw_string(font, Vector2(x0, y0 - 10), header, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
+	var shield: float = own_status.shield
+	var hb := Rect2(x, top + A + 16.0 * k, abil_w, 19.0 * k)
+	Hud.bar(overlay, hb, hp, mx, Color(0.22, 0.72, 0.28), shield, Color(0.92, 0.94, 0.97), 100.0, _chip_of("own", hp, mx))
+	var hp_text := "%d / %d" % [roundi(hp), roundi(mx)]
+	if shield > 0.0:
+		hp_text += "  +%d" % roundi(shield)
+	Hud.text(overlay, bold, hb.position + Vector2(0, hb.size.y / 2.0 + 5.0 * k), hp_text, roundi(14.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, hb.size.x)
+	x += abil_w + pad
+
+	# Items in two rows of three, gold beneath; the held augments above.
+	if ranked and own_status.has("items"):
+		_draw_inventory(font, Vector2(x, y0 + pad), k)
+
+
+## A unit's lagging health for the bar's damage chip: it holds, then drains toward the health.
+func _chip_of(id, hp: float, max_hp: float) -> float:
+	var c: float = _chips.get(id, hp)
+	c = hp if hp >= c else maxf(hp, c - max_hp * 0.9 * _hud_dt)
+	_chips[id] = c
+	return c
+
+
+## The HUD's scale: 1.0 at 1080 p.
+func _hud_k() -> float:
+	return clampf(overlay.size.y / 1080.0, 0.7, 1.35)
+
+
+func _bold_font() -> Font:
+	if _bold == null:
+		_bold = FontVariation.new()
+		_bold.base_font = ThemeDB.fallback_font
+		_bold.variation_embolden = 0.7
+	return _bold
+
+
+## Each ability's kind (line, area, dash…) for its icon, refreshed now and then: an augment can
+## replace F, and the champion can change between matches.
+func _refresh_ability_kinds() -> void:
+	var now := Time.get_ticks_msec()
+	if now < _ability_kinds_at:
+		return
+	_ability_kinds_at = now + 500
 	for slot in 6:
-		var x := x0 + slot * slot_w
-		var cd: float = cds[slot]
-		var ready := cd <= 0.0
-		var box := Rect2(x, y0, slot_w - 8, 54)
-		overlay.draw_rect(box, Color(0.18, 0.2, 0.24) if ready else Color(0.1, 0.1, 0.12))
-		overlay.draw_rect(box, Color(0.45, 0.75, 1.0) if ready else Color(0.3, 0.3, 0.35), false, 2.0)
-		overlay.draw_string(font, Vector2(x + 6, y0 + 20), settings.binding(SLOT_ACTIONS[slot]), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
-		var label := "" if ready else ("%.1f" % cd if cd < 10.0 else "%d" % ceili(cd))
-		overlay.draw_string(font, Vector2(x + 30, y0 + 20), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
-		overlay.draw_string(font, Vector2(x + 6, y0 + 44), names[slot], HORIZONTAL_ALIGNMENT_LEFT, slot_w - 14, 13, Color(0.8, 0.85, 0.9))
-		if slot < 4 and own_status.get("ranked", false):
-			var rank: int = own_status.ranks[slot]
-			var max_pips := 3 if slot == 3 else 5
-			for i in max_pips:
-				var c := Color(1.0, 0.8, 0.3) if i < rank else Color(0.3, 0.3, 0.35)
-				overlay.draw_rect(Rect2(x + 6 + i * 12, y0 + 50, 9, 3), c)
-			if rank == 0:
-				overlay.draw_rect(box, Color(0, 0, 0, 0.55))
-			if own_status.can_rank[slot]:
-				overlay.draw_string(font, Vector2(x + slot_w - 30, y0 + 20), "+", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.85, 0.3))
-	if own_status.get("ranked", false) and own_status.has("items"):
-		_draw_inventory(font, Vector2(x0 + slot_w * 6.0 + 24, y0 - 34))
-	if match_banner != "":
-		var c := Color(0.45, 0.8, 1.0) if match_banner == "VICTORY" else Color(1.0, 0.4, 0.35)
-		overlay.draw_string(font, Vector2(0, overlay.size.y * 0.3), match_banner, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 72, c)
-		overlay.draw_string(font, Vector2(0, overlay.size.y * 0.3 + 50), "A new match starts shortly", HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 22, Color.WHITE)
-	if own_status.get("dead", false):
-		var msg := "Respawning in %.1f s" % own_status.respawn_in
-		overlay.draw_rect(Rect2(Vector2.ZERO, overlay.size), Color(0.1, 0.1, 0.1, 0.35))
-		overlay.draw_string(font, Vector2(0, overlay.size.y * 0.4), msg, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 36, Color.WHITE)
+		var info: Dictionary = client.ability_info(slot)
+		var kind: String = info.get("kind", "line")
+		if kind == "support":
+			kind = "heal" if info.has("heal") else "shield_ally"
+		_ability_kinds[slot] = kind
+
+
+## Messages over the world: the hint line above the bar, the match banner, the death screen, the
+## blind round's timer.
+func _draw_hud_messages(font: Font) -> void:
+	var k := _hud_k()
+	var bold := _bold_font()
+	var hint := ""
+	var hint_color := Color(1.0, 0.85, 0.3)
 	if attack_move_armed:
-		overlay.draw_string(font, Vector2(x0, y0 + 80), "Attack-move: left-click a point", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ENEMY_COLOR)
+		hint = "Attack-move: left-click a point"
+		hint_color = ENEMY_COLOR
 	elif own_status.get("points", 0) > 0:
-		overlay.draw_string(font, Vector2(x0, y0 + 80), "%d ability point(s): %s" % [own_status.points, " / ".join(LEVEL_ACTIONS.map(func(a): return settings.binding(a)))], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
+		var keys: Array = LEVEL_ACTIONS.map(func(a): return settings.primary_binding(a))
+		var joined := " / ".join(keys)
+		var mod: String = keys[0].left(keys[0].rfind("+") + 1)
+		if mod != "" and keys.all(func(t): return t.begins_with(mod) and t.length() == mod.length() + 1):
+			joined = mod + "/".join(keys.map(func(t): return t.right(1)))  # "Alt+Q/W/E/R"
+		hint = "%d ability point%s — %s or click ▲" % [own_status.points, "" if own_status.points == 1 else "s", joined]
 	elif own_status.get("ranked", false) and client.can_shop():
-		overlay.draw_string(font, Vector2(x0, y0 + 80), "[%s] shop" % settings.binding("toggle_shop"), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
+		hint = "[%s] shop" % settings.primary_binding("toggle_shop")
+	if hint != "" and _bar_rect.size.x > 0.0:
+		Hud.text(overlay, font, Vector2(_bar_rect.position.x, _bar_rect.position.y - 18.0 * k), hint, roundi(15.0 * k), hint_color, HORIZONTAL_ALIGNMENT_CENTER, _bar_rect.size.x)
+	if own_status.get("dead", false):
+		overlay.draw_rect(Rect2(Vector2.ZERO, overlay.size), Color(0.05, 0.06, 0.08, 0.45))
+		# Just above the HUD, out of the way of the fight we're watching.
+		var top: float = _bar_rect.position.y if _bar_rect.size.y > 0.0 else overlay.size.y
+		var r := Rect2(overlay.size.x / 2.0 - 140.0 * k, top - 128.0 * k, 280.0 * k, 78.0 * k)
+		Hud.panel(overlay, r, k)
+		Hud.text(overlay, font, r.position + Vector2(0, 26.0 * k), "RESPAWNING IN", roundi(14.0 * k), Hud.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+		Hud.text(overlay, bold, r.position + Vector2(0, 64.0 * k), "%d" % ceili(own_status.respawn_in), roundi(36.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+	if match_banner != "":
+		var won := match_banner == "VICTORY"
+		var c := Color(0.5, 0.82, 1.0) if won else Color(1.0, 0.42, 0.36)
+		var band := Rect2(0, overlay.size.y * 0.26, overlay.size.x, 132.0 * k)
+		overlay.draw_rect(band, Color(0.02, 0.03, 0.05, 0.72))
+		overlay.draw_rect(Rect2(band.position, Vector2(band.size.x, 2.0 * k)), c.darkened(0.2))
+		overlay.draw_rect(Rect2(band.position + Vector2(0, band.size.y - 2.0 * k), Vector2(band.size.x, 2.0 * k)), c.darkened(0.2))
+		Hud.text(overlay, bold, band.position + Vector2(0, 80.0 * k), match_banner, roundi(72.0 * k), c, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x)
+		Hud.text(overlay, font, band.position + Vector2(0, 116.0 * k), "A new match starts shortly", roundi(18.0 * k), Hud.TEXT, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x)
 	if blind_state == "playing":
 		var left := maxf(blind_seconds - client.blind_elapsed(), 0.0)
 		var txt := "Blind round %d / %d   %d:%02d" % [client.blind_round() + 1, client.blind_rounds(), int(left) / 60, int(left) % 60]
 		overlay.draw_string(font, Vector2(16, 34), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
+
+
+## The top-right corner: kills and deaths, the match clock, frame rate and ping.
+func _draw_top_right(font: Font) -> void:
+	if client.phase() != "playing":
+		return
+	var k := _hud_k()
+	var bold := _bold_font()
+	var stats: Dictionary = client.net_stats()
+	var t := client.match_seconds()
+	var r := Rect2(overlay.size.x - 250.0 * k - 10.0 * k, 10.0 * k, 250.0 * k, 34.0 * k)
+	Hud.panel(overlay, r, k)
+	var y := r.position.y + 23.0 * k
+	var kd := "%d / %d" % [stats.kills, stats.deaths]
+	Hud.text(overlay, font, Vector2(r.position.x + 12.0 * k, y), "K/D", roundi(12.0 * k), Hud.DIM)
+	Hud.text(overlay, bold, Vector2(r.position.x + 40.0 * k, y), kd, roundi(15.0 * k), Color.WHITE)
+	Hud.text(overlay, bold, Vector2(r.position.x, y), "%d:%02d" % [int(t) / 60, int(t) % 60], roundi(16.0 * k), Color(1.0, 0.92, 0.7), HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+	var perf := "%d fps  %d ms" % [Engine.get_frames_per_second(), roundi(stats.rtt_ms)]
+	Hud.text(overlay, font, Vector2(r.position.x, y), perf, roundi(12.0 * k), Hud.DIM, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x - 12.0 * k)
+	# The kill feed under it, newest last, each line on its own dark strip.
+	var fy := r.end.y + 8.0 * k
+	for n in notices:
+		var a := clampf(4.0 - n.age, 0.0, 1.0)
+		var fs := roundi(14.0 * k)
+		var tw := font.get_string_size(n.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 20.0 * k
+		var strip := Rect2(overlay.size.x - 10.0 * k - tw, fy, tw, 24.0 * k)
+		overlay.draw_rect(strip, Color(0.03, 0.04, 0.06, 0.7 * a))
+		overlay.draw_rect(Rect2(strip.position, Vector2(3.0 * k, strip.size.y)), Color(Hud.GOLD, a))
+		overlay.draw_string(font, strip.position + Vector2(10.0 * k, 17.0 * k), n.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, a))
+		fy += 28.0 * k
+
+
+## The hovered ability's tooltip (or `--hover-slot`'s, for scripted captures).
+func _update_ability_tip() -> void:
+	var slot := -1
+	if not own_status.is_empty() and overlay.visible:
+		var m := overlay.get_local_mouse_position()
+		for i in _ability_boxes.size():
+			if _ability_boxes[i].has_point(m):
+				slot = i
+		if slot < 0 and _shot_hover >= 0 and _shot_hover < _ability_boxes.size():
+			slot = _shot_hover
+	if slot < 0:
+		ability_tip.hide()
+		return
+	var level_key: String = settings.primary_binding(LEVEL_ACTIONS[slot]) if slot < 4 else ""
+	ability_tip.show_for(client.ability_info(slot), settings.primary_binding(SLOT_ACTIONS[slot]), level_key, _ability_boxes[slot], overlay.size)
 
 
 func _update_net_graph() -> void:
@@ -1937,7 +2379,7 @@ func _update_net_graph() -> void:
 
 ## The controls line under the net graph, from the current bindings.
 func _key_hints() -> String:
-	var b := func(a: String) -> String: return settings.binding(a).replace("Mouse ", "M-")
+	var b := func(a: String) -> String: return settings.primary_binding(a).replace("Mouse ", "M-")
 	return "[%s] move / attack  [%s] attack-move  [%s %s %s %s] abilities  [%s] Blink  [%s] Barrier  [%s] stop  [%s] shop  [%s] camera lock  [Esc] settings" % [
 		b.call("move"), b.call("attack_move"), b.call("cast_q"), b.call("cast_w"), b.call("cast_e"), b.call("cast_r"),
 		b.call("cast_d"), b.call("cast_f"), b.call("stop"), b.call("toggle_shop"), b.call("camera_lock"),
@@ -2174,8 +2616,8 @@ func _toggle_shop() -> void:
 func _build_shop() -> void:
 	shop_panel = PanelContainer.new()
 	shop_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	shop_panel.position = Vector2(16, 160)
-	shop_panel.custom_minimum_size = Vector2(800, 0)
+	shop_panel.position = Vector2(16, 64)
+	shop_panel.custom_minimum_size = Vector2(920, 0)
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 14)
@@ -2184,16 +2626,16 @@ func _build_shop() -> void:
 	v.add_theme_constant_override("separation", 6)
 	margin.add_child(v)
 	shop_title = Label.new()
-	shop_title.add_theme_font_size_override("font_size", 22)
+	shop_title.theme_type_variation = "TitleLabel"
 	v.add_child(shop_title)
-	var tiers := ["Components", "Upgrades and boots", "Legendary"]
+	var tiers := ["COMPONENTS", "UPGRADES AND BOOTS", "LEGENDARY"]
 	var catalog: Array = client.shop_catalog()
 	for it in catalog:
 		item_names[it.id] = it.name
 	for tier in 3:
 		var l := Label.new()
 		l.text = tiers[tier]
-		l.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
+		l.theme_type_variation = "HeaderLabel"
 		v.add_child(l)
 		shop_grid = GridContainer.new()
 		shop_grid.columns = 5
@@ -2204,7 +2646,7 @@ func _build_shop() -> void:
 			if it.tier != tier:
 				continue
 			var b := Button.new()
-			b.custom_minimum_size = Vector2(150, 40)
+			b.custom_minimum_size = Vector2(172, 46)
 			b.add_theme_font_size_override("font_size", 12)
 			b.clip_text = true
 			b.focus_mode = Control.FOCUS_NONE
@@ -2212,15 +2654,15 @@ func _build_shop() -> void:
 			shop_grid.add_child(b)
 			shop_buttons[it.id] = b
 	var inv_label := Label.new()
-	inv_label.text = "Inventory (click to sell for 70%)"
-	inv_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
+	inv_label.text = "INVENTORY  ·  click to sell for 70%"
+	inv_label.theme_type_variation = "HeaderLabel"
 	v.add_child(inv_label)
 	shop_inventory = HBoxContainer.new()
 	shop_inventory.add_theme_constant_override("separation", 6)
 	v.add_child(shop_inventory)
 	for slot in 6:
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(124, 30)
+		b.custom_minimum_size = Vector2(140, 32)
 		b.add_theme_font_size_override("font_size", 12)
 		b.clip_text = true
 		b.focus_mode = Control.FOCUS_NONE
@@ -2237,7 +2679,8 @@ func _build_shop() -> void:
 	shop_undo.pressed.connect(func(): client.undo_trade(); _shop_refresh = 0.0)
 	row.add_child(shop_undo)
 	shop_stats = Label.new()
-	shop_stats.add_theme_color_override("font_color", Color(0.8, 0.85, 0.9))
+	shop_stats.theme_type_variation = "HintLabel"
+	shop_stats.add_theme_font_size_override("font_size", 15)
 	row.add_child(shop_stats)
 	shop_panel.visible = false
 	overlay.get_parent().add_child(shop_panel)
@@ -2252,7 +2695,7 @@ func _update_shop(delta: float) -> void:
 	_shop_refresh = 0.15
 	var open: bool = client.can_shop()
 	var gold: int = own_status.get("gold", 0)
-	shop_title.text = "Shop — %d gold%s" % [gold, "" if open else "   (closed: return to your fountain, or shop while dead)"]
+	shop_title.text = "Shop   ·   %d gold%s" % [gold, "" if open else "   (closed: return to your fountain, or shop while dead)"]
 	for it in client.shop_catalog():
 		var b: Button = shop_buttons[it.id]
 		var price: int = it.price
@@ -2280,29 +2723,35 @@ func _update_shop(delta: float) -> void:
 		]
 
 
-func _draw_inventory(font: Font, origin: Vector2) -> void:
+func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 	if item_names.is_empty():
 		for it in client.shop_catalog():
 			item_names[it.id] = it.name
 	var inv: Array = own_status.items
-	overlay.draw_rect(Rect2(origin - Vector2(8, 0), Vector2(3 * 92 + 12, 120)), Color(0, 0, 0, 0.55))
+	var I := Vector2(64.0, 43.0) * k
+	var gap := 5.0 * k
 	for slot in 6:
-		var p := origin + Vector2((slot % 3) * 92, 24 + (slot / 3) * 46)
-		var box := Rect2(p, Vector2(86, 40))
+		var p := origin + Vector2((slot % 3) * (I.x + gap), (slot / 3) * (I.y + gap))
+		var box := Rect2(p, I)
 		var id: int = inv[slot]
-		overlay.draw_rect(box, Color(0.18, 0.2, 0.24) if id != 0 else Color(0.1, 0.1, 0.12))
-		overlay.draw_rect(box, Color(0.85, 0.7, 0.35) if id != 0 else Color(0.3, 0.3, 0.35), false, 1.5)
+		overlay.draw_rect(box, Color(0.11, 0.12, 0.15) if id != 0 else Color(0.075, 0.085, 0.105))
+		overlay.draw_rect(box, Hud.GOLD if id != 0 else Color(0.25, 0.27, 0.31), false, 1.0 * k)
 		if id != 0:
-			overlay.draw_string(font, p + Vector2(4, 24), item_names.get(id, "?"), HORIZONTAL_ALIGNMENT_LEFT, 80, 12, Color(0.9, 0.9, 0.95))
-	# ARAM: Mayhem: the augments held, above the inventory.
+			overlay.draw_multiline_string(font, p + Vector2(4.0 * k, 15.0 * k), item_names.get(id, "?"), HORIZONTAL_ALIGNMENT_CENTER, I.x - 8.0 * k, roundi(11.0 * k), 2, Hud.TEXT)
+	# Gold under the items.
+	var gy := origin.y + 2.0 * (I.y + gap) + 2.0 * k
+	var ic := 16.0 * k
+	overlay.draw_texture_rect(Hud.stat_icon("gold"), Rect2(Vector2(origin.x, gy), Vector2(ic, ic)), false)
+	Hud.text(overlay, _bold_font(), Vector2(origin.x + ic + 6.0 * k, gy + 13.0 * k), "%d" % own_status.gold, roundi(15.0 * k), Color(1.0, 0.84, 0.4))
+	# ARAM: Mayhem: the augments held, above the panel.
 	var held: Array = own_status.get("augments", [])
 	for i in held.size():
 		var a: Dictionary = held[i]
-		var at := origin + Vector2(0, -10 - 18 * (held.size() - 1 - i))
+		var at := Vector2(origin.x, _bar_rect.position.y - 10.0 * k - 18.0 * k * (held.size() - 1 - i))
 		var label: String = "◆ " + a.name
 		if a.has("progress"):
 			label += "  " + a.progress
-		overlay.draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, _tier_color(a.tier))
+		Hud.text(overlay, font, at, label, roundi(14.0 * k), _tier_color(a.tier))
 
 
 ## ---- Session, champion select and spectating (M2 slice 5) --------------------------------------
@@ -2342,6 +2791,8 @@ var lobby_panel: PanelContainer
 var lobby_box: VBoxContainer
 var _lobby_refresh := 0.0
 var _lobby_ready := false
+var _lobby_sig := ""                      # the lobby as last drawn (rebuilt when it changes)
+var _lobby_timer: Label
 
 
 func _update_lobby(delta: float, phase: String) -> void:
@@ -2349,11 +2800,12 @@ func _update_lobby(delta: float, phase: String) -> void:
 		if lobby_panel != null:
 			lobby_panel.queue_free()
 			lobby_panel = null
+			_lobby_sig = ""
 		return
 	if lobby_panel == null:
 		lobby_panel = PanelContainer.new()
 		lobby_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-		lobby_panel.custom_minimum_size = Vector2(760, 0)
+		lobby_panel.custom_minimum_size = Vector2(780, 0)
 		var margin := MarginContainer.new()
 		for side in ["left", "right", "top", "bottom"]:
 			margin.add_theme_constant_override("margin_" + side, 18)
@@ -2370,40 +2822,78 @@ func _update_lobby(delta: float, phase: String) -> void:
 	var l: Dictionary = client.lobby_state()
 	if l.is_empty():
 		return
+	if _lobby_timer != null and is_instance_valid(_lobby_timer):
+		_lobby_timer.text = "%d" % ceili(l.starts_in)
+	# Rebuild only when something but the countdown changed, so buttons keep their hover and
+	# a click isn't lost to a rebuild.
+	var sig := str(l.slots) + str(l.bench)
+	if sig == _lobby_sig:
+		return
+	_lobby_sig = sig
 	for c in lobby_box.get_children():
 		c.queue_free()
+	var top := HBoxContainer.new()
+	top.add_theme_constant_override("separation", 16)
+	var titles := VBoxContainer.new()
+	titles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var title := Label.new()
-	title.text = "Champion select — ARAM all random   (starts in %d s)" % ceili(l.starts_in)
-	title.add_theme_font_size_override("font_size", 22)
-	lobby_box.add_child(title)
+	title.text = "Champion select"
+	title.theme_type_variation = "TitleLabel"
+	titles.add_child(title)
+	var sub := Label.new()
+	sub.text = "ARAM  ·  ALL RANDOM  ·  The Bridge"
+	sub.theme_type_variation = "HeaderLabel"
+	titles.add_child(sub)
+	top.add_child(titles)
+	_lobby_timer = Label.new()
+	_lobby_timer.text = "%d" % ceili(l.starts_in)
+	_lobby_timer.theme_type_variation = "TitleLabel"
+	_lobby_timer.add_theme_font_size_override("font_size", 40)
+	_lobby_timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	top.add_child(_lobby_timer)
+	lobby_box.add_child(top)
+	lobby_box.add_child(HSeparator.new())
 	var cols := HBoxContainer.new()
-	cols.add_theme_constant_override("separation", 40)
+	cols.add_theme_constant_override("separation", 24)
 	lobby_box.add_child(cols)
 	var me := {}
 	for team in ["blue", "red"]:
 		var col := VBoxContainer.new()
-		col.custom_minimum_size = Vector2(330, 0)
+		col.custom_minimum_size = Vector2(350, 0)
+		col.add_theme_constant_override("separation", 6)
 		var head := Label.new()
-		head.text = "Blue team" if team == "blue" else "Red team"
-		head.add_theme_color_override("font_color", OWN_COLOR if team == "blue" else ENEMY_COLOR)
+		head.text = "BLUE TEAM" if team == "blue" else "RED TEAM"
+		head.theme_type_variation = "HeaderLabel"
+		head.add_theme_color_override("font_color", OWN_COLOR.lightened(0.2) if team == "blue" else ENEMY_COLOR.lightened(0.1))
 		col.add_child(head)
-		for s in l.slots:
-			if s.team != team:
+		for slot in l.slots:
+			if slot.team != team:
 				continue
-			if s.you:
-				me = s
-			var row := Label.new()
-			var who := "You" if s.you else ("Bot" if s.bot else "Player %d" % s.player)
-			row.text = "%s  %s  —  %s%s" % ["✔" if s.ready else "  ", s.champion, who, ("  (%d rerolls)" % s.rerolls) if s.you else ""]
-			if s.you:
-				row.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
-			col.add_child(row)
+			if slot.you:
+				me = slot
+			col.add_child(_lobby_card(slot, OWN_COLOR if team == "blue" else ENEMY_COLOR))
 		cols.add_child(col)
+	lobby_box.add_child(HSeparator.new())
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 12)
 	lobby_box.add_child(actions)
+	if l.bench.size() > 0:
+		var label := Label.new()
+		label.text = "BENCH"
+		label.theme_type_variation = "HeaderLabel"
+		actions.add_child(label)
+		for name in l.bench:
+			var b := Button.new()
+			b.text = name
+			b.tooltip_text = "Swap your champion for %s" % name
+			b.focus_mode = Control.FOCUS_NONE
+			b.pressed.connect(func(): client.lobby_take(name); _lobby_refresh = 0.0)
+			actions.add_child(b)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	actions.add_child(spacer)
 	var reroll := Button.new()
-	reroll.text = "Reroll (%d)" % me.get("rerolls", 0)
+	reroll.text = "⟳  Reroll (%d)" % me.get("rerolls", 0)
 	reroll.disabled = me.get("rerolls", 0) == 0
 	reroll.focus_mode = Control.FOCUS_NONE
 	reroll.pressed.connect(func(): client.lobby_reroll(); _lobby_refresh = 0.0)
@@ -2411,22 +2901,66 @@ func _update_lobby(delta: float, phase: String) -> void:
 	var ready := Button.new()
 	_lobby_ready = me.get("ready", false)
 	ready.text = "Not ready" if _lobby_ready else "Ready"
+	ready.theme_type_variation = "Button" if _lobby_ready else "PrimaryButton"
+	ready.custom_minimum_size = Vector2(130, 0)
 	ready.focus_mode = Control.FOCUS_NONE
 	ready.pressed.connect(func(): client.lobby_ready(not _lobby_ready); _lobby_refresh = 0.0)
 	actions.add_child(ready)
-	if l.bench.size() > 0:
-		var bench := HBoxContainer.new()
-		bench.add_theme_constant_override("separation", 8)
-		var label := Label.new()
-		label.text = "Team bench:"
-		bench.add_child(label)
-		for name in l.bench:
-			var b := Button.new()
-			b.text = "Take %s" % name
-			b.focus_mode = Control.FOCUS_NONE
-			b.pressed.connect(func(): client.lobby_take(name); _lobby_refresh = 0.0)
-			bench.add_child(b)
-		lobby_box.add_child(bench)
+
+
+## One champion-select slot: the champion's color and initial, its name, who plays it, and a
+## check when ready. Ours has a gold rim.
+func _lobby_card(slot: Dictionary, team: Color) -> Control:
+	var card := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.07, 0.085, 0.11) if not slot.you else Color(0.12, 0.1, 0.06)
+	sb.border_color = Color(0.78, 0.65, 0.38) if slot.you else Color(0.16, 0.18, 0.22)
+	sb.set_border_width_all(1)
+	sb.border_width_left = 4
+	sb.set_corner_radius_all(4)
+	sb.content_margin_left = 10
+	sb.content_margin_right = 10
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 6
+	card.add_theme_stylebox_override("panel", sb)
+	sb.border_color = Color(0.78, 0.65, 0.38) if slot.you else Color(0.16, 0.18, 0.22)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	card.add_child(row)
+	var portrait := Control.new()
+	portrait.custom_minimum_size = Vector2(38, 38)
+	var tint: Color = CHAMPION_COLORS.get(slot.champion, Color(0.5, 0.5, 0.55))
+	var initial: String = String(slot.champion).left(1)
+	portrait.draw.connect(func():
+		var c := portrait.size / 2.0
+		portrait.draw_circle(c, 19.0, team.darkened(0.3))
+		portrait.draw_circle(c, 17.0, tint.darkened(0.25))
+		portrait.draw_circle(c + Vector2(-4, -5), 11.0, tint.lightened(0.05))
+		portrait.draw_string(_bold_font(), Vector2(0, c.y + 7.0), initial, HORIZONTAL_ALIGNMENT_CENTER, portrait.size.x, 20, Color(1, 1, 1, 0.92)))
+	row.add_child(portrait)
+	var names := VBoxContainer.new()
+	names.add_theme_constant_override("separation", -2)
+	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var champ := Label.new()
+	champ.text = slot.champion
+	champ.add_theme_font_override("font", _bold_font())
+	champ.add_theme_font_size_override("font_size", 17)
+	if slot.you:
+		champ.add_theme_color_override("font_color", Color(1.0, 0.88, 0.6))
+	names.add_child(champ)
+	var who := Label.new()
+	who.text = "You" if slot.you else ("Bot" if slot.bot else "Player %d" % slot.player)
+	if slot.you:
+		who.text += "   ·   %d reroll%s" % [slot.rerolls, "" if slot.rerolls == 1 else "s"]
+	who.theme_type_variation = "HintLabel"
+	names.add_child(who)
+	row.add_child(names)
+	var check := Label.new()
+	check.text = "READY" if slot.ready else ""
+	check.theme_type_variation = "HeaderLabel"
+	check.add_theme_color_override("font_color", Color(0.45, 0.85, 0.5))
+	row.add_child(check)
+	return card
 
 
 var spectate_target := -1
@@ -2558,8 +3092,8 @@ func _show_menu(error: String) -> void:
 	menu_panel = made[0]
 	var v: VBoxContainer = made[1]
 	var title := Label.new()
-	title.text = "MFTR"
-	title.add_theme_font_size_override("font_size", 32)
+	title.text = "Play"
+	title.theme_type_variation = "TitleLabel"
 	v.add_child(title)
 
 	var row := HBoxContainer.new()
@@ -2571,7 +3105,8 @@ func _show_menu(error: String) -> void:
 	row.add_child(menu_address)
 	var join := Button.new()
 	join.text = "Join"
-	join.custom_minimum_size = Vector2(90, 0)
+	join.theme_type_variation = "PrimaryButton"
+	join.custom_minimum_size = Vector2(96, 0)
 	join.pressed.connect(func(): _menu_join(menu_address.text))
 	row.add_child(join)
 	v.add_child(row)
@@ -2580,10 +3115,10 @@ func _show_menu(error: String) -> void:
 	menu_address.text = servers[0].get("address", "") if servers.size() > 0 else "127.0.0.1:7777"
 	if servers.size() > 0:
 		var head := Label.new()
-		head.text = "Recent servers"
-		head.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
+		head.text = "RECENT SERVERS"
+		head.theme_type_variation = "HeaderLabel"
 		v.add_child(head)
-		for e in servers:
+		for e in servers.slice(0, 6):
 			var address: String = e.get("address", "")
 			var line := HBoxContainer.new()
 			line.add_theme_constant_override("separation", 6)
@@ -2633,8 +3168,7 @@ func _show_menu(error: String) -> void:
 	var hint := Label.new()
 	hint.text = "ARAM servers deal random champions in champion select. Blind playtest: rounds under hidden network conditions, rated after each (send the results file to the developers)."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.add_theme_font_size_override("font_size", 13)
-	hint.add_theme_color_override("font_color", Color(0.65, 0.68, 0.72))
+	hint.theme_type_variation = "HintLabel"
 	v.add_child(hint)
 	if error != "":
 		var err := Label.new()
@@ -2642,6 +3176,7 @@ func _show_menu(error: String) -> void:
 		err.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		err.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4))
 		v.add_child(err)
+	v.add_child(HSeparator.new())
 	var quit := Button.new()
 	quit.text = "Quit"
 	quit.pressed.connect(func(): get_tree().quit())
@@ -2649,6 +3184,8 @@ func _show_menu(error: String) -> void:
 	await get_tree().process_frame
 	if menu_panel != null:
 		_center(menu_panel)
+		# Below the logo when there's room for both.
+		menu_panel.position.y = clampf(overlay.size.y * 0.27, 8.0, maxf(8.0, overlay.size.y - menu_panel.size.y - 8.0))
 		menu_address.grab_focus()
 		if _menu_auto_join and servers.size() > 0:
 			_menu_auto_join = false
@@ -2685,6 +3222,7 @@ func _update_connecting(phase: String) -> void:
 		v.add_child(connecting_label)
 		var cancel := Button.new()
 		cancel.text = "Back to the server list"
+		connecting_label.theme_type_variation = "HeaderLabel"
 		cancel.pressed.connect(_leave)
 		v.add_child(cancel)
 	var err: String = client.last_error()
@@ -2701,10 +3239,16 @@ func _toggle_pause_menu() -> void:
 	pause_panel = made[0]
 	var v: VBoxContainer = made[1]
 	var title := Label.new()
-	title.text = _server_address
+	title.text = "Paused"
+	title.theme_type_variation = "TitleLabel"
 	v.add_child(title)
+	var where := Label.new()
+	where.text = "%s   ·   %s" % [_server_address, client.game_type()]
+	where.theme_type_variation = "HintLabel"
+	v.add_child(where)
 	var resume := Button.new()
 	resume.text = "Resume"
+	resume.theme_type_variation = "PrimaryButton"
 	resume.pressed.connect(func(): pause_panel.visible = false)
 	v.add_child(resume)
 	var open_settings := Button.new()
@@ -2752,6 +3296,8 @@ var _terrain_pending := false
 func _render_minimap_terrain() -> void:
 	_terrain_pending = true
 	RenderingServer.global_shader_parameter_set("fog_on", 0.0)
+	if atmosphere != null:
+		atmosphere.suspend(true)
 	var region: Rect2 = minimap.region
 	var vp := SubViewport.new()
 	vp.size = Vector2i(1024, int(1024.0 * region.size.y / region.size.x))
@@ -2763,6 +3309,14 @@ func _render_minimap_terrain() -> void:
 	eye.size = region.size.y * UNITS_TO_METERS
 	eye.cull_mask = 2
 	eye.far = 200.0
+	# A flat, clear look for the map: no haze from 80 m up, no grade, no bloom.
+	var plain := Environment.new()
+	plain.background_mode = Environment.BG_COLOR
+	plain.background_color = Color(0.08, 0.09, 0.1)
+	plain.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	plain.ambient_light_color = Color(0.55, 0.6, 0.65)
+	plain.ambient_light_energy = 0.6
+	eye.environment = plain
 	var c := region.get_center() * UNITS_TO_METERS
 	eye.position = Vector3(c.x, 80.0, c.y)
 	eye.rotation_degrees = Vector3(-90, 0, 0)
@@ -2771,6 +3325,8 @@ func _render_minimap_terrain() -> void:
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
 	minimap.terrain = ImageTexture.create_from_image(vp.get_texture().get_image())
+	if atmosphere != null:
+		atmosphere.suspend(false)
 	minimap.queue_redraw()
 	vp.queue_free()
 	_terrain_pending = false

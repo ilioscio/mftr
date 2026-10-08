@@ -105,6 +105,14 @@ fog_on={
 "type": "float",
 "value": 0.0
 }
+cloud_offset={
+"type": "vec2",
+"value": Vector2(0, 0)
+}
+cloud_strength={
+"type": "float",
+"value": 0.0
+}
 
 [rendering]
 

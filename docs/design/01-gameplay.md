@@ -193,11 +193,13 @@ edges, at a speed the player sets; Esc closes settings, then the shop, then open
 | Items / trinket | 1–6 / 4 |
 | Stop | S |
 | Recall | B |
-| Level-up ability | Alt + Q/W/E/R |
+| Level-up ability | Alt + Q/W/E/R or Ctrl + Q/W/E/R (Alt+R is also the NVIDIA and AMD overlays' hotkey), or click the ability's + |
 | Shop | G |
 | Camera lock toggle / center (hold) | Y / Space |
 | Scroll the camera | Bump the screen edges, arrow keys, or drag with the middle mouse button |
 | Ping wheel | (to be bound; G is the shop) |
+
+**Ability tooltips:** hovering an ability on the bar shows what it does, its numbers at the current rank with their AD/AP scaling (colored by damage type; status effects with icons), every rank's values and what the next rank changes. They're generated from the sim's ability data, so they can't drift from the game.
 
 **Cast modes** per key: Normal (press → show indicator → click), Quick cast (cast on press at the cursor), and Quick cast with indicator (cast on release). Ability **range indicators** use the true range and the true hitbox width.
 

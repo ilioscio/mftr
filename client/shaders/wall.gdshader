@@ -2,6 +2,7 @@
 // mossy top. Low contrast so gameplay reads on top (05 §1 value hierarchy). No textures.
 shader_type spatial;
 render_mode diffuse_lambert, specular_disabled;
+#include "res://shaders/clouds.gdshaderinc"
 
 uniform vec3 rock : source_color = vec3(0.47, 0.45, 0.42);
 uniform vec3 rock_dark : source_color = vec3(0.3, 0.29, 0.29);
@@ -60,6 +61,7 @@ void vertex() {
 }
 
 void fragment() {
+	cloud_sun = cloud_shade(world_pos);
 	vec3 n = abs(world_normal);
 	// Triplanar-lite: project on the dominant axis.
 	vec2 p = n.y > 0.6 ? world_pos.xz : (n.x > n.z ? world_pos.zy : world_pos.xy);
@@ -77,4 +79,10 @@ void fragment() {
 	}
 	ALBEDO = fogged(c, world_pos);
 	ROUGHNESS = 1.0;
+}
+
+void light() {
+	// Lambert, with cloud shadows dimming the sun.
+	float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
+	DIFFUSE_LIGHT += ndl * ATTENUATION * LIGHT_COLOR / PI * (LIGHT_IS_DIRECTIONAL ? cloud_sun : 1.0);
 }
