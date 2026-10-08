@@ -43,7 +43,14 @@ var ability_tip
 var _bar_rect := Rect2()
 var _ability_boxes: Array[Rect2] = []
 var _level_buttons := {}                  # slot -> Rect2, while the slot can rank up
-var show_net_graph := true
+var _cd_total := [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # each cooldown's length, for the sweep
+var _ability_kinds := {}                  # slot -> icon kind
+var _ability_kinds_at := 0
+var _chips := {}                          # unit -> lagging health (the bars' damage chip)
+var _hud_dt := 0.0
+var _bold: FontVariation
+const Hud := preload("res://scripts/hud.gd")
+var show_net_graph := false             # F1: the full network graph (the HUD shows fps and ping)
 var proxies_enabled := true
 var attack_move_armed := false
 var own_status := {}
@@ -124,6 +131,8 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-shop":
 			_shot_shop = true
+		elif args[i] == "--keep-points":
+			_shot_keep_points = true
 		elif args[i] == "--hover-slot" and i + 1 < args.size():
 			_shot_hover = int(args[i + 1])
 			i += 1
@@ -234,6 +243,7 @@ var _menu_auto_join := false             # `--menu-join`: join the first remembe
 var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
 var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
 var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
+var _shot_keep_points := false            # `--keep-points`: don't spend the starting points
 
 
 func _update_shot(delta: float) -> void:
@@ -255,7 +265,7 @@ func _update_shot(delta: float) -> void:
 	var inward := (size / 2.0 - own).normalized()
 	var side := Vector2(-inward.y, inward.x)
 	if not _shot_moved and _shot_timer > 1.0:
-		for slot in 3:
+		for slot in 0 if _shot_keep_points else 3:
 			client.level_up(slot)  # ranked modes start with points to spend
 		if _shot_shop:
 			for item in [7, 1, 3]:  # Boots, Long Knife, Vital Crystal from the fountain
@@ -956,6 +966,7 @@ func _process(delta: float) -> void:
 	_update_minimap(delta, playing)
 	_update_shot(delta)
 	_update_ability_tip()
+	_hud_dt = delta
 	overlay.queue_redraw()
 
 
@@ -1804,7 +1815,7 @@ func _draw_overlay() -> void:
 	if own_body != null and own_body.visible:
 		var hp: float = own_status.get("health", 0.0)
 		var mx: float = own_status.get("max_health", 1.0)
-		_draw_bar(own_body.position + Vector3(0, 1.25, 0), Vector2(104, 11), hp, mx, own_status.get("shield", 0.0), Color(0.3, 0.85, 0.35))
+		_draw_bar(own_body.position + Vector3(0, 1.25, 0), Vector2(110, 12), hp, mx, own_status.get("shield", 0.0), Color(0.3, 0.82, 0.32), "own", own_status.get("level", 0), 100.0)
 		_draw_augment_pips(font, own_body.position + Vector3(0, 1.25, 0), own_status.get("augments", []))
 	for id in remote_info:
 		var u: Dictionary = remote_info[id]
@@ -1813,17 +1824,13 @@ func _draw_overlay() -> void:
 		var champ: bool = u.champion != ""
 		var structure: bool = u.kind in ["turret", "gatehouse", "base"]
 		var color := Color(0.3, 0.7, 0.95) if u.ally else Color(0.9, 0.25, 0.2)
-		var size := Vector2(104, 11) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
+		var size := Vector2(110, 12) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
 		var lift := 1.25 if champ else (2.6 if structure else 0.6)
 		if remote_bodies[id].has_meta("prop"):
 			lift = {"turret": 7.0, "gatehouse": 5.4, "base": 6.2}.get(u.kind, 3.0)
-		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color)
+		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color, id, u.level if champ else 0, 100.0 if champ else 0.0)
 		if champ:
 			_draw_augment_pips(font, remote_bodies[id].position + Vector3(0, lift, 0), u.get("augments", []))
-		if champ and u.level > 0:
-			var sp = _screen(remote_bodies[id].position + Vector3(0, lift, 0))
-			if sp != null:
-				overlay.draw_string(font, sp + Vector2(-size.x / 2.0 - 26, 0), "%d" % u.level, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
 	for f in floaters:
 		var s = _screen(f.pos + Vector3(0, 1.5 + f.age * 0.8, 0))
 		if s != null:
@@ -1831,10 +1838,11 @@ func _draw_overlay() -> void:
 			c.a = clampf(1.5 - f.age * 1.5, 0.0, 1.0)
 			overlay.draw_string(font, s + Vector2(-40, 0), f.text, HORIZONTAL_ALIGNMENT_CENTER, 80, 20, c)
 	_draw_ability_bar(font)
-	var y := 120.0
-	for n in notices:
-		overlay.draw_string(font, Vector2(overlay.size.x - 420, y), n.text, HORIZONTAL_ALIGNMENT_RIGHT, 400, 18, Color(1, 1, 1, clampf(4.0 - n.age, 0.0, 1.0)))
-		y += 24.0
+	_draw_top_right(font)
+	if _chips.size() > remote_info.size() + 32:
+		for key in _chips.keys():
+			if key is int and not remote_info.has(key):
+				_chips.erase(key)
 
 
 ## Augment indicators (06 §3: no invisible power): one tier-colored diamond per held augment,
@@ -1859,92 +1867,278 @@ func _draw_augment_pips(font: Font, world: Vector3, held: Array) -> void:
 		overlay.draw_string(font, c + Vector2(-6, 4), initial, HORIZONTAL_ALIGNMENT_CENTER, 12, 10, Color.WHITE)
 
 
-func _draw_bar(world: Vector3, size: Vector2, hp: float, max_hp: float, shield: float, color: Color) -> void:
+## A health bar over a unit: a dark frame, health with a lighter top, shield in white, recent
+## damage as a draining pale chip, ticks every 100 health for champions, and a level box.
+func _draw_bar(world: Vector3, size: Vector2, hp: float, max_hp: float, shield: float, color: Color, id = null, level := 0, tick := 0.0) -> void:
 	var s = _screen(world)
 	if s == null or max_hp <= 0.0:
 		return
+	var k := _hud_k()
+	size *= k
 	var origin: Vector2 = s - Vector2(size.x / 2.0, size.y)
-	var total := maxf(max_hp, hp + shield)
-	overlay.draw_rect(Rect2(origin - Vector2(1, 1), size + Vector2(2, 2)), Color(0, 0, 0, 0.8))
-	var w_hp := size.x * clampf(hp / total, 0.0, 1.0)
-	overlay.draw_rect(Rect2(origin, Vector2(w_hp, size.y)), color)
-	if shield > 0.0:
-		var w_sh := size.x * clampf(shield / total, 0.0, 1.0)
-		overlay.draw_rect(Rect2(origin + Vector2(w_hp, 0), Vector2(w_sh, size.y)), Color(0.95, 0.95, 0.95))
+	var chip := _chip_of(id, hp, max_hp) if id != null else hp
+	Hud.bar(overlay, Rect2(origin, size), hp, max_hp, color, shield, Color(0.95, 0.95, 0.95), tick, chip)
+	if level > 0:
+		var lb := Rect2(origin - Vector2(size.y + 9.0 * k, 3.0 * k), Vector2(size.y + 7.0 * k, size.y + 6.0 * k))
+		overlay.draw_rect(lb, Color(0.04, 0.05, 0.07, 0.95))
+		overlay.draw_rect(lb, Hud.GOLD_DIM, false, 1.0)
+		overlay.draw_string(ThemeDB.fallback_font, lb.position + Vector2(0, lb.size.y - 4.0 * k), "%d" % level, HORIZONTAL_ALIGNMENT_CENTER, lb.size.x, roundi(12.0 * k), Color.WHITE)
 
 
 func _draw_ability_bar(font: Font) -> void:
-	if own_status.is_empty() or not own_status.has("cooldowns"):
-		return
-	var names: Array = own_status.abilities
-	var cds: Array = own_status.cooldowns
-	var slot_w := 120.0
-	# Centered, unless the inventory beside it would run under the minimap.
-	var right := overlay.size.x / 2.0 + slot_w * 3.0 + 24.0 + 300.0
-	var limit: float = minimap.position.x - 12.0 if minimap != null and minimap.visible else overlay.size.x
-	var x0 := overlay.size.x / 2.0 - slot_w * 3.0 - maxf(0.0, right - limit)
-	var y0 := overlay.size.y - 92.0
-	_bar_rect = Rect2(x0 - 10, y0 - 34, slot_w * 6.0 + 20, 120)
+	_bar_rect = Rect2()
 	_ability_boxes.clear()
 	_level_buttons.clear()
-	overlay.draw_rect(_bar_rect, Color(0, 0, 0, 0.55))
+	if not own_status.is_empty() and own_status.has("cooldowns"):
+		_draw_bottom_hud(font)
+	_draw_hud_messages(font)
+
+
+## The bottom panel (05 §6): stats, the portrait with level and XP, the abilities with their
+## cooldowns, ranks and level-up buttons, health, then items and gold. Centered, shifted left of
+## the minimap when they'd meet; scaled with the window (k = 1 at 1080 p).
+func _draw_bottom_hud(font: Font) -> void:
+	var k := _hud_k()
+	var bold := _bold_font()
+	var ranked: bool = own_status.get("ranked", false)
+	var cds: Array = own_status.cooldowns
+	var mouse := overlay.get_local_mouse_position()
+	var A := 66.0 * k                     # ability icon
+	var S := 50.0 * k                     # spell icon
+	var G := 7.0 * k                      # gap
+	var I := Vector2(64.0, 43.0) * k      # item box
+	var pad := 12.0 * k
+	var stats_w := 156.0 * k if ranked else 0.0
+	var port := 100.0 * k
+	var abil_w := 4.0 * A + 3.0 * G + 14.0 * k + 2.0 * S + G
+	var items_w := 3.0 * I.x + 2.0 * 5.0 * k if ranked else 0.0
+	var w := pad + (stats_w + pad if ranked else 0.0) + port + pad + abil_w + (pad + items_w if ranked else 0.0) + pad
+	var h := 136.0 * k
+	var limit: float = minimap.position.x - 10.0 * k if minimap != null and minimap.visible else overlay.size.x
+	var x0 := minf(overlay.size.x / 2.0 - w / 2.0, limit - w)
+	x0 = maxf(x0, 6.0)
+	var y0 := overlay.size.y - h - 6.0 * k
+	_bar_rect = Rect2(x0, y0, w, h)
+	Hud.panel(overlay, _bar_rect, k)
+	var x := x0 + pad
+
+	# Stats: attack damage, ability power, armor, magic resist, attack speed, haste, move speed.
+	if ranked:
+		var sr := Rect2(x, y0 + pad, stats_w, h - pad * 2.0)
+		Hud.panel(overlay, sr, k, Hud.INK_2, Color(0, 0, 0, 0))
+		var rows := [
+			["ad", "%d" % roundi(own_status.attack_damage)], ["ap", "%d" % roundi(own_status.ability_power)],
+			["armor", "%d" % roundi(own_status.armor)], ["mr", "%d" % roundi(own_status.magic_resist)],
+			["as", "%.2f" % own_status.attack_speed], ["haste", "%d" % roundi(own_status.ability_haste)],
+			["ms", "%d" % roundi(own_status.move_speed)],
+		]
+		var cw := stats_w / 2.0
+		var rh := (sr.size.y - 8.0 * k) / 4.0
+		for i in rows.size():
+			var at := sr.position + Vector2(6.0 * k + (i % 2) * cw, 4.0 * k + (i / 2) * rh)
+			var ic := 16.0 * k
+			overlay.draw_texture_rect(Hud.stat_icon(rows[i][0]), Rect2(at + Vector2(0, (rh - ic) / 2.0), Vector2(ic, ic)), false)
+			overlay.draw_string(font, at + Vector2(ic + 5.0 * k, rh / 2.0 + 5.0 * k), rows[i][1], HORIZONTAL_ALIGNMENT_LEFT, -1, roundi(14.0 * k), Hud.TEXT)
+		x += stats_w + pad
+
+	# Portrait: the champion's color and initial, the XP ring, the level badge.
+	var champ: String = own_status.champion
+	var pc := Vector2(x + port / 2.0, y0 + h / 2.0 - 4.0 * k)
+	var pr := port / 2.0 - 6.0 * k
+	var tint: Color = CHAMPION_COLORS.get(champ, Color(0.5, 0.5, 0.55))
+	overlay.draw_circle(pc, pr + 5.0 * k, Color(0, 0, 0, 0.9))
+	overlay.draw_circle(pc, pr, tint.darkened(0.35))
+	overlay.draw_circle(pc + Vector2(-pr * 0.25, -pr * 0.3), pr * 0.62, tint.lightened(0.05))
+	Hud.text(overlay, bold, pc + Vector2(-pr, pr * 0.36), champ.left(1), roundi(pr * 1.05), Color(1, 1, 1, 0.92), HORIZONTAL_ALIGNMENT_CENTER, pr * 2.0)
+	overlay.draw_arc(pc, pr + 2.5 * k, 0.0, TAU, 64, Hud.GOLD_DIM, 3.5 * k, true)
+	if ranked:
+		var xp_frac := float(own_status.xp) / maxf(float(own_status.xp_next), 1.0)
+		if xp_frac > 0.0:
+			overlay.draw_arc(pc, pr + 2.5 * k, -PI / 2.0, -PI / 2.0 + TAU * clampf(xp_frac, 0.0, 1.0), 64, Color(0.68, 0.5, 1.0), 3.5 * k, true)
+		var lc := pc + Vector2(0, pr + 2.0 * k)
+		overlay.draw_circle(lc, 13.0 * k, Color(0.05, 0.06, 0.08))
+		overlay.draw_arc(lc, 13.0 * k, 0.0, TAU, 32, Hud.GOLD, 1.5 * k, true)
+		Hud.text(overlay, bold, lc + Vector2(-13.0 * k, 5.5 * k), "%d" % own_status.level, roundi(15.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 26.0 * k)
+	x += port + pad
+
+	# Abilities: Q W E R, then the D and F spells a little smaller.
+	_refresh_ability_kinds()
+	var names: Array = own_status.abilities
+	var top := y0 + 22.0 * k
+	for slot in 6:
+		var size := A if slot < 4 else S
+		var bx := x + slot * (A + G) if slot < 4 else x + 4.0 * A + 3.0 * G + 14.0 * k + (slot - 4) * (S + G)
+		var box := Rect2(bx, top + (A - size), size, size)
+		_ability_boxes.append(box)
+		var cd: float = cds[slot]
+		if cd <= 0.0:
+			_cd_total[slot] = 0.0
+		elif cd > _cd_total[slot]:
+			_cd_total[slot] = cd
+		var rank: int = own_status.ranks[slot] if slot < 4 and ranked else 1
+		var kind: String = _ability_kinds.get(slot, "line")
+		overlay.draw_rect(box.grow(2.0 * k), Color(0, 0, 0, 0.9))
+		overlay.draw_texture_rect(Hud.ability_icon(kind, tint if slot < 4 else Color(0.36, 0.42, 0.5)), box, false, Color(1, 1, 1) if rank > 0 else Color(0.4, 0.4, 0.42))
+		if rank == 0:
+			overlay.draw_rect(box, Color(0, 0, 0, 0.5))
+		elif cd > 0.0:
+			Hud.cooldown_sweep(overlay, box, cd / maxf(_cd_total[slot], 0.01))
+			var label := "%.1f" % cd if cd < 1.0 else "%d" % ceili(cd)
+			Hud.text(overlay, bold, box.position + Vector2(0, size / 2.0 + 8.0 * k), label, roundi(22.0 * k if slot < 4 else 18.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, size)
+		var hot := box.has_point(mouse)
+		var rim := Hud.GOLD if cd <= 0.0 and rank > 0 else Hud.GOLD_DIM
+		if hot:
+			rim = Color(1.0, 0.92, 0.65)
+		overlay.draw_rect(box, rim, false, 1.5 * k)
+		# The key, in a little tab at the bottom-left corner.
+		var key: String = settings.primary_binding(SLOT_ACTIONS[slot])
+		var kf := roundi(11.0 * k)
+		var kw := font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, kf).x + 8.0 * k
+		var kr := Rect2(box.position + Vector2(0, size - 15.0 * k), Vector2(kw, 15.0 * k))
+		overlay.draw_rect(kr, Color(0.03, 0.04, 0.05, 0.92))
+		overlay.draw_string(font, kr.position + Vector2(4.0 * k, 11.5 * k), key, HORIZONTAL_ALIGNMENT_LEFT, -1, kf, Hud.TEXT)
+		if slot < 4 and ranked:
+			# Rank pips under the icon; a level-up tab above it while a point can go here.
+			var pips := 3 if slot == 3 else 5
+			var pw := (size - (pips - 1) * 3.0 * k) / pips
+			for i in pips:
+				var c := Color(1.0, 0.82, 0.35) if i < rank else Color(0.2, 0.22, 0.26)
+				overlay.draw_rect(Rect2(box.position.x + i * (pw + 3.0 * k), box.end.y + 4.0 * k, pw, 4.0 * k), c)
+			if own_status.can_rank[slot]:
+				var btn := Rect2(box.position.x + size / 2.0 - 15.0 * k, y0 - 9.0 * k, 30.0 * k, 22.0 * k)
+				_level_buttons[slot] = btn
+				var on := btn.has_point(mouse)
+				var tri := PackedVector2Array([btn.position + Vector2(btn.size.x / 2.0, 3.0 * k), Vector2(btn.end.x - 4.0 * k, btn.end.y - 4.0 * k), Vector2(btn.position.x + 4.0 * k, btn.end.y - 4.0 * k)])
+				Hud.panel(overlay, btn, k, Color(0.3, 0.22, 0.05, 0.95) if not on else Color(0.5, 0.38, 0.1, 0.98), Hud.GOLD)
+				var pulse := 0.75 + 0.25 * sin(Time.get_ticks_msec() / 180.0)
+				overlay.draw_colored_polygon(tri, Color(1.0, 0.86, 0.4, pulse))
+		if slot == 5 and names[5] != "Barrier" and names[5] != "":
+			# An augment's spell in F's place: a gold corner mark.
+			overlay.draw_colored_polygon(PackedVector2Array([box.position + Vector2(size - 12.0 * k, 0), box.position + Vector2(size, 0), box.position + Vector2(size, 12.0 * k)]), Hud.GOLD)
+
+	# Health across the abilities' width, numbers on it.
 	var hp: float = own_status.health
 	var mx: float = own_status.max_health
-	var header := "%s   %d / %d" % [own_status.champion, roundi(hp), roundi(mx)]
-	if own_status.get("ranked", false):
-		header = "Lv %d  %s   %d / %d     %d gold" % [own_status.level, own_status.champion, roundi(hp), roundi(mx), own_status.gold]
-		var xp_frac := float(own_status.xp) / maxf(float(own_status.xp_next), 1.0)
-		overlay.draw_rect(Rect2(x0 - 10, y0 - 38, (slot_w * 6.0 + 20) * xp_frac, 4), Color(0.6, 0.45, 1.0))
-	if own_status.shield > 0.0:
-		header += "  (+%d shield)" % roundi(own_status.shield)
-	overlay.draw_string(font, Vector2(x0, y0 - 10), header, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
+	var shield: float = own_status.shield
+	var hb := Rect2(x, top + A + 16.0 * k, abil_w, 19.0 * k)
+	Hud.bar(overlay, hb, hp, mx, Color(0.22, 0.72, 0.28), shield, Color(0.92, 0.94, 0.97), 100.0, _chip_of("own", hp, mx))
+	var hp_text := "%d / %d" % [roundi(hp), roundi(mx)]
+	if shield > 0.0:
+		hp_text += "  +%d" % roundi(shield)
+	Hud.text(overlay, bold, hb.position + Vector2(0, hb.size.y / 2.0 + 5.0 * k), hp_text, roundi(14.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, hb.size.x)
+	x += abil_w + pad
+
+	# Items in two rows of three, gold beneath; the held augments above.
+	if ranked and own_status.has("items"):
+		_draw_inventory(font, Vector2(x, y0 + pad), k)
+
+
+## A unit's lagging health for the bar's damage chip: it holds, then drains toward the health.
+func _chip_of(id, hp: float, max_hp: float) -> float:
+	var c: float = _chips.get(id, hp)
+	c = hp if hp >= c else maxf(hp, c - max_hp * 0.9 * _hud_dt)
+	_chips[id] = c
+	return c
+
+
+## The HUD's scale: 1.0 at 1080 p.
+func _hud_k() -> float:
+	return clampf(overlay.size.y / 1080.0, 0.7, 1.35)
+
+
+func _bold_font() -> Font:
+	if _bold == null:
+		_bold = FontVariation.new()
+		_bold.base_font = ThemeDB.fallback_font
+		_bold.variation_embolden = 0.7
+	return _bold
+
+
+## Each ability's kind (line, area, dash…) for its icon, refreshed now and then: an augment can
+## replace F, and the champion can change between matches.
+func _refresh_ability_kinds() -> void:
+	var now := Time.get_ticks_msec()
+	if now < _ability_kinds_at:
+		return
+	_ability_kinds_at = now + 500
 	for slot in 6:
-		var x := x0 + slot * slot_w
-		var cd: float = cds[slot]
-		var ready := cd <= 0.0
-		var box := Rect2(x, y0, slot_w - 8, 54)
-		_ability_boxes.append(box)
-		overlay.draw_rect(box, Color(0.18, 0.2, 0.24) if ready else Color(0.1, 0.1, 0.12))
-		overlay.draw_rect(box, Color(0.45, 0.75, 1.0) if ready else Color(0.3, 0.3, 0.35), false, 2.0)
-		overlay.draw_string(font, Vector2(x + 6, y0 + 20), settings.primary_binding(SLOT_ACTIONS[slot]), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
-		var label := "" if ready else ("%.1f" % cd if cd < 10.0 else "%d" % ceili(cd))
-		overlay.draw_string(font, Vector2(x + 30, y0 + 20), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
-		overlay.draw_string(font, Vector2(x + 6, y0 + 44), names[slot], HORIZONTAL_ALIGNMENT_LEFT, slot_w - 14, 13, Color(0.8, 0.85, 0.9))
-		if slot < 4 and own_status.get("ranked", false):
-			var rank: int = own_status.ranks[slot]
-			var max_pips := 3 if slot == 3 else 5
-			for i in max_pips:
-				var c := Color(1.0, 0.8, 0.3) if i < rank else Color(0.3, 0.3, 0.35)
-				overlay.draw_rect(Rect2(x + 6 + i * 12, y0 + 50, 9, 3), c)
-			if rank == 0:
-				overlay.draw_rect(box, Color(0, 0, 0, 0.55))
-			if own_status.can_rank[slot]:
-				var btn := Rect2(x + slot_w - 36, y0 + 3, 24, 22)
-				_level_buttons[slot] = btn
-				var hot := btn.has_point(overlay.get_local_mouse_position())
-				overlay.draw_rect(btn, Color(0.45, 0.34, 0.08) if hot else Color(0.28, 0.21, 0.05))
-				overlay.draw_rect(btn, Color(1.0, 0.85, 0.3), false, 1.5)
-				overlay.draw_string(font, btn.position + Vector2(0, 18), "+", HORIZONTAL_ALIGNMENT_CENTER, btn.size.x, 20, Color(1.0, 0.9, 0.45))
-	if own_status.get("ranked", false) and own_status.has("items"):
-		_draw_inventory(font, Vector2(x0 + slot_w * 6.0 + 24, y0 - 34))
-	if match_banner != "":
-		var c := Color(0.45, 0.8, 1.0) if match_banner == "VICTORY" else Color(1.0, 0.4, 0.35)
-		overlay.draw_string(font, Vector2(0, overlay.size.y * 0.3), match_banner, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 72, c)
-		overlay.draw_string(font, Vector2(0, overlay.size.y * 0.3 + 50), "A new match starts shortly", HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 22, Color.WHITE)
-	if own_status.get("dead", false):
-		var msg := "Respawning in %.1f s" % own_status.respawn_in
-		overlay.draw_rect(Rect2(Vector2.ZERO, overlay.size), Color(0.1, 0.1, 0.1, 0.35))
-		overlay.draw_string(font, Vector2(0, overlay.size.y * 0.4), msg, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 36, Color.WHITE)
+		var info: Dictionary = client.ability_info(slot)
+		var kind: String = info.get("kind", "line")
+		if kind == "support":
+			kind = "heal" if info.has("heal") else "shield_ally"
+		_ability_kinds[slot] = kind
+
+
+## Messages over the world: the hint line above the bar, the match banner, the death screen, the
+## blind round's timer.
+func _draw_hud_messages(font: Font) -> void:
+	var k := _hud_k()
+	var bold := _bold_font()
+	var hint := ""
+	var hint_color := Color(1.0, 0.85, 0.3)
 	if attack_move_armed:
-		overlay.draw_string(font, Vector2(x0, y0 + 80), "Attack-move: left-click a point", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ENEMY_COLOR)
+		hint = "Attack-move: left-click a point"
+		hint_color = ENEMY_COLOR
 	elif own_status.get("points", 0) > 0:
-		overlay.draw_string(font, Vector2(x0, y0 + 80), "%d ability point(s): %s" % [own_status.points, " / ".join(LEVEL_ACTIONS.map(func(a): return settings.primary_binding(a))) + " or click +"], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
+		var keys: Array = LEVEL_ACTIONS.map(func(a): return settings.primary_binding(a))
+		var joined := " / ".join(keys)
+		var mod: String = keys[0].left(keys[0].rfind("+") + 1)
+		if mod != "" and keys.all(func(t): return t.begins_with(mod) and t.length() == mod.length() + 1):
+			joined = mod + "/".join(keys.map(func(t): return t.right(1)))  # "Alt+Q/W/E/R"
+		hint = "%d ability point%s — %s or click ▲" % [own_status.points, "" if own_status.points == 1 else "s", joined]
 	elif own_status.get("ranked", false) and client.can_shop():
-		overlay.draw_string(font, Vector2(x0, y0 + 80), "[%s] shop" % settings.primary_binding("toggle_shop"), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.3))
+		hint = "[%s] shop" % settings.primary_binding("toggle_shop")
+	if hint != "" and _bar_rect.size.x > 0.0:
+		Hud.text(overlay, font, Vector2(_bar_rect.position.x, _bar_rect.position.y - 18.0 * k), hint, roundi(15.0 * k), hint_color, HORIZONTAL_ALIGNMENT_CENTER, _bar_rect.size.x)
+	if own_status.get("dead", false):
+		overlay.draw_rect(Rect2(Vector2.ZERO, overlay.size), Color(0.05, 0.06, 0.08, 0.45))
+		var r := Rect2(overlay.size.x / 2.0 - 170.0 * k, overlay.size.y * 0.36, 340.0 * k, 78.0 * k)
+		Hud.panel(overlay, r, k)
+		Hud.text(overlay, font, r.position + Vector2(0, 26.0 * k), "RESPAWNING IN", roundi(14.0 * k), Hud.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+		Hud.text(overlay, bold, r.position + Vector2(0, 64.0 * k), "%d" % ceili(own_status.respawn_in), roundi(36.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+	if match_banner != "":
+		var won := match_banner == "VICTORY"
+		var c := Color(0.5, 0.82, 1.0) if won else Color(1.0, 0.42, 0.36)
+		var band := Rect2(0, overlay.size.y * 0.26, overlay.size.x, 132.0 * k)
+		overlay.draw_rect(band, Color(0.02, 0.03, 0.05, 0.72))
+		overlay.draw_rect(Rect2(band.position, Vector2(band.size.x, 2.0 * k)), c.darkened(0.2))
+		overlay.draw_rect(Rect2(band.position + Vector2(0, band.size.y - 2.0 * k), Vector2(band.size.x, 2.0 * k)), c.darkened(0.2))
+		Hud.text(overlay, bold, band.position + Vector2(0, 80.0 * k), match_banner, roundi(72.0 * k), c, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x)
+		Hud.text(overlay, font, band.position + Vector2(0, 116.0 * k), "A new match starts shortly", roundi(18.0 * k), Hud.TEXT, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x)
 	if blind_state == "playing":
 		var left := maxf(blind_seconds - client.blind_elapsed(), 0.0)
 		var txt := "Blind round %d / %d   %d:%02d" % [client.blind_round() + 1, client.blind_rounds(), int(left) / 60, int(left) % 60]
 		overlay.draw_string(font, Vector2(16, 34), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
+
+
+## The top-right corner: kills and deaths, the match clock, frame rate and ping.
+func _draw_top_right(font: Font) -> void:
+	if client.phase() != "playing":
+		return
+	var k := _hud_k()
+	var bold := _bold_font()
+	var stats: Dictionary = client.net_stats()
+	var t := client.match_seconds()
+	var r := Rect2(overlay.size.x - 250.0 * k - 10.0 * k, 10.0 * k, 250.0 * k, 34.0 * k)
+	Hud.panel(overlay, r, k)
+	var y := r.position.y + 23.0 * k
+	var kd := "%d / %d" % [stats.kills, stats.deaths]
+	Hud.text(overlay, font, Vector2(r.position.x + 12.0 * k, y), "K/D", roundi(12.0 * k), Hud.DIM)
+	Hud.text(overlay, bold, Vector2(r.position.x + 40.0 * k, y), kd, roundi(15.0 * k), Color.WHITE)
+	Hud.text(overlay, bold, Vector2(r.position.x, y), "%d:%02d" % [int(t) / 60, int(t) % 60], roundi(16.0 * k), Color(1.0, 0.92, 0.7), HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+	var perf := "%d fps  %d ms" % [Engine.get_frames_per_second(), roundi(stats.rtt_ms)]
+	Hud.text(overlay, font, Vector2(r.position.x, y), perf, roundi(12.0 * k), Hud.DIM, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x - 12.0 * k)
+	# The kill feed under it, newest last, each line on its own dark strip.
+	var fy := r.end.y + 8.0 * k
+	for n in notices:
+		var a := clampf(4.0 - n.age, 0.0, 1.0)
+		var fs := roundi(14.0 * k)
+		var tw := font.get_string_size(n.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 20.0 * k
+		var strip := Rect2(overlay.size.x - 10.0 * k - tw, fy, tw, 24.0 * k)
+		overlay.draw_rect(strip, Color(0.03, 0.04, 0.06, 0.7 * a))
+		overlay.draw_rect(Rect2(strip.position, Vector2(3.0 * k, strip.size.y)), Color(Hud.GOLD, a))
+		overlay.draw_string(font, strip.position + Vector2(10.0 * k, 17.0 * k), n.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, a))
+		fy += 28.0 * k
 
 
 ## The hovered ability's tooltip (or `--hover-slot`'s, for scripted captures).
@@ -2327,29 +2521,35 @@ func _update_shop(delta: float) -> void:
 		]
 
 
-func _draw_inventory(font: Font, origin: Vector2) -> void:
+func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 	if item_names.is_empty():
 		for it in client.shop_catalog():
 			item_names[it.id] = it.name
 	var inv: Array = own_status.items
-	overlay.draw_rect(Rect2(origin - Vector2(8, 0), Vector2(3 * 92 + 12, 120)), Color(0, 0, 0, 0.55))
+	var I := Vector2(64.0, 43.0) * k
+	var gap := 5.0 * k
 	for slot in 6:
-		var p := origin + Vector2((slot % 3) * 92, 24 + (slot / 3) * 46)
-		var box := Rect2(p, Vector2(86, 40))
+		var p := origin + Vector2((slot % 3) * (I.x + gap), (slot / 3) * (I.y + gap))
+		var box := Rect2(p, I)
 		var id: int = inv[slot]
-		overlay.draw_rect(box, Color(0.18, 0.2, 0.24) if id != 0 else Color(0.1, 0.1, 0.12))
-		overlay.draw_rect(box, Color(0.85, 0.7, 0.35) if id != 0 else Color(0.3, 0.3, 0.35), false, 1.5)
+		overlay.draw_rect(box, Color(0.11, 0.12, 0.15) if id != 0 else Color(0.075, 0.085, 0.105))
+		overlay.draw_rect(box, Hud.GOLD if id != 0 else Color(0.25, 0.27, 0.31), false, 1.0 * k)
 		if id != 0:
-			overlay.draw_string(font, p + Vector2(4, 24), item_names.get(id, "?"), HORIZONTAL_ALIGNMENT_LEFT, 80, 12, Color(0.9, 0.9, 0.95))
-	# ARAM: Mayhem: the augments held, above the inventory.
+			overlay.draw_multiline_string(font, p + Vector2(4.0 * k, 15.0 * k), item_names.get(id, "?"), HORIZONTAL_ALIGNMENT_CENTER, I.x - 8.0 * k, roundi(11.0 * k), 2, Hud.TEXT)
+	# Gold under the items.
+	var gy := origin.y + 2.0 * (I.y + gap) + 2.0 * k
+	var ic := 16.0 * k
+	overlay.draw_texture_rect(Hud.stat_icon("gold"), Rect2(Vector2(origin.x, gy), Vector2(ic, ic)), false)
+	Hud.text(overlay, _bold_font(), Vector2(origin.x + ic + 6.0 * k, gy + 13.0 * k), "%d" % own_status.gold, roundi(15.0 * k), Color(1.0, 0.84, 0.4))
+	# ARAM: Mayhem: the augments held, above the panel.
 	var held: Array = own_status.get("augments", [])
 	for i in held.size():
 		var a: Dictionary = held[i]
-		var at := origin + Vector2(0, -10 - 18 * (held.size() - 1 - i))
+		var at := Vector2(origin.x, _bar_rect.position.y - 10.0 * k - 18.0 * k * (held.size() - 1 - i))
 		var label: String = "◆ " + a.name
 		if a.has("progress"):
 			label += "  " + a.progress
-		overlay.draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, _tier_color(a.tier))
+		Hud.text(overlay, font, at, label, roundi(14.0 * k), _tier_color(a.tier))
 
 
 ## ---- Session, champion select and spectating (M2 slice 5) --------------------------------------

@@ -978,8 +978,11 @@ impl MatchClient {
         let champ = self.session.champion();
         d.set("champion", champ.def().name);
         let mut names = VarArray::new();
+        // F may be an augment's spell in its place.
+        let spell = self.session.own_state_now().and_then(|s| augments::spell(&s.progress.augments));
         for slot in 0..SLOTS as u8 {
-            names.push(&champ.ability(slot).map_or("", |a| a.name).to_variant());
+            let a = if slot == 5 { spell.or_else(|| champ.ability(slot)) } else { champ.ability(slot) };
+            names.push(&a.map_or("", |a| a.name).to_variant());
         }
         d.set("abilities", &names);
         if let (Some(s), Some(t)) = (self.session.own_state_now(), self.session.input_sim_time(now)) {
@@ -1218,6 +1221,12 @@ impl MatchClient {
     #[func]
     fn set_collision_proxies(&mut self, enabled: bool) {
         self.session.set_collision_proxies(enabled);
+    }
+
+    /// Seconds since the match began (the sim's clock, predicted), for the HUD's game timer.
+    #[func]
+    fn match_seconds(&self) -> f64 {
+        self.session.input_sim_time(self.now()).map_or(0.0, |t| t.0 as f64 / mftr_sim::time::SUBTICKS_PER_SECOND as f64)
     }
 
     /// Net graph data (03 §14).

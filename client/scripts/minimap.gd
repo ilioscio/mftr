@@ -154,7 +154,12 @@ func _draw_icons() -> void:
 			px.append(to_px(q))
 		px.append(px[0])
 		_layer.draw_polyline(px, Color(1, 1, 1, 0.9), 1.5)
-	_layer.draw_rect(Rect2(Vector2.ZERO, size), Color(0.75, 0.68, 0.45), false, 2.0)
+	# The frame matches the HUD's panels: a dark band with a thin gold rim on each side.
+	# (Inside the edge: the minimap clips what's drawn past it.)
+	var r := Rect2(Vector2.ZERO, size)
+	_layer.draw_rect(r.grow(-2.5), Color(0.035, 0.045, 0.06), false, 5.0)
+	_layer.draw_rect(r.grow(-0.75), Color(0.42, 0.35, 0.2), false, 1.5)
+	_layer.draw_rect(r.grow(-5.5), Color(0.78, 0.65, 0.38, 0.75), false, 1.0)
 
 
 func _gui_input(event: InputEvent) -> void:
