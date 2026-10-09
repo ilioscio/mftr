@@ -132,8 +132,8 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
   settings) are dragged by any spot that isn't a button and stay where they were left (saved as
   fractions of the screen). Tooltips draw above them all: items (icon, cost, stats colored by
   stat, passive, active) and augments (on hover above the HUD) as well as abilities.
-- **The cursor** is a steel gauntlet drawn as SVG, seen from the back of the hand, pointing
-  with its index finger up the left edge (the others folded into the fist): red plates over an enemy that can be attacked, teal over an ally, a red
+- **The cursor** is a steel gauntlet drawn as SVG, pointing like the classic hand cursor: the
+  index finger up, the other three curled beside it, the thumb out to the side: red plates over an enemy that can be attacked, teal over an ally, a red
   reticle while an attack-move waits for its click.
 - **Augment icons** are generated: a glyph for the augment's mechanic (or a stat augment's main
   stat) on a backdrop in its tier's colors. They show in the draft, above the HUD, in the
