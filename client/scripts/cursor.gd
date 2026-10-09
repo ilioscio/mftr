@@ -41,13 +41,17 @@ static func _make(state: String) -> Array:
 
 ## A gauntlet pointing like the classic hand cursor, from the back of the hand: the index
 ## finger straight up, the other three curled beside it (nearly level, upright), and the thumb
-## wrapped around the front of the palm from the left, its tip toward the fingers.
+## wrapped around the front, the palm side: hidden behind the hand but its edge, at the left.
 static func _gauntlet(plate: String, shade: String) -> String:
 	var s := 'stroke="%s" stroke-width="2.4" stroke-linejoin="round"' % OUTLINE
 	var g := ''
 	# The cuff, gold-trimmed.
 	g += '<path d="M23 53h28l1 9H22z" fill="#d4a94c" %s/>' % s
 	g += '<path d="M23.5 57.5h28" stroke="#8a6a24" stroke-width="1.6"/>'
+	# The thumb wraps around the front (the palm side, away from us): only its edge shows,
+	# bulging out at the left, behind the hand.
+	g += '<path d="M22 32q-11 1-11 11t11 10h4z" fill="%s" %s/>' % [plate, s]
+	g += '<path d="M15 39q0 6 5 9" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" opacity=".45"/>'
 	# The curled fingers: middle, ring, little, upright, each just a little lower.
 	for f in [[30, 19, 8.5], [38.5, 20, 8.5], [47, 22, 7.5]]:
 		g += '<rect x="%s" y="%s" width="%s" height="24" rx="4" fill="%s" %s/>' % [f[0], f[1], f[2], plate, s]
@@ -59,9 +63,6 @@ static func _gauntlet(plate: String, shade: String) -> String:
 	g += '<path d="M19 33h35.5v10q0 11-11 11H30q-11 0-11-11z" fill="%s" %s/>' % [plate, s]
 	for x in [30.25, 38.75, 47.25]:
 		g += '<path d="M%s 33v6" stroke="%s" stroke-width="1.6" stroke-linecap="round"/>' % [x, shade]
-	# The thumb, wrapped around the front of the palm from the left, tip toward the fingers.
-	g += '<path d="M21 34q-8 1-8 9t9 9h13q5 0 5-4.5t-5-4.5H26q-3 0-4-3z" fill="%s" %s/>' % [plate, s]
-	g += '<path d="M16 41q1 5 6 6" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" opacity=".45"/>'
 	return '<g transform="translate(-4 -1) rotate(-6 32 32)">%s</g>' % g
 
 
