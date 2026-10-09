@@ -83,6 +83,56 @@ pub fn wave_interval(secs: f32) -> SimDuration {
     SimDuration(ms.round() as u64)
 }
 
+/// How a lane map paces its waves: The Bridge like the reference ARAM (D55), Crossroads like
+/// the reference 5v5 (the first wave at 1:05, then every 30 s; a siege minion every third wave,
+/// every second from 15:00 and in every wave from 25:00; minion upgrades every 90 s).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Pacing {
+    #[default]
+    Aram,
+    Classic,
+}
+
+pub const CLASSIC_FIRST_WAVE: SimDuration = SimDuration::from_millis(65_000);
+pub const CLASSIC_WAVE_INTERVAL: SimDuration = SimDuration::from_millis(30_000);
+pub const CLASSIC_UPGRADE_EVERY_S: f32 = 90.0;
+
+impl Pacing {
+    /// The first wave, after the match starts.
+    pub fn first_wave(self) -> SimDuration {
+        match self {
+            Pacing::Aram => FIRST_WAVE,
+            Pacing::Classic => CLASSIC_FIRST_WAVE,
+        }
+    }
+
+    /// The time to the next wave, `secs` into the match.
+    pub fn interval(self, secs: f32) -> SimDuration {
+        match self {
+            Pacing::Aram => wave_interval(secs),
+            Pacing::Classic => CLASSIC_WAVE_INTERVAL,
+        }
+    }
+
+    /// Upgrades a minion spawned `secs` into the match has.
+    pub fn upgrades(self, secs: f32) -> u32 {
+        match self {
+            Pacing::Aram => minion_upgrades(secs),
+            Pacing::Classic => ((secs.max(0.0) / CLASSIC_UPGRADE_EVERY_S) as u32).min(MINION_UPGRADES_MAX),
+        }
+    }
+
+    /// Whether wave `n` (0-based), spawning `secs` into the match, brings a siege minion.
+    pub fn siege(self, n: u32, secs: f32) -> bool {
+        match self {
+            Pacing::Aram => n >= 2 && n.is_multiple_of(2),
+            Pacing::Classic if secs >= WAVES_FASTEST_AT_S => true,
+            Pacing::Classic if secs >= WAVES_FASTER_FROM_S => n.is_multiple_of(2),
+            Pacing::Classic => n % 3 == 2,
+        }
+    }
+}
+
 /// Minions grow stronger every 50 s of the match (up to 30 upgrades): health and damage per
 /// upgrade, by kind.
 pub const MINION_UPGRADE_EVERY_S: f32 = 50.0;
@@ -184,6 +234,8 @@ pub struct MatchState {
     pub aggression: Vec<(UnitId, UnitId, SimTime)>,
     /// Set once a Base falls.
     pub winner: Option<(Team, SimTime)>,
+    /// Per jungle camp (`Layout::camps`): when it spawns next, or 0 while it stands.
+    pub camps: Vec<SimTime>,
 }
 
 impl MatchState {
@@ -204,15 +256,25 @@ impl MatchState {
                 h.write_u64(at.0);
             }
         }
+        // Maps without a jungle hash as before.
+        for t in &self.camps {
+            h.write_u64(t.0);
+        }
     }
 
-    /// Minions of wave `n` (0-based): 3 melee, 3 casters, a siege minion every second wave from
-    /// the third, and a super minion in front while the team has an enemy Gatehouse down
-    /// (`empowered`).
+    /// Minions of an ARAM wave `n` (0-based): 3 melee, 3 casters, a siege minion every second
+    /// wave from the third, and a super minion in front while the team has an enemy Gatehouse
+    /// down (`empowered`).
     pub fn wave(n: u32, empowered: bool) -> Vec<MinionKind> {
+        Self::wave_of(Pacing::Aram.siege(n, 0.0), empowered)
+    }
+
+    /// A wave: 3 melee, a siege minion if `siege`, 3 casters, and a super minion in front if
+    /// `empowered`.
+    pub fn wave_of(siege: bool, empowered: bool) -> Vec<MinionKind> {
         let mut w = if empowered { vec![MinionKind::Super] } else { Vec::new() };
         w.extend([MinionKind::Melee; 3]);
-        if n >= 2 && n.is_multiple_of(2) {
+        if siege {
             w.push(MinionKind::Siege);
         }
         w.extend([MinionKind::Caster; 3]);
@@ -247,28 +309,81 @@ impl Seen {
     }
 }
 
-/// Structures still standing protect the ones behind them (01 §3): a structure can be hurt only
-/// when every structure of its team with a lower tier is down. Recomputed every tick.
+/// Structures still standing protect the ones behind them (01 §3), lane by lane: tiers 1–4
+/// (outer, inner and gatehouse turrets, the Gatehouse) fall in order down their own lane; the
+/// base turrets (5) can be hurt once one of the team's Gatehouses is down; the Base (6) once
+/// both base turrets are down too. Recomputed every tick.
 pub fn update_protection(units: &mut [Unit]) {
-    let lowest = |team: Team, units: &[Unit]| {
-        units.iter().filter(|u| u.team == team && u.tier > 0 && u.state.alive()).map(|u| u.tier).min()
+    let standing: Vec<(Team, u8, u8)> =
+        units.iter().filter(|u| u.tier > 0 && u.state.alive()).map(|u| (u.team, u.lane, u.tier)).collect();
+    // A Gatehouse is down: one has fallen (and not yet respawned), or none stands at all.
+    let gate_down = |team: Team| {
+        let gates = units.iter().filter(|u| u.team == team && u.tier == GATEHOUSE_TIER);
+        gates.clone().any(|u| !u.state.alive()) || !gates.clone().any(|u| u.state.alive())
     };
-    let lows = [lowest(Team::Blue, units), lowest(Team::Red, units)];
+    let down = [gate_down(Team::Blue), gate_down(Team::Red)];
     for u in units.iter_mut().filter(|u| u.tier > 0) {
-        u.protected = lows[u.team as usize].is_some_and(|low| u.tier > low);
+        let (team, lane, tier) = (u.team, u.lane, u.tier);
+        u.protected = match tier {
+            1..=GATEHOUSE_TIER => standing.iter().any(|&(t, l, x)| t == team && l == lane && x < tier),
+            BASE_TURRET_TIER => !down[team as usize],
+            _ => !down[team as usize] || standing.iter().any(|&(t, _, x)| t == team && x == BASE_TURRET_TIER),
+        };
     }
 }
 
-/// How much more champions' damage hurts structures now (`structure_amp`). Every tick.
-pub fn update_structure_amp(units: &mut [Unit], secs: f32) {
+/// Structure tiers (`Placement::tier`).
+pub const GATEHOUSE_TIER: u8 = 4;
+pub const BASE_TURRET_TIER: u8 = 5;
+
+/// Turret plating (01 §3, maps with `Layout::plating`): outer turrets carry 5 plates until
+/// 14:00. Each 20% of health lost breaks one (the last falls with the turret), and each pays
+/// 125 gold, split among the enemy champions near the turret.
+pub const PLATES: u8 = 5;
+pub const PLATE_GOLD: f32 = 125.0;
+pub const PLATING_FALLS_S: f32 = 14.0 * 60.0;
+
+/// Plates fall off every turret at 14:00 (their health stays). Every tick.
+pub fn update_plating(units: &mut [Unit], secs: f32) {
+    if secs >= PLATING_FALLS_S {
+        for u in units.iter_mut().filter(|u| u.plates > 0) {
+            u.plates = 0;
+        }
+    }
+}
+
+/// The plates a turret with `health` of `max` has left.
+pub fn plates_left(health: f32, max: f32) -> u8 {
+    ((health.max(0.0) / max.max(1.0)) * PLATES as f32).ceil().min(PLATES as f32) as u8
+}
+
+/// Backdoor protection (01 §3, maps with `Layout::backdoor`): a structure with none of the
+/// attacker's minions within this range takes a third of champions' damage.
+pub const BACKDOOR_RANGE: f32 = 1000.0;
+pub const BACKDOOR_DAMAGE: f32 = 1.0 / 3.0;
+
+/// How much champions' damage hurts each structure now: more late in a match
+/// (`structure_amp`), and a third with backdoor protection when `backdoor` and none of the
+/// enemy's minions are near it. Every tick.
+pub fn update_structure_amp(units: &mut [Unit], secs: f32, backdoor: bool) {
     let amp = structure_amp(secs);
+    let minions: Vec<(Team, Vec2)> = if backdoor {
+        units.iter().filter(|u| u.kind == UnitKind::Minion && u.state.alive()).map(|u| (u.team, u.state.pos)).collect()
+    } else {
+        Vec::new()
+    };
     for u in units.iter_mut().filter(|u| u.tier > 0) {
-        u.champion_damage_taken = amp;
+        let covered = !backdoor
+            || minions
+                .iter()
+                .any(|&(t, p)| t != u.team && (p - u.state.pos).length_sq() <= BACKDOOR_RANGE * BACKDOOR_RANGE);
+        u.champion_damage_taken = if covered { amp } else { amp * BACKDOOR_DAMAGE };
     }
 }
 
+/// Lane minions and turrets fight the other team, never jungle monsters.
 fn enemy_valid(me: &Unit, s: &Seen, hidden: &[UnitId]) -> bool {
-    s.team != me.team && s.targetable && hidden.binary_search(&s.id).is_err()
+    s.team != me.team && s.kind != UnitKind::Monster && s.targetable && hidden.binary_search(&s.id).is_err()
 }
 
 /// The champion that recently attacked one of `team`'s champions inside `area` (center, radius),
@@ -307,7 +422,7 @@ pub fn laner_think(
     hidden: &[UnitId],
     map: &Map,
 ) {
-    let Some(Brain::Laner { mut next }) = unit.brain else { return };
+    let Some(Brain::Laner { lane: which, mut next }) = unit.brain else { return };
     if !unit.state.alive() {
         return;
     }
@@ -345,7 +460,7 @@ pub fn laner_think(
     while (next as usize) + 1 < lane.len() && (lane[next as usize] - me).length() < 150.0 {
         next += 1;
     }
-    unit.brain = Some(Brain::Laner { next });
+    unit.brain = Some(Brain::Laner { lane: which, next });
     if let Some(&wp) = lane.get(next as usize) {
         let goal = Order::MoveTo(QPoint::from_vec2(wp));
         if unit.state.order != goal {
@@ -460,6 +575,15 @@ mod tests {
         assert_eq!(minion_upgrades(49.0), 0);
         assert_eq!(minion_upgrades(500.0), 10);
         assert_eq!(minion_upgrades(99_999.0), MINION_UPGRADES_MAX);
+        // Crossroads: the reference 5v5's cadence.
+        let c = Pacing::Classic;
+        assert_eq!(
+            (c.first_wave(), c.interval(0.0), c.interval(2000.0)),
+            (CLASSIC_FIRST_WAVE, CLASSIC_WAVE_INTERVAL, CLASSIC_WAVE_INTERVAL)
+        );
+        assert_eq!((0..6).map(|n| c.siege(n, 300.0)).collect::<Vec<_>>(), [false, false, true, false, false, true]);
+        assert!(c.siege(30, 16.0 * 60.0) && !c.siege(31, 16.0 * 60.0) && c.siege(51, 26.0 * 60.0));
+        assert_eq!((c.upgrades(89.0), c.upgrades(900.0)), (0, 10));
         assert_eq!(minion_speed(9.0 * 60.0), 325.0);
         assert_eq!(minion_speed(10.0 * 60.0), 350.0);
         assert_eq!(minion_speed(26.0 * 60.0), 425.0);

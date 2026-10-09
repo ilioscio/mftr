@@ -397,6 +397,9 @@ pub fn apply_items(
         }
         seen.push(it.id);
     }
+    if growth.insight {
+        s.ability_haste += crate::jungle::INSIGHT_HASTE;
+    }
     // Stat Anvils (Mayhem): flat stats, attack speed and move speed like an item's.
     for (stat, n) in crate::anvils::STATS.iter().zip(growth.anvil) {
         if n > 0 {

@@ -74,6 +74,7 @@ impl Match {
             Scenario::Aram => world.set_rules(mftr_sim::world::Rules::ARAM),
             Scenario::Mayhem => world.set_rules(mftr_sim::world::Rules::MAYHEM),
             Scenario::Hyper => world.set_rules(mftr_sim::world::Rules::HYPER),
+            Scenario::Classic => world.set_rules(mftr_sim::world::Rules::CLASSIC),
             _ => {}
         }
         populate(&mut world, cfg.scenario);
@@ -104,9 +105,9 @@ impl Match {
         self.players.insert(player);
         let scenario = self.cfg.scenario;
         let team = if player.0.is_multiple_of(2) || scenario == Scenario::DodgeRig { Team::Blue } else { Team::Red };
-        // Without a preference: in ARAM, each of the six in turn; elsewhere alternate, so the
+        // Without a preference: in a match, each of the six in turn; elsewhere alternate, so the
         // first duel is mage vs. marksman.
-        let champion = champion.unwrap_or(if scenario.is_aram() {
+        let champion = champion.unwrap_or(if scenario.is_match() {
             ChampionId::ALL[player.0 as usize % ChampionId::ALL.len()]
         } else {
             ChampionId::ALL[((player.0 / 2) as usize % 2) ^ (team == Team::Red) as usize]
@@ -126,7 +127,7 @@ impl Match {
         if scenario == Scenario::Duel {
             pos = duel_spawn(team, player);
         }
-        if scenario.is_aram() {
+        if scenario.is_match() {
             // In the fountain, spread out in a small arc per player.
             let base = self.world.map().layout.champion_spawn[team as usize];
             let k = (player.0 / 2) as f32;
@@ -404,6 +405,8 @@ fn kind_text(k: CommandKind) -> String {
         CommandKind::UseItem(slot) => format!("use {slot}"),
         CommandKind::BuyAnvil => "anvil".into(),
         CommandKind::PickAnvil(choice) => format!("pickanvil {choice}"),
+        CommandKind::Recall => "recall".into(),
+        CommandKind::ChooseSpell(spell) => format!("spell {spell}"),
     }
 }
 
@@ -425,6 +428,8 @@ fn parse_kind(f: &[&str]) -> Option<CommandKind> {
         "use" => CommandKind::UseItem(n(1)? as u8),
         "anvil" => CommandKind::BuyAnvil,
         "pickanvil" => CommandKind::PickAnvil(n(1)? as u8),
+        "recall" => CommandKind::Recall,
+        "spell" => CommandKind::ChooseSpell(n(1)? as u8),
         _ => return None,
     })
 }
@@ -440,7 +445,7 @@ fn populate(world: &mut World, scenario: Scenario) {
         }
         return;
     }
-    if scenario.is_aram() {
+    if scenario.is_match() {
         world.start_match();
         return;
     }

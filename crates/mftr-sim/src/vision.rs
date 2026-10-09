@@ -23,7 +23,7 @@ pub fn vision_radius(kind: UnitKind) -> f32 {
         UnitKind::Minion => VISION_MINION,
         UnitKind::RigTurret | UnitKind::Turret => VISION_TURRET,
         UnitKind::Gatehouse | UnitKind::Base => VISION_STRUCTURE,
-        UnitKind::Relic => 0.0,
+        UnitKind::Relic | UnitKind::Monster => 0.0,
     }
 }
 

@@ -18,6 +18,8 @@ pub enum MapId {
     Arena = 1,
     /// ARAM map (M2): a single lane, 12,000 × 3,000 u, structures at both ends.
     Bridge = 2,
+    /// The 5v5 map (M4): three lanes, a river and jungle on a 14,500 u square.
+    Crossroads = 3,
 }
 
 impl MapId {
@@ -26,6 +28,7 @@ impl MapId {
             0 => Some(MapId::Open),
             1 => Some(MapId::Arena),
             2 => Some(MapId::Bridge),
+            3 => Some(MapId::Crossroads),
             _ => None,
         }
     }
@@ -36,10 +39,12 @@ impl MapId {
         static OPEN: OnceLock<Arc<Map>> = OnceLock::new();
         static ARENA: OnceLock<Arc<Map>> = OnceLock::new();
         static BRIDGE: OnceLock<Arc<Map>> = OnceLock::new();
+        static CROSSROADS: OnceLock<Arc<Map>> = OnceLock::new();
         let cell = match self {
             MapId::Open => &OPEN,
             MapId::Arena => &ARENA,
             MapId::Bridge => &BRIDGE,
+            MapId::Crossroads => &CROSSROADS,
         };
         cell.get_or_init(|| Arc::new(self.build())).clone()
     }
@@ -49,12 +54,15 @@ impl MapId {
             MapId::Open => Map::new(MapId::Open, Vec::new(), Vec::new(), None),
             MapId::Arena => arena(),
             MapId::Bridge => bridge(),
+            MapId::Crossroads => crossroads(),
         }
     }
 }
 
 /// Grid cell size for navigation.
 pub const NAV_CELL: f32 = 25.0;
+/// Bucket size of the wall-edge index (sight and clearance tests).
+pub const EDGE_CELL: f32 = 500.0;
 /// Paths keep this clearance from walls (the champion collision radius).
 pub const NAV_CLEARANCE: f32 = 35.0;
 /// Extent of the M1 arena (0..MAP_SIZE on both axes), and of the open plane's nav grid.
@@ -66,16 +74,22 @@ pub struct Placement {
     pub kind: UnitKind,
     pub team: Team,
     pub pos: Vec2,
-    /// Destruction order within the team (1 = first to fall); 0 for relics.
+    /// Destruction order within the team and lane (1 = first to fall); 0 for relics. Tiers 1–4
+    /// fall in order down their lane; base turrets (5) once a Gatehouse (4) is down; the Base (6)
+    /// once both base turrets are too.
     pub tier: u8,
+    /// Which lane (index into `Layout::lanes`) a lane structure stands in.
+    pub lane: u8,
 }
 
 /// What a lane map adds to geometry: lanes, spawn points, fountains and structures.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Layout {
-    /// Each team's lane, from its own base to the enemy's (index = `Team as usize`).
-    pub lanes: [Vec<Vec2>; 2],
-    pub wave_spawn: [Vec2; 2],
+    /// The lanes; each is a path per team, from its own base to the enemy's (index = `Team as
+    /// usize`).
+    pub lanes: Vec<[Vec<Vec2>; 2]>,
+    /// Where each lane's waves spawn, per team.
+    pub wave_spawn: Vec<[Vec2; 2]>,
     pub champion_spawn: [Vec2; 2],
     /// Fountain circles (center, radius) per team.
     pub fountains: [Option<(Vec2, f32)>; 2],
@@ -83,6 +97,16 @@ pub struct Layout {
     /// you leave base (06 §2), and a champion only gets hurt after leaving and respawns whole.
     pub fountain_heals: bool,
     pub placements: Vec<Placement>,
+    /// How waves are paced on this map.
+    pub pacing: crate::lane::Pacing,
+    /// The river's course, if the map has one (drawn by the client; walls bound it).
+    pub river: Vec<Vec2>,
+    /// Outer turrets carry plates until 14:00 (`lane::PLATES`).
+    pub plating: bool,
+    /// Structures have backdoor protection (`lane::BACKDOOR_RANGE`).
+    pub backdoor: bool,
+    /// Jungle camps (01 §7).
+    pub camps: Vec<crate::jungle::Camp>,
 }
 
 #[derive(Clone, Debug)]
@@ -99,6 +123,11 @@ pub struct Map {
     /// Lanes, structures and spawn points (empty on sandbox maps).
     pub layout: Layout,
     edges: Vec<(Vec2, Vec2)>,
+    /// The edges by `EDGE_CELL` buckets over the map (edges past it in the border buckets):
+    /// sight and clearance tests only look at the buckets a segment crosses.
+    edge_cells: Vec<Vec<u32>>,
+    edge_cols: usize,
+    edge_rows: usize,
     grid_w: usize,
     grid_h: usize,
     blocked: Vec<bool>,
@@ -124,7 +153,31 @@ impl Map {
         let grid_w = (size.x / NAV_CELL).ceil() as usize;
         let grid_h = (size.y / NAV_CELL).ceil() as usize;
         let layout = Layout::default();
-        let mut map = Map { id, walls, brush, bounded, size, layout, edges, grid_w, grid_h, blocked: Vec::new() };
+        let (edge_cols, edge_rows) =
+            ((size.x / EDGE_CELL).ceil().max(1.0) as usize, (size.y / EDGE_CELL).ceil().max(1.0) as usize);
+        let mut map = Map {
+            id,
+            walls,
+            brush,
+            bounded,
+            size,
+            layout,
+            edges,
+            edge_cells: vec![Vec::new(); edge_cols * edge_rows],
+            edge_cols,
+            edge_rows,
+            grid_w,
+            grid_h,
+            blocked: Vec::new(),
+        };
+        for (i, &(a, b)) in map.edges.iter().enumerate() {
+            let (c0, c1, r0, r1) = map.edge_span(a.min(b), a.max(b));
+            for r in r0..=r1 {
+                for c in c0..=c1 {
+                    map.edge_cells[r * edge_cols + c].push(i as u32);
+                }
+            }
+        }
         map.blocked = (0..grid_w * grid_h).map(|i| !map.walkable(map.cell_center(i), NAV_CLEARANCE)).collect();
         map
     }
@@ -139,7 +192,8 @@ impl Map {
         if self.walls.iter().any(|w| point_in_polygon(p, w)) {
             return false;
         }
-        self.edges.iter().all(|&(a, b)| dist_point_segment(p, a, b) >= radius)
+        let pad = Vec2::new(radius, radius);
+        self.edges_near(p - pad, p + pad).all(|(a, b)| dist_point_segment(p, a, b) >= radius)
     }
 
     /// A circle of `radius` at `p` lies inside the playable area (blinks never leave it).
@@ -151,12 +205,32 @@ impl Map {
 
     /// Line of sight between two points: no wall edge crossed (vision, 03 §10).
     pub fn line_of_sight(&self, a: Vec2, b: Vec2) -> bool {
-        !self.edges.iter().any(|&(p, q)| segments_intersect(a, b, p, q))
+        !self.edges_near(a.min(b), a.max(b)).any(|(p, q)| segments_intersect(a, b, p, q))
     }
 
     /// A straight move from `a` to `b` keeps `clearance` from every wall.
     pub fn segment_clear(&self, a: Vec2, b: Vec2, clearance: f32) -> bool {
-        self.line_of_sight(a, b) && self.edges.iter().all(|&(p, q)| dist_segment_segment(a, b, p, q) >= clearance)
+        let pad = Vec2::new(clearance, clearance);
+        self.line_of_sight(a, b)
+            && self
+                .edges_near(a.min(b) - pad, a.max(b) + pad)
+                .all(|(p, q)| dist_segment_segment(a, b, p, q) >= clearance)
+    }
+
+    /// The edge buckets (column and row ranges, inclusive) a box from `lo` to `hi` touches,
+    /// clamped to the grid.
+    fn edge_span(&self, lo: Vec2, hi: Vec2) -> (usize, usize, usize, usize) {
+        let cell = |v: f32, n: usize| ((v / EDGE_CELL).floor().max(0.0) as usize).min(n - 1);
+        (cell(lo.x, self.edge_cols), cell(hi.x, self.edge_cols), cell(lo.y, self.edge_rows), cell(hi.y, self.edge_rows))
+    }
+
+    /// Every edge in the buckets a box from `lo` to `hi` touches (an edge may come more than
+    /// once: callers only ask whether any or all pass a test).
+    fn edges_near(&self, lo: Vec2, hi: Vec2) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
+        let (c0, c1, r0, r1) = self.edge_span(lo, hi);
+        (r0..=r1)
+            .flat_map(move |r| (c0..=c1).map(move |c| r * self.edge_cols + c))
+            .flat_map(move |i| self.edge_cells[i].iter().map(move |&e| self.edges[e as usize]))
     }
 
     /// Index of the brush polygon containing `p`, if any.
@@ -446,24 +520,252 @@ fn bridge() -> Map {
     ];
     let mut placements = Vec::new();
     for (kind, pos, tier) in blue {
-        placements.push(Placement { kind, team: Team::Blue, pos: bridge_point(pos), tier });
-        placements.push(Placement { kind, team: Team::Red, pos: bridge_point(mirror(pos)), tier });
+        placements.push(Placement { kind, team: Team::Blue, pos: bridge_point(pos), tier, lane: 0 });
+        placements.push(Placement { kind, team: Team::Red, pos: bridge_point(mirror(pos)), tier, lane: 0 });
     }
     for pos in [Vec2::new(5600.0, 950.0), Vec2::new(5600.0, 2050.0)] {
-        placements.push(Placement { kind: UnitKind::Relic, team: Team::Blue, pos: bridge_point(pos), tier: 0 });
-        placements.push(Placement { kind: UnitKind::Relic, team: Team::Blue, pos: bridge_point(mirror(pos)), tier: 0 });
+        placements.push(Placement {
+            kind: UnitKind::Relic,
+            team: Team::Blue,
+            pos: bridge_point(pos),
+            tier: 0,
+            lane: 0,
+        });
+        placements.push(Placement {
+            kind: UnitKind::Relic,
+            team: Team::Blue,
+            pos: bridge_point(mirror(pos)),
+            tier: 0,
+            lane: 0,
+        });
     }
     let lane_blue = vec![Vec2::new(2900.0, 1500.0), Vec2::new(9100.0, 1500.0), Vec2::new(10_750.0, 1500.0)];
     let lane_red: Vec<Vec2> = lane_blue.iter().map(|&p| bridge_point(mirror(p))).collect();
     let lane_blue: Vec<Vec2> = lane_blue.into_iter().map(bridge_point).collect();
     let (spawn, home, fountain) = (Vec2::new(1700.0, 1500.0), Vec2::new(450.0, 1500.0), Vec2::new(300.0, 1500.0));
     map.layout = Layout {
-        lanes: [lane_blue, lane_red],
-        wave_spawn: [bridge_point(spawn), bridge_point(mirror(spawn))],
+        lanes: vec![[lane_blue, lane_red]],
+        wave_spawn: vec![[bridge_point(spawn), bridge_point(mirror(spawn))]],
         champion_spawn: [bridge_point(home), bridge_point(mirror(home))],
         fountains: [Some((bridge_point(fountain), 600.0)), Some((bridge_point(mirror(fountain)), 600.0))],
         fountain_heals: false,
         placements,
+        pacing: crate::lane::Pacing::Aram,
+        river: Vec::new(),
+        plating: false,
+        backdoor: false,
+        camps: Vec::new(),
+    };
+    map
+}
+
+/// Crossroads (M4, the 5v5 map): a square with blue's base in the bottom-left corner and red's
+/// in the top-right, three lanes between them (top up the left edge and across the top, mid on
+/// the diagonal, bottom along the bottom and up the right edge), a river on the other diagonal,
+/// and jungle between lanes and river. Authored once, in blue's top-side jungle quadrant, in
+/// corner coordinates (`dx` right from blue's corner, `dy` up from it), and laid out four ways:
+/// reflecting across mid makes blue's bottom side, and the half turn makes red's. So the map is
+/// symmetric across both diagonals: neither team, nor either side lane, is favored.
+pub const CROSSROADS_SIZE: Vec2 = Vec2::new(14_500.0, 14_500.0);
+
+/// Blue's corner coordinates on Crossroads (`dy` measured up from the bottom edge).
+pub fn crossroads_point(dx: f32, dy: f32) -> Vec2 {
+    Vec2::new(dx, CROSSROADS_SIZE.y - dy)
+}
+
+/// The half turn about Crossroads' center: red's image of a blue point.
+fn crossroads_turn(p: Vec2) -> Vec2 {
+    CROSSROADS_SIZE - p
+}
+
+/// The reflection across Crossroads' mid lane: a top-side point's bottom-side twin.
+fn crossroads_flip(p: Vec2) -> Vec2 {
+    Vec2::new(CROSSROADS_SIZE.y - p.y, CROSSROADS_SIZE.x - p.x)
+}
+
+/// A polygon a little less regular than it was authored: each long edge gets a midpoint pushed
+/// out or in (alternately) by up to 110 u, so jungle walls don't read as boxes. Deterministic,
+/// and applied before the symmetries, so the twins match.
+fn roughen(poly: Vec<Vec2>) -> Vec<Vec2> {
+    let mut out = Vec::with_capacity(poly.len() * 2);
+    for i in 0..poly.len() {
+        let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+        out.push(a);
+        let len = a.distance(b);
+        if len > 700.0 {
+            let n = Vec2::new(b.y - a.y, a.x - b.x) * (1.0 / len);
+            let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
+            out.push((a + b) * 0.5 + n * (sign * (len * 0.06).min(110.0)));
+        }
+    }
+    out
+}
+
+/// A polygon with its corners cut: each vertex becomes two, `d` along its edges (at most a
+/// third of an edge), so blocks read as rock rather than masonry.
+fn chamfer(poly: Vec<Vec2>, d: f32) -> Vec<Vec2> {
+    let n = poly.len();
+    let mut out = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        let (prev, at, next) = (poly[(i + n - 1) % n], poly[i], poly[(i + 1) % n]);
+        let toward = |q: Vec2| {
+            let len = at.distance(q);
+            at + (q - at) * (d.min(len / 3.0) / len)
+        };
+        out.push(toward(prev));
+        out.push(toward(next));
+    }
+    out
+}
+
+fn crossroads() -> Map {
+    // Blue's top-side jungle, authored in a frame turned 45°: `u` runs up mid toward red, `v`
+    // away from mid toward the top lane (both from blue's corner). There the jungle is a right
+    // triangle: mid along `v = 650`, the river across at `u = 9753` (half of the diagonal, less
+    // its 500 u half-width), the top lane on the hypotenuse `v = u − 2475`. Two paths run from
+    // mid to the top lane (`u` 5450–5950 and 7750–8250) and one from the top lane to the river
+    // (`v` 2950–3450), so the blocks between them lie diagonally, like the lanes.
+    let uv = |u: f32, v: f32| {
+        let k = std::f32::consts::FRAC_1_SQRT_2;
+        crossroads_point((u - v) * k, (u + v) * k)
+    };
+    let c = |pts: &[(f32, f32)]| -> Vec<Vec2> { pts.iter().map(|&(u, v)| uv(u, v)).collect() };
+    let block = |pts: &[(f32, f32)]| roughen(chamfer(c(pts), 260.0));
+    // Three blocks have a clearing cut into them for a camp (01 §7): the buff camp opens onto
+    // the path to the river, the lone monster onto the river, the pack onto the path again.
+    let jungle = vec![
+        // The base wall, between the top lane and mid.
+        block(&[(3250.0, 700.0), (5450.0, 700.0), (5450.0, 2900.0)]),
+        block(&[
+            (5950.0, 700.0),
+            (7750.0, 700.0),
+            (7750.0, 2950.0),
+            (7200.0, 2950.0),
+            (7200.0, 2350.0),
+            (6500.0, 2350.0),
+            (6500.0, 2950.0),
+            (5950.0, 2950.0),
+        ]),
+        block(&[(6000.0, 3450.0), (7750.0, 3450.0), (7750.0, 5200.0)]),
+        // By the river.
+        block(&[
+            (8250.0, 700.0),
+            (9700.0, 700.0),
+            (9700.0, 1500.0),
+            (9100.0, 1500.0),
+            (9100.0, 2200.0),
+            (9700.0, 2200.0),
+            (9700.0, 2950.0),
+            (8250.0, 2950.0),
+        ]),
+        block(&[
+            (8250.0, 3450.0),
+            (8500.0, 3450.0),
+            (8500.0, 4050.0),
+            (9200.0, 4050.0),
+            (9200.0, 3450.0),
+            (9700.0, 3450.0),
+            (9700.0, 7150.0),
+            (8250.0, 5700.0),
+        ]),
+    ];
+    // The camps in those clearings, facing out of them; the bottom side has the other buff and
+    // the other two small camps in the same spots, and red's sides are the half turn of blue's.
+    use crate::jungle::{Camp, CampKind};
+    let top_camps = [
+        (CampKind::Warden, CampKind::Brute, (6850.0, 2650.0), (0.0, 1.0)),
+        (CampKind::Toad, CampKind::Crawlers, (9400.0, 1850.0), (1.0, 0.0)),
+        (CampKind::Hounds, CampKind::Ravens, (8850.0, 3700.0), (0.0, -1.0)),
+    ];
+    let mut camps = Vec::new();
+    for (top, bottom, (u, v), (du, dv)) in top_camps {
+        let (pos, ahead) = (uv(u, v), uv(u + du, v + dv));
+        for (kind, pos, ahead) in [(top, pos, ahead), (bottom, crossroads_flip(pos), crossroads_flip(ahead))] {
+            for (p, a) in [(pos, ahead), (crossroads_turn(pos), crossroads_turn(ahead))] {
+                camps.push(Camp { kind, pos: p, facing: (a - p).normalize_or_zero() });
+            }
+        }
+    }
+    // Brush: beside the top lane (twice), at the mid mouth of the first jungle path, in the
+    // river by the path's mouth there, and up the second path from mid.
+    let tall_grass = vec![
+        rect(1300.0, 7400.0, 1750.0, 8100.0).into_iter().map(|p| crossroads_point(p.x, p.y)).collect(),
+        rect(1300.0, 10_200.0, 1750.0, 10_800.0).into_iter().map(|p| crossroads_point(p.x, p.y)).collect(),
+        c(&[(5450.0, 380.0), (5950.0, 380.0), (5950.0, 680.0), (5450.0, 680.0)]),
+        c(&[(9780.0, 3500.0), (10_200.0, 3500.0), (10_200.0, 3950.0), (9780.0, 3950.0)]),
+        c(&[(7800.0, 4000.0), (8200.0, 4000.0), (8200.0, 4500.0), (7800.0, 4500.0)]),
+    ];
+    let four_ways = |polys: Vec<Vec<Vec2>>| -> Vec<Vec<Vec2>> {
+        let mut out = Vec::new();
+        for p in polys {
+            let flipped: Vec<Vec2> = p.iter().map(|&q| crossroads_flip(q)).collect();
+            for q in [p, flipped] {
+                out.push(q.iter().map(|&v| crossroads_turn(v)).collect());
+                out.push(q);
+            }
+        }
+        out
+    };
+    let walls = four_ways(jungle);
+    let brush = four_ways(tall_grass);
+    let mut map = Map::new(MapId::Crossroads, walls, brush, Some(CROSSROADS_SIZE));
+    // Blue's structures, lane by lane (0 top, 1 mid, 2 bottom; bottom is top reflected):
+    // outer, inner and gatehouse turrets, then the Gatehouse.
+    let top = [(950.0, 10_300.0), (950.0, 6800.0), (950.0, 4300.0)];
+    let mid = [(5600.0, 5600.0), (4500.0, 4500.0), (3500.0, 3500.0)];
+    let mut blue: Vec<(UnitKind, Vec2, u8, u8)> = Vec::new();
+    for (lane, turrets, gate) in [(0, top, (950.0, 3500.0)), (1, mid, (2950.0, 2950.0))] {
+        for (i, &(x, y)) in turrets.iter().enumerate() {
+            blue.push((UnitKind::Turret, crossroads_point(x, y), i as u8 + 1, lane));
+        }
+        blue.push((UnitKind::Gatehouse, crossroads_point(gate.0, gate.1), crate::lane::GATEHOUSE_TIER, lane));
+    }
+    for i in 0..blue.len() {
+        let (kind, pos, tier, lane) = blue[i];
+        if lane == 0 {
+            blue.push((kind, crossroads_flip(pos), tier, 2));
+        }
+    }
+    let base_turret = crate::lane::BASE_TURRET_TIER;
+    blue.push((UnitKind::Turret, crossroads_point(2500.0, 2050.0), base_turret, 1));
+    blue.push((UnitKind::Turret, crossroads_point(2050.0, 2500.0), base_turret, 1));
+    blue.push((UnitKind::Base, crossroads_point(1800.0, 1800.0), base_turret + 1, 1));
+    let mut placements = Vec::new();
+    for (kind, pos, tier, lane) in blue {
+        placements.push(Placement { kind, team: Team::Blue, pos, tier, lane });
+        // Red's top lane is the half turn of blue's bottom one.
+        placements.push(Placement { kind, team: Team::Red, pos: crossroads_turn(pos), tier, lane: 2 - lane });
+    }
+    // Blue's paths, base to enemy Base; red's lane `l` is the half turn of blue's lane `2 − l`.
+    let red_base = crossroads_turn(crossroads_point(1800.0, 1800.0));
+    let top_path = vec![
+        crossroads_point(950.0, 3700.0),
+        crossroads_point(950.0, 12_800.0),
+        crossroads_point(1700.0, 13_550.0),
+        crossroads_point(11_700.0, 13_550.0),
+        red_base,
+    ];
+    let mid_path = vec![crossroads_point(3300.0, 3300.0), red_base];
+    let bot_path: Vec<Vec2> = top_path.iter().map(|&p| crossroads_flip(p)).collect();
+    let blue_paths = [top_path, mid_path, bot_path];
+    let turn = |path: &[Vec2]| -> Vec<Vec2> { path.iter().map(|&p| crossroads_turn(p)).collect() };
+    let lanes = (0..3).map(|l| [blue_paths[l].clone(), turn(&blue_paths[2 - l])]).collect();
+    let spawns = [crossroads_point(950.0, 2600.0), crossroads_point(2400.0, 2400.0), crossroads_point(2600.0, 950.0)];
+    let wave_spawn = (0..3).map(|l| [spawns[l], crossroads_turn(spawns[2 - l])]).collect();
+    let (home, fountain) = (crossroads_point(800.0, 800.0), crossroads_point(600.0, 600.0));
+    map.layout = Layout {
+        lanes,
+        wave_spawn,
+        champion_spawn: [home, crossroads_turn(home)],
+        fountains: [Some((fountain, 750.0)), Some((crossroads_turn(fountain), 750.0))],
+        fountain_heals: true,
+        placements,
+        pacing: crate::lane::Pacing::Classic,
+        // Corner to corner, top left to bottom right, a little past the map at both ends.
+        river: vec![Vec2::new(-1000.0, -1000.0), CROSSROADS_SIZE + Vec2::new(1000.0, 1000.0)],
+        plating: true,
+        backdoor: true,
+        camps,
     };
     map
 }
@@ -603,9 +905,84 @@ mod tests {
                 assert!(m.walkable(p.pos + Vec2::new(0.0, 0.0), 1.0), "{p:?} stands in a wall");
             }
         }
-        for s in m.layout.champion_spawn.iter().chain(&m.layout.wave_spawn) {
+        for s in m.layout.champion_spawn.iter().chain(m.layout.wave_spawn.iter().flatten()) {
             assert!(m.in_bounds(*s, 100.0) && m.walkable(*s, 60.0), "{s:?}");
         }
+    }
+
+    /// Crossroads: blue bottom left, red top right; every structure has its twin under the half
+    /// turn (red's lane `2 − l` for blue's `l`); every lane walks clear of walls from spawn to the
+    /// enemy Base; each lane's turrets fall in order from the river back home; and a champion
+    /// can path from one fountain to the other.
+    #[test]
+    fn crossroads_is_symmetric_walkable_and_ordered() {
+        let t = std::time::Instant::now();
+        let m = MapId::Crossroads.shared();
+        let built = t.elapsed();
+        let l = &m.layout;
+        assert_eq!((l.lanes.len(), l.wave_spawn.len()), (3, 3));
+        let (blue, red) = (l.champion_spawn[0], l.champion_spawn[1]);
+        assert!(blue.x < red.x && blue.y > red.y, "blue bottom left, red top right: {blue:?} {red:?}");
+        for p in &l.placements {
+            let twin = CROSSROADS_SIZE - p.pos;
+            assert!(
+                l.placements.iter().any(|q| q.kind == p.kind
+                    && q.tier == p.tier
+                    && q.team != p.team
+                    && (p.tier > crate::lane::GATEHOUSE_TIER || q.lane == 2 - p.lane)
+                    && (q.pos - twin).length() < 0.1),
+                "{p:?} has no twin"
+            );
+            assert!(m.walkable(p.pos, 1.0), "{p:?} stands in a wall");
+        }
+        for s in l.champion_spawn.iter().chain(l.wave_spawn.iter().flatten()) {
+            assert!(m.in_bounds(*s, 100.0) && m.walkable(*s, 60.0), "{s:?}");
+        }
+        for (li, lane) in l.lanes.iter().enumerate() {
+            for team in [Team::Blue, Team::Red] {
+                let mut at = l.wave_spawn[li][team as usize];
+                for &p in &lane[team as usize] {
+                    assert!(m.segment_clear(at, p, 150.0), "lane {li} {team:?}: {at:?} -> {p:?} clips a wall");
+                    at = p;
+                }
+                // Tiers 1–4 down this lane: the outer turret nearest the river, the Gatehouse
+                // nearest home.
+                let home = l.champion_spawn[team as usize];
+                let mut own: Vec<&Placement> = l
+                    .placements
+                    .iter()
+                    .filter(|p| p.team == team && p.lane as usize == li && p.tier <= crate::lane::GATEHOUSE_TIER)
+                    .collect();
+                own.sort_by_key(|p| p.tier);
+                assert_eq!(own.iter().map(|p| p.tier).collect::<Vec<_>>(), vec![1, 2, 3, 4], "lane {li} {team:?}");
+                for w in own.windows(2) {
+                    assert!(w[0].pos.distance(home) > w[1].pos.distance(home), "lane {li} {team:?}: {w:?}");
+                }
+            }
+        }
+        let t = std::time::Instant::now();
+        let path = m.find_path(blue, red);
+        let pathed = t.elapsed();
+        assert!(path.last().is_some_and(|&p| p.distance(red) < 1.0), "{path:?}");
+        // Twelve camps, each standing in the open with its half-turn twin, two of each buff.
+        assert_eq!(l.camps.len(), 12);
+        for c in &l.camps {
+            assert!(l.camps.iter().any(|d| d.kind == c.kind && (d.pos - (CROSSROADS_SIZE - c.pos)).length() < 0.1));
+            for (kind, p) in c.spots() {
+                assert!(m.walkable(p, kind.def().radius.0 + 10.0), "{c:?}: {kind:?} at {p:?}");
+            }
+        }
+        // Across the jungles: from blue's top-side jungle to red's, and to blue's bottom side.
+        let k = std::f32::consts::FRAC_1_SQRT_2;
+        let uv = |u: f32, v: f32| crossroads_point((u - v) * k, (u + v) * k);
+        for (a, b) in [
+            (uv(5700.0, 1500.0), CROSSROADS_SIZE - uv(8000.0, 4000.0)),
+            (uv(9000.0, 3200.0), crossroads_flip(uv(6800.0, 3200.0))),
+        ] {
+            let path = m.find_path(a, b);
+            assert!(path.len() > 2 && path.last().is_some_and(|&p| p.distance(b) < 1.0), "{a:?} -> {b:?}: {path:?}");
+        }
+        eprintln!("crossroads: built in {built:?}, fountain to fountain pathed in {pathed:?} ({} legs)", path.len());
     }
 
     #[test]

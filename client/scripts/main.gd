@@ -148,6 +148,9 @@ func _ready() -> void:
 		elif args[i] == "--blind-seconds" and i + 1 < args.size():
 			blind_seconds = float(args[i + 1])
 			i += 1
+		elif args[i] == "--dump-terrain" and i + 1 < args.size():
+			_dump_terrain = args[i + 1]
+			i += 1
 		elif args[i] == "--zoom" and i + 1 < args.size():
 			camera_zoom = maxf(0.05, float(args[i + 1]))
 			i += 1
@@ -198,6 +201,14 @@ func _ready() -> void:
 			_shot_numbers = true
 		elif args[i] == "--shot-charge":
 			_shot_charge = true
+		elif args[i] == "--shot-recall":
+			_shot_recall = true
+		elif args[i] == "--shot-claim":
+			_shot_claim = true
+		elif args[i] == "--shot-goto" and i + 1 < args.size():
+			var xy := args[i + 1].split(",")
+			_shot_goto = Vector2(float(xy[0]), float(xy[1]))
+			i += 1
 		elif args[i] == "--shot-menu":
 			_shot_menu = true
 		elif args[i] == "--keep-points":
@@ -320,6 +331,9 @@ var _shot_tab_hover := ""                 # `--tab-hover augment|item`: show one
 var _shot_tab := false                    # `--shot-tab`: hold the match breakdown open
 var _shot_numbers := false                # `--shot-numbers`: sample damage numbers, for review
 var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
+var _shot_recall := false                 # `--shot-recall`: walk out, then recall 3 s before the shot
+var _shot_claim := false                 # `--shot-claim`: take Claim in F at the start
+var _shot_goto = null                     # `--shot-goto X,Y`: walk there (game units) from 2 s on
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
 var _shot_keep_points := false            # `--keep-points`: don't spend the starting points
 
@@ -362,6 +376,8 @@ func _update_shot(delta: float) -> void:
 	if not _shot_moved and _shot_timer > 1.0:
 		for slot in 0 if _shot_keep_points else 3:
 			client.level_up(slot)  # ranked modes start with points to spend
+		if _shot_claim:
+			client.choose_spell(1)
 		if _shot_shop:
 			for item in [7, 1, 3]:  # Boots, Long Knife, Vital Crystal from the fountain
 				client.buy(item)
@@ -374,6 +390,10 @@ func _update_shot(delta: float) -> void:
 		_show_click_marker(_to_world(own + inward * 600.0 - side * 500.0), OWN_COLOR)
 	elif _shot_moved and _shot_timer > 1.7 and _shot_timer - delta <= 1.7:
 		client.cast(4, own + side * 400.0)
+	elif _shot_goto != null and _shot_moved and _shot_timer > 2.0 and fmod(_shot_timer, 2.0) < delta:
+		client.move_to(_shot_goto)
+	elif _shot_recall and _shot_moved and _shot_timer > _shot_at - 3.0 and _shot_timer - delta <= _shot_at - 3.0:
+		client.recall()
 	elif _shot_charge and _shot_moved and _shot_timer > 2.0 and _shot_timer <= _shot_at:
 		# Into the fight: keep attack-moving to mid, casting at whatever's ahead.
 		settings.camera_locked = true
@@ -1136,6 +1156,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("stop"):
 		attack_move_armed = false
 		client.stop()
+	elif event.is_action_pressed("recall") and not client.is_spectator():
+		client.recall()
 	elif event.is_action_pressed("toggle_proxies"):
 		proxies_enabled = not proxies_enabled
 		client.set_collision_proxies(proxies_enabled)
@@ -1210,6 +1232,7 @@ func _process(delta: float) -> void:
 		own_body.scale = Vector3.ONE * (float(own_status.get("hitbox", CHAMPION_RADIUS_U)) / CHAMPION_RADIUS_U)
 		_update_camera(delta, dead)
 		_show_statuses(own_body, own_status.get("stunned", false), own_status.get("rooted", false), own_status.get("shield", 0.0), own_status.get("slowed", false))
+		_show_recall(own_body, own_status.get("recall", 0.0) > 0.0, ALLY_COLOR, own_status.get("champion", ""))
 		_animate(own_body, own_status, delta)
 	# Casts without a windup (A6): the drive never shows them, so play them on the event.
 	for c in client.take_instant_casts():
@@ -1274,6 +1297,48 @@ func _show_statuses(body: Node3D, stunned: bool, rooted: bool, shield: float, sl
 	body.get_node("Slow").visible = slowed
 
 
+## A recalling champion stands in a column of light in its team's color, a ring at its feet;
+## its `unit.recall` sound plays as the channel starts.
+func _show_recall(body: Node3D, on: bool, color: Color, champion: String) -> void:
+	var beam: Node3D = body.get_node_or_null("Recall")
+	if on and (beam == null or not beam.visible):
+		_sfx_play(champion, ["unit.recall"], body.global_position)
+	if beam == null:
+		if not on:
+			return
+		beam = Node3D.new()
+		beam.name = "Recall"
+		var column := MeshInstance3D.new()
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = 0.42
+		cyl.bottom_radius = 0.55
+		cyl.height = 3.2
+		cyl.radial_segments = 8
+		cyl.cap_top = false
+		cyl.cap_bottom = false
+		column.mesh = cyl
+		column.position = Vector3(0, 0.8, 0)
+		var mat := _unshaded(color.lerp(Color.WHITE, 0.35), 0.22)
+		mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		column.material_override = mat
+		beam.add_child(column)
+		var ring := MeshInstance3D.new()
+		var torus := TorusMesh.new()
+		torus.inner_radius = 0.6
+		torus.outer_radius = 0.7
+		torus.rings = 8
+		torus.ring_segments = 4
+		ring.mesh = torus
+		ring.position = Vector3(0, -0.75, 0)
+		ring.material_override = _unshaded(color.lerp(Color.WHITE, 0.5), 0.85)
+		beam.add_child(ring)
+		body.add_child(beam)
+	beam.visible = on
+	if on:
+		beam.rotation.y = Time.get_ticks_msec() / 600.0
+
+
 var remote_info := {}                   # unit_id -> latest dictionary (for bars and numbers)
 
 
@@ -1297,6 +1362,8 @@ func _update_remotes(delta: float) -> void:
 				b = _make_turret(team_color, u.radius)
 			elif u.minion:
 				b = _make_minion(MINION_BLUE if u.ally else MINION_RED, u.radius, u.get("minion_kind", ""))
+			elif u.kind == "monster":
+				b = _make_monster(u.get("monster", ""), u.radius)
 			else:
 				b = _make_champion(ALLY_COLOR if u.ally else ENEMY_COLOR, u.champion)
 			b.add_child(_make_windup_indicator())
@@ -1317,7 +1384,13 @@ func _update_remotes(delta: float) -> void:
 			if not body.has_meta("faced"):
 				# Face down the lane, toward the enemy's side of the map.
 				var dir := Vector2(1, 0)
-				if _lane_axis.size() == 2:
+				if _road_segments.size() > 1:
+					# Several lanes: along the nearest road, away from its own fountain.
+					dir = _road_direction(u.pos)
+					for f in client.map_geometry().fountains:
+						if f.ally == u.ally and dir.dot(u.pos - f.center) < 0.0:
+							dir = -dir
+				elif _lane_axis.size() == 2:
 					dir = _lane_axis[1]
 					var half: float = (client.map_geometry().size / 2.0 - _lane_axis[0]).dot(dir)
 					if (u.pos - _lane_axis[0]).dot(dir) > half:
@@ -1328,7 +1401,7 @@ func _update_remotes(delta: float) -> void:
 			p.y = 0.45
 		elif u.turret:
 			p.y = 1.2
-		elif u.kind in ["gatehouse", "base", "relic"]:
+		elif u.kind in ["gatehouse", "base", "relic", "monster"]:
 			p.y = 0.0
 		body.position = p
 		if u.champion != "":
@@ -1341,6 +1414,8 @@ func _update_remotes(delta: float) -> void:
 					m.set_shader_parameter("protected_glow", 1.0 if u.protected else 0.0)
 		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO))
 		_show_statuses(body, u.stunned, u.rooted, u.shield, u.get("slowed", false))
+		if u.champion != "":
+			_show_recall(body, u.get("recalling", false), ALLY_COLOR if u.ally else ENEMY_COLOR, u.champion)
 		if u.champion != "" or (u.minion and body.has_meta("rig")):
 			_animate(body, u, delta)
 		if u.minion:
@@ -1374,6 +1449,71 @@ func _update_remotes(delta: float) -> void:
 ## Minions: their pack's model (A5) in the team color, else a short capsule; either way the
 ## ground ring is the *collision* radius, so minion block is visible exactly as the simulation
 ## sees it (D11).
+## Jungle monsters' colors (01 §7): the buff camps in their buff's color, the others in the
+## jungle's own browns, greens and greys.
+const MONSTER_COLORS := {
+	"warden": Color(0.32, 0.5, 0.85), "brute": Color(0.82, 0.32, 0.14),
+	"hound_alpha": Color(0.42, 0.38, 0.34), "hound": Color(0.5, 0.46, 0.4),
+	"toad": Color(0.34, 0.52, 0.24), "raven_alpha": Color(0.32, 0.24, 0.4), "raven": Color(0.38, 0.3, 0.46),
+	"crawler_elder": Color(0.5, 0.5, 0.48), "crawler": Color(0.58, 0.57, 0.53),
+}
+const NEUTRAL_COLOR := Color(0.95, 0.75, 0.25)
+
+
+## A placeholder jungle monster (no models yet): a faceted body sized to its hitbox, a head
+## facing ahead, horns on the buff camps' guardians and ears on the hounds, a gold ring at its
+## feet. The ring and bar are the neutral gold, so any team reads it as "not a champion".
+func _make_monster(key: String, collision_radius_u: float) -> Node3D:
+	var color: Color = MONSTER_COLORS.get(key, Color(0.5, 0.45, 0.4))
+	var r := collision_radius_u * UNITS_TO_METERS
+	var root := Node3D.new()
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.roughness = 0.9
+	var body := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = r
+	sphere.height = r * 1.5
+	sphere.radial_segments = 7
+	sphere.rings = 4
+	body.mesh = sphere
+	body.position = Vector3(0, r * 0.75, 0)
+	body.material_override = mat
+	root.add_child(body)
+	var head := MeshInstance3D.new()
+	var hs := SphereMesh.new()
+	hs.radius = r * 0.45
+	hs.height = r * 0.8
+	hs.radial_segments = 6
+	hs.rings = 3
+	head.mesh = hs
+	head.position = Vector3(0, r * 1.15, r * 0.8)
+	head.material_override = mat
+	root.add_child(head)
+	if key in ["warden", "brute", "crawler_elder", "hound_alpha", "hound"]:
+		for side in [-1.0, 1.0]:
+			var horn := MeshInstance3D.new()
+			var cone := CylinderMesh.new()
+			cone.top_radius = 0.0
+			cone.bottom_radius = r * 0.12
+			cone.height = r * (0.7 if key in ["warden", "brute"] else 0.4)
+			cone.radial_segments = 4
+			horn.mesh = cone
+			horn.position = head.position + Vector3(side * r * 0.3, r * 0.4, -r * 0.05)
+			horn.rotation_degrees = Vector3(-20, 0, side * -25)
+			horn.material_override = _unshaded(color.lightened(0.45))
+			root.add_child(horn)
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.outer_radius = r
+	torus.inner_radius = r - 0.03
+	ring.mesh = torus
+	ring.position = Vector3(0, 0.02, 0)
+	ring.material_override = _unshaded(NEUTRAL_COLOR)
+	root.add_child(ring)
+	return root
+
+
 func _make_minion(color: Color, collision_radius_u: float, kind := "") -> MeshInstance3D:
 	var body := MeshInstance3D.new()
 	var capsule := CapsuleMesh.new()
@@ -1405,6 +1545,7 @@ func _make_minion(color: Color, collision_radius_u: float, kind := "") -> MeshIn
 ## announced. The same polygons drive collision, pathing and vision in the simulation.
 var _map_built := false
 var _lane_axis := []                      # a lane map's [blue fountain, unit direction to red's]
+var _road_segments := PackedVector4Array()  # its roads (blue to red) as segments, in meters
 
 
 ## The ground covers the map and the scenery around it (`margin_u` past every edge).
@@ -1440,14 +1581,20 @@ func _build_map() -> void:
 	for c in dressing.get_children():
 		c.layers = MAP_LAYERS
 	if geo.fountains.size() == 2:
-		# A lane map: the road runs from one fountain to the other, at whatever angle.
+		# A lane map: roads down its lanes (one from fountain to fountain on The Bridge), and
+		# the river if it has one.
 		var a: Vector2 = geo.fountains[0].center
 		var b: Vector2 = geo.fountains[1].center
 		var gm: ShaderMaterial = ground.material_override
 		gm.set_shader_parameter("lane_mode", 1.0)
-		gm.set_shader_parameter("lane_origin", (a + b) / 2.0 * UNITS_TO_METERS)
-		gm.set_shader_parameter("lane_dir", (b - a).normalized())
-		gm.set_shader_parameter("lane_width", 13.0)
+		var roads: Array = geo.get("roads", [])
+		_road_segments = _segments(roads)
+		gm.set_shader_parameter("roads", _road_segments)
+		gm.set_shader_parameter("road_count", _road_segments.size())
+		gm.set_shader_parameter("lane_width", 13.0 if roads.size() <= 1 else 9.5)
+		var river := _segments([geo.get("river", PackedVector2Array())])
+		gm.set_shader_parameter("river", river)
+		gm.set_shader_parameter("river_count", river.size())
 		_lane_axis = [a, (b - a).normalized()]
 	for f in geo.fountains:
 		# The spawn platform (a prop the size of the fountain's circle), else a tinted disk.
@@ -2113,9 +2260,15 @@ func _draw_overlay() -> void:
 		var color := Color(0.3, 0.7, 0.95) if u.ally else Color(0.9, 0.25, 0.2)
 		var size := Vector2(110, 12) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
 		var lift := 1.25 if champ else (2.6 if structure else 0.6)
+		if u.get("neutral", false):
+			color = NEUTRAL_COLOR
+			size = Vector2(110, 9) if u.get("big", false) else Vector2(62, 6)
+			lift = float(u.radius) * UNITS_TO_METERS * 1.9 + 0.3
 		if remote_bodies[id].has_meta("prop"):
 			lift = {"turret": 7.0, "gatehouse": 5.4, "base": 6.2}.get(u.kind, 3.0)
 		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color, id, u.level if champ else 0, 100.0 if champ else 0.0)
+		if u.get("plates", 0) > 0:
+			_draw_plates(remote_bodies[id].position + Vector3(0, lift, 0), size, u.plates)
 		if champ:
 			_draw_augment_pips(font, remote_bodies[id].position + Vector3(0, lift, 0), u.get("augments", []))
 			_draw_unit_label(font, remote_bodies[id].position + Vector3(0, lift, 0), size, u.champion, u.ally, u)
@@ -2201,6 +2354,24 @@ func _draw_bar(world: Vector3, size: Vector2, hp: float, max_hp: float, shield: 
 		overlay.draw_rect(lb, Color(0.04, 0.05, 0.07, 0.95))
 		overlay.draw_rect(lb, Hud.GOLD_DIM, false, 1.0)
 		overlay.draw_string(ThemeDB.fallback_font, lb.position + Vector2(0, lb.size.y - 4.0 * k), "%d" % level, HORIZONTAL_ALIGNMENT_CENTER, lb.size.x, roundi(12.0 * k), Color.WHITE)
+
+
+## A plated turret's plates (01 §3): a gold pip under its bar for each one left, a dim one for
+## each broken, and a notch on the bar where each next plate breaks.
+func _draw_plates(world: Vector3, size: Vector2, plates: int) -> void:
+	var s = _screen(world)
+	if s == null:
+		return
+	var k := _hud_k()
+	size *= k
+	var origin: Vector2 = s - Vector2(size.x / 2.0, size.y)
+	for i in range(1, 5):
+		var x := origin.x + size.x * i / 5.0
+		overlay.draw_line(Vector2(x, origin.y), Vector2(x, origin.y + size.y), Color(0.05, 0.05, 0.07, 0.9), maxf(1.0, k))
+	var pip := Vector2(size.x / 5.0 - 3.0 * k, 4.0 * k)
+	for i in 5:
+		var r := Rect2(Vector2(origin.x + size.x * i / 5.0 + 1.5 * k, origin.y + size.y + 2.0 * k), pip)
+		overlay.draw_rect(r, Hud.GOLD if i < plates else Color(0.2, 0.18, 0.12, 0.8))
 
 
 func _draw_ability_bar(font: Font) -> void:
@@ -2356,6 +2527,22 @@ func _draw_bottom_hud(font: Font) -> void:
 			overlay.draw_texture_rect(ItemIcons.icon(pot), Rect2(hb.position + Vector2(2.0 * k, -2.0 * k), Vector2(pi, pi)), false)
 		Hud.text(overlay, font, hb.position + Vector2(pi + 6.0 * k, hb.size.y / 2.0 + 5.0 * k), "%d s" % ceili(potion), roundi(12.0 * k), Color(0.6, 1.0, 0.65))
 	Hud.text(overlay, bold, hb.position + Vector2(0, hb.size.y / 2.0 + 5.0 * k), hp_text, roundi(14.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, hb.size.x)
+	# Jungle buffs: their names and seconds left, just above the health bar.
+	var bx := hb.position.x
+	for buff in [["insight", "Insight", Color(0.45, 0.68, 1.0)], ["cinder", "Cinder", Color(1.0, 0.5, 0.25)]]:
+		var left: float = own_status.get(buff[0], 0.0)
+		if left > 0.0:
+			var label := "◆ %s %d:%02d" % [buff[1], int(left) / 60, int(left) % 60]
+			Hud.text(overlay, font, Vector2(bx, hb.position.y - 5.0 * k), label, roundi(12.0 * k), buff[2])
+			bx += font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, roundi(12.0 * k)).x + 12.0 * k
+	var recall: float = own_status.get("recall", 0.0)
+	if recall > 0.0:
+		# Recalling: a channel bar above the panel, filling as home gets closer.
+		var total: float = own_status.get("recall_total", 8.0)
+		var rb := Rect2(x + abil_w / 2.0 - 130.0 * k, top - 46.0 * k, 260.0 * k, 16.0 * k)
+		Hud.panel(overlay, rb.grow(3.0 * k), k, Color(0.04, 0.05, 0.08, 0.92), Hud.GOLD_DIM)
+		overlay.draw_rect(Rect2(rb.position, Vector2(rb.size.x * clampf(1.0 - recall / total, 0.0, 1.0), rb.size.y)), Color(0.35, 0.72, 0.95))
+		Hud.text(overlay, bold, rb.position + Vector2(0, rb.size.y / 2.0 + 5.0 * k), "Recall  %.1f" % recall, roundi(13.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, rb.size.x)
 	x += abil_w + pad
 
 	# Items in two rows of three, gold beneath; the held augments above.
@@ -3171,6 +3358,7 @@ const SHOP_GAP := Vector2(10, 26)        # between build-path nodes
 var shop_panel: PanelContainer
 var shop_title: Label
 var shop_anvil: Button
+var shop_spell: Button
 var shop_inventory: HBoxContainer
 var shop_stats: Label
 var shop_undo: Button
@@ -3221,6 +3409,13 @@ func _build_shop() -> void:
 	shop_anvil.theme_type_variation = "PrimaryButton"
 	shop_anvil.pressed.connect(func(): client.buy_anvil(); _shop_refresh = 0.0)
 	top.add_child(shop_anvil)
+	# On a map with a jungle: Barrier or Claim in F.
+	shop_spell = Button.new()
+	shop_spell.focus_mode = Control.FOCUS_NONE
+	shop_spell.pressed.connect(func():
+		client.choose_spell(0 if own_status.get("spell_f", 0) == 1 else 1)
+		_shop_refresh = 0.0)
+	top.add_child(shop_spell)
 	Windows.make_movable(shop_panel, "shop", settings)
 	var body := HBoxContainer.new()
 	body.add_theme_constant_override("separation", 14)
@@ -3343,6 +3538,13 @@ func _update_shop(delta: float) -> void:
 	var open: bool = client.can_shop()
 	var gold: int = own_status.get("gold", 0)
 	shop_title.text = "Shop   ·   %d gold%s" % [gold, "" if open else "   (closed: return to your fountain, or shop while dead)"]
+	var jungle: bool = own_status.get("jungle", false)
+	shop_spell.visible = jungle
+	if jungle:
+		var claim: bool = own_status.get("spell_f", 0) == 1
+		shop_spell.text = "F: %s   ⇄   %s" % ["Claim" if claim else "Barrier", "Barrier" if claim else "Claim"]
+		shop_spell.disabled = not open
+		shop_spell.tooltip_text = "Swap your F spell. Claim (for junglers) strikes a monster or minion for true damage and heals you on monsters; Barrier shields you. A swap puts it on at least a 15 s cooldown."
 	var mayhem: bool = own_status.get("mayhem", false)
 	shop_anvil.visible = mayhem
 	if mayhem:
@@ -4364,6 +4566,35 @@ var _icon_refresh := 0.0
 ## one top-down render sees only that, never units or structures (those are icons).
 const MAP_LAYERS := 3
 var _terrain_pending := false
+var _dump_terrain := ""                   # --dump-terrain FILE: save the minimap's render
+
+
+## Polylines (game units) as the ground shader's segments (meters), at most 48.
+func _segments(polylines: Array) -> PackedVector4Array:
+	var out := PackedVector4Array()
+	for line in polylines:
+		var pts: PackedVector2Array = line
+		for i in range(1, pts.size()):
+			if out.size() < 48:
+				var a := pts[i - 1] * UNITS_TO_METERS
+				var b := pts[i] * UNITS_TO_METERS
+				out.append(Vector4(a.x, a.y, b.x, b.y))
+	return out
+
+
+## The direction (blue to red) of the road segment nearest `p` (game units).
+func _road_direction(p: Vector2) -> Vector2:
+	var best := INF
+	var dir := Vector2(1, 0)
+	var m := p * UNITS_TO_METERS
+	for s in _road_segments:
+		var a := Vector2(s.x, s.y)
+		var b := Vector2(s.z, s.w)
+		var d := m.distance_to(Geometry2D.get_closest_point_to_segment(m, a, b))
+		if d < best and a != b:
+			best = d
+			dir = (b - a).normalized()
+	return dir
 
 
 ## Paints the minimap's terrain: one orthographic render of the map from above, units left out.
@@ -4399,7 +4630,12 @@ func _render_minimap_terrain() -> void:
 	add_child(vp)
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
-	minimap.terrain = ImageTexture.create_from_image(vp.get_texture().get_image())
+	var top_down := vp.get_texture().get_image()
+	minimap.terrain = ImageTexture.create_from_image(top_down)
+	if _dump_terrain != "":
+		# Map review: the render from above, as the minimap shows it.
+		top_down.save_png(_dump_terrain)
+		print("MFTR: terrain saved to ", _dump_terrain)
 	if atmosphere != null:
 		atmosphere.suspend(false)
 	minimap.queue_redraw()
@@ -4446,7 +4682,7 @@ func _update_minimap(delta: float, playing: bool) -> void:
 			var u: Dictionary = remote_info[id]
 			if u.get("health", 1.0) <= 0.0:
 				continue
-			var team := "ally" if u.get("ally", false) else "enemy"
+			var team := "ally" if u.get("ally", false) else ("neutral" if u.get("neutral", false) else "enemy")
 			icons.append({"pos": u.pos, "kind": u.get("kind", ""), "team": team, "champion": u.get("champion", ""),
 				"color": CHAMPION_COLORS.get(u.get("champion", ""), Color.GRAY),
 				"face": portraits.portrait(u.get("champion", ""), "small")})

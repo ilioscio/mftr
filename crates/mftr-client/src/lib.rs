@@ -122,6 +122,8 @@ pub struct RemoteRender {
     pub champion: Option<ChampionId>,
     /// A minion's kind (which model to draw).
     pub minion: Option<mftr_sim::MinionKind>,
+    /// A jungle monster's kind.
+    pub monster: Option<mftr_sim::jungle::MonsterKind>,
     /// Held augments (indicators above the health bar).
     pub augments: [u8; mftr_sim::augments::SLOTS],
     pub gameplay_radius: f32,
@@ -137,6 +139,10 @@ pub struct RemoteRender {
     pub slowed: bool,
     /// A structure that can't be hurt yet.
     pub protected: bool,
+    /// A champion channeling a recall.
+    pub recalling: bool,
+    /// A turret's plates left.
+    pub plates: u8,
     /// Facing in radians, counter-clockwise from +x (10 bits on the wire, 10 §3).
     pub facing: f32,
     /// Basic attacks started, modulo 4: which attack animation to play.
@@ -603,6 +609,16 @@ impl ClientSession {
     /// Use the active of the item in inventory slot 0–5 (drink a potion). Predicted.
     pub fn use_item(&mut self, slot: u8, now: f64) -> Option<Command> {
         self.issue(CommandKind::UseItem(slot), now)
+    }
+
+    /// Take utility spell `spell` in the F slot (while shopping). Predicted.
+    pub fn choose_spell(&mut self, spell: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::ChooseSpell(spell), now)
+    }
+
+    /// Channel home to the fountain (B). Predicted.
+    pub fn recall(&mut self, now: f64) -> Option<Command> {
+        self.issue(CommandKind::Recall, now)
     }
 
     /// Reroll choice 0–2 of the open augment draft (each once per draft). Predicted.
@@ -1287,6 +1303,7 @@ impl ClientSession {
                     windup_slot,
                     champion: l.champion,
                     minion: l.minion,
+                    monster: l.monster,
                     augments: l.augments,
                     gameplay_radius: track.gameplay_radius(),
                     health: l.health as f32,
@@ -1299,6 +1316,8 @@ impl ClientSession {
                     dashing: l.dashing,
                     slowed: l.slowed,
                     protected: l.protected,
+                    recalling: l.recalling,
+                    plates: l.plates,
                     facing: mftr_net::msg::facing_from_wire(l.facing),
                     attack_variant: l.attack_variant,
                     recovering: l.recovering,

@@ -666,6 +666,54 @@ With A14 every champion in the roster has a model, clips, effects and sounds.
 
 **Exit:** full-length matches show the intended rhythm (laning → skirmish → teamfight) in telemetry from community playtests; late-game teamfight stays within performance targets on minimum spec.
 
+### M4 slices (in order of dependency)
+1. Crossroads and Classic rules: the 3-lane map, lane-by-lane structures, per-map wave pacing, `--scenario classic`, roads and river in the client, bots spread over the lanes.
+2. Recall, turret plating (until 14:00), backdoor protection.
+3. Jungle camps, Claim (smite), buff camps.
+4. Vision: wards, the trinket sweeper, control wards.
+5. Epic objectives: wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
+6. Blind and Draft pick with bans and roles.
+7. Items to ~80, the support item quest.
+8. Role bots: laning, jungling, rotations.
+
+### M4 slice 1 status (2026-10-09): ✅ done
+- Maps can have several lanes: each lane has its own path per team, wave spawns and structures. Tiers 1–4 fall in order down their own lane; base turrets can be hurt once any Gatehouse is down, the Base once both base turrets are down too. A Gatehouse down empowers only its own lane's waves.
+- **Crossroads** (`MapId::Crossroads`): 14,500 u square, blue's base bottom left, red's top right. Top, mid and bottom lanes, a river corner to corner, four jungle quadrants of diagonal blocks with paths between them, and brush. It is authored once (blue's top-side jungle) and laid out four ways, so it is symmetric across both diagonals. `mftr-tools map svg crossroads` draws the layout for review.
+- **Classic rules** (`--scenario classic`, protocol 19): level 1, 500 gold, 2.04 gold/s, fountains that heal. Waves are paced per map: Crossroads' first wave comes at 1:05, then one every 30 s, with a siege minion every third wave (every second from 15:00, every wave from 25:00) and upgrades every 90 s. The Bridge keeps ARAM's pacing.
+- Bots split over the lanes by rank (top, mid, bottom, bottom, mid). A 10-bot Classic match plays to a natural end (24:05 in the first run) and its replay re-simulates exactly.
+- Client: roads down every lane and a shallow river that fords the roads, drawn by the ground shader from the map's polylines (The Bridge's road is unchanged). Jungle edges facing the camera get low props only, so trees never hide the paths. `--dump-terrain FILE` saves the minimap's render from above.
+- For now, Classic's champion select is ARAM's all-random pick (Draft comes in slice 6).
+
+### M4 slice 2 status (2026-10-09): ✅ done
+- **Recall** (B, protocol 19): an 8 s channel to the fountain, predicted like any command.
+  - Moving, attacking, casting, using an item, Stop, crowd control or any damage cancels it.
+  - Others see a column of light in the team's color and hear the champion's `unit.recall` sound; the recaller gets a channel bar over the HUD.
+  - Bots recall when low and no enemy champion is within 1,500 u; otherwise they walk home first.
+- **Turret plating:** Crossroads' outer turrets carry 5 plates until 14:00. One breaks with each 20% of health lost, paying 125 gold split among the enemy champions near the turret. Plates show as segments and pips on the turret's health bar.
+- **Backdoor protection:** on Crossroads, a structure takes a third of champions' damage while none of their minions are within 1,000 u.
+- Both are map settings (`Layout::plating`, `Layout::backdoor`), so The Bridge plays as before; state hashes are unchanged for anything without plates or a recall.
+- Bot matches on Crossroads end in 17–44 minutes, with replays exact.
+
+### M4 slice 3 status (2026-10-09): ✅ done
+- **The jungle** (`jungle.rs`):
+  - Twelve camps on Crossroads, in clearings cut into the jungle blocks: the Azure Warden and Ember Brute buff camps, Thicket Hounds, Bog Toad, Ravenhawks and Stone Crawlers.
+  - Camps spawn at 1:30 and respawn on timers (buffs 5:00, others 2:15).
+  - Monsters are on a new **neutral team** (protocol 19: team takes 2 bits). A hit turns the whole camp on the attacker; it leashes 800 u from home and heals on the way back. Lane minions and turrets ignore monsters.
+  - The killing blow takes the gold and experience. The Warden gives **Insight** (+20 ability haste) and the Brute **Cinder** (true-damage burn and a slow on basic attacks), each for 2:00; killing a buff holder takes the buff.
+- **Claim:** an F spell chosen in the shop while in the fountain.
+  - 600 true damage to the monster or enemy minion nearest the cursor, 900 after 5 big monsters, and a 100 heal on monsters.
+  - The Tab breakdown shows each champion's F spell.
+- **Bots:** each team's fifth bot jungles. It takes Claim, waits at a camp due within 25 s on its side, clears it (Claim finishes big monsters), and plays mid while its camps are down. In 3 seeds, each team's jungler killed 46–116 monsters a match.
+- **Client:**
+  - Placeholder monsters: a faceted body in the camp's colors with horns on the guardians, a gold ring and a gold health bar, shown as gold dots on the minimap.
+  - A Claim glyph and tooltip, the F-spell switch in the shop, and Insight and Cinder timers above the health bar.
+  - `--shot-goto X,Y` walks the champion for captures.
+- **Performance:** wall edges are now indexed in 500 u buckets, so sight, clearance and walkability checks look only at nearby walls (results identical, golden hashes unchanged).
+  - Crossroads builds in 49 ms instead of 145 ms.
+  - The client's fog of war on Crossroads went from 12 to 104 fps once waves were out.
+- **Not yet:** monster models, camp respawn timers on the minimap, monsters that scale with match time, and bots that gank or invade.
+ Red wins 4 of 5 seeds, on The Bridge as well as Crossroads: the bots' fixed champion split (blue gets the even-numbered champions) is the likely cause, not the map.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

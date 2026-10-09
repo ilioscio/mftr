@@ -24,6 +24,7 @@ Inspired by the classic 3-lane layout:
 - **Jungle:** four quadrants between the lanes, split by a **river** running corner to corner.
 - **Brush:** patches of tall grass that block vision from outside. Units inside are hidden unless an enemy is also inside or has a ward there.
 - **Walls:** impassable terrain that blocks vision. Some are thin enough for dashes and blinks to cross.
+- *(start, M4 slice 1)* A 14,500 u square, blue's base in the bottom-left corner and red's in the top-right. It is symmetric across both diagonals, so neither team nor either side lane is favored by the layout.
 
 ### Structures (per team)
 
@@ -43,6 +44,10 @@ Turrets must be destroyed in order down each lane. **Turret AI** priority:
 3. The closest enemy champion.
 
 Consecutive shots on a champion ramp up in damage: *(start, D53)* 185 per shot, growing about 9 a minute to 293, and +50% per consecutive champion hit up to +150%, cooling 5 s after the last one. Turrets take reduced damage when no enemy minions are nearby (backdoor protection).
+
+*As built on Crossroads (M4 slice 2):*
+- **Plating:** each outer turret carries 5 plates until 14:00. Each 20% of health lost breaks one, and the last falls with the turret. Each plate pays 125 gold, split among the enemy champions within 1,400 u. At 14:00 the plates fall off and the turret's health stays where it is. Its health bar shows the plates.
+- **Backdoor protection:** a structure with none of the attacker's minions within 1,000 u takes a third of champions' damage. The Bridge (ARAM) has neither.
 
 ## 4. Minions
 
@@ -97,6 +102,21 @@ Gold is the only currency. It is spent at the shop while in the fountain (or any
 
 ### Camps
 Neutral camps in each quadrant respawn on timers. Two **buff camps** per side give the killer a temporary buff (start: one grants mana/energy regen + ability haste, the other grants on-hit slow + damage over time). Smaller camps give gold and XP.
+
+*As built on Crossroads (M4 slice 3):*
+- **Camps:** three per quadrant, twelve in all, each in a clearing cut into a jungle block.
+  - Blue's top side has the **Azure Warden** (buff), the **Bog Toad** (alone, by the river) and the **Thicket Hounds** (an alpha and two pups).
+  - The bottom side has the **Ember Brute** (buff), the **Stone Crawlers** (an elder and a young one) and the **Ravenhawks** (a matriarch and three).
+  - Red's sides mirror blue's.
+- **Timing:** camps spawn at 1:30. A buff camp returns 5:00 after its last monster dies, the others after 2:15.
+- **Behavior:** monsters belong to a neutral team that both sides can hit; lane minions and turrets ignore them.
+  - Hitting one turns its whole camp on the attacker.
+  - A camp gives up once it or its target is 800 u from home, walks back and heals 25% a second.
+- **Rewards:** the champion with the killing blow takes the monster's gold and experience (a buff camp pays 90 gold).
+  - The **Warden** grants **Insight**: +20 ability haste for 2:00.
+  - The **Brute** grants **Cinder** for 2:00: basic attacks burn for 6 + 2 per level true damage and slow 15% for 1 s.
+  - Killing a champion who holds a buff takes it with the time it had left.
+- *(start)* Tuning: a level-1 champion clears a buff camp alone in about 40 s for about half its health.
 
 ### Epic objectives (placeholder names)
 
@@ -153,7 +173,7 @@ Two per champion, chosen before the match. *(start)* list:
 | Name | Inspired by | Effect |
 |---|---|---|
 | Blink | Flash | Short-range instant teleport, ~400 u, long cooldown |
-| Claim | Smite | True damage to monsters/minions. Upgrades as you clear camps. Required for junglers |
+| Claim | Smite | True damage to monsters/minions. Upgrades as you clear camps. Required for junglers. *As built (M4 slice 3):* F's alternative to Barrier, chosen in the shop while in the fountain. It strikes the monster or enemy minion nearest the cursor within 500 u for 600 true damage, 900 once you've taken 5 big monsters, and heals you 100 on a monster. 15 s cooldown; a swap puts F on at least that cooldown |
 | Ignite | Ignite | True damage over time + healing reduction |
 | Mend | Heal | Heal self + ally, brief haste |
 | Barrier | Barrier | Short self shield |
@@ -185,7 +205,7 @@ Two per champion, chosen before the match. *(start)* list:
   events (every hit on you is sent, from unseen sources too): the total and how long it took,
   physical/magic/true, shields, seconds stunned, rooted and slowed, and each source by basic
   attacks, ability (with its key) and item or augment effect, with hit counts. Nothing estimated.
-- **Recall:** an 8 s channel to the fountain, cancelled by moving, taking damage or casting.
+- **Recall:** an 8 s channel to the fountain, cancelled by moving, taking damage or casting. *As built (M4 slice 2):* moving, attacking, casting, using an item, Stop, crowd control or any damage cancels it. It can't start while casting, dashing or held. Anyone who can see the champion sees a column of light and hears its recall sound. The recaller gets a channel bar over the HUD.
 - Gray-screen spectating while dead. The shop works while dead in the fountain.
 
 ## 13. Controls

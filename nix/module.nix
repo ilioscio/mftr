@@ -19,8 +19,8 @@
 let
   inherit (lib) mkOption mkEnableOption types;
   cfg = config.services.mftr;
-  # ARAM and its variants: champion select and bots by default.
-  aram = s: lib.elem s.scenario [ "aram" "mayhem" "hyper" ];
+  # Full matches (ARAM, its variants, Classic): champion select and bots by default.
+  aram = s: lib.elem s.scenario [ "aram" "mayhem" "hyper" "classic" ];
   enabled = lib.filterAttrs (_: s: s.enable) cfg.servers;
 
   server = { name, config, ... }: {
@@ -43,11 +43,12 @@ let
       };
 
       scenario = mkOption {
-        type = types.enum [ "aram" "mayhem" "hyper" "duel" "minions" "dodge" "empty" ];
+        type = types.enum [ "aram" "mayhem" "hyper" "classic" "duel" "minions" "dodge" "empty" ];
         default = "aram";
         description = ''
           The game this server runs (not taken from the server's name).
           `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM with augment drafts. `hyper`: Mayhem under Hyper rules.
+          `classic`: Classic 5v5 on Crossroads (M4, in progress).
           `duel`: the Duel Sandbox. `minions`,
           `dodge`, `empty`: test grounds (`dodge` is the blind playtest's dodge rig).
         '';
@@ -56,7 +57,7 @@ let
       bots = mkOption {
         type = types.ints.u8;
         default = if aram config then 10 else 0;
-        defaultText = lib.literalExpression ''if scenario is "aram", "mayhem" or "hyper" then 10 else 0'';
+        defaultText = lib.literalExpression ''if scenario is "aram", "mayhem", "hyper" or "classic" then 10 else 0'';
         description = ''
           Server bots. They count toward `maxPlayers`, and with `lobby` a joining human takes a
           bot's place.
@@ -66,7 +67,7 @@ let
       lobby = mkOption {
         type = types.bool;
         default = aram config;
-        defaultText = lib.literalExpression ''scenario is "aram", "mayhem" or "hyper"'';
+        defaultText = lib.literalExpression ''scenario is "aram", "mayhem", "hyper" or "classic"'';
         description = "Champion select before each match (ARAM all-random with rerolls).";
       };
 

@@ -180,10 +180,13 @@ pub struct Growth {
     pub hyper: bool,
     /// Stat Anvils kept: steps of each stat (`anvils::STATS` order).
     pub anvil: [u16; 8],
+    /// The Insight jungle buff (not an augment either).
+    pub insight: bool,
 }
 
 impl Growth {
-    pub const NONE: Growth = Growth { unstable_tiny: false, stacks: 0, chaos_done: false, hyper: false, anvil: [0; 8] };
+    pub const NONE: Growth =
+        Growth { unstable_tiny: false, stacks: 0, chaos_done: false, hyper: false, anvil: [0; 8], insight: false };
 }
 
 /// Champion of Chaos's reward.

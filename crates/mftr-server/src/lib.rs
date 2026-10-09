@@ -62,6 +62,8 @@ pub enum Scenario {
     Mayhem,
     /// M3: ARAM: Mayhem under Hyper rules (06 §2): much faster basic abilities and attacks.
     Hyper,
+    /// M4: Classic 5v5 on Crossroads: three lanes, level 1 and 500 gold, fountains that heal.
+    Classic,
 }
 
 impl Scenario {
@@ -71,6 +73,7 @@ impl Scenario {
             Scenario::Empty => MapId::Open,
             Scenario::MinionSandbox | Scenario::DodgeRig | Scenario::Duel => MapId::Arena,
             Scenario::Aram | Scenario::Mayhem | Scenario::Hyper => MapId::Bridge,
+            Scenario::Classic => MapId::Crossroads,
         }
     }
 
@@ -83,6 +86,7 @@ impl Scenario {
             "aram" => Some(Scenario::Aram),
             "mayhem" => Some(Scenario::Mayhem),
             "hyper" => Some(Scenario::Hyper),
+            "classic" => Some(Scenario::Classic),
             _ => None,
         }
     }
@@ -97,6 +101,7 @@ impl Scenario {
             Scenario::Aram => msg::GameMode::Aram,
             Scenario::Mayhem => msg::GameMode::Mayhem,
             Scenario::Hyper => msg::GameMode::Hyper,
+            Scenario::Classic => msg::GameMode::Classic,
         }
     }
 
@@ -109,12 +114,14 @@ impl Scenario {
             Scenario::Aram => "aram",
             Scenario::Mayhem => "mayhem",
             Scenario::Hyper => "hyper",
+            Scenario::Classic => "classic",
         }
     }
 
-    /// ARAM and its variants: The Bridge, a full match with champion select.
-    pub fn is_aram(self) -> bool {
-        matches!(self, Scenario::Aram | Scenario::Mayhem | Scenario::Hyper)
+    /// A full match with champion select, structures and a winner: ARAM and its variants on
+    /// The Bridge, Classic on Crossroads.
+    pub fn is_match(self) -> bool {
+        matches!(self, Scenario::Aram | Scenario::Mayhem | Scenario::Hyper | Scenario::Classic)
     }
 }
 
@@ -333,6 +340,7 @@ impl ServerCore {
                     items: p.items,
                     augments: p.augments,
                     respawn_ds: (respawn * 10.0).ceil().min(u16::MAX as f32) as u16,
+                    spell_f: u.state.progress.spell_f,
                 })
             })
             .take(msg::MAX_SCORE_ROWS)
@@ -697,7 +705,10 @@ impl ServerCore {
                     collision_radius: u.collision_radius.round().clamp(0.0, 255.0) as u8,
                     gameplay_radius: u.gameplay_radius.round().clamp(0.0, 255.0) as u8,
                     protected: u.protected,
+                    recalling: st.recalling(),
+                    plates: u.plates,
                     champion: u.champion,
+                    monster: u.monster,
                     minion: (u.kind == UnitKind::Minion)
                         .then(|| MinionKind::from_attack_range(u.attack.map_or(0.0, |a| a.range))),
                     augments: if u.champion.is_some() { st.progress.augments } else { [0; mftr_sim::augments::SLOTS] },
@@ -972,6 +983,8 @@ pub struct BotMatch {
     pub ticks: u32,
     pub champion_kills: u32,
     pub structures_destroyed: u32,
+    /// Jungle monsters killed by each team's champions (blue, red).
+    pub monsters_killed: [u32; 2],
     /// Structures that fell: when, whose, what, tier.
     pub falls: Vec<(Tick, Team, mftr_sim::UnitKind, u8)>,
     pub replay: Replay,
@@ -982,6 +995,7 @@ pub struct BotMatch {
 pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
     let mut core = ServerCore::new(ServerConfig { record: true, ..cfg }, 0.0);
     let (mut kills, mut structures) = (0, 0);
+    let mut monsters = [0u32; 2];
     let mut falls = Vec::new();
     for _ in 0..max_ticks {
         let k = core.game.world.tick().next();
@@ -991,11 +1005,16 @@ pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
         }
         let (events, _) = core.game.step(due);
         for e in &events {
-            if let SimEvent::Died { unit, .. } = e
+            if let SimEvent::Died { unit, killer, .. } = e
                 && let Some(u) = core.game.world.unit(*unit)
             {
                 match u.kind {
                     mftr_sim::UnitKind::Champion => kills += 1,
+                    mftr_sim::UnitKind::Monster => {
+                        if let Some(k) = core.game.world.unit(*killer).filter(|k| k.team != Team::Neutral) {
+                            monsters[k.team as usize] += 1;
+                        }
+                    }
                     kind if kind.is_structure() => {
                         structures += 1;
                         falls.push((k, u.team, kind, u.tier));
@@ -1011,6 +1030,7 @@ pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
                 ticks: core.game.world.tick().0,
                 champion_kills: kills,
                 structures_destroyed: structures,
+                monsters_killed: monsters,
                 falls,
                 replay: core.game.replay(),
             };
@@ -1021,6 +1041,7 @@ pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
         ticks: core.game.world.tick().0,
         champion_kills: kills,
         structures_destroyed: structures,
+        monsters_killed: monsters,
         falls,
         replay: core.game.replay(),
     }
