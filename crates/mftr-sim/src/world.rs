@@ -862,6 +862,9 @@ pub struct Unit {
     pub tier: u8,
     /// A structure behind one that still stands: can't be hurt. Recomputed every tick.
     pub protected: bool,
+    /// Damage from champions is multiplied by this (structures, late in a match: D55).
+    /// Recomputed every tick; 1 for everything else.
+    pub champion_damage_taken: f32,
     /// The level, items and augments `stats` and `attack` were computed for (champions:
     /// recomputed when any of them changes).
     pub stats_for: StatsKey,
@@ -887,6 +890,7 @@ impl Unit {
             attack: None,
             tier: 0,
             protected: false,
+            champion_damage_taken: 1.0,
             stats_for: (1, [0; INVENTORY], [0; augments::SLOTS], augments::Growth::NONE),
         }
     }
@@ -1180,11 +1184,19 @@ pub const CHAMPION_GAMEPLAY_RADIUS: f32 = 65.0;
 pub const MINION_MOVE_SPEED: f32 = 325.0;
 pub const TURRET_COLLISION_RADIUS: f32 = 60.0;
 pub const TURRET_GAMEPLAY_RADIUS: f32 = 80.0;
-/// Champion respawn at level 1 (01 §12): 6 s, +1.5 s per level *(start)*.
+/// Champion respawn at level 1 (the Duel Sandbox, where champions stay level 1): 6 s.
 pub const CHAMPION_RESPAWN: SimDuration = SimDuration::from_millis(6000);
+/// Respawn by level from 2 (D55, the reference ARAM's timers): 13 s at level 2 up to 40 s at
+/// 16, then 2 s more per level.
+const RESPAWN_S: [u8; 16] = [11, 13, 15, 17, 19, 21, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40];
 
 pub fn respawn_time(level: u8) -> SimDuration {
-    SimDuration(CHAMPION_RESPAWN.0 + SimDuration::from_millis(1500).0 * level.saturating_sub(1) as u64)
+    if level <= 1 {
+        return CHAMPION_RESPAWN;
+    }
+    let i = level as usize - 1;
+    let s = RESPAWN_S.get(i).copied().map_or(40 + 2 * (i as u64 + 1 - RESPAWN_S.len() as u64), u64::from);
+    SimDuration::from_millis(s * 1000)
 }
 pub const MINION_RESPAWN: SimDuration = SimDuration::from_millis(12_000);
 
@@ -1436,7 +1448,7 @@ impl World {
         for p in placements {
             self.spawn_placement(p);
         }
-        self.game = MatchState::default();
+        self.game = MatchState { started_at: SimTime::end_of(self.tick), ..MatchState::default() };
         if self.map.layout.lanes[0].len() > 1 {
             self.game.next_wave_at = Some(SimTime::end_of(self.tick).plus(lane::FIRST_WAVE));
         }
@@ -1462,6 +1474,11 @@ impl World {
         self.start_match();
     }
 
+    /// Seconds since the match began, at `t`.
+    pub fn match_secs(&self, t: SimTime) -> f32 {
+        t.secs_since(self.game.started_at).max(0.0)
+    }
+
     /// The match on a lane map: waves, recent aggression, winner.
     pub fn game(&self) -> &MatchState {
         &self.game
@@ -1480,6 +1497,9 @@ impl World {
     fn spawn_wave(&mut self) {
         let n = self.game.waves_spawned;
         let layout = self.map.layout.clone();
+        // Minions grow stronger and faster as the match goes on (D55).
+        let secs = self.match_secs(SimTime::end_of(self.tick));
+        let (upgrades, speed) = (lane::minion_upgrades(secs) as f32, lane::minion_speed(secs));
         for team in [Team::Blue, Team::Red] {
             // An enemy Gatehouse down (until it respawns): this team's wave brings a super minion.
             let empowered =
@@ -1491,11 +1511,19 @@ impl World {
             for (i, kind) in MatchState::wave(n, empowered).into_iter().enumerate() {
                 let (row, col) = ((i / 3) as f32, (i % 3) as f32 - 1.0);
                 let pos = spawn - ahead * (row * 80.0) + side * (col * 70.0);
-                self.spawn_minion(kind, team, pos, Some(Brain::Laner { next: 0 }));
+                let id = self.spawn_minion(kind, team, pos, Some(Brain::Laner { next: 0 }));
+                let (health, damage) = lane::minion_upgrade(kind);
+                if let Some(u) = self.units.iter_mut().find(|u| u.id == id) {
+                    u.stats.max_health += health * upgrades;
+                    u.stats.attack_damage += damage * upgrades;
+                    u.stats.move_speed = speed;
+                    u.state.health = u.stats.max_health;
+                    u.state.move_speed = speed;
+                }
             }
         }
         self.game.waves_spawned += 1;
-        self.game.next_wave_at = self.game.next_wave_at.map(|t| t.plus(lane::WAVE_INTERVAL));
+        self.game.next_wave_at = self.game.next_wave_at.map(|t| t.plus(lane::wave_interval(secs)));
         // Turrets hit harder as the match goes on.
         let damage = lane::turret_damage(self.game.waves_spawned);
         for u in self.units.iter_mut().filter(|u| u.kind == UnitKind::Turret) {
@@ -1584,6 +1612,8 @@ impl World {
             }
         }
         lane::update_protection(&mut self.units);
+        let secs = self.match_secs(SimTime::end_of(self.tick));
+        lane::update_structure_amp(&mut self.units, secs);
         if !prediction && self.game.winner.is_none() && self.game.next_wave_at.is_some_and(|w| w <= s0) {
             self.spawn_wave();
         }
@@ -2717,7 +2747,8 @@ fn damage_amp(units: &[Unit], owner: UnitId, target: UnitId, ability: bool, rng:
     if o.kind != UnitKind::Champion {
         return 1.0;
     }
-    let mut amp = 1.0;
+    // Structures take more from champions late in a match (D55).
+    let mut amp = t.champion_damage_taken;
     if o.gameplay_radius < CHAMPION_GAMEPLAY_RADIUS && t.gameplay_radius > o.gameplay_radius {
         amp *= augments::PEBBLE_AMP;
     }
@@ -4066,7 +4097,7 @@ mod tests {
         assert!(died - d.len() > 30, "waves should fight: {} minion deaths", died - d.len());
         assert!(d.iter().all(|(k, ..)| *k == UnitKind::Minion), "only minions die: {d:?}");
         assert!(w.game().winner.is_none());
-        assert_eq!(w.game().waves_spawned, 5, "0:15, 0:45, 1:15, 1:45, 2:15");
+        assert_eq!(w.game().waves_spawned, 4, "0:50, 1:15, 1:40, 2:05");
         // Lane minions stay on the lane (nobody wandered off into a corner).
         for u in w.units().iter().filter(|u| u.kind == UnitKind::Minion) {
             let across = crate::map::bridge_lane_point(u.state.pos).y;
@@ -4182,7 +4213,8 @@ mod tests {
         let s = w.units().iter().find(|u| u.attack.is_some_and(|a| a.range == 170.0)).unwrap();
         assert_eq!(
             (s.stats.max_health, s.stats.armor, s.collision_radius, s.gameplay_radius),
-            (1500.0, 100.0, 45.0, 80.0)
+            // The first wave comes at 0:50, after one upgrade (+100 health for a super).
+            (1600.0, 100.0, 45.0, 80.0)
         );
     }
 
@@ -4980,7 +5012,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0x91e2_43f3_1c8f_18c1;
+    const GOLDEN_HASH_ARENA: u64 = 0xd75b_5758_ad30_7ec1;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -5037,7 +5069,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x650e_b09f_e5ec_ead0;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x9d9b_efc1_db5e_28b1;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -5108,5 +5140,5 @@ mod tests {
 
     /// Recorded on x86_64-pc-windows-msvc when facing, follow-throughs and the input buffer
     /// joined the state (A2). CI checks Linux, macOS (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x9096_3d59_9916_a899;
+    const GOLDEN_HASH: u64 = 0xf584_8818_daaa_6df9;
 }
