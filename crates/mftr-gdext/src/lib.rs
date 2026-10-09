@@ -537,6 +537,7 @@ impl MatchClient {
             }
             d.set("recipe", &recipe);
             d.set("consumable", items::consumable(it.id).is_some());
+            d.set("lines", &item_lines(it));
             d.set("affordable", p.is_some_and(|p| p.gold >= price));
             d.set("owned", inv.contains(&it.id));
             out.push(&d.to_variant());
@@ -1681,7 +1682,79 @@ fn item_text(it: &items::Item) -> String {
         )),
         items::Passive::None => {}
     }
+    if let Some(active) = consumable_text(it) {
+        parts.push(active);
+    }
     parts.join(", ")
+}
+
+/// A consumable's active, in words.
+fn consumable_text(it: &items::Item) -> Option<String> {
+    let (heal, ms, charges, refills) = items::consumable(it.id)?;
+    let secs = ms / 1000;
+    Some(if refills {
+        format!("Active: heals {heal} over {secs} s; {charges} charges, refilled at the fountain")
+    } else {
+        format!("Active: heals {heal} over {secs} s; up to {charges} stack in a slot")
+    })
+}
+
+/// An item's tooltip lines, each with what it is (a stat's key, "passive" or "active") so the
+/// client colors them by stat.
+fn item_lines(it: &items::Item) -> VarArray {
+    let b = &it.bonus;
+    let mut out = VarArray::new();
+    let mut add = |text: String, kind: &str| {
+        let mut d = VarDictionary::new();
+        d.set("text", text.as_str());
+        d.set("kind", kind);
+        out.push(&d.to_variant());
+    };
+    let flat = [
+        (b.health, "health", "hp"),
+        (b.health_regen, "health per second", "hp"),
+        (b.armor, "armor", "armor"),
+        (b.magic_resist, "magic resist", "mr"),
+        (b.attack_damage, "attack damage", "ad"),
+        (b.ability_power, "ability power", "ap"),
+        (b.ability_haste, "ability haste", "haste"),
+        (b.move_speed, "move speed", "ms"),
+    ];
+    for (v, name, kind) in flat {
+        if v != 0.0 {
+            add(format!("+{v} {name}"), kind);
+        }
+    }
+    let pct = [
+        (b.attack_speed, "attack speed", "as"),
+        (b.life_steal, "life steal", "lifesteal"),
+        (b.move_speed_pct, "move speed", "ms"),
+        (b.ability_power_pct, "ability power", "ap"),
+    ];
+    for (v, name, kind) in pct {
+        if v != 0.0 {
+            add(format!("+{}% {name}", (v * 100.0).round()), kind);
+        }
+    }
+    match it.passive {
+        items::Passive::OnHitMagic { base, ap_ratio } => add(
+            format!("Passive: basic attacks deal {base} (+{}% AP) magic damage", (ap_ratio * 100.0).round()),
+            "passive",
+        ),
+        items::Passive::Lifeline { shield, threshold, cooldown_ms, .. } => add(
+            format!(
+                "Passive: a {shield} shield when you fall below {}% health ({} s cooldown)",
+                (threshold * 100.0).round(),
+                cooldown_ms / 1000
+            ),
+            "passive",
+        ),
+        items::Passive::None => {}
+    }
+    if let Some(active) = consumable_text(it) {
+        add(active, "active");
+    }
+    out
 }
 
 /// A Stat Anvil's bonus as text: "+10 attack damage", "+6% move speed".

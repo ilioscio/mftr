@@ -102,6 +102,22 @@ func show_for(info: Dictionary, key: String, level_key: String, anchor: Rect2, b
 	position = pos
 
 
+## Shows a tooltip written by `fill` (called with the RichTextLabel when `key` changes) above
+## `anchor`: items, augments.
+func show_custom(key: String, fill: Callable, anchor: Rect2, bounds: Vector2) -> void:
+	if key != _shown_key or not visible:
+		_shown_key = key
+		_text.clear()
+		fill.call(_text)
+		reset_size()
+	visible = true
+	var sz := get_combined_minimum_size()
+	var pos := Vector2(anchor.position.x + anchor.size.x / 2.0 - sz.x / 2.0, anchor.position.y - sz.y - 14.0)
+	pos.x = clampf(pos.x, 8.0, bounds.x - sz.x - 8.0)
+	pos.y = maxf(pos.y, 8.0)
+	position = pos
+
+
 func _build(info: Dictionary, key: String, level_key: String) -> void:
 	var t := _text
 	t.clear()

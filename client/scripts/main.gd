@@ -6,7 +6,7 @@ extends Node3D
 ## listed with their game type), how to join (play, spectate or the blind playtest) and a champion.
 ## User args (after `--`) skip the menu: a server address (`host:port#fingerprint` pins the
 ## server's key, otherwise it is trusted on first use), `--champion NAME`,
-## `--spectate` to watch (Tab cycles champions), `--shot-lobby` for a champion-select capture,
+## `--spectate` to watch (N cycles champions), `--shot-lobby` for a champion-select capture,
 ## `--shot <file.png>` / `--shot-at <seconds>` / `--shot-shop` for scripted screenshots (`--zoom <factor>` brings the camera closer, `--look X,Y` aims it at a map point; `--shot-menu`
 ## captures the start menu, `--hover-slot N` shows an ability's tooltip, `--keep-points` leaves
 ## the starting points unspent, `--shot-charge` fights in mid, `--shot-numbers` shows sample
@@ -63,6 +63,10 @@ var _hud_dt := 0.0
 var _bold: FontVariation
 const Hud := preload("res://scripts/hud.gd")
 const AbilityTooltip := preload("res://scripts/ability_tooltip.gd")
+const Windows := preload("res://scripts/windows.gd")
+const GameCursor := preload("res://scripts/cursor.gd")
+var _item_boxes: Array[Rect2] = []        # the HUD's inventory slots this frame
+var _augment_rows := []                   # [Rect2, augment] above the HUD, for hover
 var show_net_graph := false             # F1: the full network graph (the HUD shows fps and ping)
 var proxies_enabled := true
 var attack_move_armed := false
@@ -114,6 +118,7 @@ func _ready() -> void:
 	portraits = preload("res://scripts/portraits.gd").new()
 	add_child(portraits)
 	portraits.setup(func(c: String): return _model_for(c), champion_model, CHAMPION_COLORS)
+	portraits.rendered.connect(_on_portrait)
 	vfx = preload("res://scripts/vfx.gd").new()
 	add_child(vfx)
 	sfx = preload("res://scripts/sfx.gd").new()
@@ -160,6 +165,14 @@ func _ready() -> void:
 		elif args[i] == "--shot-settings" and i + 1 < args.size():
 			_shot_settings = int(args[i + 1])
 			i += 1
+		elif args[i] == "--shot-tab":
+			_shot_tab = true
+		elif args[i] == "--dump-cursors" and i + 1 < args.size():
+			for state in ["default", "enemy", "ally", "attack"]:
+				GameCursor._make(state)[0].save_png("%s/cursor_%s.png" % [args[i + 1], state])
+			print("MFTR: cursors saved to ", args[i + 1])
+			get_tree().quit()
+			return
 		elif args[i] == "--shot-numbers":
 			_shot_numbers = true
 		elif args[i] == "--shot-charge":
@@ -282,6 +295,7 @@ var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for
 var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
 var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
 var _shot_settings := -1                  # `--shot-settings N`: open Settings on tab N
+var _shot_tab := false                    # `--shot-tab`: hold the match breakdown open
 var _shot_numbers := false                # `--shot-numbers`: sample damage numbers, for review
 var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
@@ -342,7 +356,7 @@ func _update_shot(delta: float) -> void:
 		# Into the fight: keep attack-moving to mid, casting at whatever's ahead.
 		settings.camera_locked = true
 		if fmod(_shot_timer, 1.0) < delta:
-			client.attack_move(size / 2.0)
+			client.attack_move(own + inward * 9000.0)  # into the enemy's side, where the fight is
 			var aim := own + inward * 600.0
 			client.cast(int(_shot_timer) % 3, aim)
 	elif _shot_numbers and _shot_moved and _shot_timer <= _shot_at and fmod(_shot_timer, 0.18) < delta and own_body != null:
@@ -452,7 +466,11 @@ func _build_world() -> void:
 	overlay.draw.connect(_draw_overlay)
 	hud.add_child(overlay)
 	ability_tip = preload("res://scripts/ability_tooltip.gd").new()
-	hud.add_child(ability_tip)
+	# Tooltips over everything, the windows included.
+	var tips := CanvasLayer.new()
+	tips.layer = 10
+	add_child(tips)
+	tips.add_child(ability_tip)
 	net_label = Label.new()
 	net_label.position = Vector2(16, 16)
 	net_label.add_theme_font_size_override("font_size", 16)
@@ -1066,6 +1084,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			client.attack_move(p)
 			_show_click_marker(_to_world(p), ENEMY_COLOR)
 		return
+	# Items 1–6: their actives (a potion).
+	for slot in 6:
+		if event.is_action_pressed("item_%d" % (slot + 1), false, true):
+			client.use_item(slot)
+			return
 	# Level-ups (default Alt + Q/W/E/R, 01 §13) before casts: both match exactly, modifiers
 	# included, so Alt+Q never also casts Q.
 	for slot in 4:
@@ -1144,6 +1167,10 @@ func _process(delta: float) -> void:
 	_update_shop(delta)
 	_update_lobby(delta, phase)
 	_update_loading(delta)
+	_update_anvil(playing)
+	_update_scoreboard(delta, playing)
+	_update_recap(playing)
+	_update_cursor(playing)
 	_save_session(delta, playing)
 	var spectating: bool = playing and client.is_spectator()
 	if spectating:
@@ -2048,7 +2075,7 @@ func _draw_overlay() -> void:
 	var font := ThemeDB.fallback_font
 	if client.phase() == "playing" and client.is_spectator():
 		var who: String = remote_info[spectate_target].champion if remote_info.has(spectate_target) else "the map"
-		overlay.draw_string(font, Vector2(0, overlay.size.y - 40), "Spectating %s   —   Tab: next champion" % who, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 22, Color.WHITE)
+		overlay.draw_string(font, Vector2(0, overlay.size.y - 40), "Spectating %s   —   N: next champion   ·   Tab: match breakdown" % who, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x, 22, Color.WHITE)
 	if own_body != null and own_body.visible:
 		var hp: float = own_status.get("health", 0.0)
 		var mx: float = own_status.get("max_health", 1.0)
@@ -2298,6 +2325,14 @@ func _draw_bottom_hud(font: Font) -> void:
 	var hp_text := "%d / %d" % [roundi(hp), roundi(mx)]
 	if shield > 0.0:
 		hp_text += "  +%d" % roundi(shield)
+	var potion: float = own_status.get("potion", 0.0)
+	if potion > 0.0:
+		# A potion working: its icon and the seconds left, at the bar's left end.
+		var pi := hb.size.y + 4.0 * k
+		var pot: Dictionary = _catalog.get(27, {})
+		if not pot.is_empty():
+			overlay.draw_texture_rect(ItemIcons.icon(pot), Rect2(hb.position + Vector2(2.0 * k, -2.0 * k), Vector2(pi, pi)), false)
+		Hud.text(overlay, font, hb.position + Vector2(pi + 6.0 * k, hb.size.y / 2.0 + 5.0 * k), "%d s" % ceili(potion), roundi(12.0 * k), Color(0.6, 1.0, 0.65))
 	Hud.text(overlay, bold, hb.position + Vector2(0, hb.size.y / 2.0 + 5.0 * k), hp_text, roundi(14.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, hb.size.x)
 	x += abil_w + pad
 
@@ -2424,13 +2459,329 @@ func _update_ability_tip() -> void:
 		for i in _ability_boxes.size():
 			if _ability_boxes[i].has_point(m):
 				slot = i
-		if slot < 0 and _shot_hover >= 0 and _shot_hover < _ability_boxes.size():
+		if slot < 0 and _shot_hover >= 0 and _shot_hover < mini(6, _ability_boxes.size()):
 			slot = _shot_hover
+	if slot < 0 and not own_status.is_empty() and overlay.visible:
+		var m := overlay.get_local_mouse_position()
+		for i in _item_boxes.size():
+			var id: int = own_status.items[i] if i < own_status.items.size() else 0
+			if (_item_boxes[i].has_point(m) or _shot_hover == 6 + i) and id != 0 and _catalog.has(id):
+				var it: Dictionary = _catalog[id]
+				var n: int = own_status.get("charges", [])[i] if i < own_status.get("charges", []).size() else 0
+				var key := "item:%d:%d" % [id, n]
+				ability_tip.show_custom(key, func(t: RichTextLabel): _item_tooltip(t, it, n, settings.primary_binding("item_%d" % (i + 1))), _item_boxes[i], overlay.size)
+				return
+		for row in _augment_rows:
+			if row[0].has_point(m):
+				var a: Dictionary = row[1]
+				ability_tip.show_custom("aug:%s:%s" % [a.name, a.get("progress", "")], func(t: RichTextLabel): _augment_tooltip(t, a), row[0], overlay.size)
+				return
 	if slot < 0:
 		ability_tip.hide()
 		return
 	var level_key: String = settings.primary_binding(LEVEL_ACTIONS[slot]) if slot < 4 else ""
 	ability_tip.show_for(client.ability_info(slot), settings.primary_binding(SLOT_ACTIONS[slot]), level_key, _ability_boxes[slot], overlay.size)
+
+
+## Item stat colors, the way the genre colors them.
+const STAT_COLORS := {
+	"ad": "ff9a3c", "ap": "8f9cff", "hp": "5fe08a", "armor": "e8b04f", "mr": "6fb6ff",
+	"as": "ffd24a", "haste": "d6dbe2", "ms": "d6dbe2", "lifesteal": "ff6f7a", "passive": "c9a24a",
+	"active": "7ee07e",
+}
+
+
+## An item's tooltip: icon and name, its cost, its stats colored by stat, its passive and active.
+func _item_tooltip(t: RichTextLabel, it: Dictionary, charges: int, key: String) -> void:
+	t.add_image(ItemIcons.icon(it), 36, 36)
+	var tier_color: String = ["d6dbe2", "8fd8c8", "f2d27a"][clampi(int(it.tier), 0, 2)]
+	t.append_text("  [font_size=19][b][color=#%s]%s[/color][/b][/font_size]" % [tier_color, it.name])
+	t.append_text("\n[color=#ffd56b]%d gold[/color]" % it.cost)
+	if it.get("consumable", false):
+		t.append_text("[color=#8a93a0]   ·   %d charge%s   ·   [%s][/color]" % [charges, "" if charges == 1 else "s", key])
+	t.append_text("\n")
+	for line in it.get("lines", []):
+		var c: String = STAT_COLORS.get(line.kind, "d6dbe2")
+		t.append_text("\n[color=#%s]%s[/color]" % [c, line.text])
+
+
+## An augment's tooltip: its name in its tier's color, the tier, what it does, its progress.
+func _augment_tooltip(t: RichTextLabel, a: Dictionary) -> void:
+	var c: String = _tier_color(a.tier).to_html(false)
+	t.append_text("[font_size=19][b][color=#%s]◆ %s[/color][/b][/font_size]" % [c, a.name])
+	t.append_text("\n[color=#8a93a0]%s augment[/color]\n\n%s" % [a.tier, a.get("text", "")])
+	if a.has("progress"):
+		t.append_text("\n\n[color=#7ee07e]Progress: %s[/color]" % a.progress)
+
+
+## ---- The match breakdown (hold Tab) ----------------------------------------------------------
+## Every champion: portrait, level, score, minions killed, items and augments (hover them), and
+## the respawn timer of the dead, by team; the match clock on top. Movable like the others.
+
+var score_panel: PanelContainer
+var _score_sig := ""
+var _score_refresh := 0.0
+var _score_timers := {}                    # unit -> its respawn Label
+
+
+func _update_scoreboard(delta: float, playing: bool) -> void:
+	var show := playing and (Input.is_action_pressed("scoreboard") or _shot_tab) and (menu_panel == null)
+	if not show:
+		if score_panel != null:
+			score_panel.visible = false
+		return
+	if score_panel == null:
+		var made := _panel(980)
+		score_panel = made[0]
+		score_panel.set_meta("box", made[1])
+		Windows.make_movable(score_panel, "scoreboard", settings)
+	score_panel.visible = true
+	_score_refresh -= delta
+	if _score_refresh <= 0.0:
+		_score_refresh = 0.25
+		_fill_scoreboard()
+	Windows.place(score_panel, "scoreboard", settings, Vector2((overlay.size.x - score_panel.size.x) / 2.0, 70.0), overlay.size)
+
+
+func _fill_scoreboard() -> void:
+	var rows: Array = client.scoreboard()
+	var box: VBoxContainer = score_panel.get_meta("box")
+	var t := client.match_seconds()
+	# Rebuilt only when something but the timers changed (hover tooltips stay put).
+	portraits.prepare(rows.map(func(r): return r.champion))
+	var sig := str(rows.map(func(r): return [r.kills, r.deaths, r.assists, r.cs, r.level, r.items, r.augments.size(), r.respawn > 0.0])) + str(_portraits_seen)
+	if sig != _score_sig:
+		_score_sig = sig
+		_score_timers.clear()
+		for c in box.get_children():
+			c.queue_free()
+		var head := HBoxContainer.new()
+		var title := Label.new()
+		title.text = "Match breakdown"
+		title.theme_type_variation = "TitleLabel"
+		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		head.add_child(title)
+		var clock := Label.new()
+		clock.name = "Clock"
+		clock.theme_type_variation = "TitleLabel"
+		head.add_child(clock)
+		box.add_child(head)
+		for ally in [true, false]:
+			var kills := 0
+			for r in rows:
+				if r.ally == ally:
+					kills += int(r.kills)
+			var team := Label.new()
+			team.text = "%s   ·   %d kills" % ["YOUR TEAM" if ally else "ENEMY TEAM", kills]
+			team.theme_type_variation = "HeaderLabel"
+			team.add_theme_color_override("font_color", OWN_COLOR.lightened(0.25) if ally else ENEMY_COLOR.lightened(0.15))
+			box.add_child(team)
+			var grid := GridContainer.new()
+			grid.columns = 8
+			grid.add_theme_constant_override("h_separation", 14)
+			grid.add_theme_constant_override("v_separation", 4)
+			for title_text in ["", "", "", "K / D / A", "CS", "ITEMS", "AUGMENTS", ""]:
+				var h := Label.new()
+				h.text = title_text
+				h.theme_type_variation = "HintLabel"
+				grid.add_child(h)
+			for r in rows:
+				if r.ally == ally:
+					_score_row(grid, r)
+			box.add_child(grid)
+	var clock_label = box.find_child("Clock", true, false)
+	if clock_label != null:
+		clock_label.text = "%d:%02d" % [int(t) / 60, int(t) % 60]
+	for r in rows:
+		var l: Label = _score_timers.get(r.unit)
+		if l != null and is_instance_valid(l):
+			l.text = "%d s" % ceili(r.respawn) if r.respawn > 0.0 else ""
+
+
+func _score_row(grid: GridContainer, r: Dictionary) -> void:
+	var face := TextureRect.new()
+	face.texture = portraits.portrait(r.champion, "round")
+	face.custom_minimum_size = Vector2(38, 38)
+	face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	face.modulate = Color(0.45, 0.45, 0.5) if r.respawn > 0.0 else Color.WHITE
+	grid.add_child(face)
+	var level := Label.new()
+	level.text = "%d" % r.level
+	level.add_theme_font_override("font", _bold_font())
+	grid.add_child(level)
+	var name := Label.new()
+	name.text = "%s%s" % [r.champion, "  (you)" if r.you else ("  ·  bot" if r.bot else "")]
+	name.add_theme_font_override("font", _bold_font())
+	if r.you:
+		name.add_theme_color_override("font_color", Color(1.0, 0.88, 0.6))
+	name.custom_minimum_size = Vector2(170, 0)
+	grid.add_child(name)
+	var kda := Label.new()
+	kda.text = "%d / %d / %d" % [r.kills, r.deaths, r.assists]
+	kda.add_theme_font_override("font", _bold_font())
+	grid.add_child(kda)
+	var cs := Label.new()
+	cs.text = "%d" % r.cs
+	grid.add_child(cs)
+	var items := HBoxContainer.new()
+	items.add_theme_constant_override("separation", 3)
+	for id in r.items:
+		var cell := TextureRect.new()
+		cell.custom_minimum_size = Vector2(30, 30)
+		cell.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		if id != 0 and _catalog.has(id):
+			cell.texture = ItemIcons.icon(_catalog[id])
+			cell.tooltip_text = "%s\n%s" % [_catalog[id].name, _catalog[id].stats]
+		else:
+			var empty := StyleBoxFlat.new()
+			empty.bg_color = Color(0.06, 0.07, 0.09)
+			cell.texture = null
+			cell.self_modulate = Color(0.3, 0.32, 0.36)
+		items.add_child(cell)
+	grid.add_child(items)
+	var augs := HBoxContainer.new()
+	augs.add_theme_constant_override("separation", 4)
+	for a in r.augments:
+		var pip := Label.new()
+		pip.text = "◆"
+		pip.add_theme_font_size_override("font_size", 20)
+		pip.add_theme_color_override("font_color", _tier_color(a.tier))
+		pip.tooltip_text = "%s  (%s)\n%s" % [a.name, a.tier, a.text]
+		pip.mouse_filter = Control.MOUSE_FILTER_STOP
+		augs.add_child(pip)
+	augs.custom_minimum_size = Vector2(110, 0)
+	grid.add_child(augs)
+	var timer := Label.new()
+	timer.add_theme_color_override("font_color", Color(1.0, 0.45, 0.4))
+	timer.custom_minimum_size = Vector2(44, 0)
+	_score_timers[r.unit] = timer
+	grid.add_child(timer)
+
+
+## ---- The death recap ---------------------------------------------------------------------------
+## While dead: exactly what killed us. Every hit of the fight, from the server's own damage
+## events (recap.rs): the total and how long it took, by damage type, by source, and by attack,
+## ability or effect, with the crowd control we were under. Movable.
+
+var recap_panel: PanelContainer
+var _recap_shown := ""
+const KIND_COLORS := {"physical": "ff9a3c", "magic": "6fb6ff", "true": "ffffff"}
+
+
+func _update_recap(playing: bool) -> void:
+	var dead: bool = playing and own_status.get("dead", false)
+	var r: Dictionary = client.death_recap() if dead else {}
+	if r.is_empty():
+		if recap_panel != null:
+			recap_panel.queue_free()
+			recap_panel = null
+		_recap_shown = ""
+		return
+	if recap_panel == null:
+		var made := _panel(440)
+		recap_panel = made[0]
+		recap_panel.set_meta("box", made[1])
+		Windows.make_movable(recap_panel, "recap", settings)
+	var key := "%s|%s|%s" % [r.killer, r.total, r.seconds]
+	if key != _recap_shown:
+		_recap_shown = key
+		_fill_recap(recap_panel.get_meta("box"), r)
+	var default := Vector2(overlay.size.x - recap_panel.size.x - 20.0, (overlay.size.y - recap_panel.size.y) / 2.0)
+	Windows.place(recap_panel, "recap", settings, default, overlay.size)
+
+
+func _fill_recap(box: VBoxContainer, r: Dictionary) -> void:
+	for c in box.get_children():
+		c.queue_free()
+	var title := Label.new()
+	title.text = "Killed by %s" % r.killer
+	title.theme_type_variation = "TitleLabel"
+	box.add_child(title)
+	var sum := RichTextLabel.new()
+	sum.bbcode_enabled = true
+	sum.fit_content = true
+	sum.scroll_active = false
+	sum.custom_minimum_size = Vector2(400, 0)
+	sum.append_text("[b]%d[/b] damage in [b]%.1f s[/b]" % [roundi(r.total), r.seconds])
+	if r.absorbed > 0.0:
+		sum.append_text("[color=#8a93a0]   (%d of it on shields)[/color]" % roundi(r.absorbed))
+	box.add_child(sum)
+	# Physical, magic and true, as one bar.
+	var bar := Control.new()
+	bar.custom_minimum_size = Vector2(400, 14)
+	var parts := [[r.physical, Color("ff9a3c")], [r.magic, Color("6fb6ff")], [r["true"], Color("f2f4f7")]]
+	var total: float = maxf(r.total, 1.0)
+	bar.draw.connect(func():
+		var x := 0.0
+		for p in parts:
+			var w: float = bar.size.x * p[0] / total
+			bar.draw_rect(Rect2(x, 0, w, bar.size.y), p[1])
+			x += w)
+	box.add_child(bar)
+	var legend := RichTextLabel.new()
+	legend.bbcode_enabled = true
+	legend.fit_content = true
+	legend.scroll_active = false
+	legend.append_text("[color=#ff9a3c]%d physical[/color]   [color=#6fb6ff]%d magic[/color]   [color=#f2f4f7]%d true[/color]" % [roundi(r.physical), roundi(r.magic), roundi(r["true"])])
+	box.add_child(legend)
+	var cc := []
+	for pair in [["stunned", "Stunned"], ["rooted", "Rooted"], ["slowed", "Slowed"]]:
+		if r[pair[0]] > 0.05:
+			cc.append("%s %.1f s" % [pair[1], r[pair[0]]])
+	if not cc.is_empty():
+		var ccl := Label.new()
+		ccl.text = "   ·   ".join(cc)
+		ccl.add_theme_color_override("font_color", Color(1.0, 0.82, 0.29))
+		box.add_child(ccl)
+	box.add_child(HSeparator.new())
+	for src in r.sources:
+		var head := HBoxContainer.new()
+		head.add_theme_constant_override("separation", 8)
+		var face := TextureRect.new()
+		face.custom_minimum_size = Vector2(30, 30)
+		face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		face.texture = portraits.portrait(src.champion, "round") if src.champion != "" else null
+		head.add_child(face)
+		var name := Label.new()
+		name.text = src.name + ("   (killing blow)" if src.killer else "")
+		name.add_theme_font_override("font", _bold_font())
+		name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		head.add_child(name)
+		var amount := Label.new()
+		amount.text = "%d" % roundi(src.total)
+		amount.add_theme_font_override("font", _bold_font())
+		head.add_child(amount)
+		box.add_child(head)
+		for line in src.lines:
+			var l := RichTextLabel.new()
+			l.bbcode_enabled = true
+			l.fit_content = true
+			l.scroll_active = false
+			l.custom_minimum_size = Vector2(400, 0)
+			var key: String = ("[%s] " % line.key) if line.key != "" else ""
+			var c: String = KIND_COLORS.get(line.kind, "d6dbe2")
+			l.append_text("      %s%s   [color=#%s]%d %s[/color]   [color=#8a93a0]%d hit%s[/color]" % [key, line.what, c, roundi(line.total), line.kind, line.hits, "" if line.hits == 1 else "s"])
+			box.add_child(l)
+
+
+## ---- The cursor --------------------------------------------------------------------------------
+
+func _update_cursor(playing: bool) -> void:
+	var state := "default"
+	if playing and get_viewport().gui_get_hovered_control() == null:
+		if attack_move_armed:
+			state = "attack"
+		elif hovered_body != null:
+			state = "enemy"
+		else:
+			var p = _cursor_ground()
+			if p != null:
+				for id in remote_info:
+					var u: Dictionary = remote_info[id]
+					if u.ally and u.champion != "" and u.pos.distance_to(p) < 90.0:
+						state = "ally"
+						break
+	GameCursor.set_state(state)
 
 
 func _update_net_graph() -> void:
@@ -2677,6 +3028,7 @@ const SHOP_GAP := Vector2(10, 26)        # between build-path nodes
 
 var shop_panel: PanelContainer
 var shop_title: Label
+var shop_anvil: Button
 var shop_inventory: HBoxContainer
 var shop_stats: Label
 var shop_undo: Button
@@ -2698,6 +3050,8 @@ func _toggle_shop() -> void:
 		_build_shop()
 	shop_panel.visible = not shop_panel.visible
 	_shop_refresh = 0.0
+	if shop_panel.visible:
+		Windows.place(shop_panel, "shop", settings, Vector2(16, 64), overlay.size)
 
 
 func _build_shop() -> void:
@@ -2713,9 +3067,19 @@ func _build_shop() -> void:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 8)
 	margin.add_child(v)
+	var top := HBoxContainer.new()
+	v.add_child(top)
 	shop_title = Label.new()
 	shop_title.theme_type_variation = "TitleLabel"
-	v.add_child(shop_title)
+	shop_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(shop_title)
+	# Mayhem: a Stat Anvil, for late gold.
+	shop_anvil = Button.new()
+	shop_anvil.focus_mode = Control.FOCUS_NONE
+	shop_anvil.theme_type_variation = "PrimaryButton"
+	shop_anvil.pressed.connect(func(): client.buy_anvil(); _shop_refresh = 0.0)
+	top.add_child(shop_anvil)
+	Windows.make_movable(shop_panel, "shop", settings)
 	var body := HBoxContainer.new()
 	body.add_theme_constant_override("separation", 14)
 	v.add_child(body)
@@ -2725,16 +3089,16 @@ func _build_shop() -> void:
 	grids.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grids.add_theme_constant_override("separation", 6)
 	body.add_child(grids)
-	var tiers := ["COMPONENTS", "UPGRADES AND BOOTS", "LEGENDARY"]
+	var tiers := ["CONSUMABLES  ·  use with 1–6", "COMPONENTS", "UPGRADES AND BOOTS", "LEGENDARY"]
 	var catalog: Array = client.shop_catalog()
 	for it in catalog:
 		item_names[it.id] = it.name
 		_catalog[it.id] = it
 	if _shop_pick == 0 and catalog.size() > 0:
 		_shop_pick = catalog[catalog.size() - 1].id
-	for tier in 3:
+	for group in 4:
 		var l := Label.new()
-		l.text = tiers[tier]
+		l.text = tiers[group]
 		l.theme_type_variation = "HeaderLabel"
 		grids.add_child(l)
 		var grid := GridContainer.new()
@@ -2743,7 +3107,8 @@ func _build_shop() -> void:
 		grid.add_theme_constant_override("v_separation", 6)
 		grids.add_child(grid)
 		for it in catalog:
-			if it.tier != tier:
+			var consumable: bool = it.get("consumable", false)
+			if (group == 0) != consumable or (group > 0 and it.tier != group - 1):
 				continue
 			var id: int = it.id
 			var b := Button.new()
@@ -2836,6 +3201,15 @@ func _update_shop(delta: float) -> void:
 	var open: bool = client.can_shop()
 	var gold: int = own_status.get("gold", 0)
 	shop_title.text = "Shop   ·   %d gold%s" % [gold, "" if open else "   (closed: return to your fountain, or shop while dead)"]
+	var mayhem: bool = own_status.get("mayhem", false)
+	shop_anvil.visible = mayhem
+	if mayhem:
+		var level: int = own_status.get("level", 1)
+		var need: int = own_status.get("anvil_level", 9)
+		var cost: float = own_status.get("anvil_cost", 750.0)
+		shop_anvil.text = "⚒  Stat Anvil  ·  %d" % roundi(cost)
+		shop_anvil.disabled = not open or level < need or gold < cost or not own_status.get("anvil_offer", []).is_empty()
+		shop_anvil.tooltip_text = "From level %d: a Silver, Gold or Prismatic anvil offers three stats; keep one for the match.%s" % [need, "" if level >= need else "  (You're level %d.)" % level]
 	for it in client.shop_catalog():
 		_catalog[it.id] = it
 		var b: Button = shop_buttons[it.id]
@@ -2932,15 +3306,21 @@ func _update_shop_detail(open: bool, inv: Array) -> void:
 	names.add_child(cost)
 	head.add_child(names)
 	_shop_detail.add_child(head)
-	var stats := Label.new()
-	stats.text = String(it.stats).replace(", ", "\n")
-	stats.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# Its stats, colored by stat like the tooltips.
+	var stats := RichTextLabel.new()
+	stats.bbcode_enabled = true
+	stats.fit_content = true
+	stats.scroll_active = false
 	stats.custom_minimum_size = Vector2(356, 0)
+	var lines := []
+	for line in it.get("lines", []):
+		lines.append("[color=#%s]%s[/color]" % [STAT_COLORS.get(line.kind, "d6dbe2"), line.text])
+	stats.append_text("\n".join(lines))
 	_shop_detail.add_child(stats)
 
 	_shop_detail.add_child(HSeparator.new())
 	var path := Label.new()
-	path.text = "BUILD PATH" if not it.recipe.is_empty() else "BUILD PATH  ·  a basic component"
+	path.text = "BUILD PATH" if not it.recipe.is_empty() else ("BUILD PATH  ·  a consumable" if it.get("consumable", false) else "BUILD PATH  ·  a basic component")
 	path.theme_type_variation = "HeaderLabel"
 	_shop_detail.add_child(path)
 	_shop_tree = Control.new()
@@ -3066,8 +3446,10 @@ func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 			item_names[it.id] = it.name
 			_catalog[it.id] = it
 	var inv: Array = own_status.items
+	var charges: Array = own_status.get("charges", [])
 	var I := Vector2(43.0, 43.0) * k
 	var gap := 5.0 * k
+	_item_boxes.clear()
 	for slot in 6:
 		var p := origin + Vector2((slot % 3) * (I.x + gap), (slot / 3) * (I.y + gap))
 		var box := Rect2(p, I)
@@ -3080,6 +3462,13 @@ func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 		elif id != 0:
 			overlay.draw_multiline_string(font, p + Vector2(4.0 * k, 15.0 * k), item_names.get(id, "?"), HORIZONTAL_ALIGNMENT_CENTER, I.x - 8.0 * k, roundi(11.0 * k), 2, Hud.TEXT)
 		overlay.draw_rect(box, Hud.GOLD if id != 0 else Color(0.25, 0.27, 0.31), false, 1.0 * k)
+		_item_boxes.append(box)
+		# Its key in the corner, and a stack's or a flask's charges.
+		var key: String = settings.primary_binding("item_%d" % (slot + 1))
+		overlay.draw_string(font, box.position + Vector2(3.0 * k, box.size.y - 3.0 * k), key, HORIZONTAL_ALIGNMENT_LEFT, -1, roundi(10.0 * k), Color(0.85, 0.87, 0.9, 0.8))
+		var n: int = charges[slot] if slot < charges.size() else 0
+		if id != 0 and _catalog.get(id, {}).get("consumable", false):
+			Hud.text(overlay, _bold_font(), Vector2(box.position.x, box.end.y - 3.0 * k), "%d" % n, roundi(14.0 * k), Color.WHITE if n > 0 else Color(1, 0.4, 0.35), HORIZONTAL_ALIGNMENT_RIGHT, box.size.x - 3.0 * k)
 	# Gold under the items.
 	var gy := origin.y + 2.0 * (I.y + gap) + 2.0 * k
 	var ic := 16.0 * k
@@ -3087,6 +3476,7 @@ func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 	Hud.text(overlay, _bold_font(), Vector2(origin.x + ic + 6.0 * k, gy + 13.0 * k), "%d" % own_status.gold, roundi(15.0 * k), Color(1.0, 0.84, 0.4))
 	# ARAM: Mayhem: the augments held, above the panel.
 	var held: Array = own_status.get("augments", [])
+	_augment_rows.clear()
 	for i in held.size():
 		var a: Dictionary = held[i]
 		var at := Vector2(origin.x, _bar_rect.position.y - 10.0 * k - 18.0 * k * (held.size() - 1 - i))
@@ -3094,6 +3484,8 @@ func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 		if a.has("progress"):
 			label += "  " + a.progress
 		Hud.text(overlay, font, at, label, roundi(14.0 * k), _tier_color(a.tier))
+		var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, roundi(14.0 * k)).x
+		_augment_rows.append([Rect2(at - Vector2(0, 14.0 * k), Vector2(w, 18.0 * k)), a])
 
 
 ## ---- Session, champion select and spectating (M2 slice 5) --------------------------------------
@@ -3162,8 +3554,6 @@ func _update_lobby(delta: float, phase: String) -> void:
 		lobby_box.add_theme_constant_override("separation", 14)
 		margin.add_child(lobby_box)
 		overlay.get_parent().add_child(lobby_panel)
-		if not portraits.rendered.is_connected(_on_portrait):
-			portraits.rendered.connect(_on_portrait)
 	_lobby_refresh -= delta
 	if _lobby_refresh > 0.0:
 		return
@@ -3521,7 +3911,7 @@ func _spectate_next() -> void:
 	spectate_target = ids[(i + 1) % ids.size()]
 
 
-## Spectators follow a champion (Tab: the next one), or look at the middle of the map.
+## Spectators follow a champion (N: the next one), or look at the middle of the map.
 func _update_spectator_camera() -> void:
 	if not remote_info.has(spectate_target):
 		spectate_target = -1
@@ -3815,6 +4205,7 @@ func _open_settings() -> void:
 		settings_panel = preload("res://scripts/settings_panel.gd").new()
 		settings_panel.setup(settings)
 		overlay.get_parent().add_child(settings_panel)
+		Windows.make_movable(settings_panel, "settings", settings)
 	settings_panel.open()
 
 
@@ -3981,12 +4372,14 @@ func _update_draft(playing: bool) -> void:
 			draft_panel = null
 		_draft_shown = ""
 		return
-	var can_reroll: bool = own_status.get("can_reroll", false)
-	var key := str(offer.map(func(c): return c.id)) + str(can_reroll)
+	var can_reroll: Array = own_status.get("can_reroll", [])
+	var golden: int = own_status.get("golden", -1)
+	var key := str(offer.map(func(c): return c.id)) + str(can_reroll) + str(golden)
 	if draft_panel == null:
 		var made := _panel(760)
 		draft_panel = made[0]
 		draft_box = made[1]
+		Windows.make_movable(draft_panel, "augments", settings)
 	if key != _draft_shown:
 		_draft_shown = key
 		for c in draft_box.get_children():
@@ -4000,20 +4393,81 @@ func _update_draft(playing: bool) -> void:
 		row.add_theme_constant_override("separation", 12)
 		draft_box.add_child(row)
 		for i in offer.size():
-			row.add_child(_augment_card(offer[i], i))
-		var reroll := Button.new()
-		reroll.text = "Reroll" if can_reroll else "Rerolled"
-		reroll.disabled = not can_reroll
-		reroll.focus_mode = Control.FOCUS_NONE
-		reroll.pressed.connect(func(): client.reroll_augments())
-		draft_box.add_child(reroll)
-	# Low on the screen, above the ability bar, so the fight stays visible.
-	draft_panel.position = Vector2((overlay.size.x - draft_panel.size.x) / 2.0, overlay.size.y - draft_panel.size.y - 150.0)
+			# Each choice rerolls once; a golden reroll rolls it one tier up.
+			var col := VBoxContainer.new()
+			col.add_theme_constant_override("separation", 6)
+			col.add_child(_augment_card(offer[i], i))
+			var can: bool = i < can_reroll.size() and can_reroll[i]
+			var reroll := Button.new()
+			var gold := i == golden
+			reroll.text = ("★  Golden reroll" if gold else "⟳  Reroll") if can else "Rerolled"
+			reroll.disabled = not can
+			reroll.focus_mode = Control.FOCUS_NONE
+			reroll.tooltip_text = "Rerolls this choice into a %s augment." % ("higher-tier" if gold else "different")
+			if gold:
+				reroll.theme_type_variation = "PrimaryButton"
+			var choice := i
+			reroll.pressed.connect(func(): client.reroll_augment(choice))
+			col.add_child(reroll)
+			row.add_child(col)
+		var hint := Label.new()
+		hint.text = "Drag this window anywhere: your abilities' tooltips stay in reach."
+		hint.theme_type_variation = "HintLabel"
+		draft_box.add_child(hint)
+	# Low on the screen, above the ability bar, so the fight stays visible (or where it was put).
+	var default := Vector2((overlay.size.x - draft_panel.size.x) / 2.0, overlay.size.y - draft_panel.size.y - 150.0)
+	Windows.place(draft_panel, "augments", settings, default, overlay.size)
+
+
+## A Stat Anvil's three choices (Mayhem), in a movable window like the draft.
+var anvil_panel: PanelContainer
+var _anvil_shown := ""
+
+
+func _update_anvil(playing: bool) -> void:
+	var offer: Array = own_status.get("anvil_offer", []) if playing else []
+	if offer.is_empty():
+		if anvil_panel != null:
+			anvil_panel.queue_free()
+			anvil_panel = null
+		_anvil_shown = ""
+		return
+	var key := str(offer)
+	if anvil_panel == null:
+		var made := _panel(700)
+		anvil_panel = made[0]
+		anvil_panel.set_meta("box", made[1])
+		Windows.make_movable(anvil_panel, "anvil", settings)
+	if key != _anvil_shown:
+		_anvil_shown = key
+		var box: VBoxContainer = anvil_panel.get_meta("box")
+		for c in box.get_children():
+			c.queue_free()
+		var title := Label.new()
+		title.text = "%s Stat Anvil: keep one" % offer[0].tier
+		title.theme_type_variation = "TitleLabel"
+		title.add_theme_color_override("font_color", _tier_color(offer[0].tier))
+		box.add_child(title)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		box.add_child(row)
+		for i in offer.size():
+			var card := Button.new()
+			card.custom_minimum_size = Vector2(210, 90)
+			card.focus_mode = Control.FOCUS_NONE
+			card.text = String(offer[i].text)
+			card.add_theme_font_size_override("font_size", 18)
+			card.add_theme_color_override("font_color", _tier_color(offer[i].tier))
+			var choice := i
+			card.pressed.connect(func(): client.pick_anvil(choice))
+			row.add_child(card)
+	var default := Vector2((overlay.size.x - anvil_panel.size.x) / 2.0, overlay.size.y - anvil_panel.size.y - 150.0)
+	Windows.place(anvil_panel, "anvil", settings, default, overlay.size)
 
 
 func _augment_card(a: Dictionary, choice: int) -> Button:
 	var card := Button.new()
-	card.custom_minimum_size = Vector2(230, 130)
+	card.custom_minimum_size = Vector2(230, 160)
 	card.focus_mode = Control.FOCUS_NONE
 	card.pressed.connect(func(): client.pick_augment(choice))
 	var margin := MarginContainer.new()
