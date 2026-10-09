@@ -124,6 +124,10 @@ pub struct RemoteUnit {
     pub gameplay_radius: u8,
     /// A structure that can't be hurt yet (an earlier one in its lane still stands).
     pub protected: bool,
+    /// A champion channeling a recall home.
+    pub recalling: bool,
+    /// A turret's plates left (3 bits).
+    pub plates: u8,
     pub champion: Option<ChampionId>,
     /// A minion's kind (2 bits, minions only): which model the client draws (A5).
     pub minion: Option<MinionKind>,
@@ -365,6 +369,7 @@ fn write_command(w: &mut BitWriter, c: &Command) {
             w.write(13, 4);
             w.write(choice as u64, 2);
         }
+        CommandKind::Recall => w.write(14, 4),
     }
 }
 
@@ -393,6 +398,7 @@ fn read_command(r: &mut BitReader) -> Result<Command, DecodeError> {
         11 => CommandKind::UseItem(r.read(3)? as u8),
         12 => CommandKind::BuyAnvil,
         13 => CommandKind::PickAnvil(r.read(2)? as u8),
+        14 => CommandKind::Recall,
         _ => return Err(DecodeError::Invalid("command kind")),
     };
     Ok(Command { player: PlayerId(0), seq, tick, sub, kind })
@@ -742,6 +748,12 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             w.write_u32(*xp);
             write_time(w, *at);
         }
+        SimEvent::PlatesBroken { unit, count, at } => {
+            w.write(17, 5);
+            w.write_u32(unit.0);
+            w.write(*count as u64, 3);
+            write_time(w, *at);
+        }
     }
 }
 
@@ -812,6 +824,7 @@ fn read_event_of(kind: u64, r: &mut BitReader) -> Result<SimEvent, DecodeError> 
         14 => SimEvent::Healed { unit: unit(r)?, amount: read_finite(r)?, at: read_time(r)? },
         15 => SimEvent::MatchEnded { winner: read_team(r)?, at: read_time(r)? },
         16 => SimEvent::Reward { unit: unit(r)?, gold: read_finite(r)?, xp: r.read_u32()?, at: read_time(r)? },
+        17 => SimEvent::PlatesBroken { unit: unit(r)?, count: r.read(3)? as u8, at: read_time(r)? },
         _ => return Err(DecodeError::Invalid("event kind")),
     })
 }
@@ -972,6 +985,7 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     w.write_u8(s.attacks);
     w.write_f32(s.potion_rate);
     write_time(w, s.potion_until);
+    write_time(w, s.recall_until);
 }
 
 fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
@@ -1108,6 +1122,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     };
     let attacks = r.read_u8()?;
     let (potion_rate, potion_until) = (read_finite(r)?, read_time(r)?);
+    let recall_until = read_time(r)?;
     let progress = Progress {
         level,
         xp,
@@ -1167,6 +1182,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         attacks,
         potion_rate,
         potion_until,
+        recall_until,
     })
 }
 
@@ -1239,9 +1255,12 @@ fn write_update(w: &mut BitWriter, u: &UnitUpdate) {
         w.write_u16(o.max_health);
         w.write_u16(o.shield);
         w.write(o.level as u64, 5);
+        w.write(o.plates.min(7) as u64, 3);
     }
     if u.mask & delta::FLAGS != 0 {
-        for f in [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected, o.slowed, o.recovering] {
+        for f in
+            [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected, o.slowed, o.recovering, o.recalling]
+        {
             w.write_bool(f);
         }
         w.write((o.attack_variant & 3) as u64, 2);
@@ -1263,6 +1282,8 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         collision_radius: 0,
         gameplay_radius: 0,
         protected: false,
+        recalling: false,
+        plates: 0,
         champion: None,
         minion: None,
         augments: [0; mftr_sim::augments::SLOTS],
@@ -1306,13 +1327,14 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
     if mask & delta::VITALS != 0 {
         (o.health, o.max_health, o.shield) = (r.read_u16()?, r.read_u16()?, r.read_u16()?);
         o.level = r.read(5)? as u8;
+        o.plates = r.read(3)? as u8;
     }
     if mask & delta::FLAGS != 0 {
-        let mut f = [false; 8];
+        let mut f = [false; 9];
         for b in f.iter_mut() {
             *b = r.read_bool()?;
         }
-        [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected, o.slowed, o.recovering] = f;
+        [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected, o.slowed, o.recovering, o.recalling] = f;
         o.attack_variant = r.read(2)? as u8;
     }
     Ok(UnitUpdate { mask, unit: o })
@@ -1934,6 +1956,7 @@ mod tests {
             attacks: 201,
             potion_rate: 8.0,
             potion_until: SimTime(77_000),
+            recall_until: SimTime(90_000),
         }
     }
 
@@ -2028,6 +2051,8 @@ mod tests {
             collision_radius: 35,
             gameplay_radius: 220,
             protected: true,
+            recalling: true,
+            plates: 3,
             champion,
             minion: (kind == UnitKind::Minion).then_some(MinionKind::Super),
             augments: if champion.is_some() { [24, 52, 0, 0] } else { [0; 4] },

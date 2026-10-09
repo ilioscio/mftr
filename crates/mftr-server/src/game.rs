@@ -405,6 +405,7 @@ fn kind_text(k: CommandKind) -> String {
         CommandKind::UseItem(slot) => format!("use {slot}"),
         CommandKind::BuyAnvil => "anvil".into(),
         CommandKind::PickAnvil(choice) => format!("pickanvil {choice}"),
+        CommandKind::Recall => "recall".into(),
     }
 }
 
@@ -426,6 +427,7 @@ fn parse_kind(f: &[&str]) -> Option<CommandKind> {
         "use" => CommandKind::UseItem(n(1)? as u8),
         "anvil" => CommandKind::BuyAnvil,
         "pickanvil" => CommandKind::PickAnvil(n(1)? as u8),
+        "recall" => CommandKind::Recall,
         _ => return None,
     })
 }

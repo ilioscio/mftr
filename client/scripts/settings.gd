@@ -41,6 +41,7 @@ const BINDINGS := [
 	["move", "Move / attack", "Mouse Right"],
 	["attack_move", "Attack-move (then click)", "A"],
 	["stop", "Stop", "S"],
+	["recall", "Recall (8 s home)", "B"],
 	["toggle_shop", "Open / close the shop", "G"],
 	["camera_lock", "Lock / unlock the camera", "Y"],
 	["camera_center", "Center the camera (hold)", "Space"],

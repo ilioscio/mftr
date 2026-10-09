@@ -480,6 +480,15 @@ impl MatchClient {
         }
     }
 
+    /// Recall (B): an 8 s channel home, cancelled by acting or being hit.
+    #[func]
+    fn recall(&mut self) {
+        let now = self.now();
+        if self.session.recall(now).is_some() {
+            self.send_input(now);
+        }
+    }
+
     /// Reroll choice 0–2 of the open augment draft (each once per draft).
     #[func]
     fn reroll_augment(&mut self, choice: i64) {
@@ -1062,6 +1071,9 @@ impl MatchClient {
             let charges: PackedInt32Array = s.progress.charges.iter().map(|c| *c as i32).collect();
             d.set("charges", &charges);
             d.set("potion", if s.potion_until > t { s.potion_until.secs_since(t) } else { 0.0 });
+            // Recalling: seconds left of the channel (0 when not), and its full length.
+            d.set("recall", if s.recalling() { s.recall_until.secs_since(t).max(0.0) } else { 0.0 });
+            d.set("recall_total", mftr_sim::world::RECALL.0 as f64 / mftr_sim::time::SUBTICKS_PER_SECOND as f64);
             d.set("can_undo", s.progress.undo_len > 0);
             d.set("hitbox", self.session.own_radius());
             // ARAM: Mayhem: held augments and the open draft.
@@ -1250,6 +1262,8 @@ impl MatchClient {
                 },
             );
             d.set("protected", u.protected);
+            d.set("recalling", u.recalling);
+            d.set("plates", u.plates as i64);
             d.set("champion", u.champion.map_or("", |c| c.def().name));
             d.set("health", u.health);
             d.set("max_health", u.max_health);

@@ -99,6 +99,10 @@ pub struct Layout {
     pub pacing: crate::lane::Pacing,
     /// The river's course, if the map has one (drawn by the client; walls bound it).
     pub river: Vec<Vec2>,
+    /// Outer turrets carry plates until 14:00 (`lane::PLATES`).
+    pub plating: bool,
+    /// Structures have backdoor protection (`lane::BACKDOOR_RANGE`).
+    pub backdoor: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -494,6 +498,8 @@ fn bridge() -> Map {
         placements,
         pacing: crate::lane::Pacing::Aram,
         river: Vec::new(),
+        plating: false,
+        backdoor: false,
     };
     map
 }
@@ -656,6 +662,8 @@ fn crossroads() -> Map {
         pacing: crate::lane::Pacing::Classic,
         // Corner to corner, top left to bottom right, a little past the map at both ends.
         river: vec![Vec2::new(-1000.0, -1000.0), CROSSROADS_SIZE + Vec2::new(1000.0, 1000.0)],
+        plating: true,
+        backdoor: true,
     };
     map
 }

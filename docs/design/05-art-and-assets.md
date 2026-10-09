@@ -165,7 +165,8 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 - The VFX events (`<action>.<phase>`, §5.1), plus `cast`: a windup starting.
 - `unit.foot`, from the walk and run clips' `foot_l`/`foot_r` markers, never while dashing.
 - `unit.death` and `unit.respawn`.
-- `unit.recall` and `unit.emote`. These are authored but have no in-game trigger yet.
+- `unit.recall`, as a recall's channel starts (seen by anyone who can see the champion).
+- `unit.emote`. This is authored but has no in-game trigger yet.
 - `cc.hard`: the **shared hard-CC accent**, a clang over a low gong. It plays on top of any hard-CC hit or detonation, the same for every champion, so lockdown has one learnable sound.
 - `match.victory` and `match.defeat`: a fanfare when a Base falls, from the shared library, played flat (not placed in the world).
 

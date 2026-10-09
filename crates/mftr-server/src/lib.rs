@@ -704,6 +704,8 @@ impl ServerCore {
                     collision_radius: u.collision_radius.round().clamp(0.0, 255.0) as u8,
                     gameplay_radius: u.gameplay_radius.round().clamp(0.0, 255.0) as u8,
                     protected: u.protected,
+                    recalling: st.recalling(),
+                    plates: u.plates,
                     champion: u.champion,
                     minion: (u.kind == UnitKind::Minion)
                         .then(|| MinionKind::from_attack_range(u.attack.map_or(0.0, |a| a.range))),

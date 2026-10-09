@@ -137,6 +137,10 @@ pub struct RemoteRender {
     pub slowed: bool,
     /// A structure that can't be hurt yet.
     pub protected: bool,
+    /// A champion channeling a recall.
+    pub recalling: bool,
+    /// A turret's plates left.
+    pub plates: u8,
     /// Facing in radians, counter-clockwise from +x (10 bits on the wire, 10 §3).
     pub facing: f32,
     /// Basic attacks started, modulo 4: which attack animation to play.
@@ -603,6 +607,11 @@ impl ClientSession {
     /// Use the active of the item in inventory slot 0–5 (drink a potion). Predicted.
     pub fn use_item(&mut self, slot: u8, now: f64) -> Option<Command> {
         self.issue(CommandKind::UseItem(slot), now)
+    }
+
+    /// Channel home to the fountain (B). Predicted.
+    pub fn recall(&mut self, now: f64) -> Option<Command> {
+        self.issue(CommandKind::Recall, now)
     }
 
     /// Reroll choice 0–2 of the open augment draft (each once per draft). Predicted.
@@ -1299,6 +1308,8 @@ impl ClientSession {
                     dashing: l.dashing,
                     slowed: l.slowed,
                     protected: l.protected,
+                    recalling: l.recalling,
+                    plates: l.plates,
                     facing: mftr_net::msg::facing_from_wire(l.facing),
                     attack_variant: l.attack_variant,
                     recovering: l.recovering,

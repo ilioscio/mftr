@@ -4,9 +4,10 @@
 //!
 //! Behavior: follow its minion wave down the lane, staying out of enemy turret range unless
 //! allied minions are tanking; fight enemy champions in reach with its whole kit; heal and
-//! shield hurt allies; when low, take a safe health relic, or go home where the fountain heals
-//! (not in ARAM: there it keeps fighting from behind its wave); shop its build path in the
-//! fountain or while dead; spend ability points (ultimate first).
+//! shield hurt allies; when low, take a safe health relic, or go home where the fountain heals,
+//! recalling once no enemy champion is near (not in ARAM: there it keeps fighting from behind
+//! its wave); shop its build path in the fountain or while dead; spend ability points
+//! (ultimate first).
 
 use mftr_sim::ability::{Effect, SLOTS};
 use mftr_sim::champion::max_rank;
@@ -26,6 +27,10 @@ const HEALED: f32 = 0.9;
 const RELIEVED: f32 = 0.5;
 /// How far a low bot walks for a health relic.
 const RELIC_REACH: f32 = 2500.0;
+/// A low bot recalls with no enemy champion this close (else it walks home first), unless
+/// home is nearer than `WALK_HOME`.
+const RECALL_SAFE: f32 = 1500.0;
+const WALK_HOME: f32 = 2500.0;
 /// Turret danger zone: its range plus a margin.
 const TURRET_DANGER: f32 = TURRET_ATTACK.range + 150.0;
 
@@ -127,6 +132,9 @@ impl Bot {
         }
         let mut cautious = false;
         if self.retreating {
+            if st.recalling() {
+                return None; // anything else would cancel it
+            }
             if ready(5) && hp < LOW {
                 return Some(cast(5, st.pos));
             }
@@ -149,7 +157,13 @@ impl Bot {
                 .min_by(|a, b| a.1.total_cmp(&b.1));
             match (relic, fountain) {
                 (Some((pos, _)), _) => return self.go_to(CommandKind::MoveTo(QPoint::from_vec2(pos))),
-                (None, Some(home)) if heals_home => return self.go_to(CommandKind::MoveTo(QPoint::from_vec2(home))),
+                (None, Some(home)) if heals_home => {
+                    let far = st.pos.distance(home) > WALK_HOME;
+                    if far && enemies.iter().all(|e| e.distance(st.pos) > RECALL_SAFE) {
+                        return Some(CommandKind::Recall);
+                    }
+                    return self.go_to(CommandKind::MoveTo(QPoint::from_vec2(home)));
+                }
                 _ => cautious = true,
             }
         }

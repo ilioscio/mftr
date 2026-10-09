@@ -45,6 +45,10 @@ Turrets must be destroyed in order down each lane. **Turret AI** priority:
 
 Consecutive shots on a champion ramp up in damage: *(start, D53)* 185 per shot, growing about 9 a minute to 293, and +50% per consecutive champion hit up to +150%, cooling 5 s after the last one. Turrets take reduced damage when no enemy minions are nearby (backdoor protection).
 
+*As built on Crossroads (M4 slice 2):*
+- **Plating:** each outer turret carries 5 plates until 14:00. Each 20% of health lost breaks one, and the last falls with the turret. Each plate pays 125 gold, split among the enemy champions within 1,400 u. At 14:00 the plates fall off and the turret's health stays where it is. Its health bar shows the plates.
+- **Backdoor protection:** a structure with none of the attacker's minions within 1,000 u takes a third of champions' damage. The Bridge (ARAM) has neither.
+
 ## 4. Minions
 
 - The first wave spawns at **~1:00**, then one wave every **30 s** per lane.
@@ -186,7 +190,7 @@ Two per champion, chosen before the match. *(start)* list:
   events (every hit on you is sent, from unseen sources too): the total and how long it took,
   physical/magic/true, shields, seconds stunned, rooted and slowed, and each source by basic
   attacks, ability (with its key) and item or augment effect, with hit counts. Nothing estimated.
-- **Recall:** an 8 s channel to the fountain, cancelled by moving, taking damage or casting.
+- **Recall:** an 8 s channel to the fountain, cancelled by moving, taking damage or casting. *As built (M4 slice 2):* moving, attacking, casting, using an item, Stop, crowd control or any damage cancels it. It can't start while casting, dashing or held. Anyone who can see the champion sees a column of light and hears its recall sound. The recaller gets a channel bar over the HUD.
 - Gray-screen spectating while dead. The shop works while dead in the fountain.
 
 ## 13. Controls

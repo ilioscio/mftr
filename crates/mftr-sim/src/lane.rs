@@ -330,11 +330,48 @@ pub fn update_protection(units: &mut [Unit]) {
 pub const GATEHOUSE_TIER: u8 = 4;
 pub const BASE_TURRET_TIER: u8 = 5;
 
-/// How much more champions' damage hurts structures now (`structure_amp`). Every tick.
-pub fn update_structure_amp(units: &mut [Unit], secs: f32) {
+/// Turret plating (01 §3, maps with `Layout::plating`): outer turrets carry 5 plates until
+/// 14:00. Each 20% of health lost breaks one (the last falls with the turret), and each pays
+/// 125 gold, split among the enemy champions near the turret.
+pub const PLATES: u8 = 5;
+pub const PLATE_GOLD: f32 = 125.0;
+pub const PLATING_FALLS_S: f32 = 14.0 * 60.0;
+
+/// Plates fall off every turret at 14:00 (their health stays). Every tick.
+pub fn update_plating(units: &mut [Unit], secs: f32) {
+    if secs >= PLATING_FALLS_S {
+        for u in units.iter_mut().filter(|u| u.plates > 0) {
+            u.plates = 0;
+        }
+    }
+}
+
+/// The plates a turret with `health` of `max` has left.
+pub fn plates_left(health: f32, max: f32) -> u8 {
+    ((health.max(0.0) / max.max(1.0)) * PLATES as f32).ceil().min(PLATES as f32) as u8
+}
+
+/// Backdoor protection (01 §3, maps with `Layout::backdoor`): a structure with none of the
+/// attacker's minions within this range takes a third of champions' damage.
+pub const BACKDOOR_RANGE: f32 = 1000.0;
+pub const BACKDOOR_DAMAGE: f32 = 1.0 / 3.0;
+
+/// How much champions' damage hurts each structure now: more late in a match
+/// (`structure_amp`), and a third with backdoor protection when `backdoor` and none of the
+/// enemy's minions are near it. Every tick.
+pub fn update_structure_amp(units: &mut [Unit], secs: f32, backdoor: bool) {
     let amp = structure_amp(secs);
+    let minions: Vec<(Team, Vec2)> = if backdoor {
+        units.iter().filter(|u| u.kind == UnitKind::Minion && u.state.alive()).map(|u| (u.team, u.state.pos)).collect()
+    } else {
+        Vec::new()
+    };
     for u in units.iter_mut().filter(|u| u.tier > 0) {
-        u.champion_damage_taken = amp;
+        let covered = !backdoor
+            || minions
+                .iter()
+                .any(|&(t, p)| t != u.team && (p - u.state.pos).length_sq() <= BACKDOOR_RANGE * BACKDOOR_RANGE);
+        u.champion_damage_taken = if covered { amp } else { amp * BACKDOOR_DAMAGE };
     }
 }
 

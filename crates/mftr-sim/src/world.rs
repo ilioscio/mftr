@@ -484,6 +484,9 @@ pub struct UnitState {
     /// A consumable healing over time: this much health a second until `potion_until`.
     pub potion_rate: f32,
     pub potion_until: SimTime,
+    /// Recalling (01 §12): home to the fountain at this instant, unless something cancels it
+    /// first. 0 when not recalling.
+    pub recall_until: SimTime,
 }
 
 /// A cast waiting to repeat (Echo): lines fly again from the caster's position then, areas land
@@ -528,7 +531,13 @@ impl UnitState {
             attacks: 0,
             potion_rate: 0.0,
             potion_until: SimTime(0),
+            recall_until: SimTime(0),
         }
+    }
+
+    /// Recalling right now.
+    pub fn recalling(&self) -> bool {
+        self.recall_until != SimTime(0)
     }
 
     pub fn alive(&self) -> bool {
@@ -876,6 +885,10 @@ impl UnitState {
         h.write_u8(self.attacks);
         h.write_f32(self.potion_rate);
         h.write_u64(self.potion_until.0);
+        // Not recalling hashes as before recall existed.
+        if self.recalling() {
+            h.write_u64(self.recall_until.0);
+        }
     }
 }
 
@@ -918,6 +931,8 @@ pub struct Unit {
     pub protected: bool,
     /// The lane a lane structure stands in (`Placement::lane`).
     pub lane: u8,
+    /// Turret plates left (`lane::PLATES`; outer turrets on maps with plating, until 14:00).
+    pub plates: u8,
     /// Damage from champions is multiplied by this (structures, late in a match: D55).
     /// Recomputed every tick; 1 for everything else.
     pub champion_damage_taken: f32,
@@ -947,6 +962,7 @@ impl Unit {
             tier: 0,
             protected: false,
             lane: 0,
+            plates: 0,
             champion_damage_taken: 1.0,
             stats_for: (1, [0; INVENTORY], [0; augments::SLOTS], augments::Growth::NONE),
         }
@@ -1042,6 +1058,9 @@ pub enum CommandKind {
     BuyAnvil,
     /// Keep choice 0–2 of the open anvil.
     PickAnvil(u8),
+    /// Channel home to the fountain (01 §12): `RECALL`, cancelled by moving, attacking,
+    /// casting, using an item, stopping, crowd control or damage.
+    Recall,
 }
 
 /// A player command, applied at `tick` at sub-tick position `sub` (03a §3).
@@ -1260,6 +1279,12 @@ pub enum SimEvent {
         winner: Team,
         at: SimTime,
     },
+    /// A turret lost `count` plates (`lane::PLATES`).
+    PlatesBroken {
+        unit: UnitId,
+        count: u8,
+        at: SimTime,
+    },
 }
 
 pub const CHAMPION_MOVE_SPEED: f32 = 325.0;
@@ -1283,6 +1308,8 @@ pub fn respawn_time(level: u8) -> SimDuration {
     SimDuration::from_millis(s * 1000)
 }
 pub const MINION_RESPAWN: SimDuration = SimDuration::from_millis(12_000);
+/// Recall (01 §12): the channel home.
+pub const RECALL: SimDuration = SimDuration::from_millis(8000);
 
 impl MinionKind {
     pub fn from_attack_range(range: f32) -> MinionKind {
@@ -1519,6 +1546,9 @@ impl World {
         let mut u = Unit::new(id, p.kind, p.team, p.pos, radii, stats);
         u.tier = p.tier;
         u.lane = p.lane;
+        if p.kind == UnitKind::Turret && p.tier == 1 && self.map.layout.plating {
+            u.plates = lane::PLATES;
+        }
         if p.kind == UnitKind::Turret {
             u.attack = Some(lane::TURRET_ATTACK);
             u.brain = Some(Brain::Tower { heat: 0, cools_at: SimTime(0) });
@@ -1723,7 +1753,8 @@ impl World {
         }
         lane::update_protection(&mut self.units);
         let secs = self.match_secs(SimTime::end_of(self.tick));
-        lane::update_structure_amp(&mut self.units, secs);
+        lane::update_structure_amp(&mut self.units, secs, self.map.layout.backdoor);
+        lane::update_plating(&mut self.units, secs);
         if !prediction && self.game.winner.is_none() && self.game.next_wave_at.is_some_and(|w| w <= s0) {
             self.spawn_wave();
         }
@@ -1977,6 +2008,19 @@ impl World {
         fountains_and_relics(units, map, prediction, s1, events);
         for u in units.iter_mut().filter(|u| u.kind == UnitKind::Champion) {
             let st = &mut u.state;
+            if st.recalling() && st.recall_until <= s1 {
+                // Home: to the fountain's spawn point.
+                let at = st.recall_until;
+                st.recall_until = SimTime(0);
+                if st.alive() {
+                    let from = st.pos;
+                    st.pos = map.layout.champion_spawn[u.team as usize];
+                    st.detour = None;
+                    st.stuck = 0;
+                    st.set_order(Order::Idle, map);
+                    events.push(SimEvent::Blinked { unit: u.id, from, to: st.pos, at });
+                }
+            }
             if st.alive() && st.potion_until > s0 {
                 let secs = (st.potion_until.min(s1).0 - s0.0) as f32 / SUBTICKS_PER_SECOND as f32;
                 st.health = (st.health + st.potion_rate * secs).min(u.stats.max_health);
@@ -2041,6 +2085,10 @@ impl World {
                     h.write_u8(heat);
                     h.write_u64(cools_at.0);
                 }
+            }
+            // Plateless turrets (every one before plating existed) hash as before.
+            if u.plates > 0 {
+                h.write_u8(0xA0 | u.plates);
             }
         }
         for ids in &self.hidden {
@@ -2344,6 +2392,18 @@ fn apply_command(
 ) {
     let may_shop = can_shop(unit, map, rules);
     let st = &mut unit.state;
+    // Acting cancels a recall.
+    if matches!(
+        c.kind,
+        CommandKind::MoveTo(_)
+            | CommandKind::AttackMove(_)
+            | CommandKind::Attack(_)
+            | CommandKind::Stop
+            | CommandKind::Cast { .. }
+            | CommandKind::UseItem(_)
+    ) {
+        st.recall_until = SimTime(0);
+    }
     match c.kind {
         // A newer order replaces a buffered cast (one slot, the latest wins: 10 §4.1).
         CommandKind::MoveTo(q) => {
@@ -2377,6 +2437,24 @@ fn apply_command(
             st.end_soft_recovery(t);
             st.buffered = None;
             st.set_order(Order::Idle, map);
+        }
+        CommandKind::Recall => {
+            // Champions on maps with a fountain, free to act (not casting, dashing or held).
+            let home = map.layout.fountains[unit.team as usize].is_some();
+            if unit.kind == UnitKind::Champion
+                && home
+                && st.alive()
+                && !st.recalling()
+                && st.cast.is_none()
+                && st.dash.is_none()
+                && !st.hard_locked(t)
+            {
+                st.cancel_attack(t);
+                st.end_soft_recovery(t);
+                st.buffered = None;
+                st.set_order(Order::Idle, map);
+                st.recall_until = t.plus(RECALL);
+            }
         }
         CommandKind::Cast { slot, target } => {
             // Abilities buffer (10 §4.2): a cast ordered during a windup, a dash or a hard
@@ -2935,6 +3013,7 @@ fn apply_cc(u: &mut Unit, cc: Cc, at: SimTime, from: Vec2, s1: SimTime, events: 
         return;
     }
     let st = &mut u.state;
+    st.recall_until = SimTime(0);
     let hard_stop = |st: &mut UnitState, until: SimTime| {
         st.stunned_until = st.stunned_until.max(until);
         st.cast = None; // hard CC interrupts casts, attacks, follow-throughs and the buffer
@@ -3076,6 +3155,16 @@ fn deal_damage(
     st.health -= amount;
     events.push(SimEvent::Damage { source, target: u.id, origin, kind, amount, absorbed, at });
     let dealt = amount + absorbed;
+    if dealt > 0.0 {
+        st.recall_until = SimTime(0);
+    }
+    if u.plates > 0 {
+        let left = lane::plates_left(st.health, u.stats.max_health);
+        if left < u.plates {
+            events.push(SimEvent::PlatesBroken { unit: u.id, count: u.plates - left, at });
+            u.plates = left;
+        }
+    }
     if st.health > 0.0
         && u.kind == UnitKind::Champion
         && let Some((shield, threshold, duration_ms, cooldown_ms)) = items::passives(&st.progress.items).lifeline
@@ -3213,6 +3302,20 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
             }
             _ => {}
         }
+    }
+    // Plates: split among the enemy champions near the turret.
+    for e in tick_events {
+        let SimEvent::PlatesBroken { unit, count, at } = *e else { continue };
+        let Some(turret) = units.iter().find(|u| u.id == unit) else { continue };
+        let (team, pos) = (turret.team, turret.state.pos);
+        let near: Vec<UnitId> = units
+            .iter()
+            .filter(|u| u.kind == UnitKind::Champion && u.team != team && u.state.alive())
+            .filter(|u| (u.state.pos - pos).length() <= lane::XP_RANGE)
+            .map(|u| u.id)
+            .collect();
+        let each = lane::PLATE_GOLD * count as f32 / near.len().max(1) as f32;
+        pay.extend(near.into_iter().map(|id| (id, each, 0, at)));
     }
     // One reward event per earner per tick.
     let mut earners: Vec<UnitId> = pay.iter().map(|p| p.0).collect();
@@ -5271,6 +5374,107 @@ mod tests {
         assert_eq!(score(victim), (0, 1, 0));
         assert_eq!(lane::bounty(4), 450.0);
         assert_eq!(lane::bounty(-3), 220.0);
+    }
+
+    fn crossroads_world() -> World {
+        let mut w = World::new(5);
+        w.set_map(MapId::Crossroads.shared());
+        w.set_rules(Rules::CLASSIC);
+        w
+    }
+
+    /// Recall (01 §12): 8 s and the champion is in its fountain; moving or being hit first
+    /// cancels it.
+    #[test]
+    fn recall_channels_home_unless_cancelled() {
+        let mut w = crossroads_world();
+        let mid = crate::map::crossroads_point(7000.0, 7000.0);
+        let home = w.map().layout.champion_spawn[Team::Blue as usize];
+        let a = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, mid);
+        let b = w.spawn_champion(PlayerId(2), Team::Blue, ChampionId::Vesper, mid + Vec2::new(0.0, 300.0));
+        let c = w.spawn_champion(PlayerId(4), Team::Blue, ChampionId::Vesper, mid + Vec2::new(300.0, 0.0));
+        w.step(&[
+            shop(0, 1, 1, CommandKind::Recall),
+            shop(2, 1, 1, CommandKind::Recall),
+            shop(4, 1, 1, CommandKind::Recall),
+        ]);
+        assert!(w.unit(a).unwrap().state.recalling());
+        // B walks off after 2 s; C is shot by an enemy that shows up.
+        let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Vesper, mid + Vec2::new(600.0, 0.0));
+        let k = w.tick().0 + 60;
+        let mut blinked = false;
+        for _ in 0..(crate::time::TICK_HZ * 9) {
+            let t = w.tick().0 + 1;
+            let cmds =
+                if t == k { vec![cmd(2, 2, t, 0, (mid.x, mid.y + 900.0)), attack(1, 1, t, c)] } else { Vec::new() };
+            w.step(&cmds);
+            blinked |= w
+                .take_events()
+                .iter()
+                .any(|e| matches!(e, SimEvent::Blinked { unit, to, .. } if *unit == a && *to == home));
+        }
+        assert!(blinked && w.unit(a).unwrap().state.pos == home, "A recalled home");
+        for id in [b, c] {
+            let st = w.unit(id).unwrap().state;
+            assert!(!st.recalling() && st.pos.distance(home) > 3000.0, "{id:?} was cancelled");
+        }
+        assert!(w.unit(enemy).is_some());
+    }
+
+    /// Plating (01 §3): Crossroads' outer turrets start with 5 plates; each 20% of health lost
+    /// breaks one and pays 125 gold to the enemy champions near it; they fall at 14:00. Backdoor
+    /// protection: a third of champions' damage while none of their minions are near.
+    #[test]
+    fn outer_turrets_shed_plates_for_gold_and_have_backdoor_protection() {
+        let mut w = crossroads_world();
+        w.start_match();
+        let outer = |w: &World| {
+            w.units()
+                .iter()
+                .find(|u| u.kind == UnitKind::Turret && u.team == Team::Blue && u.tier == 1 && u.lane == 0)
+                .map(|u| (u.id, u.state.pos))
+                .unwrap()
+        };
+        let (turret, pos) = outer(&w);
+        let plated: Vec<u8> = w.units().iter().filter(|u| u.kind == UnitKind::Turret).map(|u| u.plates).collect();
+        assert_eq!(plated.iter().filter(|&&p| p == lane::PLATES).count(), 6, "the six outer turrets: {plated:?}");
+        assert_eq!(plated.iter().filter(|&&p| p == 0).count(), plated.len() - 6);
+        // A red champion hits it, just above 80% health, with no minions around.
+        let red = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Vesper, pos + Vec2::new(0.0, -450.0));
+        {
+            let t = w.unit_mut(turret).unwrap();
+            t.attack = None;
+            t.state.health = t.stats.max_health * 0.8 + 5.0;
+        }
+        let k = w.tick().0 + 1;
+        w.step(&[attack(1, 1, k, turret)]);
+        assert!((w.unit(turret).unwrap().champion_damage_taken - lane::BACKDOOR_DAMAGE).abs() < 1e-6, "backdoor");
+        let ev = run_until_quiet(&mut w, 45);
+        let broken: u8 = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::PlatesBroken { unit, count, .. } if *unit == turret => Some(*count),
+                _ => None,
+            })
+            .sum();
+        let gold: f32 = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::Reward { unit, gold, .. } if *unit == red => Some(*gold),
+                _ => None,
+            })
+            .sum();
+        assert_eq!((broken, w.unit(turret).unwrap().plates, gold), (1, 4, lane::PLATE_GOLD));
+        // A red minion near the turret lifts the protection.
+        w.spawn_minion(MinionKind::Melee, Team::Red, pos + Vec2::new(300.0, 0.0), None);
+        w.step(&[]);
+        assert_eq!(w.unit(turret).unwrap().champion_damage_taken, 1.0);
+        // 14:00: the plates fall off, health unchanged.
+        let health = w.unit(turret).unwrap().state.health;
+        lane::update_plating(&mut w.units, lane::PLATING_FALLS_S);
+        assert_eq!((w.unit(turret).unwrap().plates, w.unit(turret).unwrap().state.health), (0, health));
+        assert_eq!(lane::plates_left(1.0, 5000.0), 1, "the last plate goes with the turret");
+        assert_eq!(lane::plates_left(0.0, 5000.0), 0);
     }
 
     fn arena_world(seed: u64) -> World {

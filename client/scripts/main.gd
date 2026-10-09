@@ -201,6 +201,8 @@ func _ready() -> void:
 			_shot_numbers = true
 		elif args[i] == "--shot-charge":
 			_shot_charge = true
+		elif args[i] == "--shot-recall":
+			_shot_recall = true
 		elif args[i] == "--shot-menu":
 			_shot_menu = true
 		elif args[i] == "--keep-points":
@@ -323,6 +325,7 @@ var _shot_tab_hover := ""                 # `--tab-hover augment|item`: show one
 var _shot_tab := false                    # `--shot-tab`: hold the match breakdown open
 var _shot_numbers := false                # `--shot-numbers`: sample damage numbers, for review
 var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
+var _shot_recall := false                 # `--shot-recall`: walk out, then recall 3 s before the shot
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
 var _shot_keep_points := false            # `--keep-points`: don't spend the starting points
 
@@ -377,6 +380,8 @@ func _update_shot(delta: float) -> void:
 		_show_click_marker(_to_world(own + inward * 600.0 - side * 500.0), OWN_COLOR)
 	elif _shot_moved and _shot_timer > 1.7 and _shot_timer - delta <= 1.7:
 		client.cast(4, own + side * 400.0)
+	elif _shot_recall and _shot_moved and _shot_timer > _shot_at - 3.0 and _shot_timer - delta <= _shot_at - 3.0:
+		client.recall()
 	elif _shot_charge and _shot_moved and _shot_timer > 2.0 and _shot_timer <= _shot_at:
 		# Into the fight: keep attack-moving to mid, casting at whatever's ahead.
 		settings.camera_locked = true
@@ -1139,6 +1144,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("stop"):
 		attack_move_armed = false
 		client.stop()
+	elif event.is_action_pressed("recall") and not client.is_spectator():
+		client.recall()
 	elif event.is_action_pressed("toggle_proxies"):
 		proxies_enabled = not proxies_enabled
 		client.set_collision_proxies(proxies_enabled)
@@ -1213,6 +1220,7 @@ func _process(delta: float) -> void:
 		own_body.scale = Vector3.ONE * (float(own_status.get("hitbox", CHAMPION_RADIUS_U)) / CHAMPION_RADIUS_U)
 		_update_camera(delta, dead)
 		_show_statuses(own_body, own_status.get("stunned", false), own_status.get("rooted", false), own_status.get("shield", 0.0), own_status.get("slowed", false))
+		_show_recall(own_body, own_status.get("recall", 0.0) > 0.0, ALLY_COLOR, own_status.get("champion", ""))
 		_animate(own_body, own_status, delta)
 	# Casts without a windup (A6): the drive never shows them, so play them on the event.
 	for c in client.take_instant_casts():
@@ -1275,6 +1283,48 @@ func _show_statuses(body: Node3D, stunned: bool, rooted: bool, shield: float, sl
 	body.get_node("Root").visible = rooted
 	body.get_node("Shield").visible = shield > 0.0
 	body.get_node("Slow").visible = slowed
+
+
+## A recalling champion stands in a column of light in its team's color, a ring at its feet;
+## its `unit.recall` sound plays as the channel starts.
+func _show_recall(body: Node3D, on: bool, color: Color, champion: String) -> void:
+	var beam: Node3D = body.get_node_or_null("Recall")
+	if on and (beam == null or not beam.visible):
+		_sfx_play(champion, ["unit.recall"], body.global_position)
+	if beam == null:
+		if not on:
+			return
+		beam = Node3D.new()
+		beam.name = "Recall"
+		var column := MeshInstance3D.new()
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = 0.42
+		cyl.bottom_radius = 0.55
+		cyl.height = 3.2
+		cyl.radial_segments = 8
+		cyl.cap_top = false
+		cyl.cap_bottom = false
+		column.mesh = cyl
+		column.position = Vector3(0, 0.8, 0)
+		var mat := _unshaded(color.lerp(Color.WHITE, 0.35), 0.22)
+		mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		column.material_override = mat
+		beam.add_child(column)
+		var ring := MeshInstance3D.new()
+		var torus := TorusMesh.new()
+		torus.inner_radius = 0.6
+		torus.outer_radius = 0.7
+		torus.rings = 8
+		torus.ring_segments = 4
+		ring.mesh = torus
+		ring.position = Vector3(0, -0.75, 0)
+		ring.material_override = _unshaded(color.lerp(Color.WHITE, 0.5), 0.85)
+		beam.add_child(ring)
+		body.add_child(beam)
+	beam.visible = on
+	if on:
+		beam.rotation.y = Time.get_ticks_msec() / 600.0
 
 
 var remote_info := {}                   # unit_id -> latest dictionary (for bars and numbers)
@@ -1350,6 +1400,8 @@ func _update_remotes(delta: float) -> void:
 					m.set_shader_parameter("protected_glow", 1.0 if u.protected else 0.0)
 		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO))
 		_show_statuses(body, u.stunned, u.rooted, u.shield, u.get("slowed", false))
+		if u.champion != "":
+			_show_recall(body, u.get("recalling", false), ALLY_COLOR if u.ally else ENEMY_COLOR, u.champion)
 		if u.champion != "" or (u.minion and body.has_meta("rig")):
 			_animate(body, u, delta)
 		if u.minion:
@@ -2132,6 +2184,8 @@ func _draw_overlay() -> void:
 		if remote_bodies[id].has_meta("prop"):
 			lift = {"turret": 7.0, "gatehouse": 5.4, "base": 6.2}.get(u.kind, 3.0)
 		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color, id, u.level if champ else 0, 100.0 if champ else 0.0)
+		if u.get("plates", 0) > 0:
+			_draw_plates(remote_bodies[id].position + Vector3(0, lift, 0), size, u.plates)
 		if champ:
 			_draw_augment_pips(font, remote_bodies[id].position + Vector3(0, lift, 0), u.get("augments", []))
 			_draw_unit_label(font, remote_bodies[id].position + Vector3(0, lift, 0), size, u.champion, u.ally, u)
@@ -2217,6 +2271,24 @@ func _draw_bar(world: Vector3, size: Vector2, hp: float, max_hp: float, shield: 
 		overlay.draw_rect(lb, Color(0.04, 0.05, 0.07, 0.95))
 		overlay.draw_rect(lb, Hud.GOLD_DIM, false, 1.0)
 		overlay.draw_string(ThemeDB.fallback_font, lb.position + Vector2(0, lb.size.y - 4.0 * k), "%d" % level, HORIZONTAL_ALIGNMENT_CENTER, lb.size.x, roundi(12.0 * k), Color.WHITE)
+
+
+## A plated turret's plates (01 §3): a gold pip under its bar for each one left, a dim one for
+## each broken, and a notch on the bar where each next plate breaks.
+func _draw_plates(world: Vector3, size: Vector2, plates: int) -> void:
+	var s = _screen(world)
+	if s == null:
+		return
+	var k := _hud_k()
+	size *= k
+	var origin: Vector2 = s - Vector2(size.x / 2.0, size.y)
+	for i in range(1, 5):
+		var x := origin.x + size.x * i / 5.0
+		overlay.draw_line(Vector2(x, origin.y), Vector2(x, origin.y + size.y), Color(0.05, 0.05, 0.07, 0.9), maxf(1.0, k))
+	var pip := Vector2(size.x / 5.0 - 3.0 * k, 4.0 * k)
+	for i in 5:
+		var r := Rect2(Vector2(origin.x + size.x * i / 5.0 + 1.5 * k, origin.y + size.y + 2.0 * k), pip)
+		overlay.draw_rect(r, Hud.GOLD if i < plates else Color(0.2, 0.18, 0.12, 0.8))
 
 
 func _draw_ability_bar(font: Font) -> void:
@@ -2372,6 +2444,14 @@ func _draw_bottom_hud(font: Font) -> void:
 			overlay.draw_texture_rect(ItemIcons.icon(pot), Rect2(hb.position + Vector2(2.0 * k, -2.0 * k), Vector2(pi, pi)), false)
 		Hud.text(overlay, font, hb.position + Vector2(pi + 6.0 * k, hb.size.y / 2.0 + 5.0 * k), "%d s" % ceili(potion), roundi(12.0 * k), Color(0.6, 1.0, 0.65))
 	Hud.text(overlay, bold, hb.position + Vector2(0, hb.size.y / 2.0 + 5.0 * k), hp_text, roundi(14.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, hb.size.x)
+	var recall: float = own_status.get("recall", 0.0)
+	if recall > 0.0:
+		# Recalling: a channel bar above the panel, filling as home gets closer.
+		var total: float = own_status.get("recall_total", 8.0)
+		var rb := Rect2(x + abil_w / 2.0 - 130.0 * k, top - 46.0 * k, 260.0 * k, 16.0 * k)
+		Hud.panel(overlay, rb.grow(3.0 * k), k, Color(0.04, 0.05, 0.08, 0.92), Hud.GOLD_DIM)
+		overlay.draw_rect(Rect2(rb.position, Vector2(rb.size.x * clampf(1.0 - recall / total, 0.0, 1.0), rb.size.y)), Color(0.35, 0.72, 0.95))
+		Hud.text(overlay, bold, rb.position + Vector2(0, rb.size.y / 2.0 + 5.0 * k), "Recall  %.1f" % recall, roundi(13.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, rb.size.x)
 	x += abil_w + pad
 
 	# Items in two rows of three, gold beneath; the held augments above.
