@@ -884,7 +884,7 @@ pub enum Brain {
     /// Half the shots aim at the target's position, half lead its movement.
     RigTurret { range: u16 },
     /// Lane minion: walk the team's lane, fight what it meets (01 §4).
-    Laner { next: u8 },
+    Laner { lane: u8, next: u8 },
     /// Lane turret (01 §3): keeps its target while valid; `heat` counts consecutive shots at
     /// champions (each one hits harder) until it cools at `cools_at`.
     Tower { heat: u8, cools_at: SimTime },
@@ -912,6 +912,8 @@ pub struct Unit {
     pub tier: u8,
     /// A structure behind one that still stands: can't be hurt. Recomputed every tick.
     pub protected: bool,
+    /// The lane a lane structure stands in (`Placement::lane`).
+    pub lane: u8,
     /// Damage from champions is multiplied by this (structures, late in a match: D55).
     /// Recomputed every tick; 1 for everything else.
     pub champion_damage_taken: f32,
@@ -940,6 +942,7 @@ impl Unit {
             attack: None,
             tier: 0,
             protected: false,
+            lane: 0,
             champion_damage_taken: 1.0,
             stats_for: (1, [0; INVENTORY], [0; augments::SLOTS], augments::Growth::NONE),
         }
@@ -1511,6 +1514,7 @@ impl World {
         };
         let mut u = Unit::new(id, p.kind, p.team, p.pos, radii, stats);
         u.tier = p.tier;
+        u.lane = p.lane;
         if p.kind == UnitKind::Turret {
             u.attack = Some(lane::TURRET_ATTACK);
             u.brain = Some(Brain::Tower { heat: 0, cools_at: SimTime(0) });
@@ -1527,7 +1531,7 @@ impl World {
             self.spawn_placement(p);
         }
         self.game = MatchState { started_at: SimTime::end_of(self.tick), ..MatchState::default() };
-        if self.map.layout.lanes[0].len() > 1 {
+        if !self.map.layout.lanes.is_empty() {
             self.game.next_wave_at = Some(SimTime::end_of(self.tick).plus(lane::FIRST_WAVE));
         }
     }
@@ -1578,18 +1582,47 @@ impl World {
         // Minions grow stronger and faster as the match goes on (D55).
         let secs = self.match_secs(SimTime::end_of(self.tick));
         let (upgrades, speed) = (lane::minion_upgrades(secs) as f32, lane::minion_speed(secs));
-        for team in [Team::Blue, Team::Red] {
-            // An enemy Gatehouse down (until it respawns): this team's wave brings a super minion.
-            let empowered =
-                self.units.iter().any(|u| u.kind == UnitKind::Gatehouse && u.team != team && !u.state.alive());
-            let spawn = layout.wave_spawn[team as usize];
-            let ahead =
-                layout.lanes[team as usize].first().map_or(Vec2::new(1.0, 0.0), |&p| (p - spawn).normalize_or_zero());
+        for (li, lane) in layout.lanes.iter().enumerate() {
+            for team in [Team::Blue, Team::Red] {
+                // That lane's enemy Gatehouse down (until it respawns): the wave brings a super
+                // minion.
+                let empowered = self.units.iter().any(|u| {
+                    u.kind == UnitKind::Gatehouse && u.team != team && u.lane as usize == li && !u.state.alive()
+                });
+                let spawn = layout.wave_spawn[li][team as usize];
+                let ahead =
+                    lane[team as usize].first().map_or(Vec2::new(1.0, 0.0), |&p| (p - spawn).normalize_or_zero());
+                self.spawn_lane_wave(n, empowered, team, li as u8, spawn, ahead, upgrades, speed);
+            }
+        }
+        self.game.waves_spawned += 1;
+        self.game.next_wave_at = self.game.next_wave_at.map(|t| t.plus(lane::wave_interval(secs)));
+        // Turrets hit harder as the match goes on.
+        let damage = lane::turret_damage(self.game.waves_spawned);
+        for u in self.units.iter_mut().filter(|u| u.kind == UnitKind::Turret) {
+            u.stats.attack_damage = damage;
+        }
+    }
+
+    /// One team's wave in one lane, in a column along the lane (melee in front).
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_lane_wave(
+        &mut self,
+        n: u32,
+        empowered: bool,
+        team: Team,
+        lane: u8,
+        spawn: Vec2,
+        ahead: Vec2,
+        upgrades: f32,
+        speed: f32,
+    ) {
+        {
             let side = Vec2::new(-ahead.y, ahead.x);
             for (i, kind) in MatchState::wave(n, empowered).into_iter().enumerate() {
                 let (row, col) = ((i / 3) as f32, (i % 3) as f32 - 1.0);
                 let pos = spawn - ahead * (row * 80.0) + side * (col * 70.0);
-                let id = self.spawn_minion(kind, team, pos, Some(Brain::Laner { next: 0 }));
+                let id = self.spawn_minion(kind, team, pos, Some(Brain::Laner { lane, next: 0 }));
                 let (health, damage) = lane::minion_upgrade(kind);
                 if let Some(u) = self.units.iter_mut().find(|u| u.id == id) {
                     u.stats.max_health += health * upgrades;
@@ -1599,13 +1632,6 @@ impl World {
                     u.state.move_speed = speed;
                 }
             }
-        }
-        self.game.waves_spawned += 1;
-        self.game.next_wave_at = self.game.next_wave_at.map(|t| t.plus(lane::wave_interval(secs)));
-        // Turrets hit harder as the match goes on.
-        let damage = lane::turret_damage(self.game.waves_spawned);
-        for u in self.units.iter_mut().filter(|u| u.kind == UnitKind::Turret) {
-            u.stats.attack_damage = damage;
         }
     }
 
@@ -1744,7 +1770,7 @@ impl World {
                 _ => {}
             }
         }
-        if !prediction && map.layout.lanes[0].len() > 1 {
+        if !prediction && !map.layout.lanes.is_empty() {
             let seen: Vec<Seen> = units.iter().filter(|u| u.state.alive()).map(Seen::of).collect();
             let since = SimTime(s0.0.saturating_sub(lane::AGGRESSION_MEMORY.0));
             let recent: Vec<(UnitId, UnitId, SimTime)> =
@@ -1752,8 +1778,8 @@ impl World {
             for unit in units.iter_mut() {
                 let hide = &hidden[unit.team as usize];
                 match unit.brain {
-                    Some(Brain::Laner { .. }) => {
-                        let lane = &map.layout.lanes[unit.team as usize];
+                    Some(Brain::Laner { lane, .. }) => {
+                        let lane = &map.layout.lanes[lane as usize][unit.team as usize];
                         lane::laner_think(unit, &seen, lane, &recent, hide, map);
                     }
                     Some(Brain::Tower { .. }) => lane::tower_think(unit, &seen, &recent, hide, map),
@@ -1996,9 +2022,13 @@ impl World {
                     h.write_u8(3);
                     h.write_u16(range);
                 }
-                Some(Brain::Laner { next }) => {
+                Some(Brain::Laner { lane, next }) => {
                     h.write_u8(4);
                     h.write_u8(next);
+                    // Lane 0 (single-lane maps) hashes as before.
+                    if lane > 0 {
+                        h.write_u8(lane);
+                    }
                 }
                 Some(Brain::Tower { heat, cools_at }) => {
                     h.write_u8(5);

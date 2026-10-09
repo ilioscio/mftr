@@ -410,8 +410,8 @@ impl DuelBot {
             .min_by(|a, b| a.pos.distance(own).total_cmp(&b.pos.distance(own)));
         let Some(e) = enemy else {
             // On a lane map: push down the lane with the minions.
-            let lane = &session.map().layout.lanes[session.team() as usize];
-            if let Some(&end) = lane.last() {
+            let lanes = &session.map().layout.lanes;
+            if let Some(&end) = lanes.first().and_then(|l| l[session.team() as usize].last()) {
                 return session.attack_move(end, now).is_some();
             }
             // Otherwise go looking for the enemy champion, through the middle of the arena.

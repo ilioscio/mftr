@@ -66,16 +66,22 @@ pub struct Placement {
     pub kind: UnitKind,
     pub team: Team,
     pub pos: Vec2,
-    /// Destruction order within the team (1 = first to fall); 0 for relics.
+    /// Destruction order within the team and lane (1 = first to fall); 0 for relics. Tiers 1–4
+    /// fall in order down their lane; base turrets (5) once a Gatehouse (4) is down; the Base (6)
+    /// once both base turrets are too.
     pub tier: u8,
+    /// Which lane (index into `Layout::lanes`) a lane structure stands in.
+    pub lane: u8,
 }
 
 /// What a lane map adds to geometry: lanes, spawn points, fountains and structures.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Layout {
-    /// Each team's lane, from its own base to the enemy's (index = `Team as usize`).
-    pub lanes: [Vec<Vec2>; 2],
-    pub wave_spawn: [Vec2; 2],
+    /// The lanes; each is a path per team, from its own base to the enemy's (index = `Team as
+    /// usize`).
+    pub lanes: Vec<[Vec<Vec2>; 2]>,
+    /// Where each lane's waves spawn, per team.
+    pub wave_spawn: Vec<[Vec2; 2]>,
     pub champion_spawn: [Vec2; 2],
     /// Fountain circles (center, radius) per team.
     pub fountains: [Option<(Vec2, f32)>; 2],
@@ -446,20 +452,32 @@ fn bridge() -> Map {
     ];
     let mut placements = Vec::new();
     for (kind, pos, tier) in blue {
-        placements.push(Placement { kind, team: Team::Blue, pos: bridge_point(pos), tier });
-        placements.push(Placement { kind, team: Team::Red, pos: bridge_point(mirror(pos)), tier });
+        placements.push(Placement { kind, team: Team::Blue, pos: bridge_point(pos), tier, lane: 0 });
+        placements.push(Placement { kind, team: Team::Red, pos: bridge_point(mirror(pos)), tier, lane: 0 });
     }
     for pos in [Vec2::new(5600.0, 950.0), Vec2::new(5600.0, 2050.0)] {
-        placements.push(Placement { kind: UnitKind::Relic, team: Team::Blue, pos: bridge_point(pos), tier: 0 });
-        placements.push(Placement { kind: UnitKind::Relic, team: Team::Blue, pos: bridge_point(mirror(pos)), tier: 0 });
+        placements.push(Placement {
+            kind: UnitKind::Relic,
+            team: Team::Blue,
+            pos: bridge_point(pos),
+            tier: 0,
+            lane: 0,
+        });
+        placements.push(Placement {
+            kind: UnitKind::Relic,
+            team: Team::Blue,
+            pos: bridge_point(mirror(pos)),
+            tier: 0,
+            lane: 0,
+        });
     }
     let lane_blue = vec![Vec2::new(2900.0, 1500.0), Vec2::new(9100.0, 1500.0), Vec2::new(10_750.0, 1500.0)];
     let lane_red: Vec<Vec2> = lane_blue.iter().map(|&p| bridge_point(mirror(p))).collect();
     let lane_blue: Vec<Vec2> = lane_blue.into_iter().map(bridge_point).collect();
     let (spawn, home, fountain) = (Vec2::new(1700.0, 1500.0), Vec2::new(450.0, 1500.0), Vec2::new(300.0, 1500.0));
     map.layout = Layout {
-        lanes: [lane_blue, lane_red],
-        wave_spawn: [bridge_point(spawn), bridge_point(mirror(spawn))],
+        lanes: vec![[lane_blue, lane_red]],
+        wave_spawn: vec![[bridge_point(spawn), bridge_point(mirror(spawn))]],
         champion_spawn: [bridge_point(home), bridge_point(mirror(home))],
         fountains: [Some((bridge_point(fountain), 600.0)), Some((bridge_point(mirror(fountain)), 600.0))],
         fountain_heals: false,
@@ -603,7 +621,7 @@ mod tests {
                 assert!(m.walkable(p.pos + Vec2::new(0.0, 0.0), 1.0), "{p:?} stands in a wall");
             }
         }
-        for s in m.layout.champion_spawn.iter().chain(&m.layout.wave_spawn) {
+        for s in m.layout.champion_spawn.iter().chain(m.layout.wave_spawn.iter().flatten()) {
             assert!(m.in_bounds(*s, 100.0) && m.walkable(*s, 60.0), "{s:?}");
         }
     }

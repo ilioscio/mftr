@@ -247,17 +247,32 @@ impl Seen {
     }
 }
 
-/// Structures still standing protect the ones behind them (01 §3): a structure can be hurt only
-/// when every structure of its team with a lower tier is down. Recomputed every tick.
+/// Structures still standing protect the ones behind them (01 §3), lane by lane: tiers 1–4
+/// (outer, inner and gatehouse turrets, the Gatehouse) fall in order down their own lane; the
+/// base turrets (5) can be hurt once one of the team's Gatehouses is down; the Base (6) once
+/// both base turrets are down too. Recomputed every tick.
 pub fn update_protection(units: &mut [Unit]) {
-    let lowest = |team: Team, units: &[Unit]| {
-        units.iter().filter(|u| u.team == team && u.tier > 0 && u.state.alive()).map(|u| u.tier).min()
+    let standing: Vec<(Team, u8, u8)> =
+        units.iter().filter(|u| u.tier > 0 && u.state.alive()).map(|u| (u.team, u.lane, u.tier)).collect();
+    // A Gatehouse is down: one has fallen (and not yet respawned), or none stands at all.
+    let gate_down = |team: Team| {
+        let gates = units.iter().filter(|u| u.team == team && u.tier == GATEHOUSE_TIER);
+        gates.clone().any(|u| !u.state.alive()) || !gates.clone().any(|u| u.state.alive())
     };
-    let lows = [lowest(Team::Blue, units), lowest(Team::Red, units)];
+    let down = [gate_down(Team::Blue), gate_down(Team::Red)];
     for u in units.iter_mut().filter(|u| u.tier > 0) {
-        u.protected = lows[u.team as usize].is_some_and(|low| u.tier > low);
+        let (team, lane, tier) = (u.team, u.lane, u.tier);
+        u.protected = match tier {
+            1..=GATEHOUSE_TIER => standing.iter().any(|&(t, l, x)| t == team && l == lane && x < tier),
+            BASE_TURRET_TIER => !down[team as usize],
+            _ => !down[team as usize] || standing.iter().any(|&(t, _, x)| t == team && x == BASE_TURRET_TIER),
+        };
     }
 }
+
+/// Structure tiers (`Placement::tier`).
+pub const GATEHOUSE_TIER: u8 = 4;
+pub const BASE_TURRET_TIER: u8 = 5;
 
 /// How much more champions' damage hurts structures now (`structure_amp`). Every tick.
 pub fn update_structure_amp(units: &mut [Unit], secs: f32) {
@@ -307,7 +322,7 @@ pub fn laner_think(
     hidden: &[UnitId],
     map: &Map,
 ) {
-    let Some(Brain::Laner { mut next }) = unit.brain else { return };
+    let Some(Brain::Laner { lane: which, mut next }) = unit.brain else { return };
     if !unit.state.alive() {
         return;
     }
@@ -345,7 +360,7 @@ pub fn laner_think(
     while (next as usize) + 1 < lane.len() && (lane[next as usize] - me).length() < 150.0 {
         next += 1;
     }
-    unit.brain = Some(Brain::Laner { next });
+    unit.brain = Some(Brain::Laner { lane: which, next });
     if let Some(&wp) = lane.get(next as usize) {
         let goal = Order::MoveTo(QPoint::from_vec2(wp));
         if unit.state.order != goal {

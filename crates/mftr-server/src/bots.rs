@@ -225,39 +225,63 @@ impl Bot {
             return self.go_to(CommandKind::Attack(target.id));
         }
 
-        // Push with the wave: just behind the frontmost allied minion, out of unsafe turret range.
-        let lane = &world.map().layout.lanes[team as usize];
-        let (Some(&start), Some(&end)) = (lane.first(), lane.last()) else {
+        // Push with the wave in our lane: just behind the frontmost allied minion, out of unsafe
+        // turret range. Progress is measured along the lane's path (lanes bend).
+        let layout = &world.map().layout;
+        let lane = self.lane_of(world, team);
+        let Some(path) = layout.lanes.get(lane).map(|l| &l[team as usize]) else {
             return self.go_to(CommandKind::AttackMove(QPoint::from_vec2(world.map().size * 0.5)));
         };
-        let dir = (end - start).normalize_or_zero();
-        let progress = |p: Vec2| (p - start).dot(dir);
+        if path.len() < 2 {
+            return self.go_to(CommandKind::AttackMove(QPoint::from_vec2(world.map().size * 0.5)));
+        }
+        let progress = |p: Vec2| along(path, p).0;
         let front = world
             .units()
             .iter()
             .filter(|u| u.team == team && u.kind == UnitKind::Minion && u.state.alive())
+            .filter(|u| matches!(u.brain, Some(mftr_sim::world::Brain::Laner { lane: l, .. }) if l as usize == lane))
             .max_by(|a, b| progress(a.state.pos).total_cmp(&progress(b.state.pos)));
         let behind = if cautious { 550.0 } else { 150.0 };
         let mut goal = match front {
-            Some(m) => m.state.pos - dir * behind,
-            // No wave: wait by the frontmost allied turret.
+            Some(m) => m.state.pos - along(path, m.state.pos).1 * behind,
+            // No wave: wait by the frontmost allied turret of this lane.
             None => world
                 .units()
                 .iter()
-                .filter(|u| u.team == team && u.kind == UnitKind::Turret && u.state.alive())
+                .filter(|u| u.team == team && u.kind == UnitKind::Turret && u.state.alive() && u.lane as usize == lane)
                 .max_by(|a, b| progress(a.state.pos).total_cmp(&progress(b.state.pos)))
-                .map_or(start, |u| u.state.pos),
+                .map_or(path[0], |u| u.state.pos),
         };
         // Back off along the lane while the spot is in an unsafe turret's range.
         for _ in 0..20 {
             if !self.unsafe_at(world, team, goal) {
                 break;
             }
-            goal -= dir * 100.0;
+            goal -= along(path, goal).1 * 100.0;
         }
+        let dir = along(path, goal).1;
         // A little spread across the lane, so bots don't stack on one line.
         let goal = goal + Vec2::new(-dir.y, dir.x) * self.rng.range_f32(-120.0, 120.0);
         self.go_to(CommandKind::AttackMove(QPoint::from_vec2(goal)))
+    }
+
+    /// This bot's lane: by its rank among its team's champions, one top, two mid, two bottom
+    /// (lane 0 on single-lane maps).
+    fn lane_of(&self, world: &World, team: Team) -> usize {
+        let n = world.map().layout.lanes.len();
+        if n < 2 {
+            return 0;
+        }
+        let mut mates: Vec<u8> = world
+            .units()
+            .iter()
+            .filter(|u| u.team == team && u.kind == UnitKind::Champion)
+            .filter_map(|u| u.owner.map(|o| o.0))
+            .collect();
+        mates.sort();
+        let rank = mates.iter().position(|p| *p == self.player.0).unwrap_or(0);
+        [0, 1, 2, 2, 1][rank % 5].min(n - 1)
     }
 
     /// An enemy turret covers `p`, fewer than two allied minions are there to take its shots,
@@ -310,4 +334,23 @@ impl Bot {
 fn cast(slot: u8, at: Vec2) -> CommandKind {
     debug_assert!((slot as usize) < SLOTS);
     CommandKind::Cast { slot, target: QPoint::from_vec2(at) }
+}
+
+/// How far along `path` the point nearest `p` is, and the path's direction there.
+fn along(path: &[Vec2], p: Vec2) -> (f32, Vec2) {
+    let mut best = (f32::INFINITY, 0.0, Vec2::new(1.0, 0.0));
+    let mut walked = 0.0;
+    for w in path.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let seg = b - a;
+        let len = seg.length().max(1e-3);
+        let dir = seg * (1.0 / len);
+        let t = ((p - a).dot(dir)).clamp(0.0, len);
+        let d = (a + dir * t).distance(p);
+        if d < best.0 {
+            best = (d, walked + t, dir);
+        }
+        walked += len;
+    }
+    (best.1, best.2)
 }
