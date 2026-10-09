@@ -88,8 +88,8 @@ static func panel(ci: CanvasItem, rect: Rect2, k: float, fill := INK, rim := GOL
 
 ## A clockwise cooldown sweep over `rect`: `frac` of it (from 12 o'clock) still dark.
 static func cooldown_sweep(ci: CanvasItem, rect: Rect2, frac: float) -> void:
-	if frac <= 0.0:
-		return
+	if frac <= 0.01:
+		return  # a sliver: nothing to draw (and too thin to triangulate)
 	var c := rect.get_center()
 	var r := rect.size.length()  # past the corners; clipped to the square below
 	# The dark part runs from where the sweep has reached, clockwise, back to 12 o'clock; the

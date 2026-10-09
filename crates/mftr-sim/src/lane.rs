@@ -68,8 +68,52 @@ pub const TURRET_DAMAGE_MAX: f32 = 293.0;
 pub const TURRET_HEAT_STEP: f32 = 0.5;
 pub const TURRET_HEAT_MAX: u8 = 3;
 pub const TURRET_HEAT_COOL: SimDuration = SimDuration::from_millis(5000);
-pub const WAVE_INTERVAL: SimDuration = SimDuration::from_millis(30_000);
-pub const FIRST_WAVE: SimDuration = SimDuration::from_millis(15_000);
+/// Waves (D55, the reference ARAM's pacing): the first at 0:50, then every 25 s, the interval
+/// shrinking from 15:00 to 13 s at 25:00, so a lead can close a match out.
+pub const FIRST_WAVE: SimDuration = SimDuration::from_millis(50_000);
+pub const WAVE_INTERVAL: SimDuration = SimDuration::from_millis(25_000);
+pub const WAVE_INTERVAL_LATE: SimDuration = SimDuration::from_millis(13_000);
+pub const WAVES_FASTER_FROM_S: f32 = 15.0 * 60.0;
+pub const WAVES_FASTEST_AT_S: f32 = 25.0 * 60.0;
+
+/// The time to the next wave, `secs` into the match.
+pub fn wave_interval(secs: f32) -> SimDuration {
+    let f = ((secs - WAVES_FASTER_FROM_S) / (WAVES_FASTEST_AT_S - WAVES_FASTER_FROM_S)).clamp(0.0, 1.0);
+    let ms = WAVE_INTERVAL.0 as f32 + (WAVE_INTERVAL_LATE.0 as f32 - WAVE_INTERVAL.0 as f32) * f;
+    SimDuration(ms.round() as u64)
+}
+
+/// Minions grow stronger every 50 s of the match (up to 30 upgrades): health and damage per
+/// upgrade, by kind.
+pub const MINION_UPGRADE_EVERY_S: f32 = 50.0;
+pub const MINION_UPGRADES_MAX: u32 = 30;
+
+pub fn minion_upgrade(kind: MinionKind) -> (f32, f32) {
+    match kind {
+        MinionKind::Melee => (22.0, 0.6),
+        MinionKind::Caster => (9.0, 1.5),
+        MinionKind::Siege => (25.0, 1.5),
+        MinionKind::Super => (100.0, 5.0),
+    }
+}
+
+/// Upgrades a minion spawned `secs` into the match has.
+pub fn minion_upgrades(secs: f32) -> u32 {
+    ((secs.max(0.0) / MINION_UPGRADE_EVERY_S) as u32).min(MINION_UPGRADES_MAX)
+}
+
+/// Minions walk faster as the match goes on: +25 at 10, 15, 20 and 25 minutes (325 → 425).
+pub fn minion_speed(secs: f32) -> f32 {
+    let steps = ((secs / 60.0 - 5.0) / 5.0).floor().clamp(0.0, 4.0);
+    crate::world::MINION_MOVE_SPEED + 25.0 * steps
+}
+
+/// Champions hit structures harder as the match goes on: +0% at 5:00 to +25% at 20:00.
+pub const STRUCTURE_AMP_MAX: f32 = 0.25;
+
+pub fn structure_amp(secs: f32) -> f32 {
+    1.0 + STRUCTURE_AMP_MAX * ((secs / 60.0 - 5.0) / 15.0).clamp(0.0, 1.0)
+}
 pub const GATEHOUSE_RESPAWN: SimDuration = SimDuration::from_millis(300_000);
 pub const RELIC_RESPAWN: SimDuration = SimDuration::from_millis(40_000);
 /// A relic heals this share of max health.
@@ -134,6 +178,8 @@ pub fn minion_damage(kind: MinionKind) -> f32 {
 pub struct MatchState {
     pub next_wave_at: Option<SimTime>,
     pub waves_spawned: u32,
+    /// When the match began (the clock, waves and scaling count from it).
+    pub started_at: SimTime,
     /// Recent champion-on-champion attacks: (attacker, victim, at).
     pub aggression: Vec<(UnitId, UnitId, SimTime)>,
     /// Set once a Base falls.
@@ -144,6 +190,7 @@ impl MatchState {
     pub fn hash_into(&self, h: &mut impl StateSink) {
         h.write_u64(self.next_wave_at.map_or(u64::MAX, |t| t.0));
         h.write_u32(self.waves_spawned);
+        h.write_u64(self.started_at.0);
         h.write_u32(self.aggression.len() as u32);
         for (a, v, t) in &self.aggression {
             h.write_u32(a.0);
@@ -159,12 +206,13 @@ impl MatchState {
         }
     }
 
-    /// Minions of wave `n` (0-based): 3 melee, 3 casters, a siege minion every third wave, and
-    /// a super minion in front while the team has an enemy Gatehouse down (`empowered`).
+    /// Minions of wave `n` (0-based): 3 melee, 3 casters, a siege minion every second wave from
+    /// the third, and a super minion in front while the team has an enemy Gatehouse down
+    /// (`empowered`).
     pub fn wave(n: u32, empowered: bool) -> Vec<MinionKind> {
         let mut w = if empowered { vec![MinionKind::Super] } else { Vec::new() };
         w.extend([MinionKind::Melee; 3]);
-        if n % 3 == 2 {
+        if n >= 2 && n.is_multiple_of(2) {
             w.push(MinionKind::Siege);
         }
         w.extend([MinionKind::Caster; 3]);
@@ -208,6 +256,14 @@ pub fn update_protection(units: &mut [Unit]) {
     let lows = [lowest(Team::Blue, units), lowest(Team::Red, units)];
     for u in units.iter_mut().filter(|u| u.tier > 0) {
         u.protected = lows[u.team as usize].is_some_and(|low| u.tier > low);
+    }
+}
+
+/// How much more champions' damage hurts structures now (`structure_amp`). Every tick.
+pub fn update_structure_amp(units: &mut [Unit], secs: f32) {
+    let amp = structure_amp(secs);
+    for u in units.iter_mut().filter(|u| u.tier > 0) {
+        u.champion_damage_taken = amp;
     }
 }
 
@@ -375,18 +431,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn waves_have_a_siege_minion_every_third_and_a_super_when_empowered() {
+    fn waves_have_a_siege_minion_every_second_from_the_third_and_a_super_when_empowered() {
         assert_eq!(MatchState::wave(0, false).len(), 6);
+        assert_eq!(MatchState::wave(1, false).len(), 6);
         assert_eq!(MatchState::wave(2, false).len(), 7);
-        assert!(MatchState::wave(5, false).contains(&MinionKind::Siege));
+        assert_eq!(MatchState::wave(3, false).len(), 6);
+        assert!(MatchState::wave(4, false).contains(&MinionKind::Siege));
         assert!(!MatchState::wave(4, false).contains(&MinionKind::Super));
         assert_eq!(MatchState::wave(4, true)[0], MinionKind::Super);
-        assert_eq!(MatchState::wave(5, true).len(), 8);
+        assert_eq!(MatchState::wave(6, true).len(), 8);
         for kind in [MinionKind::Melee, MinionKind::Caster, MinionKind::Siege, MinionKind::Super] {
             assert_eq!(MinionKind::from_attack_range(minion_attack(kind).range), kind);
         }
         assert_eq!(turret_minion_share(minion_attack(MinionKind::Super).range), 0.07);
         assert_eq!(turret_minion_share(minion_attack(MinionKind::Caster).range), 0.70);
+    }
+
+    /// D55: the reference ARAM's pacing. Waves every 25 s, 13 s from 25:00; minions upgrade
+    /// every 50 s and speed up from 10:00 to 425 at 25:00; structures take up to +25% from
+    /// champions by 20:00.
+    #[test]
+    fn the_pacing_speeds_up_late_in_a_match() {
+        let ms = |s: f32| wave_interval(s).0 / crate::time::SUBTICKS_PER_SECOND;
+        assert_eq!(ms(0.0), 25);
+        assert_eq!(ms(14.0 * 60.0), 25);
+        assert_eq!(ms(20.0 * 60.0), 19);
+        assert_eq!(ms(30.0 * 60.0), 13);
+        assert_eq!(minion_upgrades(49.0), 0);
+        assert_eq!(minion_upgrades(500.0), 10);
+        assert_eq!(minion_upgrades(99_999.0), MINION_UPGRADES_MAX);
+        assert_eq!(minion_speed(9.0 * 60.0), 325.0);
+        assert_eq!(minion_speed(10.0 * 60.0), 350.0);
+        assert_eq!(minion_speed(26.0 * 60.0), 425.0);
+        assert_eq!(structure_amp(0.0), 1.0);
+        assert!((structure_amp(12.5 * 60.0) - 1.125).abs() < 1e-4);
+        assert_eq!(structure_amp(40.0 * 60.0), 1.25);
         assert_eq!(turret_minion_share(minion_attack(MinionKind::Siege).range), 0.14);
         assert_eq!(turret_minion_share(minion_attack(MinionKind::Melee).range), 0.45);
     }

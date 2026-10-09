@@ -46,6 +46,17 @@ Augments are permanent modifiers drafted during the match. They're built from th
 - At scheduled levels, each player gets **3 choices** of one rarity tier and can **reroll** a limited number of times.
 - Tier per draft slot can be fixed or rolled (e.g. guaranteed one Prismatic by mid-game).
 - Drafting happens live: while the draft window is open the player is untargetable in base, or it happens during death, depending on mode config.
+- **As built:** each of the three choices can be rerolled once (up to six augments seen a draft),
+  into one of the same tier that isn't held or shown. One Silver or Gold draft in four has a
+  **golden reroll** on one choice, shown before it's used: it rolls that choice one tier up.
+
+### Stat Anvils *(as built)*
+Late gold buys stats, as in the reference game's Mayhem. From level 9, a champion who can shop
+buys an anvil for 750 gold. Its tier is rolled (60% Silver, 30% Gold, 10% Prismatic; with
+*Blacksmith's Blessing*, 20/50/30) and it offers three different stats of that tier (attack
+damage, ability power, health, armor, magic resist, attack speed, ability haste, move speed). The
+kept one lasts the match, and anvils add up. A Silver anvil is +10 attack damage, +16 ability
+power or +150 health; Gold 1.8×, Prismatic 3×.
 
 ### Tiers
 | Tier | Role | Examples (working names) |

@@ -97,10 +97,12 @@ func _draw() -> void:
 		if map_size.x != map_size.y:
 			var lane := Rect2(0, map_size.y / 2.0 - 650.0, map_size.x, 1300.0)
 			draw_rect(_to_px_rect(lane), Color(0.46, 0.4, 0.3))
+		# (Until the render arrives. Some cliffs reach far past the map and fold back on
+		# themselves: those that can't be triangulated are skipped, not drawn wrong.)
 		for poly in geometry.get("brush", []):
-			draw_colored_polygon(_poly_px(poly), Color(0.16, 0.3, 0.14))
+			_flat_polygon(_poly_px(poly), Color(0.16, 0.3, 0.14))
 		for poly in geometry.get("walls", []):
-			draw_colored_polygon(_poly_px(poly), Color(0.2, 0.19, 0.22))
+			_flat_polygon(_poly_px(poly), Color(0.2, 0.19, 0.22))
 	for f in geometry.get("fountains", []):
 		var c := Color(0.3, 0.75, 0.85, 0.5) if f.ally else Color(0.9, 0.35, 0.3, 0.5)
 		draw_circle(to_px(f.center), f.radius / region.size.x * size.x, c)
@@ -111,6 +113,11 @@ func _poly_px(poly: PackedVector2Array) -> PackedVector2Array:
 	for p in poly:
 		out.append(to_px(p))
 	return out
+
+
+func _flat_polygon(pts: PackedVector2Array, color: Color) -> void:
+	if not Geometry2D.triangulate_polygon(pts).is_empty():
+		draw_colored_polygon(pts, color)
 
 
 func _draw_icons() -> void:

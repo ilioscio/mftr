@@ -183,6 +183,8 @@ pub struct Progress {
     pub streak: i8,
     /// Inventory (item ids, 0 = empty).
     pub items: [u8; INVENTORY],
+    /// Charges of each slot's consumable (stacked potions, a flask's charges); 0 otherwise.
+    pub charges: [u8; INVENTORY],
     /// When the Lifeline passive is ready again (item cooldowns survive death).
     pub lifeline_ready: SimTime,
     /// Trades that can still be undone, oldest first (`undo_len` valid). Cleared when the
@@ -195,8 +197,10 @@ pub struct Progress {
     pub offer: [u8; augments::CHOICES],
     /// Drafts opened so far (the open one included).
     pub drafted: u8,
-    /// The open draft was rerolled.
-    pub rerolled: bool,
+    /// Which choices of the open draft were rerolled (bit per choice: each once).
+    pub rerolled: u8,
+    /// The choice (1–3) whose reroll is golden (one tier up) this draft; 0 for none.
+    pub golden: u8,
     /// Seeds this champion's offers, so picks and rerolls are predicted exactly.
     pub augment_seed: u32,
     /// Unstable Experiment's current roll: tiny (else huge).
@@ -207,12 +211,24 @@ pub struct Progress {
     pub takedowns: u8,
     /// Plays under Hyper rules (set from the rules at spawn).
     pub hyper: bool,
+    /// Stat Anvils (Mayhem): steps of each stat kept, the open anvil's choices (packed,
+    /// `anvils::pack`; all 0 when none is open), and how many were bought.
+    pub anvil: [u16; 8],
+    pub anvil_offer: [u8; crate::anvils::CHOICES],
+    pub anvils: u8,
+    /// This match's score (the scoreboard): champion kills, deaths, assists, and minions
+    /// killed (last hits).
+    pub kills: u16,
+    pub deaths: u16,
+    pub assists: u16,
+    pub cs: u16,
 }
 
 /// One buy or sell: the inventory before it and the gold it changed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Trade {
     pub items: [u8; INVENTORY],
+    pub charges: [u8; INVENTORY],
     pub gold: f32,
 }
 
@@ -233,18 +249,27 @@ impl Progress {
         points: 0,
         streak: 0,
         items: [0; INVENTORY],
+        charges: [0; INVENTORY],
         lifeline_ready: SimTime(0),
-        undo: [Trade { items: [0; INVENTORY], gold: 0.0 }; UNDO],
+        undo: [Trade { items: [0; INVENTORY], charges: [0; INVENTORY], gold: 0.0 }; UNDO],
         undo_len: 0,
         augments: [0; augments::SLOTS],
         offer: [0; augments::CHOICES],
         drafted: 0,
-        rerolled: false,
+        rerolled: 0,
+        golden: 0,
         augment_seed: 0,
         unstable_tiny: false,
         stacks: 0,
         takedowns: 0,
         hyper: false,
+        anvil: [0; 8],
+        anvil_offer: [0; crate::anvils::CHOICES],
+        anvils: 0,
+        kills: 0,
+        deaths: 0,
+        assists: 0,
+        cs: 0,
     };
 
     pub fn hash_into(&self, h: &mut impl StateSink) {
@@ -259,11 +284,17 @@ impl Progress {
         for i in self.items {
             h.write_u8(i);
         }
+        for c in self.charges {
+            h.write_u8(c);
+        }
         h.write_u64(self.lifeline_ready.0);
         h.write_u8(self.undo_len);
         for t in &self.undo[..self.undo_len as usize] {
             for i in t.items {
                 h.write_u8(i);
+            }
+            for c in t.charges {
+                h.write_u8(c);
             }
             h.write_f32(t.gold);
         }
@@ -274,12 +305,23 @@ impl Progress {
             h.write_u8(a);
         }
         h.write_u8(self.drafted);
-        h.write_u8(self.rerolled as u8);
+        h.write_u8(self.rerolled);
+        h.write_u8(self.golden);
         h.write_u32(self.augment_seed);
         h.write_u8(self.unstable_tiny as u8);
         h.write_u32(self.stacks as u32);
         h.write_u8(self.takedowns);
         h.write_u8(self.hyper as u8);
+        for n in self.anvil {
+            h.write_u32(n as u32);
+        }
+        for c in self.anvil_offer {
+            h.write_u8(c);
+        }
+        h.write_u8(self.anvils);
+        for n in [self.kills, self.deaths, self.assists, self.cs] {
+            h.write_u32(n as u32);
+        }
     }
 
     /// What a champion's stats are computed from.
@@ -289,6 +331,7 @@ impl Progress {
             stacks: self.stacks,
             chaos_done: self.takedowns >= augments::CHAOS_TAKEDOWNS,
             hyper: self.hyper,
+            anvil: self.anvil,
         };
         (self.level, self.items, self.augments, growth)
     }
@@ -434,6 +477,9 @@ pub struct UnitState {
     pub buffered: Option<BufferedCast>,
     /// Basic attacks started (wrapping): picks the attack animation, the same on every client.
     pub attacks: u8,
+    /// A consumable healing over time: this much health a second until `potion_until`.
+    pub potion_rate: f32,
+    pub potion_until: SimTime,
 }
 
 /// A cast waiting to repeat (Echo): lines fly again from the caster's position then, areas land
@@ -476,6 +522,8 @@ impl UnitState {
             recovery: None,
             buffered: None,
             attacks: 0,
+            potion_rate: 0.0,
+            potion_until: SimTime(0),
         }
     }
 
@@ -822,6 +870,8 @@ impl UnitState {
             }
         }
         h.write_u8(self.attacks);
+        h.write_f32(self.potion_rate);
+        h.write_u64(self.potion_until.0);
     }
 }
 
@@ -862,6 +912,9 @@ pub struct Unit {
     pub tier: u8,
     /// A structure behind one that still stands: can't be hurt. Recomputed every tick.
     pub protected: bool,
+    /// Damage from champions is multiplied by this (structures, late in a match: D55).
+    /// Recomputed every tick; 1 for everything else.
+    pub champion_damage_taken: f32,
     /// The level, items and augments `stats` and `attack` were computed for (champions:
     /// recomputed when any of them changes).
     pub stats_for: StatsKey,
@@ -887,6 +940,7 @@ impl Unit {
             attack: None,
             tier: 0,
             protected: false,
+            champion_damage_taken: 1.0,
             stats_for: (1, [0; INVENTORY], [0; augments::SLOTS], augments::Growth::NONE),
         }
     }
@@ -973,8 +1027,14 @@ pub enum CommandKind {
     Undo,
     /// Keep choice 0–2 of the open augment draft.
     PickAugment(u8),
-    /// Replace the open draft's choices (once per draft).
-    RerollAugments,
+    /// Replace choice 0–2 of the open draft (each once per draft).
+    RerollAugment(u8),
+    /// Use the active of the item in an inventory slot (0–5): drink a potion.
+    UseItem(u8),
+    /// Buy a Stat Anvil (Mayhem, level 9+, 750 gold, while shopping): it offers three stats.
+    BuyAnvil,
+    /// Keep choice 0–2 of the open anvil.
+    PickAnvil(u8),
 }
 
 /// A player command, applied at `tick` at sub-tick position `sub` (03a §3).
@@ -1003,6 +1063,8 @@ pub struct Missile {
     pub power: f32,
     /// Index within the cast's volley (Multishot), plus `augments::ECHO_SHOT` for an echo.
     pub shot: u8,
+    /// The ability slot that fired it (0–5).
+    pub slot: u8,
 }
 
 impl Missile {
@@ -1045,6 +1107,8 @@ pub struct Area {
     pub cc: Cc,
     /// 0, or `augments::ECHO_SHOT` for an echo.
     pub shot: u8,
+    /// The ability slot that cast it (0–5).
+    pub slot: u8,
 }
 
 /// A homing basic-attack bolt: not dodgeable, flies at the target until it lands.
@@ -1077,6 +1141,21 @@ impl Missile {
     pub fn volley(&self) -> (UnitId, u32, bool) {
         (self.owner, self.cast_seq, self.shot >= augments::ECHO_SHOT)
     }
+}
+
+/// What dealt a hit: death recaps and stats say exactly which attack, ability or effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DamageOrigin {
+    /// A basic attack (a champion's, a minion's or a structure's: the source unit says).
+    Attack,
+    /// An ability by slot (0–5 = Q W E R D F).
+    Ability(u8),
+    /// An item's effect (on-hit damage), by item id.
+    Item(u8),
+    /// An augment's effect (Thorns), by augment id.
+    Augment(u8),
+    /// An enemy fountain.
+    Fountain,
 }
 
 /// Things that happened during a step, for the network layer and the client display.
@@ -1119,6 +1198,8 @@ pub enum SimEvent {
     Damage {
         source: UnitId,
         target: UnitId,
+        /// What hit: an attack, which ability, an item or augment effect.
+        origin: DamageOrigin,
         kind: DamageKind,
         amount: f32,
         absorbed: f32,
@@ -1180,11 +1261,19 @@ pub const CHAMPION_GAMEPLAY_RADIUS: f32 = 65.0;
 pub const MINION_MOVE_SPEED: f32 = 325.0;
 pub const TURRET_COLLISION_RADIUS: f32 = 60.0;
 pub const TURRET_GAMEPLAY_RADIUS: f32 = 80.0;
-/// Champion respawn at level 1 (01 §12): 6 s, +1.5 s per level *(start)*.
+/// Champion respawn at level 1 (the Duel Sandbox, where champions stay level 1): 6 s.
 pub const CHAMPION_RESPAWN: SimDuration = SimDuration::from_millis(6000);
+/// Respawn by level from 2 (D55, the reference ARAM's timers): 13 s at level 2 up to 40 s at
+/// 16, then 2 s more per level.
+const RESPAWN_S: [u8; 16] = [11, 13, 15, 17, 19, 21, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40];
 
 pub fn respawn_time(level: u8) -> SimDuration {
-    SimDuration(CHAMPION_RESPAWN.0 + SimDuration::from_millis(1500).0 * level.saturating_sub(1) as u64)
+    if level <= 1 {
+        return CHAMPION_RESPAWN;
+    }
+    let i = level as usize - 1;
+    let s = RESPAWN_S.get(i).copied().map_or(40 + 2 * (i as u64 + 1 - RESPAWN_S.len() as u64), u64::from);
+    SimDuration::from_millis(s * 1000)
 }
 pub const MINION_RESPAWN: SimDuration = SimDuration::from_millis(12_000);
 
@@ -1255,6 +1344,7 @@ enum Fired {
     /// A lunge arriving at its target.
     Strike {
         owner: UnitId,
+        slot: u8,
         target: UnitId,
         power: f32,
         kind: DamageKind,
@@ -1436,7 +1526,7 @@ impl World {
         for p in placements {
             self.spawn_placement(p);
         }
-        self.game = MatchState::default();
+        self.game = MatchState { started_at: SimTime::end_of(self.tick), ..MatchState::default() };
         if self.map.layout.lanes[0].len() > 1 {
             self.game.next_wave_at = Some(SimTime::end_of(self.tick).plus(lane::FIRST_WAVE));
         }
@@ -1462,6 +1552,11 @@ impl World {
         self.start_match();
     }
 
+    /// Seconds since the match began, at `t`.
+    pub fn match_secs(&self, t: SimTime) -> f32 {
+        t.secs_since(self.game.started_at).max(0.0)
+    }
+
     /// The match on a lane map: waves, recent aggression, winner.
     pub fn game(&self) -> &MatchState {
         &self.game
@@ -1480,6 +1575,9 @@ impl World {
     fn spawn_wave(&mut self) {
         let n = self.game.waves_spawned;
         let layout = self.map.layout.clone();
+        // Minions grow stronger and faster as the match goes on (D55).
+        let secs = self.match_secs(SimTime::end_of(self.tick));
+        let (upgrades, speed) = (lane::minion_upgrades(secs) as f32, lane::minion_speed(secs));
         for team in [Team::Blue, Team::Red] {
             // An enemy Gatehouse down (until it respawns): this team's wave brings a super minion.
             let empowered =
@@ -1491,11 +1589,19 @@ impl World {
             for (i, kind) in MatchState::wave(n, empowered).into_iter().enumerate() {
                 let (row, col) = ((i / 3) as f32, (i % 3) as f32 - 1.0);
                 let pos = spawn - ahead * (row * 80.0) + side * (col * 70.0);
-                self.spawn_minion(kind, team, pos, Some(Brain::Laner { next: 0 }));
+                let id = self.spawn_minion(kind, team, pos, Some(Brain::Laner { next: 0 }));
+                let (health, damage) = lane::minion_upgrade(kind);
+                if let Some(u) = self.units.iter_mut().find(|u| u.id == id) {
+                    u.stats.max_health += health * upgrades;
+                    u.stats.attack_damage += damage * upgrades;
+                    u.stats.move_speed = speed;
+                    u.state.health = u.stats.max_health;
+                    u.state.move_speed = speed;
+                }
             }
         }
         self.game.waves_spawned += 1;
-        self.game.next_wave_at = self.game.next_wave_at.map(|t| t.plus(lane::WAVE_INTERVAL));
+        self.game.next_wave_at = self.game.next_wave_at.map(|t| t.plus(lane::wave_interval(secs)));
         // Turrets hit harder as the match goes on.
         let damage = lane::turret_damage(self.game.waves_spawned);
         for u in self.units.iter_mut().filter(|u| u.kind == UnitKind::Turret) {
@@ -1584,6 +1690,8 @@ impl World {
             }
         }
         lane::update_protection(&mut self.units);
+        let secs = self.match_secs(SimTime::end_of(self.tick));
+        lane::update_structure_amp(&mut self.units, secs);
         if !prediction && self.game.winner.is_none() && self.game.next_wave_at.is_some_and(|w| w <= s0) {
             self.spawn_wave();
         }
@@ -1814,7 +1922,8 @@ impl World {
             for (owner, target, power, at) in melee {
                 let amp = damage_amp(units, owner, target, false, rng);
                 if let Some(u) = units.iter_mut().find(|u| u.id == target) {
-                    let dealt = deal_damage(u, owner, power * amp, DamageKind::Physical, at, events);
+                    let dealt =
+                        deal_damage(u, owner, DamageOrigin::Attack, power * amp, DamageKind::Physical, at, events);
                     landed.push((owner, target, dealt, at));
                 }
             }
@@ -1834,6 +1943,24 @@ impl World {
 
         // Phase 4: fountains, relics, passive gold, regeneration and shield expiry.
         fountains_and_relics(units, map, prediction, s1, events);
+        for u in units.iter_mut().filter(|u| u.kind == UnitKind::Champion) {
+            let st = &mut u.state;
+            if st.alive() && st.potion_until > s0 {
+                let secs = (st.potion_until.min(s1).0 - s0.0) as f32 / SUBTICKS_PER_SECOND as f32;
+                st.health = (st.health + st.potion_rate * secs).min(u.stats.max_health);
+            }
+            if st.potion_until <= s1 {
+                st.potion_rate = 0.0;
+            }
+            if can_shop(u, map, &rules) {
+                let p = &mut u.state.progress;
+                for s in 0..INVENTORY {
+                    if let Some((_, _, most, true)) = items::consumable(p.items[s]) {
+                        p.charges[s] = most;
+                    }
+                }
+            }
+        }
         if rules.passive_gold > 0.0 {
             for u in units.iter_mut().filter(|u| u.kind == UnitKind::Champion) {
                 u.state.progress.gold += rules.passive_gold * TICK_DT;
@@ -2034,6 +2161,7 @@ fn deliver(unit: &Unit, c: EchoCast, t: SimTime, echo: bool, fired: &mut Vec<Fir
                 cast_seq: c.seq,
                 power,
                 shot: first_shot,
+                slot: c.slot,
             };
             fired.push(Fired::Missile(base));
             if d.multishot && tf.accepts(Transforms::MULTISHOT) {
@@ -2060,6 +2188,7 @@ fn deliver(unit: &Unit, c: EchoCast, t: SimTime, echo: bool, fired: &mut Vec<Fir
                 cast_seq: c.seq,
                 cc: a.cc,
                 shot: first_shot,
+                slot: c.slot,
             }));
         }
         _ => return false,
@@ -2150,7 +2279,7 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
             if slot < 3 && augments::mods(&unit.state.progress.augments).fundamentals {
                 power *= augments::FUNDAMENTALS_AMP;
             }
-            fired.push(Fired::Strike { owner: id, target, power, kind: l.damage.kind, cc: l.cc, at: t });
+            fired.push(Fired::Strike { owner: id, slot, target, power, kind: l.damage.kind, cc: l.cc, at: t });
         }
         unit.state.dash = None;
         unit.state.detour = None;
@@ -2177,6 +2306,7 @@ fn apply_command(
     ctx: CastContext,
     events: &mut Vec<SimEvent>,
 ) {
+    let may_shop = can_shop(unit, map, rules);
     let st = &mut unit.state;
     match c.kind {
         // A newer order replaces a buffered cast (one slot, the latest wins: 10 §4.1).
@@ -2232,9 +2362,30 @@ fn apply_command(
             }
         }
         CommandKind::Buy(_) | CommandKind::Sell(_) | CommandKind::Undo => shop(unit, c.kind, map, rules),
+        CommandKind::UseItem(slot) => use_item(unit, slot, t),
+        CommandKind::BuyAnvil if rules.augments && may_shop => {
+            let p = &mut st.progress;
+            if p.level >= crate::anvils::MIN_LEVEL && p.gold >= crate::anvils::COST && p.anvil_offer[0] == 0 {
+                let lucky = augments::mods(&p.augments).anvil_luck;
+                p.anvil_offer = crate::anvils::roll(p.augment_seed, p.anvils, lucky);
+                p.anvils = p.anvils.saturating_add(1);
+                p.gold -= crate::anvils::COST;
+            }
+        }
+        CommandKind::PickAnvil(choice) => {
+            let p = &mut st.progress;
+            if let Some(&c) = p.anvil_offer.get(choice as usize)
+                && let Some((tier, stat)) = crate::anvils::unpack(c)
+            {
+                let i = crate::anvils::STATS.iter().position(|s| *s == stat).unwrap_or(0);
+                p.anvil[i] = p.anvil[i].saturating_add(crate::anvils::TIER_UNITS[tier.min(2) as usize]);
+                p.anvil_offer = [0; crate::anvils::CHOICES];
+            }
+        }
+        CommandKind::BuyAnvil => {}
         CommandKind::PickAugment(choice) if rules.augments => augments::pick(&mut st.progress, choice),
-        CommandKind::RerollAugments if rules.augments => augments::reroll(&mut st.progress),
-        CommandKind::PickAugment(_) | CommandKind::RerollAugments => {}
+        CommandKind::RerollAugment(choice) if rules.augments => augments::reroll(&mut st.progress, choice),
+        CommandKind::PickAugment(_) | CommandKind::RerollAugment(_) => {}
     }
 }
 
@@ -2254,6 +2405,26 @@ fn shop(unit: &mut Unit, kind: CommandKind, map: &Map, rules: &Rules) {
     }
     let p = &mut unit.state.progress;
     match kind {
+        CommandKind::Buy(id) if items::consumable(id).is_some() => {
+            // Potions stack in a slot (up to its charges); a flask is one per champion, full.
+            let (Some(item), Some((_, _, most, refills))) = (items::item(id), items::consumable(id)) else { return };
+            if item.cost > p.gold {
+                return;
+            }
+            let held = p.items.iter().position(|i| *i == id);
+            let before = Trade { items: p.items, charges: p.charges, gold: -item.cost };
+            match held {
+                Some(_) if refills => return,
+                Some(s) if p.charges[s] < most => p.charges[s] += 1,
+                _ => {
+                    let Some(s) = p.items.iter().position(|i| *i == 0) else { return };
+                    p.items[s] = id;
+                    p.charges[s] = if refills { most } else { 1 };
+                }
+            }
+            p.push_trade(before);
+            p.gold -= item.cost;
+        }
         CommandKind::Buy(id) => {
             let (Some(item), Some((cost, used))) = (items::item(id), items::price(id, &p.items)) else { return };
             let mut inv = p.items;
@@ -2267,29 +2438,63 @@ fn shop(unit: &mut Unit, kind: CommandKind, map: &Map, rules: &Rules) {
                 return;
             }
             inv[slot] = id;
-            p.push_trade(Trade { items: p.items, gold: -cost });
+            p.push_trade(Trade { items: p.items, charges: p.charges, gold: -cost });
+            // Slots whose item changed hold no charges.
+            for ((c, new), old) in p.charges.iter_mut().zip(inv).zip(p.items) {
+                if new != old {
+                    *c = 0;
+                }
+            }
             p.items = inv;
             p.gold -= cost;
         }
         CommandKind::Sell(slot) => {
-            let before = p.items;
-            if let Some(i) = p.items.get_mut(slot as usize)
+            let (before, charges) = (p.items, p.charges);
+            let s = slot as usize;
+            if let Some(i) = p.items.get_mut(s)
                 && let Some(item) = items::item(*i)
             {
-                let refund = item.cost * items::SELL_REFUND;
+                // A stack of potions sells by the potion; anything else whole.
+                let n = match items::consumable(item.id) {
+                    Some((_, _, _, false)) => charges[s].max(1) as f32,
+                    _ => 1.0,
+                };
+                let refund = item.cost * n * items::SELL_REFUND;
                 *i = 0;
+                p.charges[s] = 0;
                 p.gold += refund;
-                p.push_trade(Trade { items: before, gold: refund });
+                p.push_trade(Trade { items: before, charges, gold: refund });
             }
         }
         CommandKind::Undo if p.undo_len > 0 => {
             p.undo_len -= 1;
             let t = p.undo[p.undo_len as usize];
             p.items = t.items;
+            p.charges = t.charges;
             p.gold -= t.gold;
         }
         _ => {}
     }
+}
+
+/// Drink the consumable in `slot` at `t`: it heals over time from now (a second one while one
+/// runs adds its time). A potion stack shrinks by one and is gone at zero; a flask keeps its
+/// slot and refills at the fountain.
+fn use_item(unit: &mut Unit, slot: u8, t: SimTime) {
+    let st = &mut unit.state;
+    let s = slot as usize;
+    if !st.alive() || s >= INVENTORY || st.progress.charges[s] == 0 {
+        return;
+    }
+    let Some((heal, duration_ms, _, refills)) = items::consumable(st.progress.items[s]) else { return };
+    st.progress.charges[s] -= 1;
+    if st.progress.charges[s] == 0 && !refills {
+        st.progress.items[s] = 0;
+    }
+    let duration = SimDuration::from_millis(duration_ms);
+    let rate = heal / duration.0 as f32 * SUBTICKS_PER_SECOND as f32;
+    st.potion_until = if st.potion_until > t { st.potion_until.plus(duration) } else { t.plus(duration) };
+    st.potion_rate = st.potion_rate.max(rate);
 }
 
 /// Validate and start a cast at `t` (03 §5: the sim validates everything). Skillshots and
@@ -2547,7 +2752,15 @@ fn resolve_effects(
             let amp = damage_amp(units, m.owner, target, true, rng);
             if let Some(u) = units.iter_mut().find(|u| u.id == target) {
                 apply_cc(u, m.spec.cc, at, from, s1, events);
-                let dealt = deal_damage(u, m.owner, m.power * amp, m.spec.damage.kind, at, events);
+                let dealt = deal_damage(
+                    u,
+                    m.owner,
+                    DamageOrigin::Ability(m.slot),
+                    m.power * amp,
+                    m.spec.damage.kind,
+                    at,
+                    events,
+                );
                 after_ability_hit(units, m.owner, target, dealt, at, events);
             }
             return false;
@@ -2572,7 +2785,15 @@ fn resolve_effects(
                 let amp = damage_amp(units, a.owner, id, true, rng);
                 let Some(u) = units.iter_mut().find(|u| u.id == id) else { continue };
                 apply_cc(u, a.cc, a.detonate_at, a.center, s1, events);
-                let dealt = deal_damage(u, a.owner, a.power * amp, a.kind, a.detonate_at, events);
+                let dealt = deal_damage(
+                    u,
+                    a.owner,
+                    DamageOrigin::Ability(a.slot),
+                    a.power * amp,
+                    a.kind,
+                    a.detonate_at,
+                    events,
+                );
                 after_ability_hit(units, a.owner, id, dealt, a.detonate_at, events);
             }
         }
@@ -2593,7 +2814,7 @@ fn resolve_effects(
         if gap <= step {
             let at = SimTime(from.0 + (gap / b.speed * SUBTICKS_PER_SECOND as f32) as u64).min(s1);
             events.push(SimEvent::AttackLanded { id: b.id, target: b.target, at, hit: true });
-            let dealt = deal_damage(target, b.owner, b.power * amp, b.kind, at, events);
+            let dealt = deal_damage(target, b.owner, DamageOrigin::Attack, b.power * amp, b.kind, at, events);
             landed.push((b.owner, b.target, dealt, at));
             return false;
         }
@@ -2609,10 +2830,11 @@ fn on_hit(units: &mut [Unit], landed: &[(UnitId, UnitId, f32, SimTime)], events:
     for &(owner, target, dealt, at) in landed {
         let Some(o) = units.iter().find(|u| u.id == owner && u.kind == UnitKind::Champion) else { continue };
         let (passives, stats) = (items::passives(&o.state.progress.items), o.stats);
-        if let Some((base, ap_ratio)) = passives.on_hit_magic
+        if let Some((base, ap_ratio, item)) = passives.on_hit_magic
             && let Some(t) = units.iter_mut().find(|u| u.id == target)
         {
-            deal_damage(t, owner, base + ap_ratio * stats.ability_power, DamageKind::Magic, at, events);
+            let raw = base + ap_ratio * stats.ability_power;
+            deal_damage(t, owner, DamageOrigin::Item(item), raw, DamageKind::Magic, at, events);
         }
         if stats.life_steal > 0.0
             && dealt > 0.0
@@ -2633,7 +2855,8 @@ fn on_hit(units: &mut [Unit], landed: &[(UnitId, UnitId, f32, SimTime)], events:
             && dealt > 0.0
             && let Some(o) = units.iter_mut().find(|u| u.id == owner)
         {
-            deal_damage(o, target, augments::THORNS * dealt, DamageKind::Magic, at, events);
+            let thorns = DamageOrigin::Augment(augments::THORNS_ID);
+            deal_damage(o, target, thorns, augments::THORNS * dealt, DamageKind::Magic, at, events);
         }
     }
 }
@@ -2717,7 +2940,8 @@ fn damage_amp(units: &[Unit], owner: UnitId, target: UnitId, ability: bool, rng:
     if o.kind != UnitKind::Champion {
         return 1.0;
     }
-    let mut amp = 1.0;
+    // Structures take more from champions late in a match (D55).
+    let mut amp = t.champion_damage_taken;
     if o.gameplay_radius < CHAMPION_GAMEPLAY_RADIUS && t.gameplay_radius > o.gameplay_radius {
         amp *= augments::PEBBLE_AMP;
     }
@@ -2751,14 +2975,14 @@ fn resolve_direct(units: &mut [Unit], direct: &mut [Fired], rng: &mut Pcg32, s1:
     direct.sort_by_key(at_of);
     for f in direct.iter() {
         match *f {
-            Fired::Strike { owner, target, power, kind, cc, at } => {
+            Fired::Strike { owner, slot, target, power, kind, cc, at } => {
                 let power = power * damage_amp(units, owner, target, true, rng);
                 let from = units.iter().find(|u| u.id == owner).map(|u| (u.state.pos, u.gameplay_radius));
                 if let (Some((p, r)), Some(u)) = (from, units.iter_mut().find(|u| u.id == target)) {
                     // Still within reach on arrival (it may have dashed or blinked away).
                     if (u.state.pos - p).length() <= r + u.gameplay_radius + STRIKE_SLACK {
                         apply_cc(u, cc, at, p, s1, events);
-                        let dealt = deal_damage(u, owner, power, kind, at, events);
+                        let dealt = deal_damage(u, owner, DamageOrigin::Ability(slot), power, kind, at, events);
                         after_ability_hit(units, owner, target, dealt, at, events);
                     }
                 }
@@ -2791,6 +3015,7 @@ pub const STRIKE_SLACK: f32 = 100.0;
 fn deal_damage(
     u: &mut Unit,
     source: UnitId,
+    origin: DamageOrigin,
     raw: f32,
     kind: DamageKind,
     at: SimTime,
@@ -2813,7 +3038,7 @@ fn deal_damage(
         amount -= absorbed;
     }
     st.health -= amount;
-    events.push(SimEvent::Damage { source, target: u.id, kind, amount, absorbed, at });
+    events.push(SimEvent::Damage { source, target: u.id, origin, kind, amount, absorbed, at });
     let dealt = amount + absorbed;
     if st.health > 0.0
         && u.kind == UnitKind::Champion
@@ -2892,6 +3117,9 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
                 let (gold, xp) = lane::minion_reward(victim.attack.map_or(0.0, |a| a.range));
                 if let Some(k) = enemy_champ(killer) {
                     pay.push((k, gold, 0, at));
+                    if let Some(u) = units.iter_mut().find(|u| u.id == k) {
+                        u.state.progress.cs = u.state.progress.cs.saturating_add(1);
+                    }
                 }
                 let share = lane::shared_xp(xp, nearby.len());
                 pay.extend(nearby.iter().map(|id| (*id, 0.0, share, at)));
@@ -2913,6 +3141,12 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
                     pay.push((k, gold, 0, at));
                     if let Some(u) = units.iter_mut().find(|u| u.id == k) {
                         u.state.progress.streak = u.state.progress.streak.max(0).saturating_add(1);
+                        u.state.progress.kills = u.state.progress.kills.saturating_add(1);
+                    }
+                }
+                for a in &assists {
+                    if let Some(u) = units.iter_mut().find(|u| u.id == *a) {
+                        u.state.progress.assists = u.state.progress.assists.saturating_add(1);
                     }
                 }
                 // Takedowns: Champion of Chaos counts them, Reset refreshes Q, W and E.
@@ -2931,6 +3165,7 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
                 }
                 if let Some(v) = units.iter_mut().find(|u| u.id == unit) {
                     v.state.progress.streak = v.state.progress.streak.min(0).saturating_sub(1);
+                    v.state.progress.deaths = v.state.progress.deaths.saturating_add(1);
                 }
                 let share = lane::shared_xp(140 + 30 * vlevel as u32, nearby.len());
                 pay.extend(nearby.iter().map(|id| (*id, 0.0, share, at)));
@@ -2992,7 +3227,15 @@ fn fountains_and_relics(units: &mut [Unit], map: &Map, prediction: bool, s1: Sim
                 let max = u.stats.max_health;
                 u.state.health = (u.state.health + max * lane::FOUNTAIN_HEAL * TICK_DT).min(max);
             } else if !prediction {
-                deal_damage(u, UnitId(0), lane::FOUNTAIN_DPS * TICK_DT, DamageKind::True, s1, events);
+                deal_damage(
+                    u,
+                    UnitId(0),
+                    DamageOrigin::Fountain,
+                    lane::FOUNTAIN_DPS * TICK_DT,
+                    DamageKind::True,
+                    s1,
+                    events,
+                );
             }
         }
     }
@@ -4066,7 +4309,7 @@ mod tests {
         assert!(died - d.len() > 30, "waves should fight: {} minion deaths", died - d.len());
         assert!(d.iter().all(|(k, ..)| *k == UnitKind::Minion), "only minions die: {d:?}");
         assert!(w.game().winner.is_none());
-        assert_eq!(w.game().waves_spawned, 5, "0:15, 0:45, 1:15, 1:45, 2:15");
+        assert_eq!(w.game().waves_spawned, 4, "0:50, 1:15, 1:40, 2:05");
         // Lane minions stay on the lane (nobody wandered off into a corner).
         for u in w.units().iter().filter(|u| u.kind == UnitKind::Minion) {
             let across = crate::map::bridge_lane_point(u.state.pos).y;
@@ -4182,7 +4425,8 @@ mod tests {
         let s = w.units().iter().find(|u| u.attack.is_some_and(|a| a.range == 170.0)).unwrap();
         assert_eq!(
             (s.stats.max_health, s.stats.armor, s.collision_radius, s.gameplay_radius),
-            (1500.0, 100.0, 45.0, 80.0)
+            // The first wave comes at 0:50, after one upgrade (+100 health for a super).
+            (1600.0, 100.0, 45.0, 80.0)
         );
     }
 
@@ -4268,7 +4512,7 @@ mod tests {
         let mut plain = ranked_world();
         let other = plain.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Bastion, Vec2::new(1000.0, 1000.0));
         plain.step(&[]);
-        plain.step(&[pick(1, 2, CommandKind::PickAugment(0)), pick(2, 2, CommandKind::RerollAugments)]);
+        plain.step(&[pick(1, 2, CommandKind::PickAugment(0)), pick(2, 2, CommandKind::RerollAugment(0))]);
         let p = plain.unit(other).unwrap().state.progress;
         assert_eq!((p.offer, p.augments, p.drafted), ([0; 3], [0; 4], 0), "ARAM without Mayhem has no drafts");
     }
@@ -4691,6 +4935,93 @@ mod tests {
         Command { player: PlayerId(player), seq, tick: Tick(tick), sub: SubTick::START, kind }
     }
 
+    /// Stat Anvils (Mayhem): from level 9, 750 gold in the fountain buys three stat choices of
+    /// a rolled tier; the kept one adds to the champion's stats for the match. Plain ARAM has
+    /// none.
+    #[test]
+    fn stat_anvils_buy_stats_late_in_mayhem() {
+        let fountain = bridge_point(Vec2::new(400.0, 1500.0));
+        let mut aram = ranked_world();
+        aram.set_map(MapId::Bridge.shared());
+        let plain = aram.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, fountain);
+        aram.unit_mut(plain).unwrap().state.progress.level = 12;
+        aram.step(&[shop(0, 1, 1, CommandKind::BuyAnvil)]);
+        assert_eq!(aram.unit(plain).unwrap().state.progress.anvils, 0, "no anvils in plain ARAM");
+
+        let mut w = World::new(9);
+        w.set_rules(Rules::MAYHEM);
+        w.set_map(MapId::Bridge.shared());
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, fountain);
+        w.unit_mut(me).unwrap().state.progress.drafted = augments::SLOTS as u8; // no drafts
+        w.step(&[shop(0, 1, 1, CommandKind::BuyAnvil)]);
+        assert_eq!(w.unit(me).unwrap().state.progress.anvils, 0, "not before level 9");
+        w.unit_mut(me).unwrap().state.progress.level = 9;
+        let gold = w.unit(me).unwrap().state.progress.gold;
+        w.step(&[shop(0, 2, 2, CommandKind::BuyAnvil)]);
+        let p = w.unit(me).unwrap().state.progress;
+        assert_eq!(p.anvils, 1);
+        assert!(p.gold < gold - crate::anvils::COST + 1.0);
+        let (tier, stat) = crate::anvils::unpack(p.anvil_offer[1]).unwrap();
+        let before = w.unit(me).unwrap().stats;
+        w.step(&[shop(0, 3, 3, CommandKind::PickAnvil(1))]);
+        w.step(&[]);
+        let u = w.unit(me).unwrap();
+        assert_eq!(u.state.progress.anvil_offer, [0; crate::anvils::CHOICES]);
+        let units = crate::anvils::TIER_UNITS[tier as usize];
+        let i = crate::anvils::STATS.iter().position(|s| *s == stat).unwrap();
+        assert_eq!(u.state.progress.anvil[i], units);
+        assert_ne!(u.stats, before, "the kept stat counts");
+    }
+
+    /// Consumables (keys 1–6): potions stack in one slot and heal 120 over 15 s each, used up;
+    /// the flask heals 100 over 12 s, twice, keeps its slot and refills at the fountain. Undo
+    /// gives a stack back whole.
+    #[test]
+    fn potions_stack_heal_over_time_and_the_flask_refills() {
+        use crate::items::*;
+        let mut w = ranked_world();
+        w.set_map(MapId::Bridge.shared());
+        let fountain = bridge_point(Vec2::new(400.0, 1500.0));
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, fountain);
+        w.step(&[shop(0, 1, 1, CommandKind::Buy(HEALTH_POTION)), shop(0, 2, 1, CommandKind::Buy(HEALTH_POTION))]);
+        w.step(&[shop(0, 3, 2, CommandKind::Buy(REFILLABLE_FLASK)), shop(0, 4, 2, CommandKind::Buy(REFILLABLE_FLASK))]);
+        let p = w.unit(me).unwrap().state.progress;
+        assert_eq!((p.items[0], p.charges[0]), (HEALTH_POTION, 2), "two potions, one slot");
+        assert_eq!((p.items[1], p.charges[1]), (REFILLABLE_FLASK, 2), "one flask, full");
+        assert_eq!(p.items[2], 0, "a second flask isn't sold");
+        // Out in the lane and hurt: drink a potion. A twin who doesn't drink shows what the
+        // potion added on top of health regeneration.
+        let lane = bridge_point(Vec2::new(4000.0, 1500.0));
+        let twin =
+            w.spawn_champion(PlayerId(1), Team::Blue, ChampionId::Vesper, bridge_point(Vec2::new(4000.0, 1700.0)));
+        for (id, pos) in [(me, lane), (twin, bridge_point(Vec2::new(4000.0, 1700.0)))] {
+            let u = w.unit_mut(id).unwrap();
+            u.state.pos = pos;
+            u.state.health = 200.0;
+        }
+        let k = w.tick().0 + 1;
+        w.step(&[shop(0, 5, k, CommandKind::UseItem(0))]);
+        for _ in 0..(crate::time::TICK_HZ * 16) {
+            w.step(&[]);
+        }
+        let u = w.unit(me).unwrap();
+        let healed = u.state.health - w.unit(twin).unwrap().state.health;
+        assert!((healed - 120.0).abs() < 0.01, "120 over 15 s: {healed}");
+        assert_eq!((u.state.progress.items[0], u.state.progress.charges[0]), (HEALTH_POTION, 1));
+        // The flask twice, then empty, then refilled at the fountain.
+        let k = w.tick().0 + 1;
+        w.step(&[shop(0, 6, k, CommandKind::UseItem(1)), shop(0, 7, k, CommandKind::UseItem(1))]);
+        let p = w.unit(me).unwrap().state.progress;
+        assert_eq!((p.items[1], p.charges[1]), (REFILLABLE_FLASK, 0), "an empty flask keeps its slot");
+        w.unit_mut(me).unwrap().state.pos = fountain;
+        w.step(&[]);
+        assert_eq!(w.unit(me).unwrap().state.progress.charges[1], 2);
+        // The last potion: used up, the slot frees.
+        let k = w.tick().0 + 1;
+        w.step(&[shop(0, 8, k, CommandKind::UseItem(0))]);
+        assert_eq!(w.unit(me).unwrap().state.progress.items[0], 0);
+    }
+
     /// M2 slice 3: buying only in the own fountain or while dead; recipes consume components
     /// and cost the difference; selling refunds 70%; stats follow the next tick.
     #[test]
@@ -4894,6 +5225,14 @@ mod tests {
         assert_eq!(gold_of(assister), lane::KILL_GOLD * 0.5);
         assert_eq!(w.unit(killer).unwrap().state.progress.streak, 1);
         assert_eq!(w.unit(victim).unwrap().state.progress.streak, -1);
+        // The scoreboard: a kill, an assist, a death.
+        let score = |id: UnitId| {
+            let p = w.unit(id).unwrap().state.progress;
+            (p.kills, p.deaths, p.assists)
+        };
+        assert_eq!(score(killer), (1, 0, 0));
+        assert_eq!(score(assister), (0, 0, 1));
+        assert_eq!(score(victim), (0, 1, 0));
         assert_eq!(lane::bounty(4), 450.0);
         assert_eq!(lane::bounty(-3), 220.0);
     }
@@ -4980,7 +5319,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0x91e2_43f3_1c8f_18c1;
+    const GOLDEN_HASH_ARENA: u64 = 0xe845_b3e4_e35b_90c9;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -5037,7 +5376,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x650e_b09f_e5ec_ead0;
+    const GOLDEN_HASH_BRIDGE: u64 = 0xb3d5_88f8_9bd9_b6b1;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -5108,5 +5447,5 @@ mod tests {
 
     /// Recorded on x86_64-pc-windows-msvc when facing, follow-throughs and the input buffer
     /// joined the state (A2). CI checks Linux, macOS (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x9096_3d59_9916_a899;
+    const GOLDEN_HASH: u64 = 0xe606_4e94_327a_2611;
 }

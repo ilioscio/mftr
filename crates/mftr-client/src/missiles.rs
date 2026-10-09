@@ -430,6 +430,7 @@ mod tests {
             cast_seq: 7,
             power: 50.0,
             shot,
+            slot: 0,
         };
         let mut book = MissileBook::default();
         for (id, shot, tick) in [(10, 0, 1), (11, 1, 2), (12, mftr_sim::augments::ECHO_SHOT, 3)] {

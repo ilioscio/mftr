@@ -451,11 +451,40 @@ impl MatchClient {
         }
     }
 
-    /// Reroll the open augment draft (once per draft).
+    /// Buy a Stat Anvil (Mayhem, level 9+, while shopping).
     #[func]
-    fn reroll_augments(&mut self) {
+    fn buy_anvil(&mut self) {
         let now = self.now();
-        if self.session.reroll_augments(now).is_some() {
+        if self.session.buy_anvil(now).is_some() {
+            self.send_input(now);
+        }
+    }
+
+    /// Keep choice 0–2 of the open anvil.
+    #[func]
+    fn pick_anvil(&mut self, choice: i64) {
+        let now = self.now();
+        if (0..mftr_sim::anvils::CHOICES as i64).contains(&choice)
+            && self.session.pick_anvil(choice as u8, now).is_some()
+        {
+            self.send_input(now);
+        }
+    }
+
+    /// Use the item in inventory slot 0–5 (keys 1–6): drink a potion.
+    #[func]
+    fn use_item(&mut self, slot: i64) {
+        let now = self.now();
+        if (0..INVENTORY as i64).contains(&slot) && self.session.use_item(slot as u8, now).is_some() {
+            self.send_input(now);
+        }
+    }
+
+    /// Reroll choice 0–2 of the open augment draft (each once per draft).
+    #[func]
+    fn reroll_augment(&mut self, choice: i64) {
+        let now = self.now();
+        if (0..augments::CHOICES as i64).contains(&choice) && self.session.reroll_augment(choice as u8, now).is_some() {
             self.send_input(now);
         }
     }
@@ -507,6 +536,8 @@ impl MatchClient {
                 recipe.push(&(*r as i64).to_variant());
             }
             d.set("recipe", &recipe);
+            d.set("consumable", items::consumable(it.id).is_some());
+            d.set("lines", &item_lines(it));
             d.set("affordable", p.is_some_and(|p| p.gold >= price));
             d.set("owned", inv.contains(&it.id));
             out.push(&d.to_variant());
@@ -1011,19 +1042,13 @@ impl MatchClient {
                 inv.push(&(i as i64).to_variant());
             }
             d.set("items", &inv);
+            let charges: PackedInt32Array = s.progress.charges.iter().map(|c| *c as i32).collect();
+            d.set("charges", &charges);
+            d.set("potion", if s.potion_until > t { s.potion_until.secs_since(t) } else { 0.0 });
             d.set("can_undo", s.progress.undo_len > 0);
             d.set("hitbox", self.session.own_radius());
             // ARAM: Mayhem: held augments and the open draft.
-            let card = |id: u8| {
-                let mut c = VarDictionary::new();
-                if let Some(a) = augments::augment(id) {
-                    c.set("id", id as i64);
-                    c.set("name", a.name);
-                    c.set("tier", a.tier.name());
-                    c.set("text", a.text);
-                }
-                c
-            };
+            let card = augment_card;
             let mut held = VarArray::new();
             for id in s.progress.augments.iter().filter(|id| **id != 0) {
                 let mut c = card(*id);
@@ -1051,7 +1076,38 @@ impl MatchClient {
                 offer.push(&card(*id).to_variant());
             }
             d.set("offer", &offer);
-            d.set("can_reroll", s.progress.offer[0] != 0 && !s.progress.rerolled);
+            // Per choice: can it still be rerolled, and is its reroll golden (one tier up)?
+            let open = s.progress.offer[0] != 0;
+            let can: Vec<bool> = (0..augments::CHOICES).map(|c| open && s.progress.rerolled & (1 << c) == 0).collect();
+            let mut rerolls = VarArray::new();
+            for c in can {
+                rerolls.push(&c.to_variant());
+            }
+            d.set("can_reroll", &rerolls);
+            // Stat Anvils (Mayhem): the open one's choices, and what's been kept so far.
+            let tiers = ["Silver", "Gold", "Prismatic"];
+            let mut anvil = VarArray::new();
+            for c in s.progress.anvil_offer {
+                if let Some((tier, stat)) = mftr_sim::anvils::unpack(c) {
+                    let mut m = VarDictionary::new();
+                    m.set("tier", tiers[tier.min(2) as usize]);
+                    m.set("stat", stat.name());
+                    m.set("text", anvil_text(stat, mftr_sim::anvils::TIER_UNITS[tier.min(2) as usize]).as_str());
+                    anvil.push(&m.to_variant());
+                }
+            }
+            d.set("anvil_offer", &anvil);
+            let mut kept = VarArray::new();
+            for (stat, n) in mftr_sim::anvils::STATS.iter().zip(s.progress.anvil) {
+                if n > 0 {
+                    kept.push(&anvil_text(*stat, n).to_variant());
+                }
+            }
+            d.set("anvils_kept", &kept);
+            d.set("anvil_cost", mftr_sim::anvils::COST);
+            d.set("anvil_level", mftr_sim::anvils::MIN_LEVEL as i64);
+            d.set("mayhem", self.session.rules().augments);
+            d.set("golden", s.progress.golden as i64 - 1);
             d.set("shield", if s.shield_until > t { s.shield } else { 0.0 });
             d.set("dead", !s.alive());
             d.set("respawn_in", s.respawn_at.map_or(0.0, |r| r.secs_since(t)));
@@ -1236,7 +1292,131 @@ impl MatchClient {
     /// Seconds since the match began (the sim's clock, predicted), for the HUD's game timer.
     #[func]
     fn match_seconds(&self) -> f64 {
-        self.session.input_sim_time(self.now()).map_or(0.0, |t| t.0 as f64 / mftr_sim::time::SUBTICKS_PER_SECOND as f64)
+        let started = self.session.scoreboard().map_or(mftr_sim::SimTime(0), |b| b.started_at);
+        self.session.input_sim_time(self.now()).map_or(0.0, |t| t.secs_since(started).max(0.0) as f64)
+    }
+
+    /// Every champion's score (the Tab breakdown): `[{ unit, champion, team, ally, you, bot,
+    /// level, kills, deaths, assists, cs, items: [ids], augments: [{ id, name, tier, text }],
+    /// respawn }]`, our team first.
+    #[func]
+    fn scoreboard(&self) -> VarArray {
+        let mut out = VarArray::new();
+        let Some(b) = self.session.scoreboard() else { return out };
+        let mine = self.session.team();
+        let mut rows: Vec<_> = b.rows.iter().collect();
+        rows.sort_by_key(|r| (r.team != mine, r.unit.0));
+        for r in rows {
+            let mut d = VarDictionary::new();
+            d.set("unit", r.unit.0 as i64);
+            d.set("champion", r.champion.def().name);
+            d.set("team", if r.team == Team::Blue { "blue" } else { "red" });
+            d.set("ally", r.team == mine);
+            d.set("you", r.unit == self.session.unit());
+            d.set("bot", r.bot);
+            d.set("level", r.level as i64);
+            d.set("kills", r.kills as i64);
+            d.set("deaths", r.deaths as i64);
+            d.set("assists", r.assists as i64);
+            d.set("cs", r.cs as i64);
+            let items: PackedInt32Array = r.items.iter().map(|i| *i as i32).collect();
+            d.set("items", &items);
+            let mut augs = VarArray::new();
+            for id in r.augments.iter().filter(|id| **id != 0) {
+                if augments::augment(*id).is_some() {
+                    augs.push(&augment_card(*id).to_variant());
+                }
+            }
+            d.set("augments", &augs);
+            d.set("respawn", r.respawn_ds as f64 / 10.0);
+            // The F spell's icon: Barrier, or an augment's spell in its place.
+            let f = augments::spell(&r.augments).or_else(|| r.champion.ability(5));
+            d.set("spell_f", f.map_or("barrier", |a| icon_kind(&a)));
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// Turrets destroyed: `[ours, theirs]` (the Tab breakdown's header).
+    #[func]
+    fn towers(&self) -> PackedInt32Array {
+        let Some(b) = self.session.scoreboard() else { return PackedInt32Array::new() };
+        let t = if self.session.team() == Team::Blue { b.towers } else { [b.towers[1], b.towers[0]] };
+        t.iter().map(|n| *n as i32).collect()
+    }
+
+    /// The recap of our latest death (01 §13), every hit of the fight accounted for: `{ killer,
+    /// total, seconds, physical, magic, true, absorbed, stunned, rooted, slowed, sources: [{
+    /// name, champion, kind, total, lines: [{ what, key, kind, total, hits }] }] }`, or empty.
+    #[func]
+    fn death_recap(&self) -> VarDictionary {
+        use mftr_sim::world::DamageOrigin;
+        let mut d = VarDictionary::new();
+        let Some(r) = self.session.last_recap() else { return d };
+        let kind_name = |k: DamageKind| match k {
+            DamageKind::Physical => "physical",
+            DamageKind::Magic => "magic",
+            DamageKind::True => "true",
+        };
+        let unit_name = |kind: UnitKind, champion: Option<ChampionId>| -> String {
+            match (kind, champion) {
+                (_, Some(c)) => c.def().name.to_string(),
+                (UnitKind::Minion, _) => "Minion".into(),
+                (UnitKind::Turret, _) => "Turret".into(),
+                (UnitKind::Gatehouse, _) => "Gatehouse".into(),
+                (UnitKind::Base, _) => "Base".into(),
+                _ => "Unknown".into(),
+            }
+        };
+        let killer = r.sources.iter().find(|s| s.source == r.killer);
+        d.set("killer", killer.map_or("the fountain".to_string(), |s| unit_name(s.kind, s.champion)).as_str());
+        for (k, v) in [
+            ("total", r.total),
+            ("seconds", r.seconds),
+            ("physical", r.physical),
+            ("magic", r.magic),
+            ("true", r.true_damage),
+            ("absorbed", r.absorbed),
+            ("stunned", r.stunned),
+            ("rooted", r.rooted),
+            ("slowed", r.slowed),
+        ] {
+            d.set(k, v);
+        }
+        let mut sources = VarArray::new();
+        for s in &r.sources {
+            let mut m = VarDictionary::new();
+            m.set("name", unit_name(s.kind, s.champion).as_str());
+            m.set("champion", s.champion.map_or("", |c| c.def().name));
+            m.set("killer", s.source == r.killer);
+            m.set("total", s.total);
+            let mut lines = VarArray::new();
+            for l in &s.lines {
+                let mut x = VarDictionary::new();
+                let (what, key) = match l.origin {
+                    DamageOrigin::Attack => ("Basic attacks".to_string(), ""),
+                    DamageOrigin::Ability(slot) => (
+                        s.champion.and_then(|c| c.ability(slot)).map_or("Ability".to_string(), |a| a.name.to_string()),
+                        ["Q", "W", "E", "R", "D", "F"].get(slot as usize).copied().unwrap_or(""),
+                    ),
+                    DamageOrigin::Item(id) => (items::item(id).map_or("Item".to_string(), |i| i.name.to_string()), ""),
+                    DamageOrigin::Augment(id) => {
+                        (augments::augment(id).map_or("Augment".to_string(), |a| a.name.to_string()), "")
+                    }
+                    DamageOrigin::Fountain => ("Fountain".to_string(), ""),
+                };
+                x.set("what", what.as_str());
+                x.set("key", key);
+                x.set("kind", kind_name(l.kind));
+                x.set("total", l.total);
+                x.set("hits", l.hits as i64);
+                lines.push(&x.to_variant());
+            }
+            m.set("lines", &lines);
+            sources.push(&m.to_variant());
+        }
+        d.set("sources", &sources);
+        d
     }
 
     /// Net graph data (03 §14).
@@ -1499,7 +1679,170 @@ fn item_text(it: &items::Item) -> String {
         )),
         items::Passive::None => {}
     }
+    if let Some(active) = consumable_text(it) {
+        parts.push(active);
+    }
     parts.join(", ")
+}
+
+/// A consumable's active, in words.
+fn consumable_text(it: &items::Item) -> Option<String> {
+    let (heal, ms, charges, refills) = items::consumable(it.id)?;
+    let secs = ms / 1000;
+    Some(if refills {
+        format!("Active: heals {heal} over {secs} s; {charges} charges, refilled at the fountain")
+    } else {
+        format!("Active: heals {heal} over {secs} s; up to {charges} stack in a slot")
+    })
+}
+
+/// An item's tooltip lines, each with what it is (a stat's key, "passive" or "active") so the
+/// client colors them by stat.
+fn item_lines(it: &items::Item) -> VarArray {
+    let b = &it.bonus;
+    let mut out = VarArray::new();
+    let mut add = |text: String, kind: &str| {
+        let mut d = VarDictionary::new();
+        d.set("text", text.as_str());
+        d.set("kind", kind);
+        out.push(&d.to_variant());
+    };
+    let flat = [
+        (b.health, "health", "hp"),
+        (b.health_regen, "health per second", "hp"),
+        (b.armor, "armor", "armor"),
+        (b.magic_resist, "magic resist", "mr"),
+        (b.attack_damage, "attack damage", "ad"),
+        (b.ability_power, "ability power", "ap"),
+        (b.ability_haste, "ability haste", "haste"),
+        (b.move_speed, "move speed", "ms"),
+    ];
+    for (v, name, kind) in flat {
+        if v != 0.0 {
+            add(format!("+{v} {name}"), kind);
+        }
+    }
+    let pct = [
+        (b.attack_speed, "attack speed", "as"),
+        (b.life_steal, "life steal", "lifesteal"),
+        (b.move_speed_pct, "move speed", "ms"),
+        (b.ability_power_pct, "ability power", "ap"),
+    ];
+    for (v, name, kind) in pct {
+        if v != 0.0 {
+            add(format!("+{}% {name}", (v * 100.0).round()), kind);
+        }
+    }
+    match it.passive {
+        items::Passive::OnHitMagic { base, ap_ratio } => add(
+            format!("Passive: basic attacks deal {base} (+{}% AP) magic damage", (ap_ratio * 100.0).round()),
+            "passive",
+        ),
+        items::Passive::Lifeline { shield, threshold, cooldown_ms, .. } => add(
+            format!(
+                "Passive: a {shield} shield when you fall below {}% health ({} s cooldown)",
+                (threshold * 100.0).round(),
+                cooldown_ms / 1000
+            ),
+            "passive",
+        ),
+        items::Passive::None => {}
+    }
+    if let Some(active) = consumable_text(it) {
+        add(active, "active");
+    }
+    out
+}
+
+/// The icon kind of an ability (the HUD's glyphs): what its effect does.
+fn icon_kind(a: &mftr_sim::ability::Ability) -> &'static str {
+    use mftr_sim::ability::Effect;
+    match a.effect {
+        Effect::Line(_) => "line",
+        Effect::Area(r) if r.range == 0.0 => "nova",
+        Effect::Area(_) => "area",
+        Effect::Lunge(_) => "lunge",
+        Effect::Dash(_) => "dash",
+        Effect::Blink(_) => "blink",
+        Effect::Shield(_) => "barrier",
+        Effect::Support(s) if s.shield > 0.0 => "shield_ally",
+        Effect::Support(_) => "heal",
+    }
+}
+
+/// An augment for the client: `{ id, name, tier, text, glyph }`, the glyph naming its icon (its
+/// mechanic, or for a stat augment its main stat).
+fn augment_card(id: u8) -> VarDictionary {
+    let mut c = VarDictionary::new();
+    if let Some(a) = augments::augment(id) {
+        c.set("id", id as i64);
+        c.set("name", a.name);
+        c.set("tier", a.tier.name());
+        c.set("text", a.text);
+        c.set("glyph", augment_glyph(a));
+    }
+    c
+}
+
+fn augment_glyph(a: &augments::Augment) -> &'static str {
+    use augments::Effect;
+    match a.effect {
+        Effect::None => {
+            // The stat it gives most of, roughly normalized.
+            let b = &a.bonus;
+            let weights = [
+                (b.health / 10.0 + b.health_pct * 100.0, "hp"),
+                (b.attack_damage + b.attack_damage_pct * 100.0, "ad"),
+                (b.ability_power / 1.6 + b.ability_power_pct * 60.0, "ap"),
+                (b.armor * 1.2 + b.resist_pct * 60.0, "armor"),
+                (b.magic_resist * 1.2, "mr"),
+                (b.attack_speed * 200.0, "as"),
+                (b.ability_haste * 2.0, "haste"),
+                (b.move_speed + b.move_speed_pct * 300.0, "ms"),
+            ];
+            weights.iter().fold((0.0, "ad"), |best, w| if w.0 > best.0 { *w } else { best }).1
+        }
+        Effect::AdToAp(_) | Effect::ApToAd(_) => "convert",
+        Effect::Multishot => "multishot",
+        Effect::Echo => "echo",
+        Effect::Wide => "wide",
+        Effect::Titan => "titan",
+        Effect::Pebble => "pebble",
+        Effect::Unstable => "unstable",
+        Effect::Executioner => "execute",
+        Effect::FirstStrike => "first_strike",
+        Effect::LastStand => "last_stand",
+        Effect::Spellcrit => "spellcrit",
+        Effect::Spellhunger => "hunger",
+        Effect::SpellVamp => "vamp",
+        Effect::Thorns => "thorns",
+        Effect::Spellblade => "spellblade",
+        Effect::Reset => "reset",
+        Effect::AnvilLuck => "anvil",
+        Effect::ChampionOfChaos => "chaos",
+        Effect::Fundamentals => "fundamentals",
+        Effect::CloseQuarters => "close",
+        Effect::Sharpshooter => "sharpshooter",
+        Effect::Spell(_) => "spell",
+    }
+}
+
+/// A Stat Anvil's bonus as text: "+10 attack damage", "+6% move speed".
+fn anvil_text(stat: mftr_sim::anvils::Stat, units: u16) -> String {
+    use mftr_sim::anvils::Stat;
+    let b = stat.bonus(units);
+    let v = match stat {
+        Stat::AttackDamage => b.attack_damage,
+        Stat::AbilityPower => b.ability_power,
+        Stat::Health => b.health,
+        Stat::Armor => b.armor,
+        Stat::MagicResist => b.magic_resist,
+        Stat::AttackSpeed => b.attack_speed * 100.0,
+        Stat::AbilityHaste => b.ability_haste,
+        Stat::MoveSpeed => b.move_speed_pct * 100.0,
+    };
+    let pct = matches!(stat, Stat::AttackSpeed | Stat::MoveSpeed);
+    format!("+{}{} {}", (v * 10.0).round() / 10.0, if pct { "%" } else { "" }, stat.name())
 }
 
 #[cfg(test)]

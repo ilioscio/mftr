@@ -21,6 +21,7 @@ var master_volume := 80.0                # 0–100 %
 var effects_volume := 100.0              # abilities, attacks, impacts: under Master
 var interface_volume := 100.0            # the fanfare and other interface sounds: under Master
 var mute_in_background := true           # silence while the window isn't focused
+var window_positions := {}               # window name -> [x, y] as fractions of the screen
 
 ## Rebindable actions, in the order the settings list them: [action, label, default].
 ## A default is a key name with modifiers (`Alt+Q`) or a mouse button (`Mouse Right`); an action
@@ -48,6 +49,13 @@ const BINDINGS := [
 	["pan_left", "Scroll the camera left", "Left"],
 	["pan_right", "Scroll the camera right", "Right"],
 	["toggle_minimap", "Show / hide the minimap", "None"],
+	["scoreboard", "Match breakdown (hold)", "Tab"],
+	["item_1", "Use item 1", "1"],
+	["item_2", "Use item 2", "2"],
+	["item_3", "Use item 3", "3"],
+	["item_4", "Use item 4", "4"],
+	["item_5", "Use item 5", "5"],
+	["item_6", "Use item 6", "6"],
 	["toggle_net_graph", "Network stats", "F1"],
 	["toggle_proxies", "Collision proxies (debug)", "F2"],
 ]
@@ -75,6 +83,7 @@ func load_file() -> void:
 		effects_volume = clampf(cfg.get_value("audio", "effects", effects_volume), 0.0, 100.0)
 		interface_volume = clampf(cfg.get_value("audio", "interface", interface_volume), 0.0, 100.0)
 		mute_in_background = cfg.get_value("audio", "mute_in_background", mute_in_background)
+		window_positions = cfg.get_value("windows", "positions", {})
 		_binds = cfg.get_value("keys", "binds", {})
 	apply_bindings()
 
@@ -94,6 +103,7 @@ func save() -> void:
 	cfg.set_value("audio", "effects", effects_volume)
 	cfg.set_value("audio", "interface", interface_volume)
 	cfg.set_value("audio", "mute_in_background", mute_in_background)
+	cfg.set_value("windows", "positions", window_positions)
 	cfg.set_value("keys", "binds", _binds)
 	cfg.save(PATH)
 

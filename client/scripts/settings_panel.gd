@@ -42,7 +42,8 @@ func open() -> void:
 	visible = true
 	_refresh_bindings()
 	await get_tree().process_frame
-	position = ((get_parent_control_size() - size) / 2.0).max(Vector2.ZERO)
+	var screen := get_parent_control_size()
+	preload("res://scripts/windows.gd").place(self, "settings", settings, ((screen - size) / 2.0).max(Vector2.ZERO), screen)
 
 
 func close() -> void:
@@ -119,6 +120,10 @@ func _camera_tab() -> Control:
 
 func _interface_tab() -> Control:
 	var g := _grid("Interface")
+	var reset := Button.new()
+	reset.text = "Put every window back"
+	reset.pressed.connect(func(): settings.window_positions = {}; settings.save())
+	_row(g, "Moved windows", reset, "The shop, the augment draft, the match breakdown and the others go back to where they start.")
 	_row(g, "Show the minimap", _check(settings.minimap_shown, func(v): settings.minimap_shown = v))
 	_row(g, "Minimap size", _slider(settings.minimap_size, 50, 160, func(v): settings.minimap_size = v, "%"))
 	return g

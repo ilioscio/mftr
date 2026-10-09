@@ -31,6 +31,7 @@ use std::collections::{BTreeMap, VecDeque};
 pub mod blind;
 pub mod effects;
 pub mod missiles;
+pub mod recap;
 use effects::EffectBook;
 pub use effects::{AreaRender, BoltRender};
 use missiles::MissileBook;
@@ -149,6 +150,8 @@ pub struct RemoteRender {
 pub struct CombatText {
     pub target: UnitId,
     pub source: UnitId,
+    /// Which attack, ability or effect (damage only).
+    pub origin: mftr_sim::world::DamageOrigin,
     pub kind: DamageKind,
     pub amount: f32,
     pub absorbed: f32,
@@ -314,6 +317,13 @@ pub struct ClientSession {
     remote_casts: BTreeMap<UnitId, (SimTime, SimTime, Vec2, u8)>,
     effects: EffectBook,
     combat_text: Vec<CombatText>,
+    /// Hits and crowd control on the own champion, and the recap of its latest death.
+    damage_log: recap::DamageLog,
+    last_recap: Option<recap::DeathRecap>,
+    /// The own champion's crowd control as last seen: stunned, rooted and slowed until.
+    own_cc: (SimTime, SimTime, SimTime),
+    /// The latest scoreboard (the match clock and the Tab breakdown).
+    scoreboard: Option<msg::Scoreboard>,
     /// Casts with no windup (supports, shields, blinks) since the last take: `(unit, slot)`.
     /// Their animation can only start on the confirmed event (A6).
     instant_casts: Vec<(UnitId, u8)>,
@@ -379,6 +389,10 @@ impl ClientSession {
             snapshot_ack: Tick(0),
             effects: EffectBook::default(),
             combat_text: Vec::new(),
+            damage_log: recap::DamageLog::default(),
+            last_recap: None,
+            own_cc: (SimTime(0), SimTime(0), SimTime(0)),
+            scoreboard: None,
             instant_casts: Vec::new(),
             notices: Vec::new(),
             last_own_blink: SimTime(0),
@@ -576,9 +590,24 @@ impl ClientSession {
         self.issue(CommandKind::PickAugment(choice), now)
     }
 
-    /// Reroll the open augment draft (once per draft). Predicted.
-    pub fn reroll_augments(&mut self, now: f64) -> Option<Command> {
-        self.issue(CommandKind::RerollAugments, now)
+    /// Buy a Stat Anvil (Mayhem). Predicted.
+    pub fn buy_anvil(&mut self, now: f64) -> Option<Command> {
+        self.issue(CommandKind::BuyAnvil, now)
+    }
+
+    /// Keep choice 0–2 of the open anvil. Predicted.
+    pub fn pick_anvil(&mut self, choice: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::PickAnvil(choice), now)
+    }
+
+    /// Use the active of the item in inventory slot 0–5 (drink a potion). Predicted.
+    pub fn use_item(&mut self, slot: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::UseItem(slot), now)
+    }
+
+    /// Reroll choice 0–2 of the open augment draft (each once per draft). Predicted.
+    pub fn reroll_augment(&mut self, choice: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::RerollAugment(choice), now)
     }
 
     /// Whether the shop is open for the own champion right now (predicted state).
@@ -881,16 +910,36 @@ impl ClientSession {
                 SimEvent::AreaSpawned(a) => self.effects.on_area(a, self.unit, self.team),
                 SimEvent::AttackLaunched(b) => self.effects.on_bolt(b, self.unit, self.team),
                 SimEvent::AttackLanded { id, at, .. } => self.effects.on_bolt_landed(id, at),
-                SimEvent::Damage { source, target, kind, amount, absorbed, .. } => {
+                SimEvent::Damage { source, target, origin, kind, amount, absorbed, at } => {
                     if source == self.unit {
                         self.stats.damage_dealt += (amount + absorbed) as f64;
                     }
                     if target == self.unit {
                         self.stats.damage_taken += (amount + absorbed) as f64;
+                        // Who hit us: as we see it, else (a champion out of sight) the
+                        // scoreboard says which champion that unit is.
+                        let from = self.remote.get(&source).map(|r| (r.latest.kind, r.latest.champion));
+                        let listed = self.scoreboard.as_ref().and_then(|b| b.rows.iter().find(|r| r.unit == source));
+                        let (source_kind, source_champion) = from
+                            .or(listed.map(|r| (UnitKind::Champion, Some(r.champion))))
+                            .unwrap_or((UnitKind::Minion, None));
+                        self.damage_log.hit(recap::Hit {
+                            at,
+                            source,
+                            source_kind,
+                            source_champion,
+                            origin,
+                            kind,
+                            amount,
+                            absorbed,
+                        });
                     }
-                    self.combat_text.push(CombatText { target, source, kind, amount, absorbed, heal: false });
+                    self.combat_text.push(CombatText { target, source, origin, kind, amount, absorbed, heal: false });
                 }
-                SimEvent::Died { unit, killer, .. } => {
+                SimEvent::Died { unit, killer, at, .. } => {
+                    if unit == self.unit {
+                        self.last_recap = Some(self.damage_log.recap(killer, at));
+                    }
                     let champion = self.remote.get(&unit).is_some_and(|t| t.latest.kind == UnitKind::Champion);
                     self.stats.kills += (killer == self.unit && champion) as u64;
                     self.stats.minion_kills += (killer == self.unit && !champion && unit != self.unit) as u64;
@@ -901,6 +950,7 @@ impl ClientSession {
                 SimEvent::Healed { unit, amount, .. } => self.combat_text.push(CombatText {
                     target: unit,
                     source: unit,
+                    origin: mftr_sim::world::DamageOrigin::Attack,
                     kind: DamageKind::True,
                     amount,
                     absorbed: 0.0,
@@ -1001,10 +1051,27 @@ impl ClientSession {
             self.update(now);
             return;
         }
+        if let Some(b) = s.scoreboard {
+            self.scoreboard = Some(*b);
+        }
         let Some((id, server_state)) = s.own else { return };
         if id != self.unit {
             return;
         }
+        // Crowd control that just landed on us (for the death recap): an "until" that moved
+        // later started now, at the snapshot's tick.
+        let at = SimTime::end_of(s.tick);
+        let cc = (server_state.stunned_until, server_state.rooted_until, server_state.slowed_until);
+        for (until, before, kind) in [
+            (cc.0, self.own_cc.0, recap::CcKind::Stun),
+            (cc.1, self.own_cc.1, recap::CcKind::Root),
+            (cc.2, self.own_cc.2, recap::CcKind::Slow),
+        ] {
+            if until > before && until > at {
+                self.damage_log.crowd_control(recap::CcHit { at, kind, seconds: until.secs_since(at) });
+            }
+        }
+        self.own_cc = cc;
         match self.phase {
             Phase::Connecting | Phase::Lobby => {}
             Phase::Joining => {
@@ -1276,6 +1343,16 @@ impl ClientSession {
     }
 
     /// Confirmed damage since the last call (floating numbers).
+    /// The recap of the own champion's latest death (01 §13).
+    pub fn last_recap(&self) -> Option<&recap::DeathRecap> {
+        self.last_recap.as_ref()
+    }
+
+    /// The latest scoreboard: the match clock and every champion's score.
+    pub fn scoreboard(&self) -> Option<&msg::Scoreboard> {
+        self.scoreboard.as_ref()
+    }
+
     pub fn take_combat_text(&mut self) -> Vec<CombatText> {
         std::mem::take(&mut self.combat_text)
     }

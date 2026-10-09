@@ -5,6 +5,7 @@
 //! see `docs/design/03-netcode.md` §17 for the determinism policy.
 
 pub mod ability;
+pub mod anvils;
 pub mod augments;
 pub mod champion;
 pub mod collision;

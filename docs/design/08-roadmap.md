@@ -300,6 +300,11 @@ Four more placeholder champions (original kits, D36), so all six M2 archetypes e
   Alt or Ctrl + Q/W/E/R or a click on the ability's +, the shop on G, Esc closes the shop); a
   free camera with edge scrolling, a lock and centering; the minimap; the fog of war drawn over
   the world; ability tooltips with scaling and the next rank's changes, generated from the sim.
+- **0.9.x:** the reference ARAM's pacing (D55); a scoreboard and the Tab breakdown; an exact
+  death recap; potions and the flask on 1–6; per-choice and golden augment rerolls; Stat Anvils
+  (Mayhem); movable windows; item and augment tooltips; the gauntlet cursor; volume settings;
+  portraits rendered from the models, champion select and a loading screen; item icons and
+  build paths in the shop.
 - **Visual polish** (05 §5–6): a framed HUD with generated ability icons and cooldown sweeps;
   one UI theme for every menu, a backdrop and logo, champion select as cards; sun shadows, a
   filmic grade, bloom, haze and drifting cloud shadows (Settings → Graphics); damage numbers

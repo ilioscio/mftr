@@ -400,7 +400,10 @@ fn kind_text(k: CommandKind) -> String {
         CommandKind::Sell(slot) => format!("sell {slot}"),
         CommandKind::Undo => "undo".into(),
         CommandKind::PickAugment(choice) => format!("augment {choice}"),
-        CommandKind::RerollAugments => "reroll".into(),
+        CommandKind::RerollAugment(choice) => format!("reroll {choice}"),
+        CommandKind::UseItem(slot) => format!("use {slot}"),
+        CommandKind::BuyAnvil => "anvil".into(),
+        CommandKind::PickAnvil(choice) => format!("pickanvil {choice}"),
     }
 }
 
@@ -418,7 +421,10 @@ fn parse_kind(f: &[&str]) -> Option<CommandKind> {
         "sell" => CommandKind::Sell(n(1)? as u8),
         "undo" => CommandKind::Undo,
         "augment" => CommandKind::PickAugment(n(1)? as u8),
-        "reroll" => CommandKind::RerollAugments,
+        "reroll" => CommandKind::RerollAugment(n(1).unwrap_or(0) as u8),
+        "use" => CommandKind::UseItem(n(1)? as u8),
+        "anvil" => CommandKind::BuyAnvil,
+        "pickanvil" => CommandKind::PickAnvil(n(1)? as u8),
         _ => return None,
     })
 }
