@@ -176,10 +176,12 @@ pub struct Growth {
     pub chaos_done: bool,
     /// Hyper rules (not an augment, but part of the same stat stack).
     pub hyper: bool,
+    /// Stat Anvils kept: steps of each stat (`anvils::STATS` order).
+    pub anvil: [u16; 8],
 }
 
 impl Growth {
-    pub const NONE: Growth = Growth { unstable_tiny: false, stacks: 0, chaos_done: false, hyper: false };
+    pub const NONE: Growth = Growth { unstable_tiny: false, stacks: 0, chaos_done: false, hyper: false, anvil: [0; 8] };
 }
 
 /// Champion of Chaos's reward.

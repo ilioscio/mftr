@@ -354,6 +354,11 @@ fn write_command(w: &mut BitWriter, c: &Command) {
             w.write(11, 4);
             w.write(slot as u64, 3);
         }
+        CommandKind::BuyAnvil => w.write(12, 4),
+        CommandKind::PickAnvil(choice) => {
+            w.write(13, 4);
+            w.write(choice as u64, 2);
+        }
     }
 }
 
@@ -380,6 +385,8 @@ fn read_command(r: &mut BitReader) -> Result<Command, DecodeError> {
         9 => CommandKind::PickAugment(r.read(2)? as u8),
         10 => CommandKind::RerollAugment(r.read(2)? as u8),
         11 => CommandKind::UseItem(r.read(3)? as u8),
+        12 => CommandKind::BuyAnvil,
+        13 => CommandKind::PickAnvil(r.read(2)? as u8),
         _ => return Err(DecodeError::Invalid("command kind")),
     };
     Ok(Command { player: PlayerId(0), seq, tick, sub, kind })
@@ -931,6 +938,13 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     w.write_bool(p.unstable_tiny);
     w.write(p.stacks as u64, 16);
     w.write_u8(p.takedowns);
+    for n in p.anvil {
+        w.write(n as u64, 12);
+    }
+    for c in p.anvil_offer {
+        w.write_u8(c);
+    }
+    w.write_u8(p.anvils);
     for n in [p.kills, p.deaths, p.assists, p.cs] {
         w.write(n as u64, 16);
     }
@@ -1066,6 +1080,15 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let unstable_tiny = r.read_bool()?;
     let stacks = r.read(16)? as u16;
     let takedowns = r.read_u8()?;
+    let mut anvil = [0u16; 8];
+    for n in anvil.iter_mut() {
+        *n = r.read(12)? as u16;
+    }
+    let mut anvil_offer = [0u8; mftr_sim::anvils::CHOICES];
+    for c in anvil_offer.iter_mut() {
+        *c = r.read_u8()?;
+    }
+    let anvils = r.read_u8()?;
     let (kills, deaths, assists, cs) = (r.read(16)? as u16, r.read(16)? as u16, r.read(16)? as u16, r.read(16)? as u16);
     let hyper = r.read_bool()?;
     let spellblade_until = read_time(r)?;
@@ -1101,6 +1124,9 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         stacks,
         takedowns,
         hyper,
+        anvil,
+        anvil_offer,
+        anvils,
         kills,
         deaths,
         assists,
@@ -1884,6 +1910,9 @@ mod tests {
                 stacks: 37,
                 takedowns: 5,
                 hyper: true,
+                anvil: [5, 0, 15, 0, 9, 0, 0, 0],
+                anvil_offer: [17, 21, 24],
+                anvils: 3,
                 kills: 12,
                 deaths: 3,
                 assists: 9,

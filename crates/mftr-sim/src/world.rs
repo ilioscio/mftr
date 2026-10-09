@@ -211,6 +211,11 @@ pub struct Progress {
     pub takedowns: u8,
     /// Plays under Hyper rules (set from the rules at spawn).
     pub hyper: bool,
+    /// Stat Anvils (Mayhem): steps of each stat kept, the open anvil's choices (packed,
+    /// `anvils::pack`; all 0 when none is open), and how many were bought.
+    pub anvil: [u16; 8],
+    pub anvil_offer: [u8; crate::anvils::CHOICES],
+    pub anvils: u8,
     /// This match's score (the scoreboard): champion kills, deaths, assists, and minions
     /// killed (last hits).
     pub kills: u16,
@@ -258,6 +263,9 @@ impl Progress {
         stacks: 0,
         takedowns: 0,
         hyper: false,
+        anvil: [0; 8],
+        anvil_offer: [0; crate::anvils::CHOICES],
+        anvils: 0,
         kills: 0,
         deaths: 0,
         assists: 0,
@@ -304,6 +312,13 @@ impl Progress {
         h.write_u32(self.stacks as u32);
         h.write_u8(self.takedowns);
         h.write_u8(self.hyper as u8);
+        for n in self.anvil {
+            h.write_u32(n as u32);
+        }
+        for c in self.anvil_offer {
+            h.write_u8(c);
+        }
+        h.write_u8(self.anvils);
         for n in [self.kills, self.deaths, self.assists, self.cs] {
             h.write_u32(n as u32);
         }
@@ -316,6 +331,7 @@ impl Progress {
             stacks: self.stacks,
             chaos_done: self.takedowns >= augments::CHAOS_TAKEDOWNS,
             hyper: self.hyper,
+            anvil: self.anvil,
         };
         (self.level, self.items, self.augments, growth)
     }
@@ -1015,6 +1031,10 @@ pub enum CommandKind {
     RerollAugment(u8),
     /// Use the active of the item in an inventory slot (0–5): drink a potion.
     UseItem(u8),
+    /// Buy a Stat Anvil (Mayhem, level 9+, 750 gold, while shopping): it offers three stats.
+    BuyAnvil,
+    /// Keep choice 0–2 of the open anvil.
+    PickAnvil(u8),
 }
 
 /// A player command, applied at `tick` at sub-tick position `sub` (03a §3).
@@ -2286,6 +2306,7 @@ fn apply_command(
     ctx: CastContext,
     events: &mut Vec<SimEvent>,
 ) {
+    let may_shop = can_shop(unit, map, rules);
     let st = &mut unit.state;
     match c.kind {
         // A newer order replaces a buffered cast (one slot, the latest wins: 10 §4.1).
@@ -2342,6 +2363,25 @@ fn apply_command(
         }
         CommandKind::Buy(_) | CommandKind::Sell(_) | CommandKind::Undo => shop(unit, c.kind, map, rules),
         CommandKind::UseItem(slot) => use_item(unit, slot, t),
+        CommandKind::BuyAnvil if rules.augments && may_shop => {
+            let p = &mut st.progress;
+            if p.level >= crate::anvils::MIN_LEVEL && p.gold >= crate::anvils::COST && p.anvil_offer[0] == 0 {
+                p.anvil_offer = crate::anvils::roll(p.augment_seed, p.anvils);
+                p.anvils = p.anvils.saturating_add(1);
+                p.gold -= crate::anvils::COST;
+            }
+        }
+        CommandKind::PickAnvil(choice) => {
+            let p = &mut st.progress;
+            if let Some(&c) = p.anvil_offer.get(choice as usize)
+                && let Some((tier, stat)) = crate::anvils::unpack(c)
+            {
+                let i = crate::anvils::STATS.iter().position(|s| *s == stat).unwrap_or(0);
+                p.anvil[i] = p.anvil[i].saturating_add(crate::anvils::TIER_UNITS[tier.min(2) as usize]);
+                p.anvil_offer = [0; crate::anvils::CHOICES];
+            }
+        }
+        CommandKind::BuyAnvil => {}
         CommandKind::PickAugment(choice) if rules.augments => augments::pick(&mut st.progress, choice),
         CommandKind::RerollAugment(choice) if rules.augments => augments::reroll(&mut st.progress, choice),
         CommandKind::PickAugment(_) | CommandKind::RerollAugment(_) => {}
@@ -4894,6 +4934,44 @@ mod tests {
         Command { player: PlayerId(player), seq, tick: Tick(tick), sub: SubTick::START, kind }
     }
 
+    /// Stat Anvils (Mayhem): from level 9, 750 gold in the fountain buys three stat choices of
+    /// a rolled tier; the kept one adds to the champion's stats for the match. Plain ARAM has
+    /// none.
+    #[test]
+    fn stat_anvils_buy_stats_late_in_mayhem() {
+        let fountain = bridge_point(Vec2::new(400.0, 1500.0));
+        let mut aram = ranked_world();
+        aram.set_map(MapId::Bridge.shared());
+        let plain = aram.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, fountain);
+        aram.unit_mut(plain).unwrap().state.progress.level = 12;
+        aram.step(&[shop(0, 1, 1, CommandKind::BuyAnvil)]);
+        assert_eq!(aram.unit(plain).unwrap().state.progress.anvils, 0, "no anvils in plain ARAM");
+
+        let mut w = World::new(9);
+        w.set_rules(Rules::MAYHEM);
+        w.set_map(MapId::Bridge.shared());
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, fountain);
+        w.unit_mut(me).unwrap().state.progress.drafted = augments::SLOTS as u8; // no drafts
+        w.step(&[shop(0, 1, 1, CommandKind::BuyAnvil)]);
+        assert_eq!(w.unit(me).unwrap().state.progress.anvils, 0, "not before level 9");
+        w.unit_mut(me).unwrap().state.progress.level = 9;
+        let gold = w.unit(me).unwrap().state.progress.gold;
+        w.step(&[shop(0, 2, 2, CommandKind::BuyAnvil)]);
+        let p = w.unit(me).unwrap().state.progress;
+        assert_eq!(p.anvils, 1);
+        assert!(p.gold < gold - crate::anvils::COST + 1.0);
+        let (tier, stat) = crate::anvils::unpack(p.anvil_offer[1]).unwrap();
+        let before = w.unit(me).unwrap().stats;
+        w.step(&[shop(0, 3, 3, CommandKind::PickAnvil(1))]);
+        w.step(&[]);
+        let u = w.unit(me).unwrap();
+        assert_eq!(u.state.progress.anvil_offer, [0; crate::anvils::CHOICES]);
+        let units = crate::anvils::TIER_UNITS[tier as usize];
+        let i = crate::anvils::STATS.iter().position(|s| *s == stat).unwrap();
+        assert_eq!(u.state.progress.anvil[i], units);
+        assert_ne!(u.stats, before, "the kept stat counts");
+    }
+
     /// Consumables (keys 1–6): potions stack in one slot and heal 120 over 15 s each, used up;
     /// the flask heals 100 over 12 s, twice, keeps its slot and refills at the fountain. Undo
     /// gives a stack back whole.
@@ -5240,7 +5318,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0xe739_b029_e345_7ce9;
+    const GOLDEN_HASH_ARENA: u64 = 0xe845_b3e4_e35b_90c9;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -5297,7 +5375,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x1261_203e_690c_f431;
+    const GOLDEN_HASH_BRIDGE: u64 = 0xb3d5_88f8_9bd9_b6b1;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -5368,5 +5446,5 @@ mod tests {
 
     /// Recorded on x86_64-pc-windows-msvc when facing, follow-throughs and the input buffer
     /// joined the state (A2). CI checks Linux, macOS (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0xe4b3_9b41_4e57_b381;
+    const GOLDEN_HASH: u64 = 0xe606_4e94_327a_2611;
 }

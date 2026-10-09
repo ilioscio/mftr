@@ -397,6 +397,15 @@ pub fn apply_items(
         }
         seen.push(it.id);
     }
+    // Stat Anvils (Mayhem): flat stats, attack speed and move speed like an item's.
+    for (stat, n) in crate::anvils::STATS.iter().zip(growth.anvil) {
+        if n > 0 {
+            let x = stat.bonus(n);
+            add_flat(&mut s, &x);
+            pct.attack_speed += x.attack_speed;
+            add_percents(&mut pct, &x);
+        }
+    }
     for a in crate::augments::held(augments) {
         add_flat(&mut s, &a.bonus);
         pct.attack_speed += a.bonus.attack_speed;

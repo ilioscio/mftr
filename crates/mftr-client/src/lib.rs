@@ -590,6 +590,16 @@ impl ClientSession {
         self.issue(CommandKind::PickAugment(choice), now)
     }
 
+    /// Buy a Stat Anvil (Mayhem). Predicted.
+    pub fn buy_anvil(&mut self, now: f64) -> Option<Command> {
+        self.issue(CommandKind::BuyAnvil, now)
+    }
+
+    /// Keep choice 0–2 of the open anvil. Predicted.
+    pub fn pick_anvil(&mut self, choice: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::PickAnvil(choice), now)
+    }
+
     /// Use the active of the item in inventory slot 0–5 (drink a potion). Predicted.
     pub fn use_item(&mut self, slot: u8, now: f64) -> Option<Command> {
         self.issue(CommandKind::UseItem(slot), now)

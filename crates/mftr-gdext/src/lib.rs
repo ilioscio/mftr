@@ -451,6 +451,26 @@ impl MatchClient {
         }
     }
 
+    /// Buy a Stat Anvil (Mayhem, level 9+, while shopping).
+    #[func]
+    fn buy_anvil(&mut self) {
+        let now = self.now();
+        if self.session.buy_anvil(now).is_some() {
+            self.send_input(now);
+        }
+    }
+
+    /// Keep choice 0–2 of the open anvil.
+    #[func]
+    fn pick_anvil(&mut self, choice: i64) {
+        let now = self.now();
+        if (0..mftr_sim::anvils::CHOICES as i64).contains(&choice)
+            && self.session.pick_anvil(choice as u8, now).is_some()
+        {
+            self.send_input(now);
+        }
+    }
+
     /// Use the item in inventory slot 0–5 (keys 1–6): drink a potion.
     #[func]
     fn use_item(&mut self, slot: i64) {
@@ -1072,6 +1092,29 @@ impl MatchClient {
                 rerolls.push(&c.to_variant());
             }
             d.set("can_reroll", &rerolls);
+            // Stat Anvils (Mayhem): the open one's choices, and what's been kept so far.
+            let tiers = ["Silver", "Gold", "Prismatic"];
+            let mut anvil = VarArray::new();
+            for c in s.progress.anvil_offer {
+                if let Some((tier, stat)) = mftr_sim::anvils::unpack(c) {
+                    let mut m = VarDictionary::new();
+                    m.set("tier", tiers[tier.min(2) as usize]);
+                    m.set("stat", stat.name());
+                    m.set("text", anvil_text(stat, mftr_sim::anvils::TIER_UNITS[tier.min(2) as usize]).as_str());
+                    anvil.push(&m.to_variant());
+                }
+            }
+            d.set("anvil_offer", &anvil);
+            let mut kept = VarArray::new();
+            for (stat, n) in mftr_sim::anvils::STATS.iter().zip(s.progress.anvil) {
+                if n > 0 {
+                    kept.push(&anvil_text(*stat, n).to_variant());
+                }
+            }
+            d.set("anvils_kept", &kept);
+            d.set("anvil_cost", mftr_sim::anvils::COST);
+            d.set("anvil_level", mftr_sim::anvils::MIN_LEVEL as i64);
+            d.set("mayhem", self.session.rules().augments);
             d.set("golden", s.progress.golden as i64 - 1);
             d.set("shield", if s.shield_until > t { s.shield } else { 0.0 });
             d.set("dead", !s.alive());
@@ -1654,4 +1697,22 @@ mod tests {
         // An unknown delay still falls back to the radius alone.
         assert_eq!(area_action(ChampionId::Cairn, 180.0, SimDuration(7)), Some("e"));
     }
+}
+
+/// A Stat Anvil's bonus as text: "+10 attack damage", "+6% move speed".
+fn anvil_text(stat: mftr_sim::anvils::Stat, units: u16) -> String {
+    use mftr_sim::anvils::Stat;
+    let b = stat.bonus(units);
+    let v = match stat {
+        Stat::AttackDamage => b.attack_damage,
+        Stat::AbilityPower => b.ability_power,
+        Stat::Health => b.health,
+        Stat::Armor => b.armor,
+        Stat::MagicResist => b.magic_resist,
+        Stat::AttackSpeed => b.attack_speed * 100.0,
+        Stat::AbilityHaste => b.ability_haste,
+        Stat::MoveSpeed => b.move_speed_pct * 100.0,
+    };
+    let pct = matches!(stat, Stat::AttackSpeed | Stat::MoveSpeed);
+    format!("+{}{} {}", (v * 10.0).round() / 10.0, if pct { "%" } else { "" }, stat.name())
 }
