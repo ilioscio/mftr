@@ -10,7 +10,7 @@ use crate::packet::PacketHeader;
 use mftr_sim::ability::{Cc, Damage, DamageKind, LineSkillshot, SLOTS};
 use mftr_sim::items::INVENTORY;
 use mftr_sim::map::MapId;
-use mftr_sim::world::{BufferedCast, EchoCast, MAX_PATH, Path, Progress, Recovery, Rules, Trade, UNDO};
+use mftr_sim::world::{BufferedCast, DamageOrigin, EchoCast, MAX_PATH, Path, Progress, Recovery, Rules, Trade, UNDO};
 use mftr_sim::{
     Area, AttackWindup, Bolt, Cast, ChampionId, Command, CommandKind, DashMove, MinionKind, Missile, Order, PlayerId,
     QPoint, SimDuration, SimEvent, SimTime, SubTick, Team, Tick, UnitId, UnitKind, UnitState, Vec2,
@@ -162,6 +162,36 @@ pub fn facing_from_wire(q: u16) -> f32 {
     (q & 1023) as f32 / 1024.0 * std::f32::consts::TAU
 }
 
+/// One champion on the scoreboard (the Tab breakdown, 01 §13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScoreRow {
+    pub unit: UnitId,
+    pub champion: ChampionId,
+    pub team: Team,
+    pub bot: bool,
+    pub level: u8,
+    pub kills: u16,
+    pub deaths: u16,
+    pub assists: u16,
+    /// Minions killed (last hits).
+    pub cs: u16,
+    pub items: [u8; INVENTORY],
+    pub augments: [u8; mftr_sim::augments::SLOTS],
+    /// Tenths of a second until it respawns; 0 while alive.
+    pub respawn_ds: u16,
+}
+
+/// The match as a whole: when it began (the clock) and every champion's score. Sent with a
+/// snapshot about once a second, to players and spectators alike.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Scoreboard {
+    pub started_at: SimTime,
+    pub rows: Vec<ScoreRow>,
+}
+
+/// Most rows a scoreboard carries.
+pub const MAX_SCORE_ROWS: usize = 16;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Snapshot {
     pub tick: Tick,
@@ -181,6 +211,8 @@ pub struct Snapshot {
     pub removed: Vec<UnitId>,
     /// Reliable ordered events `(seq, event)`, repeated until acknowledged (03b §7).
     pub events: Vec<(u32, SimEvent)>,
+    /// The scoreboard, about once a second.
+    pub scoreboard: Option<Box<Scoreboard>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -486,6 +518,7 @@ fn write_missile(w: &mut BitWriter, m: &Missile) {
     w.write_u32(m.cast_seq);
     w.write_f32(m.power);
     w.write(m.shot as u64, 4);
+    w.write(m.slot as u64, 3);
 }
 
 fn read_missile(r: &mut BitReader) -> Result<Missile, DecodeError> {
@@ -500,6 +533,7 @@ fn read_missile(r: &mut BitReader) -> Result<Missile, DecodeError> {
         cast_seq: r.read_u32()?,
         power: read_finite(r)?,
         shot: r.read(4)? as u8,
+        slot: r.read(3)? as u8,
     })
 }
 
@@ -523,6 +557,37 @@ fn volley_len(events: &[(u32, SimEvent)], i: usize) -> usize {
         n += 1;
     }
     n
+}
+
+/// What dealt a hit: 3 bits of kind, then a slot (3 bits) or an item or augment id (8).
+fn write_origin(w: &mut BitWriter, o: DamageOrigin) {
+    match o {
+        DamageOrigin::Attack => w.write(0, 3),
+        DamageOrigin::Ability(slot) => {
+            w.write(1, 3);
+            w.write(slot as u64, 3);
+        }
+        DamageOrigin::Item(id) => {
+            w.write(2, 3);
+            w.write_u8(id);
+        }
+        DamageOrigin::Augment(id) => {
+            w.write(3, 3);
+            w.write_u8(id);
+        }
+        DamageOrigin::Fountain => w.write(4, 3),
+    }
+}
+
+fn read_origin(r: &mut BitReader) -> Result<DamageOrigin, DecodeError> {
+    Ok(match r.read(3)? {
+        0 => DamageOrigin::Attack,
+        1 => DamageOrigin::Ability(r.read(3)? as u8),
+        2 => DamageOrigin::Item(r.read_u8()?),
+        3 => DamageOrigin::Augment(r.read_u8()?),
+        4 => DamageOrigin::Fountain,
+        _ => return Err(DecodeError::Invalid("damage origin")),
+    })
 }
 
 fn write_event(w: &mut BitWriter, e: &SimEvent) {
@@ -566,6 +631,7 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             w.write_u32(a.cast_seq);
             write_cc(w, a.cc);
             w.write(a.shot as u64, 4);
+            w.write(a.slot as u64, 3);
         }
         SimEvent::AreaDetonated { id, at } => {
             w.write(5, 5);
@@ -592,10 +658,11 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             write_time(w, *at);
             w.write_bool(*hit);
         }
-        SimEvent::Damage { source, target, kind, amount, absorbed, at } => {
+        SimEvent::Damage { source, target, origin, kind, amount, absorbed, at } => {
             w.write(8, 5);
             w.write_u32(source.0);
             w.write_u32(target.0);
+            write_origin(w, *origin);
             write_damage_kind(w, *kind);
             w.write_f32(*amount);
             w.write_f32(*absorbed);
@@ -685,6 +752,7 @@ fn read_event_of(kind: u64, r: &mut BitReader) -> Result<SimEvent, DecodeError> 
             cast_seq: r.read_u32()?,
             cc: read_cc(r)?,
             shot: r.read(4)? as u8,
+            slot: r.read(3)? as u8,
         }),
         5 => SimEvent::AreaDetonated { id: r.read_u32()?, at: read_time(r)? },
         6 => SimEvent::AttackLaunched(Bolt {
@@ -703,6 +771,7 @@ fn read_event_of(kind: u64, r: &mut BitReader) -> Result<SimEvent, DecodeError> 
         8 => SimEvent::Damage {
             source: unit(r)?,
             target: unit(r)?,
+            origin: read_origin(r)?,
             kind: read_damage_kind(r)?,
             amount: read_finite(r)?,
             absorbed: read_finite(r)?,
@@ -847,6 +916,9 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     w.write_bool(p.unstable_tiny);
     w.write(p.stacks as u64, 16);
     w.write_u8(p.takedowns);
+    for n in [p.kills, p.deaths, p.assists, p.cs] {
+        w.write(n as u64, 16);
+    }
     w.write_bool(p.hyper);
     write_time(w, s.spellblade_until);
     // A2 (D52): facing, the follow-through, the input buffer, the attack counter.
@@ -969,6 +1041,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let unstable_tiny = r.read_bool()?;
     let stacks = r.read(16)? as u16;
     let takedowns = r.read_u8()?;
+    let (kills, deaths, assists, cs) = (r.read(16)? as u16, r.read(16)? as u16, r.read(16)? as u16, r.read(16)? as u16);
     let hyper = r.read_bool()?;
     let spellblade_until = read_time(r)?;
     let facing = read_vec2(r)?;
@@ -1000,6 +1073,10 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         stacks,
         takedowns,
         hyper,
+        kills,
+        deaths,
+        assists,
+        cs,
     };
     Ok(UnitState {
         pos,
@@ -1286,6 +1363,70 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
     Ok((header, msg))
 }
 
+fn write_scoreboard(w: &mut BitWriter, b: &Scoreboard) {
+    write_time(w, b.started_at);
+    w.write(b.rows.len().min(MAX_SCORE_ROWS) as u64, 5);
+    for row in b.rows.iter().take(MAX_SCORE_ROWS) {
+        w.write_u32(row.unit.0);
+        write_champion(w, Some(row.champion));
+        write_team(w, row.team);
+        w.write_bool(row.bot);
+        w.write(row.level as u64, 5);
+        for n in [row.kills, row.deaths, row.assists, row.cs] {
+            w.write(n as u64, 16);
+        }
+        for i in row.items {
+            w.write_u8(i);
+        }
+        for a in row.augments {
+            w.write_u8(a);
+        }
+        w.write(row.respawn_ds as u64, 16);
+    }
+}
+
+fn read_scoreboard(r: &mut BitReader) -> Result<Scoreboard, DecodeError> {
+    let started_at = read_time(r)?;
+    let n = r.read(5)? as usize;
+    if n > MAX_SCORE_ROWS {
+        return Err(DecodeError::Invalid("score rows"));
+    }
+    let mut rows = Vec::with_capacity(n);
+    for _ in 0..n {
+        let unit = UnitId(r.read_u32()?);
+        let champion = read_champion(r)?.ok_or(DecodeError::Invalid("champion"))?;
+        let team = read_team(r)?;
+        let bot = r.read_bool()?;
+        let level = r.read(5)? as u8;
+        let (kills, deaths, assists, cs) =
+            (r.read(16)? as u16, r.read(16)? as u16, r.read(16)? as u16, r.read(16)? as u16);
+        let mut items = [0u8; INVENTORY];
+        for i in items.iter_mut() {
+            *i = r.read_u8()?;
+        }
+        let mut augments = [0u8; mftr_sim::augments::SLOTS];
+        for a in augments.iter_mut() {
+            *a = r.read_u8()?;
+        }
+        let respawn_ds = r.read(16)? as u16;
+        rows.push(ScoreRow {
+            unit,
+            champion,
+            team,
+            bot,
+            level,
+            kills,
+            deaths,
+            assists,
+            cs,
+            items,
+            augments,
+            respawn_ds,
+        });
+    }
+    Ok(Scoreboard { started_at, rows })
+}
+
 // ---- server → client --------------------------------------------------------------------
 
 pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
@@ -1392,6 +1533,10 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
                     }
                     _ => write_event(&mut w, e),
                 }
+            }
+            w.write_bool(s.scoreboard.is_some());
+            if let Some(b) = &s.scoreboard {
+                write_scoreboard(&mut w, b);
             }
             w.finish()
         }
@@ -1506,6 +1651,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                     return Err(DecodeError::Invalid("event count"));
                 }
             }
+            let scoreboard = if r.read_bool()? { Some(Box::new(read_scoreboard(&mut r)?)) } else { None };
             ServerMessage::Snapshot(Box::new(Snapshot {
                 tick,
                 since_tick_us,
@@ -1517,6 +1663,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 others,
                 removed,
                 events,
+                scoreboard,
             }))
         }
         2 => ServerMessage::Reject {
@@ -1705,6 +1852,10 @@ mod tests {
                 stacks: 37,
                 takedowns: 5,
                 hyper: true,
+                kills: 12,
+                deaths: 3,
+                assists: 9,
+                cs: 140,
             },
             spellblade_until: SimTime(88_888),
             facing: Vec2::new(0.6, -0.8),
@@ -1766,6 +1917,7 @@ mod tests {
             cast_seq: 41,
             power: 140.0,
             shot: 2,
+            slot: 5,
         };
         let area = Area {
             id: 11,
@@ -1780,6 +1932,7 @@ mod tests {
             cast_seq: 42,
             cc: Cc::Knockup(SimDuration::from_millis(1000)),
             shot: 4,
+            slot: 1,
         };
         let bolt = Bolt {
             id: 12,
@@ -1843,6 +1996,7 @@ mod tests {
                 kind: DamageKind::Physical,
                 amount: 40.25,
                 absorbed: 11.0,
+                origin: mftr_sim::world::DamageOrigin::Ability(2),
                 at: SimTime(6_300),
             },
             SimEvent::Died { unit: UnitId(3), killer: UnitId(4), at: SimTime(6_300), respawn_at: SimTime(17_820) },
@@ -1883,6 +2037,23 @@ mod tests {
             ],
             removed: vec![UnitId(11), UnitId(12)],
             events: events.into_iter().enumerate().map(|(i, e)| (i as u32 + 1, e)).collect(),
+            scoreboard: Some(Box::new(Scoreboard {
+                started_at: SimTime(48_000),
+                rows: vec![ScoreRow {
+                    unit: UnitId(4),
+                    champion: ChampionId::Vesper,
+                    team: Team::Red,
+                    bot: true,
+                    level: 14,
+                    kills: 9,
+                    deaths: 2,
+                    assists: 11,
+                    cs: 87,
+                    items: [18, 0, 7, 0, 0, 3],
+                    augments: [46, 0, 12, 0],
+                    respawn_ds: 215,
+                }],
+            })),
         };
         let msg = ServerMessage::Snapshot(Box::new(snap));
         let bytes = encode_server(&hdr(), &msg);
@@ -1913,6 +2084,7 @@ mod tests {
             cast_seq: 41,
             power: 140.0,
             shot,
+            slot: 0,
         };
         let volley = [
             m(20, Vec2::new(1.0, 0.0), 0),
@@ -1938,6 +2110,7 @@ mod tests {
             others: Vec::new(),
             removed: Vec::new(),
             events,
+            scoreboard: None,
         };
         let bytes = encode_server(&hdr(), &ServerMessage::Snapshot(Box::new(snap(events.clone()))));
         let ServerMessage::Snapshot(back) = decode_server(&bytes).unwrap().1 else { panic!() };

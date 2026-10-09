@@ -1236,7 +1236,125 @@ impl MatchClient {
     /// Seconds since the match began (the sim's clock, predicted), for the HUD's game timer.
     #[func]
     fn match_seconds(&self) -> f64 {
-        self.session.input_sim_time(self.now()).map_or(0.0, |t| t.0 as f64 / mftr_sim::time::SUBTICKS_PER_SECOND as f64)
+        let started = self.session.scoreboard().map_or(mftr_sim::SimTime(0), |b| b.started_at);
+        self.session.input_sim_time(self.now()).map_or(0.0, |t| t.secs_since(started).max(0.0) as f64)
+    }
+
+    /// Every champion's score (the Tab breakdown): `[{ unit, champion, team, ally, you, bot,
+    /// level, kills, deaths, assists, cs, items: [ids], augments: [{ id, name, tier, text }],
+    /// respawn }]`, our team first.
+    #[func]
+    fn scoreboard(&self) -> VarArray {
+        let mut out = VarArray::new();
+        let Some(b) = self.session.scoreboard() else { return out };
+        let mine = self.session.team();
+        let mut rows: Vec<_> = b.rows.iter().collect();
+        rows.sort_by_key(|r| (r.team != mine, r.unit.0));
+        for r in rows {
+            let mut d = VarDictionary::new();
+            d.set("unit", r.unit.0 as i64);
+            d.set("champion", r.champion.def().name);
+            d.set("team", if r.team == Team::Blue { "blue" } else { "red" });
+            d.set("ally", r.team == mine);
+            d.set("you", r.unit == self.session.unit());
+            d.set("bot", r.bot);
+            d.set("level", r.level as i64);
+            d.set("kills", r.kills as i64);
+            d.set("deaths", r.deaths as i64);
+            d.set("assists", r.assists as i64);
+            d.set("cs", r.cs as i64);
+            let items: PackedInt32Array = r.items.iter().map(|i| *i as i32).collect();
+            d.set("items", &items);
+            let mut augs = VarArray::new();
+            for id in r.augments.iter().filter(|id| **id != 0) {
+                if let Some(a) = augments::augment(*id) {
+                    let mut c = VarDictionary::new();
+                    c.set("id", *id as i64);
+                    c.set("name", a.name);
+                    c.set("tier", a.tier.name());
+                    c.set("text", a.text);
+                    augs.push(&c.to_variant());
+                }
+            }
+            d.set("augments", &augs);
+            d.set("respawn", r.respawn_ds as f64 / 10.0);
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// The recap of our latest death (01 §13), every hit of the fight accounted for: `{ killer,
+    /// total, seconds, physical, magic, true, absorbed, stunned, rooted, slowed, sources: [{
+    /// name, champion, kind, total, lines: [{ what, key, kind, total, hits }] }] }`, or empty.
+    #[func]
+    fn death_recap(&self) -> VarDictionary {
+        use mftr_sim::world::DamageOrigin;
+        let mut d = VarDictionary::new();
+        let Some(r) = self.session.last_recap() else { return d };
+        let kind_name = |k: DamageKind| match k {
+            DamageKind::Physical => "physical",
+            DamageKind::Magic => "magic",
+            DamageKind::True => "true",
+        };
+        let unit_name = |kind: UnitKind, champion: Option<ChampionId>| -> String {
+            match (kind, champion) {
+                (_, Some(c)) => c.def().name.to_string(),
+                (UnitKind::Minion, _) => "Minion".into(),
+                (UnitKind::Turret, _) => "Turret".into(),
+                (UnitKind::Gatehouse, _) => "Gatehouse".into(),
+                (UnitKind::Base, _) => "Base".into(),
+                _ => "Unknown".into(),
+            }
+        };
+        let killer = r.sources.iter().find(|s| s.source == r.killer);
+        d.set("killer", killer.map_or("the fountain".to_string(), |s| unit_name(s.kind, s.champion)).as_str());
+        for (k, v) in [
+            ("total", r.total),
+            ("seconds", r.seconds),
+            ("physical", r.physical),
+            ("magic", r.magic),
+            ("true", r.true_damage),
+            ("absorbed", r.absorbed),
+            ("stunned", r.stunned),
+            ("rooted", r.rooted),
+            ("slowed", r.slowed),
+        ] {
+            d.set(k, v);
+        }
+        let mut sources = VarArray::new();
+        for s in &r.sources {
+            let mut m = VarDictionary::new();
+            m.set("name", unit_name(s.kind, s.champion).as_str());
+            m.set("champion", s.champion.map_or("", |c| c.def().name));
+            m.set("killer", s.source == r.killer);
+            m.set("total", s.total);
+            let mut lines = VarArray::new();
+            for l in &s.lines {
+                let mut x = VarDictionary::new();
+                let (what, key) = match l.origin {
+                    DamageOrigin::Attack => ("Basic attacks".to_string(), ""),
+                    DamageOrigin::Ability(slot) => (
+                        s.champion.and_then(|c| c.ability(slot)).map_or("Ability".to_string(), |a| a.name.to_string()),
+                        ["Q", "W", "E", "R", "D", "F"].get(slot as usize).copied().unwrap_or(""),
+                    ),
+                    DamageOrigin::Item(id) => (items::item(id).map_or("Item".to_string(), |i| i.name.to_string()), ""),
+                    DamageOrigin::Augment(id) => {
+                        (augments::augment(id).map_or("Augment".to_string(), |a| a.name.to_string()), "")
+                    }
+                    DamageOrigin::Fountain => ("Fountain".to_string(), ""),
+                };
+                x.set("what", what.as_str());
+                x.set("key", key);
+                x.set("kind", kind_name(l.kind));
+                x.set("total", l.total);
+                x.set("hits", l.hits as i64);
+                lines.push(&x.to_variant());
+            }
+            m.set("lines", &lines);
+            sources.push(&m.to_variant());
+        }
+        d.set("sources", &sources);
+        d
     }
 
     /// Net graph data (03 §14).

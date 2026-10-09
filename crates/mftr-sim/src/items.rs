@@ -256,7 +256,8 @@ pub fn price(id: u8, inventory: &[u8; INVENTORY]) -> Option<(f32, Vec<usize>)> {
 /// Unique passives from an inventory (each counted once).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Passives {
-    pub on_hit_magic: Option<(f32, f32)>,
+    /// Base, AP ratio, and the item it comes from (death recaps name it).
+    pub on_hit_magic: Option<(f32, f32, u8)>,
     pub lifeline: Option<(f32, f32, u64, u64)>,
 }
 
@@ -264,7 +265,7 @@ pub fn passives(inventory: &[u8; INVENTORY]) -> Passives {
     let mut p = Passives::default();
     for it in inventory.iter().filter_map(|id| item(*id)) {
         match it.passive {
-            Passive::OnHitMagic { base, ap_ratio } => p.on_hit_magic = Some((base, ap_ratio)),
+            Passive::OnHitMagic { base, ap_ratio } => p.on_hit_magic = Some((base, ap_ratio, it.id)),
             Passive::Lifeline { shield, threshold, duration_ms, cooldown_ms } => {
                 p.lifeline = Some((shield, threshold, duration_ms, cooldown_ms))
             }

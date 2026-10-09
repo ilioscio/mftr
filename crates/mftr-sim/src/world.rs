@@ -207,6 +207,12 @@ pub struct Progress {
     pub takedowns: u8,
     /// Plays under Hyper rules (set from the rules at spawn).
     pub hyper: bool,
+    /// This match's score (the scoreboard): champion kills, deaths, assists, and minions
+    /// killed (last hits).
+    pub kills: u16,
+    pub deaths: u16,
+    pub assists: u16,
+    pub cs: u16,
 }
 
 /// One buy or sell: the inventory before it and the gold it changed.
@@ -245,6 +251,10 @@ impl Progress {
         stacks: 0,
         takedowns: 0,
         hyper: false,
+        kills: 0,
+        deaths: 0,
+        assists: 0,
+        cs: 0,
     };
 
     pub fn hash_into(&self, h: &mut impl StateSink) {
@@ -280,6 +290,9 @@ impl Progress {
         h.write_u32(self.stacks as u32);
         h.write_u8(self.takedowns);
         h.write_u8(self.hyper as u8);
+        for n in [self.kills, self.deaths, self.assists, self.cs] {
+            h.write_u32(n as u32);
+        }
     }
 
     /// What a champion's stats are computed from.
@@ -1007,6 +1020,8 @@ pub struct Missile {
     pub power: f32,
     /// Index within the cast's volley (Multishot), plus `augments::ECHO_SHOT` for an echo.
     pub shot: u8,
+    /// The ability slot that fired it (0–5).
+    pub slot: u8,
 }
 
 impl Missile {
@@ -1049,6 +1064,8 @@ pub struct Area {
     pub cc: Cc,
     /// 0, or `augments::ECHO_SHOT` for an echo.
     pub shot: u8,
+    /// The ability slot that cast it (0–5).
+    pub slot: u8,
 }
 
 /// A homing basic-attack bolt: not dodgeable, flies at the target until it lands.
@@ -1081,6 +1098,21 @@ impl Missile {
     pub fn volley(&self) -> (UnitId, u32, bool) {
         (self.owner, self.cast_seq, self.shot >= augments::ECHO_SHOT)
     }
+}
+
+/// What dealt a hit: death recaps and stats say exactly which attack, ability or effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DamageOrigin {
+    /// A basic attack (a champion's, a minion's or a structure's: the source unit says).
+    Attack,
+    /// An ability by slot (0–5 = Q W E R D F).
+    Ability(u8),
+    /// An item's effect (on-hit damage), by item id.
+    Item(u8),
+    /// An augment's effect (Thorns), by augment id.
+    Augment(u8),
+    /// An enemy fountain.
+    Fountain,
 }
 
 /// Things that happened during a step, for the network layer and the client display.
@@ -1123,6 +1155,8 @@ pub enum SimEvent {
     Damage {
         source: UnitId,
         target: UnitId,
+        /// What hit: an attack, which ability, an item or augment effect.
+        origin: DamageOrigin,
         kind: DamageKind,
         amount: f32,
         absorbed: f32,
@@ -1267,6 +1301,7 @@ enum Fired {
     /// A lunge arriving at its target.
     Strike {
         owner: UnitId,
+        slot: u8,
         target: UnitId,
         power: f32,
         kind: DamageKind,
@@ -1844,7 +1879,8 @@ impl World {
             for (owner, target, power, at) in melee {
                 let amp = damage_amp(units, owner, target, false, rng);
                 if let Some(u) = units.iter_mut().find(|u| u.id == target) {
-                    let dealt = deal_damage(u, owner, power * amp, DamageKind::Physical, at, events);
+                    let dealt =
+                        deal_damage(u, owner, DamageOrigin::Attack, power * amp, DamageKind::Physical, at, events);
                     landed.push((owner, target, dealt, at));
                 }
             }
@@ -2064,6 +2100,7 @@ fn deliver(unit: &Unit, c: EchoCast, t: SimTime, echo: bool, fired: &mut Vec<Fir
                 cast_seq: c.seq,
                 power,
                 shot: first_shot,
+                slot: c.slot,
             };
             fired.push(Fired::Missile(base));
             if d.multishot && tf.accepts(Transforms::MULTISHOT) {
@@ -2090,6 +2127,7 @@ fn deliver(unit: &Unit, c: EchoCast, t: SimTime, echo: bool, fired: &mut Vec<Fir
                 cast_seq: c.seq,
                 cc: a.cc,
                 shot: first_shot,
+                slot: c.slot,
             }));
         }
         _ => return false,
@@ -2180,7 +2218,7 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
             if slot < 3 && augments::mods(&unit.state.progress.augments).fundamentals {
                 power *= augments::FUNDAMENTALS_AMP;
             }
-            fired.push(Fired::Strike { owner: id, target, power, kind: l.damage.kind, cc: l.cc, at: t });
+            fired.push(Fired::Strike { owner: id, slot, target, power, kind: l.damage.kind, cc: l.cc, at: t });
         }
         unit.state.dash = None;
         unit.state.detour = None;
@@ -2577,7 +2615,15 @@ fn resolve_effects(
             let amp = damage_amp(units, m.owner, target, true, rng);
             if let Some(u) = units.iter_mut().find(|u| u.id == target) {
                 apply_cc(u, m.spec.cc, at, from, s1, events);
-                let dealt = deal_damage(u, m.owner, m.power * amp, m.spec.damage.kind, at, events);
+                let dealt = deal_damage(
+                    u,
+                    m.owner,
+                    DamageOrigin::Ability(m.slot),
+                    m.power * amp,
+                    m.spec.damage.kind,
+                    at,
+                    events,
+                );
                 after_ability_hit(units, m.owner, target, dealt, at, events);
             }
             return false;
@@ -2602,7 +2648,15 @@ fn resolve_effects(
                 let amp = damage_amp(units, a.owner, id, true, rng);
                 let Some(u) = units.iter_mut().find(|u| u.id == id) else { continue };
                 apply_cc(u, a.cc, a.detonate_at, a.center, s1, events);
-                let dealt = deal_damage(u, a.owner, a.power * amp, a.kind, a.detonate_at, events);
+                let dealt = deal_damage(
+                    u,
+                    a.owner,
+                    DamageOrigin::Ability(a.slot),
+                    a.power * amp,
+                    a.kind,
+                    a.detonate_at,
+                    events,
+                );
                 after_ability_hit(units, a.owner, id, dealt, a.detonate_at, events);
             }
         }
@@ -2623,7 +2677,7 @@ fn resolve_effects(
         if gap <= step {
             let at = SimTime(from.0 + (gap / b.speed * SUBTICKS_PER_SECOND as f32) as u64).min(s1);
             events.push(SimEvent::AttackLanded { id: b.id, target: b.target, at, hit: true });
-            let dealt = deal_damage(target, b.owner, b.power * amp, b.kind, at, events);
+            let dealt = deal_damage(target, b.owner, DamageOrigin::Attack, b.power * amp, b.kind, at, events);
             landed.push((b.owner, b.target, dealt, at));
             return false;
         }
@@ -2639,10 +2693,11 @@ fn on_hit(units: &mut [Unit], landed: &[(UnitId, UnitId, f32, SimTime)], events:
     for &(owner, target, dealt, at) in landed {
         let Some(o) = units.iter().find(|u| u.id == owner && u.kind == UnitKind::Champion) else { continue };
         let (passives, stats) = (items::passives(&o.state.progress.items), o.stats);
-        if let Some((base, ap_ratio)) = passives.on_hit_magic
+        if let Some((base, ap_ratio, item)) = passives.on_hit_magic
             && let Some(t) = units.iter_mut().find(|u| u.id == target)
         {
-            deal_damage(t, owner, base + ap_ratio * stats.ability_power, DamageKind::Magic, at, events);
+            let raw = base + ap_ratio * stats.ability_power;
+            deal_damage(t, owner, DamageOrigin::Item(item), raw, DamageKind::Magic, at, events);
         }
         if stats.life_steal > 0.0
             && dealt > 0.0
@@ -2663,7 +2718,8 @@ fn on_hit(units: &mut [Unit], landed: &[(UnitId, UnitId, f32, SimTime)], events:
             && dealt > 0.0
             && let Some(o) = units.iter_mut().find(|u| u.id == owner)
         {
-            deal_damage(o, target, augments::THORNS * dealt, DamageKind::Magic, at, events);
+            let thorns = DamageOrigin::Augment(augments::THORNS_ID);
+            deal_damage(o, target, thorns, augments::THORNS * dealt, DamageKind::Magic, at, events);
         }
     }
 }
@@ -2782,14 +2838,14 @@ fn resolve_direct(units: &mut [Unit], direct: &mut [Fired], rng: &mut Pcg32, s1:
     direct.sort_by_key(at_of);
     for f in direct.iter() {
         match *f {
-            Fired::Strike { owner, target, power, kind, cc, at } => {
+            Fired::Strike { owner, slot, target, power, kind, cc, at } => {
                 let power = power * damage_amp(units, owner, target, true, rng);
                 let from = units.iter().find(|u| u.id == owner).map(|u| (u.state.pos, u.gameplay_radius));
                 if let (Some((p, r)), Some(u)) = (from, units.iter_mut().find(|u| u.id == target)) {
                     // Still within reach on arrival (it may have dashed or blinked away).
                     if (u.state.pos - p).length() <= r + u.gameplay_radius + STRIKE_SLACK {
                         apply_cc(u, cc, at, p, s1, events);
-                        let dealt = deal_damage(u, owner, power, kind, at, events);
+                        let dealt = deal_damage(u, owner, DamageOrigin::Ability(slot), power, kind, at, events);
                         after_ability_hit(units, owner, target, dealt, at, events);
                     }
                 }
@@ -2822,6 +2878,7 @@ pub const STRIKE_SLACK: f32 = 100.0;
 fn deal_damage(
     u: &mut Unit,
     source: UnitId,
+    origin: DamageOrigin,
     raw: f32,
     kind: DamageKind,
     at: SimTime,
@@ -2844,7 +2901,7 @@ fn deal_damage(
         amount -= absorbed;
     }
     st.health -= amount;
-    events.push(SimEvent::Damage { source, target: u.id, kind, amount, absorbed, at });
+    events.push(SimEvent::Damage { source, target: u.id, origin, kind, amount, absorbed, at });
     let dealt = amount + absorbed;
     if st.health > 0.0
         && u.kind == UnitKind::Champion
@@ -2923,6 +2980,9 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
                 let (gold, xp) = lane::minion_reward(victim.attack.map_or(0.0, |a| a.range));
                 if let Some(k) = enemy_champ(killer) {
                     pay.push((k, gold, 0, at));
+                    if let Some(u) = units.iter_mut().find(|u| u.id == k) {
+                        u.state.progress.cs = u.state.progress.cs.saturating_add(1);
+                    }
                 }
                 let share = lane::shared_xp(xp, nearby.len());
                 pay.extend(nearby.iter().map(|id| (*id, 0.0, share, at)));
@@ -2944,6 +3004,12 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
                     pay.push((k, gold, 0, at));
                     if let Some(u) = units.iter_mut().find(|u| u.id == k) {
                         u.state.progress.streak = u.state.progress.streak.max(0).saturating_add(1);
+                        u.state.progress.kills = u.state.progress.kills.saturating_add(1);
+                    }
+                }
+                for a in &assists {
+                    if let Some(u) = units.iter_mut().find(|u| u.id == *a) {
+                        u.state.progress.assists = u.state.progress.assists.saturating_add(1);
                     }
                 }
                 // Takedowns: Champion of Chaos counts them, Reset refreshes Q, W and E.
@@ -2962,6 +3028,7 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
                 }
                 if let Some(v) = units.iter_mut().find(|u| u.id == unit) {
                     v.state.progress.streak = v.state.progress.streak.min(0).saturating_sub(1);
+                    v.state.progress.deaths = v.state.progress.deaths.saturating_add(1);
                 }
                 let share = lane::shared_xp(140 + 30 * vlevel as u32, nearby.len());
                 pay.extend(nearby.iter().map(|id| (*id, 0.0, share, at)));
@@ -3023,7 +3090,15 @@ fn fountains_and_relics(units: &mut [Unit], map: &Map, prediction: bool, s1: Sim
                 let max = u.stats.max_health;
                 u.state.health = (u.state.health + max * lane::FOUNTAIN_HEAL * TICK_DT).min(max);
             } else if !prediction {
-                deal_damage(u, UnitId(0), lane::FOUNTAIN_DPS * TICK_DT, DamageKind::True, s1, events);
+                deal_damage(
+                    u,
+                    UnitId(0),
+                    DamageOrigin::Fountain,
+                    lane::FOUNTAIN_DPS * TICK_DT,
+                    DamageKind::True,
+                    s1,
+                    events,
+                );
             }
         }
     }
@@ -4926,6 +5001,14 @@ mod tests {
         assert_eq!(gold_of(assister), lane::KILL_GOLD * 0.5);
         assert_eq!(w.unit(killer).unwrap().state.progress.streak, 1);
         assert_eq!(w.unit(victim).unwrap().state.progress.streak, -1);
+        // The scoreboard: a kill, an assist, a death.
+        let score = |id: UnitId| {
+            let p = w.unit(id).unwrap().state.progress;
+            (p.kills, p.deaths, p.assists)
+        };
+        assert_eq!(score(killer), (1, 0, 0));
+        assert_eq!(score(assister), (0, 0, 1));
+        assert_eq!(score(victim), (0, 1, 0));
         assert_eq!(lane::bounty(4), 450.0);
         assert_eq!(lane::bounty(-3), 220.0);
     }
@@ -5012,7 +5095,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0xd75b_5758_ad30_7ec1;
+    const GOLDEN_HASH_ARENA: u64 = 0x1a34_ebda_a31b_7841;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -5069,7 +5152,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x9d9b_efc1_db5e_28b1;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x29d8_b11b_fc0d_7253;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -5140,5 +5223,5 @@ mod tests {
 
     /// Recorded on x86_64-pc-windows-msvc when facing, follow-throughs and the input buffer
     /// joined the state (A2). CI checks Linux, macOS (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0xf584_8818_daaa_6df9;
+    const GOLDEN_HASH: u64 = 0x8773_c750_4771_b539;
 }

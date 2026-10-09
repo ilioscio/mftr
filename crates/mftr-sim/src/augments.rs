@@ -107,6 +107,8 @@ pub const SPELLCRIT_AMP: f32 = 1.6;
 pub const SPELLHUNGER_CAP: u16 = 80;
 pub const SPELL_VAMP: f32 = 0.12;
 pub const THORNS: f32 = 0.25;
+/// Thorns's id (its damage is attributed to it).
+pub const THORNS_ID: u8 = 46;
 /// Spellblade: an ability arms it for this long; the next attack adds the base attack damage.
 pub const SPELLBLADE_MS: u64 = 4000;
 /// Champion of Chaos: takedowns to complete the quest.

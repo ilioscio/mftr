@@ -310,6 +310,36 @@ impl ServerCore {
         self.tick_time(self.game.world.tick().next())
     }
 
+    /// Every champion's score at `t`, and when the match began.
+    fn scoreboard(&self, t: SimTime) -> msg::Scoreboard {
+        let world = &self.game.world;
+        let rows = world
+            .units()
+            .iter()
+            .filter_map(|u| {
+                let champion = u.champion?;
+                let p = &u.state.progress;
+                let respawn = u.state.respawn_at.map_or(0.0, |r| r.secs_since(t).max(0.0));
+                Some(msg::ScoreRow {
+                    unit: u.id,
+                    champion,
+                    team: u.team,
+                    bot: u.owner.is_some_and(|o| self.bots.iter().any(|b| b.player == o)),
+                    level: p.level,
+                    kills: p.kills,
+                    deaths: p.deaths,
+                    assists: p.assists,
+                    cs: p.cs,
+                    items: p.items,
+                    augments: p.augments,
+                    respawn_ds: (respawn * 10.0).ceil().min(u16::MAX as f32) as u16,
+                })
+            })
+            .take(msg::MAX_SCORE_ROWS)
+            .collect();
+        msg::Scoreboard { started_at: world.game().started_at, rows }
+    }
+
     fn header(conn: &mut Conn) -> PacketHeader {
         let (ack, ack_bits) = conn.recv.ack_fields();
         PacketHeader { seq: conn.send.next_seq(), ack, ack_bits }
@@ -712,6 +742,9 @@ impl ServerCore {
                 _ => {}
             }
         }
+        // The scoreboard, about once a second (the same for everyone: it's what the Tab
+        // breakdown shows, items and augments included, as in the reference game).
+        let scoreboard = (k.0 % mftr_sim::TICK_HZ == 0).then(|| Box::new(self.scoreboard(SimTime::end_of(k))));
         // Per team: the events it may receive, in order (the per-client parts follow).
         let mut team_events: [Vec<SimEvent>; 3] = [Vec::new(), Vec::new(), Vec::new()];
         for (i, list) in team_events.iter_mut().enumerate() {
@@ -855,12 +888,18 @@ impl ServerCore {
                 baseline: baseline.as_ref().map(|(t, _)| *t),
                 others: updates,
                 removed,
+                scoreboard: scoreboard.clone(),
             };
             let h = Self::header(conn);
             // Stay under the packet limit (03b §1): the least important unit updates wait for a
             // later snapshot (those units coast, or appear later), then a backlog of reliable
             // events does.
             let mut bytes = msg::encode_server(&h, &ServerMessage::Snapshot(Box::new(snap.clone())));
+            if bytes.len() > mftr_net::MAX_PAYLOAD_BYTES && snap.scoreboard.is_some() {
+                // The scoreboard can wait for the next second.
+                snap.scoreboard = None;
+                bytes = msg::encode_server(&h, &ServerMessage::Snapshot(Box::new(snap.clone())));
+            }
             while bytes.len() > mftr_net::MAX_PAYLOAD_BYTES && !snap.others.is_empty() {
                 let keep = snap.others.len() * 3 / 4;
                 for dropped in snap.others.drain(keep..) {
