@@ -65,6 +65,7 @@ const Hud := preload("res://scripts/hud.gd")
 const AbilityTooltip := preload("res://scripts/ability_tooltip.gd")
 const Windows := preload("res://scripts/windows.gd")
 const GameCursor := preload("res://scripts/cursor.gd")
+const AugmentIcons := preload("res://scripts/augment_icons.gd")
 var _item_boxes: Array[Rect2] = []        # the HUD's inventory slots this frame
 var _augment_rows := []                   # [Rect2, augment] above the HUD, for hover
 var show_net_graph := false             # F1: the full network graph (the HUD shows fps and ping)
@@ -167,6 +168,26 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-tab":
 			_shot_tab = true
+		elif args[i] == "--tab-hover" and i + 1 < args.size():
+			_shot_tab_hover = args[i + 1]
+			i += 1
+		elif args[i] == "--dump-augment-icons" and i + 1 < args.size():
+			# Every glyph in every tier, one row per tier: a sheet for review.
+			var glyphs: Array = AugmentIcons.GLYPHS.keys() + AugmentIcons.STATS
+			var sheet := Image.create(glyphs.size() * 68, 3 * 68, false, Image.FORMAT_RGBA8)
+			sheet.fill(Color(0.1, 0.11, 0.13))
+			for row in 3:
+				for col in glyphs.size():
+					var img := AugmentIcons.icon({"glyph": glyphs[col], "tier": ["Silver", "Gold", "Prismatic"][row]}).get_image()
+					img.decompress()
+					img.clear_mipmaps()
+					img.resize(64, 64, Image.INTERPOLATE_LANCZOS)
+					img.convert(Image.FORMAT_RGBA8)
+					sheet.blend_rect(img, Rect2i(0, 0, 64, 64), Vector2i(col * 68 + 2, row * 68 + 2))
+			sheet.save_png(args[i + 1])
+			print("MFTR: augment icons saved to ", args[i + 1])
+			get_tree().quit()
+			return
 		elif args[i] == "--dump-cursors" and i + 1 < args.size():
 			for state in ["default", "enemy", "ally", "attack"]:
 				GameCursor._make(state)[0].save_png("%s/cursor_%s.png" % [args[i + 1], state])
@@ -295,6 +316,7 @@ var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for
 var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
 var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
 var _shot_settings := -1                  # `--shot-settings N`: open Settings on tab N
+var _shot_tab_hover := ""                 # `--tab-hover augment|item`: show one's tooltip in it
 var _shot_tab := false                    # `--shot-tab`: hold the match breakdown open
 var _shot_numbers := false                # `--shot-numbers`: sample damage numbers, for review
 var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
@@ -2461,6 +2483,16 @@ func _update_ability_tip() -> void:
 				slot = i
 		if slot < 0 and _shot_hover >= 0 and _shot_hover < mini(6, _ability_boxes.size()):
 			slot = _shot_hover
+	if not _tab_hover.is_empty() and score_panel != null and score_panel.visible:
+		var c: Control = _tab_hover[2]
+		if is_instance_valid(c):
+			var data: Dictionary = _tab_hover[1]
+			var rect := c.get_global_rect()
+			if _tab_hover[0] == "item":
+				ability_tip.show_custom("tab:item:%d" % data.id, func(t: RichTextLabel): _item_tooltip(t, data, 0, ""), rect, overlay.size)
+			else:
+				ability_tip.show_custom("tab:aug:%s" % data.name, func(t: RichTextLabel): _augment_tooltip(t, data), rect, overlay.size)
+			return
 	if slot < 0 and not own_status.is_empty() and overlay.visible:
 		var m := overlay.get_local_mouse_position()
 		for i in _item_boxes.size():
@@ -2497,7 +2529,7 @@ func _item_tooltip(t: RichTextLabel, it: Dictionary, charges: int, key: String) 
 	var tier_color: String = ["d6dbe2", "8fd8c8", "f2d27a"][clampi(int(it.tier), 0, 2)]
 	t.append_text("  [font_size=19][b][color=#%s]%s[/color][/b][/font_size]" % [tier_color, it.name])
 	t.append_text("\n[color=#ffd56b]%d gold[/color]" % it.cost)
-	if it.get("consumable", false):
+	if it.get("consumable", false) and key != "":
 		t.append_text("[color=#8a93a0]   ·   %d charge%s   ·   [%s][/color]" % [charges, "" if charges == 1 else "s", key])
 	t.append_text("\n")
 	for line in it.get("lines", []):
@@ -2508,20 +2540,26 @@ func _item_tooltip(t: RichTextLabel, it: Dictionary, charges: int, key: String) 
 ## An augment's tooltip: its name in its tier's color, the tier, what it does, its progress.
 func _augment_tooltip(t: RichTextLabel, a: Dictionary) -> void:
 	var c: String = _tier_color(a.tier).to_html(false)
-	t.append_text("[font_size=19][b][color=#%s]◆ %s[/color][/b][/font_size]" % [c, a.name])
+	t.add_image(AugmentIcons.icon(a), 36, 36)
+	t.append_text("  [font_size=19][b][color=#%s]%s[/color][/b][/font_size]" % [c, a.name])
 	t.append_text("\n[color=#8a93a0]%s augment[/color]\n\n%s" % [a.tier, a.get("text", "")])
 	if a.has("progress"):
 		t.append_text("\n\n[color=#7ee07e]Progress: %s[/color]" % a.progress)
 
 
 ## ---- The match breakdown (hold Tab) ----------------------------------------------------------
-## Every champion: portrait, level, score, minions killed, items and augments (hover them), and
-## the respawn timer of the dead, by team; the match clock on top. Movable like the others.
+## Laid out like the reference game's: our team on the left, theirs on the right, mirrored, the
+## score and turrets destroyed in the middle on top. Each row: the augments (outer edge), the D
+## and F spells, the portrait with the level and, while dead, the respawn timer, minions
+## killed, K/D/A, the items. Hovering an item or an augment shows its tooltip, the enemy's too.
+## Movable like the other windows.
 
 var score_panel: PanelContainer
 var _score_sig := ""
 var _score_refresh := 0.0
 var _score_timers := {}                    # unit -> its respawn Label
+var _tab_hover := []                       # [kind, data, Control] under the mouse in the breakdown
+var _tab_hoverables := []                  # every hoverable in it (scripted captures pick one)
 
 
 func _update_scoreboard(delta: float, playing: bool) -> void:
@@ -2529,133 +2567,225 @@ func _update_scoreboard(delta: float, playing: bool) -> void:
 	if not show:
 		if score_panel != null:
 			score_panel.visible = false
+		_tab_hover = []
 		return
 	if score_panel == null:
-		var made := _panel(980)
-		score_panel = made[0]
-		score_panel.set_meta("box", made[1])
+		score_panel = PanelContainer.new()
+		var margin := MarginContainer.new()
+		for side in ["left", "right", "top", "bottom"]:
+			margin.add_theme_constant_override("margin_" + side, 12)
+		score_panel.add_child(margin)
+		var box := VBoxContainer.new()
+		box.add_theme_constant_override("separation", 8)
+		margin.add_child(box)
+		score_panel.set_meta("box", box)
+		overlay.get_parent().add_child(score_panel)
 		Windows.make_movable(score_panel, "scoreboard", settings)
+	if not score_panel.visible:
+		score_panel.move_to_front()  # held open, it's on top of the other windows
 	score_panel.visible = true
 	_score_refresh -= delta
 	if _score_refresh <= 0.0:
 		_score_refresh = 0.25
 		_fill_scoreboard()
-	Windows.place(score_panel, "scoreboard", settings, Vector2((overlay.size.x - score_panel.size.x) / 2.0, 70.0), overlay.size)
+	Windows.place(score_panel, "scoreboard", settings, Vector2((overlay.size.x - score_panel.size.x) / 2.0, overlay.size.y * 0.2), overlay.size)
 
 
 func _fill_scoreboard() -> void:
 	var rows: Array = client.scoreboard()
 	var box: VBoxContainer = score_panel.get_meta("box")
-	var t := client.match_seconds()
-	# Rebuilt only when something but the timers changed (hover tooltips stay put).
 	portraits.prepare(rows.map(func(r): return r.champion))
-	var sig := str(rows.map(func(r): return [r.kills, r.deaths, r.assists, r.cs, r.level, r.items, r.augments.size(), r.respawn > 0.0])) + str(_portraits_seen)
+	var towers: PackedInt32Array = client.towers()
+	# Rebuilt only when something but the timers changed (a tooltip under the mouse stays).
+	var sig := str(rows.map(func(r): return [r.kills, r.deaths, r.assists, r.cs, r.level, r.items, r.augments.size(), r.respawn > 0.0, r.spell_f])) + str(_portraits_seen) + str(towers)
 	if sig != _score_sig:
 		_score_sig = sig
 		_score_timers.clear()
+		_tab_hover = []
+		_tab_hoverables = []
 		for c in box.get_children():
 			c.queue_free()
+		var kills := [0, 0]
+		for r in rows:
+			kills[0 if r.ally else 1] += int(r.kills)
+		# The middle: turrets, kills against kills, turrets.
 		var head := HBoxContainer.new()
-		var title := Label.new()
-		title.text = "Match breakdown"
-		title.theme_type_variation = "TitleLabel"
-		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		head.add_child(title)
-		var clock := Label.new()
-		clock.name = "Clock"
-		clock.theme_type_variation = "TitleLabel"
-		head.add_child(clock)
+		head.alignment = BoxContainer.ALIGNMENT_CENTER
+		head.add_theme_constant_override("separation", 26)
+		var ally_c := OWN_COLOR.lightened(0.25)
+		var enemy_c := ENEMY_COLOR.lightened(0.1)
+		head.add_child(_tab_label("♜ %d" % (towers[0] if towers.size() > 0 else 0), 18, ally_c))
+		head.add_child(_tab_label("%d" % kills[0], 28, ally_c))
+		head.add_child(_tab_label("⚔", 22, Color(0.85, 0.75, 0.5)))
+		head.add_child(_tab_label("%d" % kills[1], 28, enemy_c))
+		head.add_child(_tab_label("♜ %d" % (towers[1] if towers.size() > 1 else 0), 18, enemy_c))
 		box.add_child(head)
+		var cols := HBoxContainer.new()
+		cols.add_theme_constant_override("separation", 6)
+		box.add_child(cols)
 		for ally in [true, false]:
-			var kills := 0
+			var col := VBoxContainer.new()
+			col.add_theme_constant_override("separation", 4)
 			for r in rows:
 				if r.ally == ally:
-					kills += int(r.kills)
-			var team := Label.new()
-			team.text = "%s   ·   %d kills" % ["YOUR TEAM" if ally else "ENEMY TEAM", kills]
-			team.theme_type_variation = "HeaderLabel"
-			team.add_theme_color_override("font_color", OWN_COLOR.lightened(0.25) if ally else ENEMY_COLOR.lightened(0.15))
-			box.add_child(team)
-			var grid := GridContainer.new()
-			grid.columns = 8
-			grid.add_theme_constant_override("h_separation", 14)
-			grid.add_theme_constant_override("v_separation", 4)
-			for title_text in ["", "", "", "K / D / A", "CS", "ITEMS", "AUGMENTS", ""]:
-				var h := Label.new()
-				h.text = title_text
-				h.theme_type_variation = "HintLabel"
-				grid.add_child(h)
-			for r in rows:
-				if r.ally == ally:
-					_score_row(grid, r)
-			box.add_child(grid)
-	var clock_label = box.find_child("Clock", true, false)
-	if clock_label != null:
-		clock_label.text = "%d:%02d" % [int(t) / 60, int(t) % 60]
+					col.add_child(_score_row(r, not ally))
+			cols.add_child(col)
+	if _shot_tab_hover != "" and _tab_hover.is_empty():
+		# `--tab-hover augment|item`: the last one of that kind (the enemy's side is built last).
+		for hv in _tab_hoverables:
+			if hv[0] == _shot_tab_hover:
+				_tab_hover = hv
 	for r in rows:
 		var l: Label = _score_timers.get(r.unit)
 		if l != null and is_instance_valid(l):
-			l.text = "%d s" % ceili(r.respawn) if r.respawn > 0.0 else ""
+			l.text = "%d" % ceili(r.respawn) if r.respawn > 0.0 else ""
 
 
-func _score_row(grid: GridContainer, r: Dictionary) -> void:
-	var face := TextureRect.new()
-	face.texture = portraits.portrait(r.champion, "round")
-	face.custom_minimum_size = Vector2(38, 38)
-	face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	face.modulate = Color(0.45, 0.45, 0.5) if r.respawn > 0.0 else Color.WHITE
-	grid.add_child(face)
+func _tab_label(text: String, size: int, color: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_override("font", _bold_font())
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return l
+
+
+## One row. `mirrored` (the enemy's side) runs right to left: items, score, portrait, spells,
+## augments on the outer edge.
+func _score_row(r: Dictionary, mirrored: bool) -> Control:
+	var dead: bool = r.respawn > 0.0
+	var row := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.32, 0.06, 0.06, 0.85) if dead else (Color(0.13, 0.11, 0.06, 0.9) if r.you else Color(0.05, 0.065, 0.085, 0.85))
+	sb.border_color = Color(0.78, 0.65, 0.38) if r.you else Color(0.14, 0.16, 0.2)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(4)
+	sb.set_content_margin_all(5)
+	row.add_theme_stylebox_override("panel", sb)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	row.add_child(h)
+	var parts: Array[Control] = []
+
+	# Augments: a 2 × 2 grid.
+	var augs := GridContainer.new()
+	augs.columns = 2
+	augs.add_theme_constant_override("h_separation", 3)
+	augs.add_theme_constant_override("v_separation", 3)
+	for i in 4:
+		var cell := TextureRect.new()
+		cell.custom_minimum_size = Vector2(24, 24)
+		cell.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		if i < r.augments.size():
+			var a: Dictionary = r.augments[i]
+			cell.texture = AugmentIcons.icon(a)
+			_tab_hoverable(cell, "augment", a)
+		else:
+			cell.texture = _empty_slot()
+		augs.add_child(cell)
+	parts.append(augs)
+
+	# D and F.
+	var spells := VBoxContainer.new()
+	spells.add_theme_constant_override("separation", 2)
+	var tint: Color = CHAMPION_COLORS.get(r.champion, Color(0.5, 0.5, 0.55))
+	for kind in ["blink", r.spell_f]:
+		var sp := TextureRect.new()
+		sp.custom_minimum_size = Vector2(22, 22)
+		sp.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		sp.texture = Hud.ability_icon(kind, Color(0.36, 0.42, 0.5))
+		spells.add_child(sp)
+	parts.append(spells)
+
+	# The portrait: level in the corner, the respawn timer over it while dead.
+	var face := Control.new()
+	face.custom_minimum_size = Vector2(48, 48)
+	var pic := TextureRect.new()
+	pic.texture = portraits.portrait(r.champion, "round")
+	pic.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.modulate = Color(0.4, 0.4, 0.45) if dead else Color.WHITE
+	face.add_child(pic)
+	face.tooltip_text = "%s%s" % [r.champion, "  (you)" if r.you else ("  ·  bot" if r.bot else "")]
 	var level := Label.new()
 	level.text = "%d" % r.level
 	level.add_theme_font_override("font", _bold_font())
-	grid.add_child(level)
-	var name := Label.new()
-	name.text = "%s%s" % [r.champion, "  (you)" if r.you else ("  ·  bot" if r.bot else "")]
-	name.add_theme_font_override("font", _bold_font())
-	if r.you:
-		name.add_theme_color_override("font_color", Color(1.0, 0.88, 0.6))
-	name.custom_minimum_size = Vector2(170, 0)
-	grid.add_child(name)
-	var kda := Label.new()
-	kda.text = "%d / %d / %d" % [r.kills, r.deaths, r.assists]
-	kda.add_theme_font_override("font", _bold_font())
-	grid.add_child(kda)
-	var cs := Label.new()
-	cs.text = "%d" % r.cs
-	grid.add_child(cs)
+	level.add_theme_font_size_override("font_size", 12)
+	var lsb := StyleBoxFlat.new()
+	lsb.bg_color = Color(0.04, 0.05, 0.07)
+	lsb.set_corner_radius_all(8)
+	lsb.set_content_margin_all(2)
+	level.add_theme_stylebox_override("normal", lsb)
+	level.position = Vector2(30, 30)
+	face.add_child(level)
+	var timer := Label.new()
+	timer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	timer.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	timer.add_theme_font_override("font", _bold_font())
+	timer.add_theme_font_size_override("font_size", 20)
+	timer.add_theme_color_override("font_color", Color(1.0, 0.3, 0.25))
+	timer.add_theme_color_override("font_outline_color", Color.BLACK)
+	timer.add_theme_constant_override("outline_size", 4)
+	face.add_child(timer)
+	_score_timers[r.unit] = timer
+	parts.append(face)
+
+	# Minions killed, then K/D/A.
+	var cs := _tab_label("%d" % r.cs, 16, Color(1.0, 0.86, 0.5))
+	cs.custom_minimum_size = Vector2(34, 0)
+	cs.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cs.tooltip_text = "Minions killed"
+	cs.mouse_filter = Control.MOUSE_FILTER_PASS
+	parts.append(cs)
+	var kda := _tab_label("%d / %d / %d" % [r.kills, r.deaths, r.assists], 16, Color(0.92, 0.94, 0.96))
+	kda.custom_minimum_size = Vector2(86, 0)
+	kda.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	parts.append(kda)
+
+	# Items.
 	var items := HBoxContainer.new()
-	items.add_theme_constant_override("separation", 3)
+	items.add_theme_constant_override("separation", 2)
 	for id in r.items:
 		var cell := TextureRect.new()
 		cell.custom_minimum_size = Vector2(30, 30)
 		cell.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		if id != 0 and _catalog.has(id):
 			cell.texture = ItemIcons.icon(_catalog[id])
-			cell.tooltip_text = "%s\n%s" % [_catalog[id].name, _catalog[id].stats]
+			_tab_hoverable(cell, "item", _catalog[id])
 		else:
-			var empty := StyleBoxFlat.new()
-			empty.bg_color = Color(0.06, 0.07, 0.09)
-			cell.texture = null
-			cell.self_modulate = Color(0.3, 0.32, 0.36)
+			cell.texture = _empty_slot()
 		items.add_child(cell)
-	grid.add_child(items)
-	var augs := HBoxContainer.new()
-	augs.add_theme_constant_override("separation", 4)
-	for a in r.augments:
-		var pip := Label.new()
-		pip.text = "◆"
-		pip.add_theme_font_size_override("font_size", 20)
-		pip.add_theme_color_override("font_color", _tier_color(a.tier))
-		pip.tooltip_text = "%s  (%s)\n%s" % [a.name, a.tier, a.text]
-		pip.mouse_filter = Control.MOUSE_FILTER_STOP
-		augs.add_child(pip)
-	augs.custom_minimum_size = Vector2(110, 0)
-	grid.add_child(augs)
-	var timer := Label.new()
-	timer.add_theme_color_override("font_color", Color(1.0, 0.45, 0.4))
-	timer.custom_minimum_size = Vector2(44, 0)
-	_score_timers[r.unit] = timer
-	grid.add_child(timer)
+	parts.append(items)
+
+	if mirrored:
+		parts.reverse()
+	for c in parts:
+		c.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		h.add_child(c)
+	return row
+
+
+## Hovering this shows its tooltip (an item's or an augment's), from the breakdown too.
+func _tab_hoverable(c: Control, kind: String, data: Dictionary) -> void:
+	_tab_hoverables.append([kind, data, c])
+	c.mouse_filter = Control.MOUSE_FILTER_PASS
+	c.mouse_entered.connect(func(): _tab_hover = [kind, data, c])
+	c.mouse_exited.connect(func():
+		if not _tab_hover.is_empty() and _tab_hover[2] == c:
+			_tab_hover = [])
+
+
+static var _empty: ImageTexture
+
+
+static func _empty_slot() -> Texture2D:
+	if _empty == null:
+		var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+		img.fill(Color(0.07, 0.08, 0.1))
+		_empty = ImageTexture.create_from_image(img)
+	return _empty
 
 
 ## ---- The death recap ---------------------------------------------------------------------------
@@ -2734,6 +2864,18 @@ func _fill_recap(box: VBoxContainer, r: Dictionary) -> void:
 		ccl.add_theme_color_override("font_color", Color(1.0, 0.82, 0.29))
 		box.add_child(ccl)
 	box.add_child(HSeparator.new())
+	# The sources scroll when there are more than fit (a long fight, many enemies); the
+	# summary above stays in view.
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(list)
+	box.add_child(scroll)
+	var rows := 0
+	for src in r.sources:
+		rows += 1 + src.lines.size()
+	scroll.custom_minimum_size = Vector2(410, minf(rows * 30.0 + 8.0, overlay.size.y * 0.45))
 	for src in r.sources:
 		var head := HBoxContainer.new()
 		head.add_theme_constant_override("separation", 8)
@@ -2751,17 +2893,17 @@ func _fill_recap(box: VBoxContainer, r: Dictionary) -> void:
 		amount.text = "%d" % roundi(src.total)
 		amount.add_theme_font_override("font", _bold_font())
 		head.add_child(amount)
-		box.add_child(head)
+		list.add_child(head)
 		for line in src.lines:
 			var l := RichTextLabel.new()
 			l.bbcode_enabled = true
 			l.fit_content = true
 			l.scroll_active = false
-			l.custom_minimum_size = Vector2(400, 0)
+
 			var key: String = ("[%s] " % line.key) if line.key != "" else ""
 			var c: String = KIND_COLORS.get(line.kind, "d6dbe2")
 			l.append_text("      %s%s   [color=#%s]%d %s[/color]   [color=#8a93a0]%d hit%s[/color]" % [key, line.what, c, roundi(line.total), line.kind, line.hits, "" if line.hits == 1 else "s"])
-			box.add_child(l)
+			list.add_child(l)
 
 
 ## ---- The cursor --------------------------------------------------------------------------------
@@ -3477,15 +3619,14 @@ func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 	# ARAM: Mayhem: the augments held, above the panel.
 	var held: Array = own_status.get("augments", [])
 	_augment_rows.clear()
+	var side := 30.0 * k
 	for i in held.size():
 		var a: Dictionary = held[i]
-		var at := Vector2(origin.x, _bar_rect.position.y - 10.0 * k - 18.0 * k * (held.size() - 1 - i))
-		var label: String = "◆ " + a.name
+		var r := Rect2(Vector2(origin.x + i * (side + 4.0 * k), _bar_rect.position.y - side - 6.0 * k), Vector2(side, side))
+		overlay.draw_texture_rect(AugmentIcons.icon(a), r, false)
 		if a.has("progress"):
-			label += "  " + a.progress
-		Hud.text(overlay, font, at, label, roundi(14.0 * k), _tier_color(a.tier))
-		var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, roundi(14.0 * k)).x
-		_augment_rows.append([Rect2(at - Vector2(0, 14.0 * k), Vector2(w, 18.0 * k)), a])
+			Hud.text(overlay, font, Vector2(r.position.x, r.end.y - 2.0 * k), a.progress, roundi(10.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x - 2.0 * k)
+		_augment_rows.append([r, a])
 
 
 ## ---- Session, champion select and spectating (M2 slice 5) --------------------------------------
@@ -4376,7 +4517,7 @@ func _update_draft(playing: bool) -> void:
 	var golden: int = own_status.get("golden", -1)
 	var key := str(offer.map(func(c): return c.id)) + str(can_reroll) + str(golden)
 	if draft_panel == null:
-		var made := _panel(760)
+		var made := _panel(860)
 		draft_panel = made[0]
 		draft_box = made[1]
 		Windows.make_movable(draft_panel, "augments", settings)
@@ -4465,30 +4606,61 @@ func _update_anvil(playing: bool) -> void:
 	Windows.place(anvil_panel, "anvil", settings, default, overlay.size)
 
 
-func _augment_card(a: Dictionary, choice: int) -> Button:
-	var card := Button.new()
-	card.custom_minimum_size = Vector2(230, 160)
-	card.focus_mode = Control.FOCUS_NONE
-	card.pressed.connect(func(): client.pick_augment(choice))
-	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 10)
-	card.add_child(margin)
+## A draft choice: the augment's icon, name and description in a card that grows to fit them,
+## so no description ever spills out (01 §13). Only an unusually long one gets smaller text.
+func _augment_card(a: Dictionary, choice: int) -> Control:
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Vector2(270, 170)
+	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	var tint := _tier_color(a.tier)
+	var look := func(hot: bool) -> StyleBoxFlat:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.1, 0.12, 0.15) if not hot else Color(0.14, 0.16, 0.2)
+		sb.border_color = tint.darkened(0.35) if not hot else tint
+		sb.set_border_width_all(2 if hot else 1)
+		sb.set_corner_radius_all(6)
+		sb.set_content_margin_all(12)
+		return sb
+	card.add_theme_stylebox_override("panel", look.call(false))
+	card.mouse_entered.connect(func(): card.add_theme_stylebox_override("panel", look.call(true)))
+	card.mouse_exited.connect(func(): card.add_theme_stylebox_override("panel", look.call(false)))
+	card.gui_input.connect(func(e: InputEvent):
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+			client.pick_augment(choice)
+			card.accept_event())
 	var v := VBoxContainer.new()
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_child(v)
+	v.add_theme_constant_override("separation", 8)
+	card.add_child(v)
+	var head := HBoxContainer.new()
+	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	head.add_theme_constant_override("separation", 10)
+	var icon := TextureRect.new()
+	icon.texture = AugmentIcons.icon(a)
+	icon.custom_minimum_size = Vector2(48, 48)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	head.add_child(icon)
 	var name := Label.new()
 	name.text = a.name
+	name.add_theme_font_override("font", _bold_font())
 	name.add_theme_font_size_override("font_size", 18)
-	name.add_theme_color_override("font_color", _tier_color(a.tier))
+	name.add_theme_color_override("font_color", tint)
+	name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	name.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	v.add_child(name)
+	head.add_child(name)
+	v.add_child(head)
 	var text := Label.new()
 	text.text = a.text
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	text.custom_minimum_size = Vector2(205, 0)
+	text.custom_minimum_size = Vector2(246, 0)
+	var n: int = String(a.text).length()
+	text.add_theme_font_size_override("font_size", 16 if n <= 150 else (14 if n <= 220 else 13))
 	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(text)
 	return card
+
+

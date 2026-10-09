@@ -1048,16 +1048,7 @@ impl MatchClient {
             d.set("can_undo", s.progress.undo_len > 0);
             d.set("hitbox", self.session.own_radius());
             // ARAM: Mayhem: held augments and the open draft.
-            let card = |id: u8| {
-                let mut c = VarDictionary::new();
-                if let Some(a) = augments::augment(id) {
-                    c.set("id", id as i64);
-                    c.set("name", a.name);
-                    c.set("tier", a.tier.name());
-                    c.set("text", a.text);
-                }
-                c
-            };
+            let card = augment_card;
             let mut held = VarArray::new();
             for id in s.progress.augments.iter().filter(|id| **id != 0) {
                 let mut c = card(*id);
@@ -1332,20 +1323,26 @@ impl MatchClient {
             d.set("items", &items);
             let mut augs = VarArray::new();
             for id in r.augments.iter().filter(|id| **id != 0) {
-                if let Some(a) = augments::augment(*id) {
-                    let mut c = VarDictionary::new();
-                    c.set("id", *id as i64);
-                    c.set("name", a.name);
-                    c.set("tier", a.tier.name());
-                    c.set("text", a.text);
-                    augs.push(&c.to_variant());
+                if augments::augment(*id).is_some() {
+                    augs.push(&augment_card(*id).to_variant());
                 }
             }
             d.set("augments", &augs);
             d.set("respawn", r.respawn_ds as f64 / 10.0);
+            // The F spell's icon: Barrier, or an augment's spell in its place.
+            let f = augments::spell(&r.augments).or_else(|| r.champion.ability(5));
+            d.set("spell_f", f.map_or("barrier", |a| icon_kind(&a)));
             out.push(&d.to_variant());
         }
         out
+    }
+
+    /// Turrets destroyed: `[ours, theirs]` (the Tab breakdown's header).
+    #[func]
+    fn towers(&self) -> PackedInt32Array {
+        let Some(b) = self.session.scoreboard() else { return PackedInt32Array::new() };
+        let t = if self.session.team() == Team::Blue { b.towers } else { [b.towers[1], b.towers[0]] };
+        t.iter().map(|n| *n as i32).collect()
     }
 
     /// The recap of our latest death (01 §13), every hit of the fight accounted for: `{ killer,
@@ -1755,6 +1752,79 @@ fn item_lines(it: &items::Item) -> VarArray {
         add(active, "active");
     }
     out
+}
+
+/// The icon kind of an ability (the HUD's glyphs): what its effect does.
+fn icon_kind(a: &mftr_sim::ability::Ability) -> &'static str {
+    use mftr_sim::ability::Effect;
+    match a.effect {
+        Effect::Line(_) => "line",
+        Effect::Area(r) if r.range == 0.0 => "nova",
+        Effect::Area(_) => "area",
+        Effect::Lunge(_) => "lunge",
+        Effect::Dash(_) => "dash",
+        Effect::Blink(_) => "blink",
+        Effect::Shield(_) => "barrier",
+        Effect::Support(s) if s.shield > 0.0 => "shield_ally",
+        Effect::Support(_) => "heal",
+    }
+}
+
+/// An augment for the client: `{ id, name, tier, text, glyph }`, the glyph naming its icon (its
+/// mechanic, or for a stat augment its main stat).
+fn augment_card(id: u8) -> VarDictionary {
+    let mut c = VarDictionary::new();
+    if let Some(a) = augments::augment(id) {
+        c.set("id", id as i64);
+        c.set("name", a.name);
+        c.set("tier", a.tier.name());
+        c.set("text", a.text);
+        c.set("glyph", augment_glyph(a));
+    }
+    c
+}
+
+fn augment_glyph(a: &augments::Augment) -> &'static str {
+    use augments::Effect;
+    match a.effect {
+        Effect::None => {
+            // The stat it gives most of, roughly normalized.
+            let b = &a.bonus;
+            let weights = [
+                (b.health / 10.0 + b.health_pct * 100.0, "hp"),
+                (b.attack_damage + b.attack_damage_pct * 100.0, "ad"),
+                (b.ability_power / 1.6 + b.ability_power_pct * 60.0, "ap"),
+                (b.armor * 1.2 + b.resist_pct * 60.0, "armor"),
+                (b.magic_resist * 1.2, "mr"),
+                (b.attack_speed * 200.0, "as"),
+                (b.ability_haste * 2.0, "haste"),
+                (b.move_speed + b.move_speed_pct * 300.0, "ms"),
+            ];
+            weights.iter().fold((0.0, "ad"), |best, w| if w.0 > best.0 { *w } else { best }).1
+        }
+        Effect::AdToAp(_) | Effect::ApToAd(_) => "convert",
+        Effect::Multishot => "multishot",
+        Effect::Echo => "echo",
+        Effect::Wide => "wide",
+        Effect::Titan => "titan",
+        Effect::Pebble => "pebble",
+        Effect::Unstable => "unstable",
+        Effect::Executioner => "execute",
+        Effect::FirstStrike => "first_strike",
+        Effect::LastStand => "last_stand",
+        Effect::Spellcrit => "spellcrit",
+        Effect::Spellhunger => "hunger",
+        Effect::SpellVamp => "vamp",
+        Effect::Thorns => "thorns",
+        Effect::Spellblade => "spellblade",
+        Effect::Reset => "reset",
+        Effect::AnvilLuck => "anvil",
+        Effect::ChampionOfChaos => "chaos",
+        Effect::Fundamentals => "fundamentals",
+        Effect::CloseQuarters => "close",
+        Effect::Sharpshooter => "sharpshooter",
+        Effect::Spell(_) => "spell",
+    }
 }
 
 /// A Stat Anvil's bonus as text: "+10 attack damage", "+6% move speed".

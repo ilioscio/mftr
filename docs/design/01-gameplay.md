@@ -202,7 +202,7 @@ edges, at a speed the player sets; Esc closes settings, then the shop, then open
 | Abilities | Q W E R |
 | Utility spells | D F |
 | Items / trinket | 1–6 / 4 (as built: 1–6 use an item's active, a potion) |
-| Match breakdown | Tab (hold): every champion's level, K/D/A, minions killed, items, augments, respawn timer |
+| Match breakdown | Tab (hold): laid out like the reference game's, teams side by side and mirrored, kills and turrets on top; every champion's augments, spells, level, respawn timer, minions killed, K/D/A and items, all with tooltips |
 | Spectators: next champion | N |
 | Stop | S |
 | Recall | B |

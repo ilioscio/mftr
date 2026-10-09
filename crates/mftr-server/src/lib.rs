@@ -337,7 +337,15 @@ impl ServerCore {
             })
             .take(msg::MAX_SCORE_ROWS)
             .collect();
-        msg::Scoreboard { started_at: world.game().started_at, rows }
+        // Turrets down on each side: blue destroyed red's, and the other way round.
+        let down = |team: Team| {
+            world
+                .units()
+                .iter()
+                .filter(|u| u.kind == mftr_sim::UnitKind::Turret && u.team == team && !u.state.alive())
+                .count() as u8
+        };
+        msg::Scoreboard { started_at: world.game().started_at, towers: [down(Team::Red), down(Team::Blue)], rows }
     }
 
     fn header(conn: &mut Conn) -> PacketHeader {

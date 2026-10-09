@@ -186,6 +186,8 @@ pub struct ScoreRow {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scoreboard {
     pub started_at: SimTime,
+    /// Turrets each team has destroyed (blue's, red's).
+    pub towers: [u8; 2],
     pub rows: Vec<ScoreRow>,
 }
 
@@ -1421,6 +1423,8 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
 
 fn write_scoreboard(w: &mut BitWriter, b: &Scoreboard) {
     write_time(w, b.started_at);
+    w.write(b.towers[0] as u64, 5);
+    w.write(b.towers[1] as u64, 5);
     w.write(b.rows.len().min(MAX_SCORE_ROWS) as u64, 5);
     for row in b.rows.iter().take(MAX_SCORE_ROWS) {
         w.write_u32(row.unit.0);
@@ -1443,6 +1447,7 @@ fn write_scoreboard(w: &mut BitWriter, b: &Scoreboard) {
 
 fn read_scoreboard(r: &mut BitReader) -> Result<Scoreboard, DecodeError> {
     let started_at = read_time(r)?;
+    let towers = [r.read(5)? as u8, r.read(5)? as u8];
     let n = r.read(5)? as usize;
     if n > MAX_SCORE_ROWS {
         return Err(DecodeError::Invalid("score rows"));
@@ -1480,7 +1485,7 @@ fn read_scoreboard(r: &mut BitReader) -> Result<Scoreboard, DecodeError> {
             respawn_ds,
         });
     }
-    Ok(Scoreboard { started_at, rows })
+    Ok(Scoreboard { started_at, towers, rows })
 }
 
 // ---- server → client --------------------------------------------------------------------
@@ -2102,6 +2107,7 @@ mod tests {
             events: events.into_iter().enumerate().map(|(i, e)| (i as u32 + 1, e)).collect(),
             scoreboard: Some(Box::new(Scoreboard {
                 started_at: SimTime(48_000),
+                towers: [2, 3],
                 rows: vec![ScoreRow {
                     unit: UnitId(4),
                     champion: ChampionId::Vesper,
