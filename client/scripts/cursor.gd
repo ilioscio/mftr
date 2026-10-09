@@ -33,33 +33,32 @@ static func _make(state: String) -> Array:
 		var plate: String = {"enemy": "#d65a4a", "ally": "#4fc2b4"}.get(state, "#c9d0da")
 		var shade: String = {"enemy": "#8f2f25", "ally": "#2b7f75"}.get(state, "#7d8794")
 		svg = _gauntlet(plate, shade)
-		hotspot = Vector2(6, 5)  # the fingertip, after the gauntlet's turn
+		hotspot = Vector2(5, 5)  # the fingertip, after the gauntlet's turn
 	var img := Image.new()
 	img.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">%s</svg>' % svg, SIZE_PX / 64.0)
 	return [img, hotspot * (SIZE_PX / 64.0)]
 
 
-## A gauntlet pointing with its index finger: the finger rises from the edge of the fist, the
-## other three curl over beside it, the thumb wraps the front. Turned to point up and to the
-## left.
+## A gauntlet pointing with its index finger, seen from the back of the hand: the finger
+## rises from the hand's left edge, the other three are folded into the fist (their plates as
+## ridges across it), the thumb is out of sight. Turned to point up and to the left.
 static func _gauntlet(plate: String, shade: String) -> String:
 	var s := 'stroke="%s" stroke-width="2.4" stroke-linejoin="round"' % OUTLINE
 	var g := ''
 	# The cuff, gold-trimmed.
-	g += '<path d="M19 50h30l2 10H17z" fill="#d4a94c" %s/>' % s
-	g += '<path d="M20 54h29" stroke="#8a6a24" stroke-width="1.6"/>'
-	# The back of the hand.
-	g += '<path d="M18 30q0-4 4-4h22q5 0 5 5v15q0 6-6 6H23q-5 0-5-5z" fill="%s" %s/>' % [plate, s]
-	# Three curled fingers: knuckles along the top, beside the pointing one.
-	for x in [30, 36.5, 43]:
-		g += '<rect x="%s" y="22" width="6.5" height="11" rx="3.2" fill="%s" %s/>' % [x, plate, s]
-	# The index finger, in two plates, from the hand's left edge.
-	g += '<path d="M19 30V9a5.5 5.5 0 0 1 11 0v21z" fill="%s" %s/>' % [plate, s]
-	g += '<path d="M20 16h9M20 23h9" stroke="%s" stroke-width="1.6"/>' % shade
-	g += '<path d="M22 10v16" stroke="#ffffff" stroke-width="1.8" opacity=".55"/>'
-	# The thumb, across the front.
-	g += '<path d="M18 38q-6 0-6 5t7 5h11q4 0 4-4t-4-4z" fill="%s" %s/>' % [plate, s]
-	return '<g transform="translate(-8 -5) rotate(-25 32 32)">%s</g>' % g
+	g += '<path d="M20 48h29l2 11H18z" fill="#d4a94c" %s/>' % s
+	g += '<path d="M21 52.5h28" stroke="#8a6a24" stroke-width="1.6"/>'
+	# The fist: its top steps down from the finger to the little finger's knuckle.
+	g += '<path d="M18 30q0-5 5-5h6q3.5-4 7-1q3.5-3 7 0q3.5-2.5 6.5 1q3.5 1 3.5 5.5v15q0 6-6 6H23q-5 0-5-5z" fill="%s" %s/>' % [plate, s]
+	# The folded fingers' plates, as ridges across the back of the fist.
+	for y in [33, 39, 45]:
+		g += '<path d="M31 %dq9-2 18 0" fill="none" stroke="%s" stroke-width="1.8" stroke-linecap="round"/>' % [y, shade]
+	g += '<path d="M30 28v21" stroke="%s" stroke-width="1.6"/>' % shade
+	# The index finger, in two plates, up the hand's left edge.
+	g += '<path d="M18 32V9a5.5 5.5 0 0 1 11 0v23z" fill="%s" %s/>' % [plate, s]
+	g += '<path d="M19 16h9M19 23h9" stroke="%s" stroke-width="1.6"/>' % shade
+	g += '<path d="M21 10v18" stroke="#ffffff" stroke-width="1.8" opacity=".55"/>'
+	return '<g transform="translate(-10 -6) rotate(-20 32 32)">%s</g>' % g
 
 
 ## Attack-move: a red reticle, aimed at its center.
