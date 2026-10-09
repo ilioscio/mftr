@@ -709,6 +709,7 @@ impl ServerCore {
                     plates: u.plates,
                     champion: u.champion,
                     monster: u.monster,
+                    ward: u.ward,
                     minion: (u.kind == UnitKind::Minion)
                         .then(|| MinionKind::from_attack_range(u.attack.map_or(0.0, |a| a.range))),
                     augments: if u.champion.is_some() { st.progress.augments } else { [0; mftr_sim::augments::SLOTS] },

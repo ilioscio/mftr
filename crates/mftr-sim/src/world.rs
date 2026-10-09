@@ -64,6 +64,8 @@ pub enum UnitKind {
     Relic,
     /// A jungle monster (team Neutral, 01 §7).
     Monster,
+    /// A ward (01 §8): vision for its team.
+    Ward,
 }
 
 impl UnitKind {
@@ -86,6 +88,7 @@ impl UnitKind {
             5 => UnitKind::Base,
             6 => UnitKind::Relic,
             7 => UnitKind::Monster,
+            8 => UnitKind::Ward,
             _ => return None,
         })
     }
@@ -234,6 +237,12 @@ pub struct Progress {
     /// Jungle buffs: Insight and Cinder until these instants (0 = none).
     pub insight_until: SimTime,
     pub cinder_until: SimTime,
+    /// The trinket (`wards::TRINKET_*`), its charges (the totem), when it's next ready (the
+    /// totem's next charge, the lens's cooldown; 0 = nothing pending), and an active sweep.
+    pub trinket: u8,
+    pub trinket_charges: u8,
+    pub trinket_ready: SimTime,
+    pub sweep_until: SimTime,
 }
 
 /// One buy or sell: the inventory before it and the gold it changed.
@@ -286,6 +295,10 @@ impl Progress {
         camps: 0,
         insight_until: SimTime(0),
         cinder_until: SimTime(0),
+        trinket: 0,
+        trinket_charges: 0,
+        trinket_ready: SimTime(0),
+        sweep_until: SimTime(0),
     };
 
     pub fn hash_into(&self, h: &mut impl StateSink) {
@@ -344,6 +357,13 @@ impl Progress {
             h.write_u8(self.camps);
             h.write_u64(self.insight_until.0);
             h.write_u64(self.cinder_until.0);
+        }
+        // Without a trinket (maps without wards), the hash is what it was before them.
+        if self.trinket != 0 || self.trinket_charges != 0 || self.trinket_ready.0 != 0 || self.sweep_until.0 != 0 {
+            h.write_u8(self.trinket);
+            h.write_u8(self.trinket_charges);
+            h.write_u64(self.trinket_ready.0);
+            h.write_u64(self.sweep_until.0);
         }
     }
 
@@ -939,6 +959,8 @@ pub enum Brain {
     /// Jungle monster: stands at `home` until its camp (`Layout::camps` index) is attacked
     /// (`jungle::monster_think`).
     Monster { camp: u8, home: QPoint },
+    /// A ward: gone at `expires` (0: never).
+    Ward { expires: SimTime },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -969,6 +991,9 @@ pub struct Unit {
     pub plates: u8,
     /// A jungle monster's kind.
     pub monster: Option<crate::jungle::MonsterKind>,
+    /// A ward's kind, and the champion who placed it.
+    pub ward: Option<crate::wards::WardKind>,
+    pub placed_by: Option<UnitId>,
     /// Damage from champions is multiplied by this (structures, late in a match: D55).
     /// Recomputed every tick; 1 for everything else.
     pub champion_damage_taken: f32,
@@ -1000,6 +1025,8 @@ impl Unit {
             lane: 0,
             plates: 0,
             monster: None,
+            ward: None,
+            placed_by: None,
             champion_damage_taken: 1.0,
             stats_for: (1, [0; INVENTORY], [0; augments::SLOTS], augments::Growth::NONE),
         }
@@ -1101,6 +1128,15 @@ pub enum CommandKind {
     /// Take utility spell `ability::SPELL_*` in the F slot (while shopping). The spell starts
     /// on at least `SPELL_SWAP_COOLDOWN`, so swapping never resets a cooldown.
     ChooseSpell(u8),
+    /// Use the trinket at a point: place a stealth ward (the totem) or sweep (the lens).
+    UseTrinket(QPoint),
+    /// Use the item in an inventory slot at a point: place a control ward.
+    UseItemAt {
+        slot: u8,
+        target: QPoint,
+    },
+    /// Take trinket `wards::TRINKET_*` (while shopping).
+    ChooseTrinket(u8),
 }
 
 /// Swapping the F spell puts it on at least this cooldown.
@@ -1428,6 +1464,14 @@ enum Fired {
         cc: Cc,
         at: SimTime,
     },
+    /// A ward to place (server: spawned after this tick's movement).
+    Ward {
+        owner: UnitId,
+        team: Team,
+        kind: crate::wards::WardKind,
+        pos: Vec2,
+        expires: SimTime,
+    },
     /// Claim's true damage on its target.
     Claim {
         owner: UnitId,
@@ -1553,6 +1597,11 @@ impl World {
         let id = self.next_id();
         let mut progress = self.rules.progress();
         progress.augment_seed = self.rng.next_u32();
+        if self.map.layout.wards {
+            // The Warding Totem, one charge ready and the next on its way.
+            progress.trinket_charges = 1;
+            progress.trinket_ready = SimTime::end_of(self.tick).plus(crate::wards::TOTEM_RECHARGE);
+        }
         let stats = champion.def().stats_at(progress.level);
         let mut u = Unit::champion(id, owner, team, champion, pos, pos, stats);
         u.state.progress = progress;
@@ -1805,7 +1854,12 @@ impl World {
         let prediction = self.prediction;
 
         // Phase 0: lane minions that died are gone; respawns; structure protection; waves.
-        self.units.retain(|u| u.state.alive() || !matches!(u.brain, Some(Brain::Laner { .. } | Brain::Monster { .. })));
+        self.units.retain(|u| {
+            let expired = matches!(u.brain, Some(Brain::Ward { expires }) if expires.0 != 0 && expires <= s0);
+            !expired
+                && (u.state.alive()
+                    || !matches!(u.brain, Some(Brain::Laner { .. } | Brain::Monster { .. } | Brain::Ward { .. })))
+        });
         for u in self.units.iter_mut() {
             if u.state.respawn_at.is_some_and(|r| r <= s0) {
                 let mut progress = u.state.progress;
@@ -1843,7 +1897,20 @@ impl World {
         }
 
         let World {
-            units, rng, missiles, areas, bolts, next_missile, struck, events, map, hidden, game, rules, ..
+            units,
+            rng,
+            missiles,
+            areas,
+            bolts,
+            next_missile,
+            next_unit,
+            struck,
+            events,
+            map,
+            hidden,
+            game,
+            rules,
+            ..
         } = self;
         let rules = *rules;
         let map: &Map = map;
@@ -2029,6 +2096,12 @@ impl World {
                 melee.push((owner, target, power, at));
                 continue;
             }
+            if let Fired::Ward { owner, team, kind, pos, expires } = f {
+                if !prediction {
+                    place_ward(units, next_unit, owner, team, kind, pos, expires);
+                }
+                continue;
+            }
             if matches!(f, Fired::Strike { .. } | Fired::Support { .. } | Fired::Claim { .. }) {
                 direct.push(f);
                 continue;
@@ -2061,7 +2134,11 @@ impl World {
                         bolts.push(b);
                     }
                 }
-                Fired::Melee { .. } | Fired::Strike { .. } | Fired::Support { .. } | Fired::Claim { .. } => {}
+                Fired::Melee { .. }
+                | Fired::Strike { .. }
+                | Fired::Support { .. }
+                | Fired::Claim { .. }
+                | Fired::Ward { .. } => {}
             }
         }
         if !prediction {
@@ -2096,6 +2173,19 @@ impl World {
         for u in units.iter_mut().filter(|u| u.kind == UnitKind::Champion) {
             let st = &mut u.state;
             let p = &mut st.progress;
+            if p.sweep_until.0 != 0 && p.sweep_until <= s1 {
+                p.sweep_until = SimTime(0);
+            }
+            if p.trinket == crate::wards::TRINKET_TOTEM && p.trinket_ready.0 != 0 && p.trinket_ready <= s1 {
+                // The totem regains a charge, and starts on the next while short of full.
+                let at = p.trinket_ready;
+                p.trinket_charges = (p.trinket_charges + 1).min(crate::wards::TOTEM_CHARGES);
+                p.trinket_ready = if p.trinket_charges < crate::wards::TOTEM_CHARGES {
+                    at.plus(crate::wards::TOTEM_RECHARGE)
+                } else {
+                    SimTime(0)
+                };
+            }
             for until in [&mut p.insight_until, &mut p.cinder_until] {
                 if until.0 != 0 && *until <= s1 {
                     *until = SimTime(0);
@@ -2183,6 +2273,10 @@ impl World {
                     h.write_u8(camp);
                     h.write_u16(home.x);
                     h.write_u16(home.y);
+                }
+                Some(Brain::Ward { expires }) => {
+                    h.write_u8(7);
+                    h.write_u64(expires.0);
                 }
             }
             // Plateless turrets (every one before plating existed) hash as before.
@@ -2500,6 +2594,8 @@ fn apply_command(
             | CommandKind::Stop
             | CommandKind::Cast { .. }
             | CommandKind::UseItem(_)
+            | CommandKind::UseTrinket(_)
+            | CommandKind::UseItemAt { .. }
     ) {
         st.recall_until = SimTime(0);
     }
@@ -2536,6 +2632,53 @@ fn apply_command(
             st.end_soft_recovery(t);
             st.buffered = None;
             st.set_order(Order::Idle, map);
+        }
+        CommandKind::UseTrinket(q) if map.layout.wards && st.alive() && unit.kind == UnitKind::Champion => {
+            use crate::wards::*;
+            let p = &mut st.progress;
+            if p.trinket == TRINKET_LENS {
+                if p.trinket_ready <= t {
+                    p.sweep_until = t.plus(SWEEP_FOR);
+                    p.trinket_ready = t.plus(LENS_COOLDOWN);
+                }
+            } else if p.trinket_charges > 0 {
+                let pos = placement(st.pos, q.to_vec2());
+                if map.walkable(pos, 1.0) {
+                    p.trinket_charges -= 1;
+                    if p.trinket_ready.0 == 0 {
+                        p.trinket_ready = t.plus(TOTEM_RECHARGE);
+                    }
+                    let expires = t.plus(stealth_life(p.level));
+                    let (id, team) = (unit.id, unit.team);
+                    ctx.fired.push(Fired::Ward { owner: id, team, kind: WardKind::Stealth, pos, expires });
+                }
+            }
+        }
+        CommandKind::UseItemAt { slot, target } if map.layout.wards && st.alive() => {
+            let s = slot as usize;
+            let p = &mut st.progress;
+            if s < INVENTORY && items::placeable(p.items[s]) && p.charges[s] > 0 {
+                let pos = crate::wards::placement(st.pos, target.to_vec2());
+                if map.walkable(pos, 1.0) {
+                    p.charges[s] -= 1;
+                    if p.charges[s] == 0 {
+                        p.items[s] = 0;
+                    }
+                    let (id, team) = (unit.id, unit.team);
+                    let kind = crate::wards::WardKind::Control;
+                    ctx.fired.push(Fired::Ward { owner: id, team, kind, pos, expires: SimTime(0) });
+                }
+            }
+        }
+        // Not on this map, dead, or not a champion.
+        CommandKind::UseTrinket(_) | CommandKind::UseItemAt { .. } => {}
+        CommandKind::ChooseTrinket(k) => {
+            let p = &mut st.progress;
+            if may_shop && map.layout.wards && k <= crate::wards::TRINKET_LENS && p.trinket != k {
+                p.trinket = k;
+                p.trinket_charges = 0;
+                p.trinket_ready = t.plus(crate::wards::TRINKET_SWAP);
+            }
         }
         CommandKind::ChooseSpell(spell) => {
             let p = &mut st.progress;
@@ -2625,10 +2768,11 @@ fn shop(unit: &mut Unit, kind: CommandKind, map: &Map, rules: &Rules) {
     }
     let p = &mut unit.state.progress;
     match kind {
-        CommandKind::Buy(id) if items::consumable(id).is_some() => {
-            // Potions stack in a slot (up to its charges); a flask is one per champion, full.
-            let (Some(item), Some((_, _, most, refills))) = (items::item(id), items::consumable(id)) else { return };
-            if item.cost > p.gold {
+        CommandKind::Buy(id) if items::stackable(id).is_some() => {
+            // Potions and control wards stack in a slot (up to its charges); a flask is one per
+            // champion, full. Control wards only where wards are allowed.
+            let (Some(item), Some((most, refills))) = (items::item(id), items::stackable(id)) else { return };
+            if item.cost > p.gold || (items::placeable(id) && !map.layout.wards) {
                 return;
             }
             let held = p.items.iter().position(|i| *i == id);
@@ -2675,8 +2819,8 @@ fn shop(unit: &mut Unit, kind: CommandKind, map: &Map, rules: &Rules) {
                 && let Some(item) = items::item(*i)
             {
                 // A stack of potions sells by the potion; anything else whole.
-                let n = match items::consumable(item.id) {
-                    Some((_, _, _, false)) => charges[s].max(1) as f32,
+                let n = match items::stackable(item.id) {
+                    Some((_, false)) => charges[s].max(1) as f32,
                     _ => 1.0,
                 };
                 let refund = item.cost * n * items::SELL_REFUND;
@@ -2695,6 +2839,35 @@ fn shop(unit: &mut Unit, kind: CommandKind, map: &Map, rules: &Rules) {
         }
         _ => {}
     }
+}
+
+/// Place a ward (server): a champion keeps `wards::MAX_STEALTH` stealth wards and
+/// `MAX_CONTROL` control wards out; a new one removes its oldest past that.
+fn place_ward(
+    units: &mut Vec<Unit>,
+    next_unit: &mut u32,
+    owner: UnitId,
+    team: Team,
+    kind: crate::wards::WardKind,
+    pos: Vec2,
+    expires: SimTime,
+) {
+    use crate::wards::*;
+    let most = if kind == WardKind::Stealth { MAX_STEALTH } else { MAX_CONTROL };
+    let mine: Vec<UnitId> = units
+        .iter()
+        .filter(|u| u.placed_by == Some(owner) && u.ward == Some(kind) && u.state.alive())
+        .map(|u| u.id)
+        .collect();
+    // Ids grow with time: the first ones are the oldest.
+    for old in mine.iter().take((mine.len() + 1).saturating_sub(most)) {
+        if let Some(u) = units.iter_mut().find(|u| u.id == *old) {
+            u.state = UnitState { respawn_at: Some(SimTime(u64::MAX)), ..UnitState::new(u.state.pos, 0.0) };
+        }
+    }
+    let id = UnitId(*next_unit);
+    *next_unit += 1;
+    units.push(ward_unit(id, kind, team, pos, owner, expires));
 }
 
 /// Drink the consumable in `slot` at `t`: it heals over time from now (a second one while one
@@ -2967,7 +3140,7 @@ fn resolve_effects(
     // Skillshots and areas hit units, not structures (those take attacks only).
     let motion: Vec<(UnitId, Team, f32, Vec2, Vec2)> = units
         .iter()
-        .filter(|u| u.targetable() && !u.kind.is_structure())
+        .filter(|u| u.targetable() && !u.kind.is_structure() && u.kind != UnitKind::Ward)
         .map(|u| {
             let start = start_pos.iter().find(|(id, _)| *id == u.id).map_or(u.state.pos, |(_, p)| *p);
             (u.id, u.team, u.gameplay_radius, start, u.state.pos)
@@ -3296,6 +3469,20 @@ fn deal_damage(
     if raw <= 0.0 || !u.targetable() {
         return 0.0;
     }
+    // Wards count basic attacks: one point each, nothing else hurts them.
+    if u.kind == UnitKind::Ward {
+        if origin != DamageOrigin::Attack {
+            return 0.0;
+        }
+        let st = &mut u.state;
+        st.health -= 1.0;
+        events.push(SimEvent::Damage { source, target: u.id, origin, kind, amount: 1.0, absorbed: 0.0, at });
+        if st.health <= 0.0 {
+            *st = UnitState { respawn_at: Some(SimTime(u64::MAX)), ..UnitState::new(st.pos, 0.0) };
+            events.push(SimEvent::Died { unit: u.id, killer: source, at, respawn_at: SimTime(u64::MAX) });
+        }
+        return 1.0;
+    }
     let resist = match kind {
         DamageKind::Physical => u.stats.armor,
         DamageKind::Magic => u.stats.magic_resist,
@@ -3462,6 +3649,11 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
                 }
                 let share = lane::shared_xp(140 + 30 * vlevel as u32, nearby.len());
                 pay.extend(nearby.iter().map(|id| (*id, 0.0, share, at)));
+            }
+            UnitKind::Ward => {
+                if let (Some(kind), Some(k)) = (victim.ward, enemy_champ(killer)) {
+                    pay.push((k, kind.gold(), 0, at));
+                }
             }
             UnitKind::Monster => {
                 // The champion with the killing blow takes it all (and a buff camp's buff).
@@ -5740,6 +5932,90 @@ mod tests {
             "reset: {:?}",
             a.state.pos
         );
+    }
+
+    /// Wards (01 §8): the totem places a stealth ward that gives its team vision and stays
+    /// hidden from the enemy until a control ward reveals it, which also disables it; three
+    /// attacks destroy it for gold; a champion keeps three out; they expire; the totem recharges;
+    /// the lens sweeps.
+    #[test]
+    fn wards_watch_hide_reveal_and_fall() {
+        use crate::vision::Vision;
+        use crate::wards::*;
+        let mut w = crossroads_world();
+        let spot = |dx: f32, dy: f32| crate::map::crossroads_point(dx, dy);
+        let (here, far) = (spot(950.0, 7000.0), spot(950.0, 6400.0));
+        let blue = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, here);
+        assert_eq!(w.unit(blue).unwrap().state.progress.trinket_charges, 1);
+        let k = w.tick().0 + 1;
+        w.step(&[shop(0, 1, k, CommandKind::UseTrinket(QPoint::from_vec2(far)))]);
+        w.step(&[]);
+        let ward = w.units().iter().find(|u| u.kind == UnitKind::Ward).map(|u| (u.id, u.state.pos)).expect("a ward");
+        assert!(ward.1.distance(far) < 1.0 && w.unit(blue).unwrap().state.progress.trinket_charges == 0);
+        // It watches past the champion's own sight; the enemy can't see it.
+        w.unit_mut(blue).unwrap().state.pos = spot(950.0, 9500.0);
+        let beyond = spot(950.0, 5700.0);
+        assert!(Vision::of(&w, Team::Blue).sees(w.map(), beyond));
+        let red = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Vesper, spot(1300.0, 6200.0));
+        let seen_by_red = |w: &World| Vision::of(w, Team::Red).sees_unit(w.map(), w.unit(ward.0).unwrap());
+        assert!(!seen_by_red(&w), "stealthed");
+        // A red control ward reveals it and blinds it.
+        {
+            let p = &mut w.unit_mut(red).unwrap().state.progress;
+            p.items[0] = crate::items::CONTROL_WARD;
+            p.charges[0] = 2;
+        }
+        let k = w.tick().0 + 1;
+        let at = QPoint::from_vec2(spot(1300.0, 6000.0));
+        w.step(&[shop(1, 1, k, CommandKind::UseItemAt { slot: 0, target: at })]);
+        w.step(&[]);
+        assert!(seen_by_red(&w), "revealed");
+        assert!(!Vision::of(&w, Team::Blue).sees(w.map(), beyond), "disabled");
+        assert_eq!(w.unit(red).unwrap().state.progress.charges[0], 1);
+        // Three attacks.
+        let k = w.tick().0 + 1;
+        w.step(&[attack(1, 2, k, ward.0)]);
+        let ev = run_until_quiet(&mut w, crate::time::TICK_HZ * 6);
+        assert!(ev.iter().any(|e| matches!(e, SimEvent::Died { unit, .. } if *unit == ward.0)));
+        let gold: f32 = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::Reward { unit, gold, .. } if *unit == red => Some(*gold),
+                _ => None,
+            })
+            .sum();
+        assert_eq!(gold, WardKind::Stealth.gold());
+        // Three out at most; the oldest goes. They expire.
+        for (seq, dy) in (2..).zip([8000.0, 8400.0, 8800.0, 9200.0]) {
+            w.unit_mut(blue).unwrap().state.progress.trinket_charges = 1;
+            let k = w.tick().0 + 1;
+            w.step(&[shop(0, seq, k, CommandKind::UseTrinket(QPoint::from_vec2(spot(950.0, dy))))]);
+            w.step(&[]);
+        }
+        let mine = |w: &World| {
+            w.units()
+                .iter()
+                .filter(|u| u.placed_by == Some(blue) && u.state.alive())
+                .map(|u| u.state.pos)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(mine(&w).len(), MAX_STEALTH);
+        assert!(!mine(&w).contains(&spot(950.0, 8000.0)), "the oldest is gone");
+        let life = stealth_life(1).0 / crate::time::SUBTICKS_PER_SECOND + 1;
+        run_until_quiet(&mut w, crate::time::TICK_HZ * life as u32);
+        assert!(mine(&w).is_empty(), "expired");
+        assert!(w.units().iter().any(|u| u.ward == Some(WardKind::Control)), "control wards stay");
+        // The totem recharges (2:00 after the match's first charge); the lens sweeps.
+        run_until_quiet(&mut w, crate::time::TICK_HZ * 30);
+        assert!(w.unit(blue).unwrap().state.progress.trinket_charges >= 1);
+        {
+            let p = &mut w.unit_mut(red).unwrap().state.progress;
+            p.trinket = TRINKET_LENS;
+            p.trinket_ready = SimTime(0);
+        }
+        let k = w.tick().0 + 1;
+        w.step(&[shop(1, 3, k, CommandKind::UseTrinket(at))]);
+        assert!(w.unit(red).unwrap().state.progress.sweep_until > SimTime::end_of(w.tick()));
     }
 
     /// The F spell is chosen in the fountain; a swap never shortens its cooldown.

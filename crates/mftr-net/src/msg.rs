@@ -133,6 +133,8 @@ pub struct RemoteUnit {
     pub minion: Option<MinionKind>,
     /// A jungle monster's kind (4 bits, monsters only).
     pub monster: Option<mftr_sim::jungle::MonsterKind>,
+    /// A ward's kind (1 bit, wards only).
+    pub ward: Option<mftr_sim::wards::WardKind>,
     /// Held augments (ARAM: Mayhem): shown as indicators above the health bar (06 §3).
     pub augments: [u8; mftr_sim::augments::SLOTS],
     /// Whole health points (16 bits each): confirmed values only (03a §7).
@@ -380,6 +382,22 @@ fn write_command(w: &mut BitWriter, c: &Command) {
             w.write(0, 4);
             w.write(spell as u64, 2);
         }
+        CommandKind::UseTrinket(q) => {
+            w.write(15, 4);
+            w.write(1, 4);
+            write_qpoint(w, q);
+        }
+        CommandKind::UseItemAt { slot, target } => {
+            w.write(15, 4);
+            w.write(2, 4);
+            w.write(slot as u64, 3);
+            write_qpoint(w, target);
+        }
+        CommandKind::ChooseTrinket(k) => {
+            w.write(15, 4);
+            w.write(3, 4);
+            w.write(k as u64, 2);
+        }
     }
 }
 
@@ -411,6 +429,9 @@ fn read_command(r: &mut BitReader) -> Result<Command, DecodeError> {
         14 => CommandKind::Recall,
         15 => match r.read(4)? {
             0 => CommandKind::ChooseSpell(r.read(2)? as u8),
+            1 => CommandKind::UseTrinket(read_qpoint(r)?),
+            2 => CommandKind::UseItemAt { slot: r.read(3)? as u8, target: read_qpoint(r)? },
+            3 => CommandKind::ChooseTrinket(r.read(2)? as u8),
             _ => return Err(DecodeError::Invalid("command kind")),
         },
         _ => return Err(DecodeError::Invalid("command kind")),
@@ -990,6 +1011,10 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     w.write_u8(p.camps);
     write_time(w, p.insight_until);
     write_time(w, p.cinder_until);
+    w.write(p.trinket as u64, 2);
+    w.write(p.trinket_charges as u64, 2);
+    write_time(w, p.trinket_ready);
+    write_time(w, p.sweep_until);
     w.write_bool(p.hyper);
     write_time(w, s.spellblade_until);
     // A2 (D52): facing, the follow-through, the input buffer, the attack counter.
@@ -1135,6 +1160,8 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let (kills, deaths, assists, cs) = (r.read(16)? as u16, r.read(16)? as u16, r.read(16)? as u16, r.read(16)? as u16);
     let (spell_f, camps) = (r.read(2)? as u8, r.read_u8()?);
     let (insight_until, cinder_until) = (read_time(r)?, read_time(r)?);
+    let (trinket, trinket_charges) = (r.read(2)? as u8, r.read(2)? as u8);
+    let (trinket_ready, sweep_until) = (read_time(r)?, read_time(r)?);
     let hyper = r.read_bool()?;
     let spellblade_until = read_time(r)?;
     let facing = read_vec2(r)?;
@@ -1181,6 +1208,10 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         camps,
         insight_until,
         cinder_until,
+        trinket,
+        trinket_charges,
+        trinket_ready,
+        sweep_until,
     };
     Ok(UnitState {
         pos,
@@ -1250,7 +1281,7 @@ fn write_update(w: &mut BitWriter, u: &UnitUpdate) {
     w.write_u32(o.id.0);
     w.write(u.mask as u64, 5);
     if u.mask & delta::STATIC != 0 {
-        w.write(o.kind.wire() as u64, 3);
+        w.write(o.kind.wire() as u64, 4);
         write_team(w, o.team);
         w.write_u8(o.collision_radius);
         w.write_u8(o.gameplay_radius);
@@ -1260,6 +1291,9 @@ fn write_update(w: &mut BitWriter, u: &UnitUpdate) {
         }
         if o.kind == UnitKind::Monster {
             w.write(o.monster.map_or(0, |m| m as u64), 4);
+        }
+        if o.kind == UnitKind::Ward {
+            w.write(o.ward.map_or(0, |k| k as u64), 1);
         }
         if o.champion.is_some() {
             let held = o.augments != [0; mftr_sim::augments::SLOTS];
@@ -1319,6 +1353,7 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         champion: None,
         minion: None,
         monster: None,
+        ward: None,
         augments: [0; mftr_sim::augments::SLOTS],
         health: 0,
         max_health: 0,
@@ -1335,13 +1370,16 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         facing: 0,
     };
     if mask & delta::STATIC != 0 {
-        o.kind = UnitKind::from_wire(r.read(3)? as u8).ok_or(DecodeError::Invalid("unit kind"))?;
+        o.kind = UnitKind::from_wire(r.read(4)? as u8).ok_or(DecodeError::Invalid("unit kind"))?;
         o.team = read_team(r)?;
         o.collision_radius = r.read_u8()?;
         o.gameplay_radius = r.read_u8()?;
         o.champion = read_champion(r)?;
         if o.kind == UnitKind::Minion {
             o.minion = Some(minion_from_wire(r.read(2)?));
+        }
+        if o.kind == UnitKind::Ward {
+            o.ward = mftr_sim::wards::WardKind::from_wire(r.read(1)? as u8);
         }
         if o.kind == UnitKind::Monster {
             o.monster = Some(
@@ -1993,6 +2031,10 @@ mod tests {
                 camps: 6,
                 insight_until: SimTime(91_000),
                 cinder_until: SimTime(92_000),
+                trinket: 1,
+                trinket_charges: 2,
+                trinket_ready: SimTime(93_000),
+                sweep_until: SimTime(94_000),
             },
             spellblade_until: SimTime(88_888),
             facing: Vec2::new(0.6, -0.8),
@@ -2101,6 +2143,7 @@ mod tests {
             champion,
             minion: (kind == UnitKind::Minion).then_some(MinionKind::Super),
             monster: (kind == UnitKind::Monster).then_some(mftr_sim::jungle::MonsterKind::RavenAlpha),
+            ward: (kind == UnitKind::Ward).then_some(mftr_sim::wards::WardKind::Control),
             augments: if champion.is_some() { [24, 52, 0, 0] } else { [0; 4] },
             health: 512,
             max_health: 620,
@@ -2178,6 +2221,7 @@ mod tests {
                 UnitUpdate { mask: delta::ALL, unit: remote(5, UnitKind::Minion, Team::Red, None) },
                 UnitUpdate { mask: delta::ALL, unit: remote(6, UnitKind::Relic, Team::Blue, None) },
                 UnitUpdate { mask: delta::ALL, unit: remote(8, UnitKind::Monster, Team::Neutral, None) },
+                UnitUpdate { mask: delta::ALL, unit: remote(9, UnitKind::Ward, Team::Red, None) },
             ],
             removed: vec![UnitId(11), UnitId(12)],
             events: events.into_iter().enumerate().map(|(i, e)| (i as u32 + 1, e)).collect(),

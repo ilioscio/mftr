@@ -6,9 +6,13 @@
 //! - Walls block line of sight.
 //! - A point inside a brush polygon is visible only to sources inside the same brush.
 //! - Structures and relics are always visible to everyone, like structures in the reference game.
+//! - Wards (M4) are vision sources too. An enemy stealth ward is seen only where a control ward
+//!   or a sweep reveals it, and gives its own team no vision there.
 
 use crate::map::Map;
 use crate::math::Vec2;
+use crate::time::SimTime;
+use crate::wards::WardKind;
 use crate::world::{Team, Unit, UnitKind, World};
 
 pub const VISION_CHAMPION: f32 = 1200.0;
@@ -24,6 +28,7 @@ pub fn vision_radius(kind: UnitKind) -> f32 {
         UnitKind::RigTurret | UnitKind::Turret => VISION_TURRET,
         UnitKind::Gatehouse | UnitKind::Base => VISION_STRUCTURE,
         UnitKind::Relic | UnitKind::Monster => 0.0,
+        UnitKind::Ward => crate::wards::WARD_VISION,
     }
 }
 
@@ -32,18 +37,25 @@ pub fn vision_radius(kind: UnitKind) -> f32 {
 pub struct Vision {
     pub team: Team,
     sources: Vec<(Vec2, f32, Option<u8>)>,
+    /// Where the team reveals enemy stealth wards (control wards, sweeps).
+    reveal: Vec<(Vec2, f32)>,
 }
 
 impl Vision {
     pub fn of(world: &World, team: Team) -> Self {
         let map = world.map();
+        let now = SimTime::end_of(world.tick());
+        // The enemy disables our stealth wards where it reveals them: they see nothing there.
+        let disabled = crate::wards::revealers(world.units(), crate::wards::enemy_of(team), now);
         let sources = world
             .units()
             .iter()
             .filter(|u| u.team == team && u.state.alive() && vision_radius(u.kind) > 0.0)
+            .filter(|u| u.ward != Some(WardKind::Stealth) || !covered(&disabled, u.state.pos))
             .map(|u| (u.state.pos, vision_radius(u.kind), map.brush_at(u.state.pos)))
             .collect();
-        Vision { team, sources }
+        let reveal = crate::wards::revealers(world.units(), team, now);
+        Vision { team, sources, reveal }
     }
 
     /// Whether the team sees the point `p`.
@@ -59,8 +71,19 @@ impl Vision {
         if !unit.state.alive() {
             return false;
         }
-        unit.team == self.team || unit.kind.is_structure() || self.sees(map, unit.state.pos)
+        if unit.team == self.team || unit.kind.is_structure() {
+            return true;
+        }
+        // An enemy stealth ward only where we reveal it.
+        if unit.ward == Some(WardKind::Stealth) {
+            return covered(&self.reveal, unit.state.pos);
+        }
+        self.sees(map, unit.state.pos)
     }
+}
+
+fn covered(areas: &[(Vec2, f32)], p: Vec2) -> bool {
+    areas.iter().any(|&(c, r)| (c - p).length_sq() <= r * r)
 }
 
 #[cfg(test)]

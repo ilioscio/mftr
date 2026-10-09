@@ -712,6 +712,22 @@ With A14 every champion in the roster has a model, clips, effects and sounds.
   - Crossroads builds in 49 ms instead of 145 ms.
   - The client's fog of war on Crossroads went from 12 to 104 fps once waves were out.
 - **Not yet:** monster models, camp respawn timers on the minimap, monsters that scale with match time, and bots that gank or invade.
+
+### M4 slice 4 status (2026-10-09): ✅ done
+- **Wards** (`wards.rs`, Crossroads only):
+  - **Stealth wards** come from the Warding Totem trinket (T): 2 charges, one back every 2:00. They last 90 s + 3 s a level, and enemies can't see them unless revealed.
+  - **Control wards** are a 75-gold item placed at the cursor; they stay until destroyed and reveal and disable enemy stealth wards in their sight.
+  - The **Sweeping Lens** (the other trinket) reveals and disables them around its champion for 6 s.
+  - Wards give 900 u of vision; basic attacks destroy them in 3 or 4 hits, for 15 or 30 gold. Skillshots, minions and turrets ignore them.
+  - A champion keeps 3 stealth and 1 control ward out at most.
+- **Vision** (server): ward sources, reveal areas, and enemy stealth wards seen only where revealed. A disabled ward stops giving vision.
+- **Wire** (still protocol 19): the unit kind takes 4 bits, units carry their ward kind, and the trinket state is in the own state. New extended commands: `UseTrinket`, `UseItemAt` and `ChooseTrinket`.
+- **Bots** ward brush near them that no allied ward watches (about 100 wards a match).
+- **Client:**
+  - Ward bodies: a stake with an eye in the team's color, a pink crystal on control wards. Ward icons on the minimap.
+  - A trinket slot on the HUD with charges and cooldown, the trinket switch in the shop, and a control-ward item icon.
+  - The `--shot-ward` capture flag.
+- **Not yet:** sweep and reveal visuals, ward timers on the minimap, and the support item's wards (slice 7).
  Red wins 4 of 5 seeds, on The Bridge as well as Crossroads: the bots' fixed champion split (blue gets the even-numbered champions) is the likely cause, not the map.
 
 ## M5 — Community

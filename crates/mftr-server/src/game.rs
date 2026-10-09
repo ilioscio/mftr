@@ -407,6 +407,9 @@ fn kind_text(k: CommandKind) -> String {
         CommandKind::PickAnvil(choice) => format!("pickanvil {choice}"),
         CommandKind::Recall => "recall".into(),
         CommandKind::ChooseSpell(spell) => format!("spell {spell}"),
+        CommandKind::UseTrinket(q) => format!("trinket {} {}", q.x, q.y),
+        CommandKind::UseItemAt { slot, target } => format!("useat {slot} {} {}", target.x, target.y),
+        CommandKind::ChooseTrinket(k) => format!("pick-trinket {k}"),
     }
 }
 
@@ -430,6 +433,9 @@ fn parse_kind(f: &[&str]) -> Option<CommandKind> {
         "pickanvil" => CommandKind::PickAnvil(n(1)? as u8),
         "recall" => CommandKind::Recall,
         "spell" => CommandKind::ChooseSpell(n(1)? as u8),
+        "trinket" => CommandKind::UseTrinket(q(1)?),
+        "useat" => CommandKind::UseItemAt { slot: n(1)? as u8, target: q(2)? },
+        "pick-trinket" => CommandKind::ChooseTrinket(n(1)? as u8),
         _ => return None,
     })
 }

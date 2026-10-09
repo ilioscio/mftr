@@ -480,6 +480,35 @@ impl MatchClient {
         }
     }
 
+    /// Use the trinket at a ground point (T): a stealth ward there, or a sweep.
+    #[func]
+    fn use_trinket(&mut self, at: Vector2) {
+        let now = self.now();
+        if self.session.use_trinket(Vec2::new(at.x, at.y), now).is_some() {
+            self.send_input(now);
+        }
+    }
+
+    /// Use the item in slot 0–5 at a ground point: place a control ward.
+    #[func]
+    fn use_item_at(&mut self, slot: i64, at: Vector2) {
+        let now = self.now();
+        if (0..INVENTORY as i64).contains(&slot)
+            && self.session.use_item_at(slot as u8, Vec2::new(at.x, at.y), now).is_some()
+        {
+            self.send_input(now);
+        }
+    }
+
+    /// Take trinket 0 (Warding Totem) or 1 (Sweeping Lens), while shopping.
+    #[func]
+    fn choose_trinket(&mut self, trinket: i64) {
+        let now = self.now();
+        if (0..=1).contains(&trinket) && self.session.choose_trinket(trinket as u8, now).is_some() {
+            self.send_input(now);
+        }
+    }
+
     /// Take utility spell `spell` (0 Barrier, 1 Claim) in the F slot, while shopping.
     #[func]
     fn choose_spell(&mut self, spell: i64) {
@@ -531,7 +560,12 @@ impl MatchClient {
     fn shop_catalog(&self) -> VarArray {
         let mut out = VarArray::new();
         let p = self.session.own_state_now().map(|s| s.progress);
+        let wards = self.session.map().layout.wards;
         for it in items::CATALOG.iter() {
+            // Control wards only where wards are allowed.
+            if items::placeable(it.id) && !wards {
+                continue;
+            }
             let inv = p.map_or([0; INVENTORY], |p| p.items);
             let price = items::price(it.id, &inv).map_or(it.cost, |(c, _)| c);
             let mut d = VarDictionary::new();
@@ -554,7 +588,9 @@ impl MatchClient {
                 recipe.push(&(*r as i64).to_variant());
             }
             d.set("recipe", &recipe);
-            d.set("consumable", items::consumable(it.id).is_some());
+            d.set("consumable", items::stackable(it.id).is_some());
+            // Used at the cursor (a control ward).
+            d.set("placeable", items::placeable(it.id));
             d.set("lines", &item_lines(it));
             d.set("affordable", p.is_some_and(|p| p.gold >= price));
             d.set("owned", inv.contains(&it.id));
@@ -1169,6 +1205,16 @@ impl MatchClient {
             d.set("mayhem", self.session.rules().augments);
             // A map with a jungle: Claim can be taken in F.
             d.set("jungle", !self.session.map().layout.camps.is_empty());
+            // Wards: the trinket (0 totem, 1 lens), its charges, seconds until it's next
+            // ready (a charge, or the lens), and an active sweep's seconds left.
+            d.set("wards", self.session.map().layout.wards);
+            d.set("trinket", s.progress.trinket as i64);
+            d.set("trinket_charges", s.progress.trinket_charges as i64);
+            d.set(
+                "trinket_ready",
+                if s.progress.trinket_ready > t { s.progress.trinket_ready.secs_since(t) } else { 0.0 },
+            );
+            d.set("sweep", if s.progress.sweep_until > t { s.progress.sweep_until.secs_since(t) } else { 0.0 });
             d.set("golden", s.progress.golden as i64 - 1);
             d.set("shield", if s.shield_until > t { s.shield } else { 0.0 });
             d.set("dead", !s.alive());
@@ -1293,6 +1339,7 @@ impl MatchClient {
                     UnitKind::Base => "base",
                     UnitKind::Relic => "relic",
                     UnitKind::Monster => "monster",
+                    UnitKind::Ward => "ward",
                 },
             );
             // A jungle monster: its kind ("warden", "hound_alpha", …), name and size class.
@@ -1302,6 +1349,9 @@ impl MatchClient {
                 d.set("big", m.def().big);
             }
             d.set("neutral", u.team == Team::Neutral);
+            if let Some(k) = u.ward {
+                d.set("ward", if k == mftr_sim::wards::WardKind::Control { "control" } else { "stealth" });
+            }
             d.set("protected", u.protected);
             d.set("recalling", u.recalling);
             d.set("plates", u.plates as i64);
@@ -1765,6 +1815,12 @@ fn item_text(it: &items::Item) -> String {
 
 /// A consumable's active, in words.
 fn consumable_text(it: &items::Item) -> Option<String> {
+    if items::placeable(it.id) {
+        let (charges, _) = items::stackable(it.id)?;
+        return Some(format!(
+            "Active: place a control ward at the cursor. It watches until destroyed, and reveals and disables enemy stealth wards it sees; one out at a time, up to {charges} in a slot"
+        ));
+    }
     let (heal, ms, charges, refills) = items::consumable(it.id)?;
     let secs = ms / 1000;
     Some(if refills {
