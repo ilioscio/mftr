@@ -84,7 +84,7 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                 down: SimLink::new(cfg.profile, s * 2 + 2),
                 bot: match cfg.scenario {
                     Scenario::DodgeRig => Bot::Dodge(DodgeBot::new(s, cfg.reaction)),
-                    Scenario::Duel | Scenario::Aram | Scenario::Mayhem | Scenario::Hyper => {
+                    Scenario::Duel | Scenario::Aram | Scenario::Mayhem | Scenario::Hyper | Scenario::Classic => {
                         Bot::Duel(DuelBot::new(s, cfg.reaction))
                     }
                     _ => Bot::Click(ClickBot::new(s)),

@@ -261,6 +261,8 @@ pub enum GameMode {
     Aram = 4,
     Mayhem = 5,
     Hyper = 6,
+    /// M4: Classic 5v5 on Crossroads.
+    Classic = 7,
 }
 
 impl GameMode {
@@ -273,6 +275,7 @@ impl GameMode {
             4 => GameMode::Aram,
             5 => GameMode::Mayhem,
             6 => GameMode::Hyper,
+            7 => GameMode::Classic,
             _ => return None,
         })
     }
@@ -287,6 +290,7 @@ impl GameMode {
             GameMode::Aram => "ARAM",
             GameMode::Mayhem => "ARAM: Mayhem",
             GameMode::Hyper => "ARAM: Mayhem (Hyper)",
+            GameMode::Classic => "Classic 5v5",
         }
     }
 }

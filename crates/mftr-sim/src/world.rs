@@ -379,6 +379,10 @@ impl Rules {
     pub const MAYHEM: Rules = Rules { augments: true, ..Rules::ARAM };
     /// ARAM: Mayhem under Hyper rules: the stress mode (M3 exit).
     pub const HYPER: Rules = Rules { hyper: true, ..Rules::MAYHEM };
+    /// Classic 5v5 on Crossroads (M4): level 1, a starting purse for a first item and potion,
+    /// and the reference 5v5's passive income (20.4 gold per 10 s).
+    pub const CLASSIC: Rules =
+        Rules { start_level: 1, start_gold: 500.0, passive_gold: 2.04, ranked: true, augments: false, hyper: false };
 
     pub fn progress(&self) -> Progress {
         if !self.ranked {
@@ -1275,7 +1279,7 @@ pub fn respawn_time(level: u8) -> SimDuration {
         return CHAMPION_RESPAWN;
     }
     let i = level as usize - 1;
-    let s = RESPAWN_S.get(i).copied().map_or(40 + 2 * (i as u64 + 1 - RESPAWN_S.len() as u64), u64::from);
+    let s = RESPAWN_S.get(i).copied().map_or_else(|| 40 + 2 * (i as u64 + 1 - RESPAWN_S.len() as u64), u64::from);
     SimDuration::from_millis(s * 1000)
 }
 pub const MINION_RESPAWN: SimDuration = SimDuration::from_millis(12_000);
@@ -1532,7 +1536,7 @@ impl World {
         }
         self.game = MatchState { started_at: SimTime::end_of(self.tick), ..MatchState::default() };
         if !self.map.layout.lanes.is_empty() {
-            self.game.next_wave_at = Some(SimTime::end_of(self.tick).plus(lane::FIRST_WAVE));
+            self.game.next_wave_at = Some(SimTime::end_of(self.tick).plus(self.map.layout.pacing.first_wave()));
         }
     }
 
@@ -1581,7 +1585,9 @@ impl World {
         let layout = self.map.layout.clone();
         // Minions grow stronger and faster as the match goes on (D55).
         let secs = self.match_secs(SimTime::end_of(self.tick));
-        let (upgrades, speed) = (lane::minion_upgrades(secs) as f32, lane::minion_speed(secs));
+        let pacing = layout.pacing;
+        let (upgrades, speed) = (pacing.upgrades(secs) as f32, lane::minion_speed(secs));
+        let siege = pacing.siege(n, secs);
         for (li, lane) in layout.lanes.iter().enumerate() {
             for team in [Team::Blue, Team::Red] {
                 // That lane's enemy Gatehouse down (until it respawns): the wave brings a super
@@ -1592,11 +1598,11 @@ impl World {
                 let spawn = layout.wave_spawn[li][team as usize];
                 let ahead =
                     lane[team as usize].first().map_or(Vec2::new(1.0, 0.0), |&p| (p - spawn).normalize_or_zero());
-                self.spawn_lane_wave(n, empowered, team, li as u8, spawn, ahead, upgrades, speed);
+                self.spawn_lane_wave(siege, empowered, team, li as u8, spawn, ahead, upgrades, speed);
             }
         }
         self.game.waves_spawned += 1;
-        self.game.next_wave_at = self.game.next_wave_at.map(|t| t.plus(lane::wave_interval(secs)));
+        self.game.next_wave_at = self.game.next_wave_at.map(|t| t.plus(pacing.interval(secs)));
         // Turrets hit harder as the match goes on.
         let damage = lane::turret_damage(self.game.waves_spawned);
         for u in self.units.iter_mut().filter(|u| u.kind == UnitKind::Turret) {
@@ -1608,7 +1614,7 @@ impl World {
     #[allow(clippy::too_many_arguments)]
     fn spawn_lane_wave(
         &mut self,
-        n: u32,
+        siege: bool,
         empowered: bool,
         team: Team,
         lane: u8,
@@ -1619,7 +1625,7 @@ impl World {
     ) {
         {
             let side = Vec2::new(-ahead.y, ahead.x);
-            for (i, kind) in MatchState::wave(n, empowered).into_iter().enumerate() {
+            for (i, kind) in MatchState::wave_of(siege, empowered).into_iter().enumerate() {
                 let (row, col) = ((i / 3) as f32, (i % 3) as f32 - 1.0);
                 let pos = spawn - ahead * (row * 80.0) + side * (col * 70.0);
                 let id = self.spawn_minion(kind, team, pos, Some(Brain::Laner { lane, next: 0 }));

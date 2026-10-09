@@ -7,6 +7,7 @@
 //!   mftr-tools blind-report FILE.tsv...
 //!   mftr-tools pack validate FILE.glb|DIR...
 //!   mftr-tools sfx build [sounds.ron|DIR...]   (default: art)
+//!   mftr-tools map svg open|arena|bridge|crossroads   (an SVG of the layout, on stdout)
 //!
 //! Profiles: perfect, lan, good, typical, mid, rough, awful.
 
@@ -67,11 +68,19 @@ fn main() {
                 );
                 if matches!(
                     cfg.scenario,
-                    Scenario::DodgeRig | Scenario::Duel | Scenario::Aram | Scenario::Mayhem | Scenario::Hyper
+                    Scenario::DodgeRig
+                        | Scenario::Duel
+                        | Scenario::Aram
+                        | Scenario::Mayhem
+                        | Scenario::Hyper
+                        | Scenario::Classic
                 ) {
                     println!("{}", r.summary.dodge_row());
                 }
-                if matches!(cfg.scenario, Scenario::Duel | Scenario::Aram | Scenario::Mayhem | Scenario::Hyper) {
+                if matches!(
+                    cfg.scenario,
+                    Scenario::Duel | Scenario::Aram | Scenario::Mayhem | Scenario::Hyper | Scenario::Classic
+                ) {
                     println!("{}", r.summary.duel_row());
                 }
             }
@@ -81,7 +90,9 @@ fn main() {
             let cfg = mftr_server::ServerConfig {
                 seed: num("--seed", 1.0) as u64,
                 bots: num("--bots", 10.0) as u8,
-                scenario: if args.iter().any(|a| a == "--hyper") {
+                scenario: if args.iter().any(|a| a == "--classic") {
+                    Scenario::Classic
+                } else if args.iter().any(|a| a == "--hyper") {
                     Scenario::Hyper
                 } else if args.iter().any(|a| a == "--mayhem") {
                     Scenario::Mayhem
@@ -236,6 +247,12 @@ fn main() {
                 }
             }
         }
+        Some("map") if args.get(1).map(String::as_str) == Some("svg") => {
+            // A map's layout, for design review: `mftr-tools map svg crossroads > crossroads.svg`.
+            let name = args.get(2).map(String::as_str).unwrap_or("crossroads");
+            let id = mftr_tools::mapsvg::by_name(name).unwrap_or_else(|| panic!("unknown map {name}"));
+            print!("{}", mftr_tools::mapsvg::render(&id.build()));
+        }
         _ => {
             eprintln!("usage: mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--seed N]");
             eprintln!(
@@ -244,6 +261,7 @@ fn main() {
             eprintln!("       mftr-tools blind-report FILE.tsv...");
             eprintln!("       mftr-tools pack validate FILE.glb|DIR...");
             eprintln!("       mftr-tools sfx build [sounds.ron|DIR...]");
+            eprintln!("       mftr-tools map svg open|arena|bridge|crossroads");
             std::process::exit(2);
         }
     }

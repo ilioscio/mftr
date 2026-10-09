@@ -62,6 +62,8 @@ pub enum Scenario {
     Mayhem,
     /// M3: ARAM: Mayhem under Hyper rules (06 §2): much faster basic abilities and attacks.
     Hyper,
+    /// M4: Classic 5v5 on Crossroads: three lanes, level 1 and 500 gold, fountains that heal.
+    Classic,
 }
 
 impl Scenario {
@@ -71,6 +73,7 @@ impl Scenario {
             Scenario::Empty => MapId::Open,
             Scenario::MinionSandbox | Scenario::DodgeRig | Scenario::Duel => MapId::Arena,
             Scenario::Aram | Scenario::Mayhem | Scenario::Hyper => MapId::Bridge,
+            Scenario::Classic => MapId::Crossroads,
         }
     }
 
@@ -83,6 +86,7 @@ impl Scenario {
             "aram" => Some(Scenario::Aram),
             "mayhem" => Some(Scenario::Mayhem),
             "hyper" => Some(Scenario::Hyper),
+            "classic" => Some(Scenario::Classic),
             _ => None,
         }
     }
@@ -97,6 +101,7 @@ impl Scenario {
             Scenario::Aram => msg::GameMode::Aram,
             Scenario::Mayhem => msg::GameMode::Mayhem,
             Scenario::Hyper => msg::GameMode::Hyper,
+            Scenario::Classic => msg::GameMode::Classic,
         }
     }
 
@@ -109,12 +114,14 @@ impl Scenario {
             Scenario::Aram => "aram",
             Scenario::Mayhem => "mayhem",
             Scenario::Hyper => "hyper",
+            Scenario::Classic => "classic",
         }
     }
 
-    /// ARAM and its variants: The Bridge, a full match with champion select.
-    pub fn is_aram(self) -> bool {
-        matches!(self, Scenario::Aram | Scenario::Mayhem | Scenario::Hyper)
+    /// A full match with champion select, structures and a winner: ARAM and its variants on
+    /// The Bridge, Classic on Crossroads.
+    pub fn is_match(self) -> bool {
+        matches!(self, Scenario::Aram | Scenario::Mayhem | Scenario::Hyper | Scenario::Classic)
     }
 }
 

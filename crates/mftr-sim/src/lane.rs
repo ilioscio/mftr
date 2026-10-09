@@ -83,6 +83,56 @@ pub fn wave_interval(secs: f32) -> SimDuration {
     SimDuration(ms.round() as u64)
 }
 
+/// How a lane map paces its waves: The Bridge like the reference ARAM (D55), Crossroads like
+/// the reference 5v5 (the first wave at 1:05, then every 30 s; a siege minion every third wave,
+/// every second from 15:00 and in every wave from 25:00; minion upgrades every 90 s).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Pacing {
+    #[default]
+    Aram,
+    Classic,
+}
+
+pub const CLASSIC_FIRST_WAVE: SimDuration = SimDuration::from_millis(65_000);
+pub const CLASSIC_WAVE_INTERVAL: SimDuration = SimDuration::from_millis(30_000);
+pub const CLASSIC_UPGRADE_EVERY_S: f32 = 90.0;
+
+impl Pacing {
+    /// The first wave, after the match starts.
+    pub fn first_wave(self) -> SimDuration {
+        match self {
+            Pacing::Aram => FIRST_WAVE,
+            Pacing::Classic => CLASSIC_FIRST_WAVE,
+        }
+    }
+
+    /// The time to the next wave, `secs` into the match.
+    pub fn interval(self, secs: f32) -> SimDuration {
+        match self {
+            Pacing::Aram => wave_interval(secs),
+            Pacing::Classic => CLASSIC_WAVE_INTERVAL,
+        }
+    }
+
+    /// Upgrades a minion spawned `secs` into the match has.
+    pub fn upgrades(self, secs: f32) -> u32 {
+        match self {
+            Pacing::Aram => minion_upgrades(secs),
+            Pacing::Classic => ((secs.max(0.0) / CLASSIC_UPGRADE_EVERY_S) as u32).min(MINION_UPGRADES_MAX),
+        }
+    }
+
+    /// Whether wave `n` (0-based), spawning `secs` into the match, brings a siege minion.
+    pub fn siege(self, n: u32, secs: f32) -> bool {
+        match self {
+            Pacing::Aram => n >= 2 && n.is_multiple_of(2),
+            Pacing::Classic if secs >= WAVES_FASTEST_AT_S => true,
+            Pacing::Classic if secs >= WAVES_FASTER_FROM_S => n.is_multiple_of(2),
+            Pacing::Classic => n % 3 == 2,
+        }
+    }
+}
+
 /// Minions grow stronger every 50 s of the match (up to 30 upgrades): health and damage per
 /// upgrade, by kind.
 pub const MINION_UPGRADE_EVERY_S: f32 = 50.0;
@@ -206,13 +256,19 @@ impl MatchState {
         }
     }
 
-    /// Minions of wave `n` (0-based): 3 melee, 3 casters, a siege minion every second wave from
-    /// the third, and a super minion in front while the team has an enemy Gatehouse down
-    /// (`empowered`).
+    /// Minions of an ARAM wave `n` (0-based): 3 melee, 3 casters, a siege minion every second
+    /// wave from the third, and a super minion in front while the team has an enemy Gatehouse
+    /// down (`empowered`).
     pub fn wave(n: u32, empowered: bool) -> Vec<MinionKind> {
+        Self::wave_of(Pacing::Aram.siege(n, 0.0), empowered)
+    }
+
+    /// A wave: 3 melee, a siege minion if `siege`, 3 casters, and a super minion in front if
+    /// `empowered`.
+    pub fn wave_of(siege: bool, empowered: bool) -> Vec<MinionKind> {
         let mut w = if empowered { vec![MinionKind::Super] } else { Vec::new() };
         w.extend([MinionKind::Melee; 3]);
-        if n >= 2 && n.is_multiple_of(2) {
+        if siege {
             w.push(MinionKind::Siege);
         }
         w.extend([MinionKind::Caster; 3]);
@@ -475,6 +531,15 @@ mod tests {
         assert_eq!(minion_upgrades(49.0), 0);
         assert_eq!(minion_upgrades(500.0), 10);
         assert_eq!(minion_upgrades(99_999.0), MINION_UPGRADES_MAX);
+        // Crossroads: the reference 5v5's cadence.
+        let c = Pacing::Classic;
+        assert_eq!(
+            (c.first_wave(), c.interval(0.0), c.interval(2000.0)),
+            (CLASSIC_FIRST_WAVE, CLASSIC_WAVE_INTERVAL, CLASSIC_WAVE_INTERVAL)
+        );
+        assert_eq!((0..6).map(|n| c.siege(n, 300.0)).collect::<Vec<_>>(), [false, false, true, false, false, true]);
+        assert!(c.siege(30, 16.0 * 60.0) && !c.siege(31, 16.0 * 60.0) && c.siege(51, 26.0 * 60.0));
+        assert_eq!((c.upgrades(89.0), c.upgrades(900.0)), (0, 10));
         assert_eq!(minion_speed(9.0 * 60.0), 325.0);
         assert_eq!(minion_speed(10.0 * 60.0), 350.0);
         assert_eq!(minion_speed(26.0 * 60.0), 425.0);
