@@ -212,7 +212,7 @@ impl MatchState {
     pub fn wave(n: u32, empowered: bool) -> Vec<MinionKind> {
         let mut w = if empowered { vec![MinionKind::Super] } else { Vec::new() };
         w.extend([MinionKind::Melee; 3]);
-        if n >= 2 && n % 2 == 0 {
+        if n >= 2 && n.is_multiple_of(2) {
             w.push(MinionKind::Siege);
         }
         w.extend([MinionKind::Caster; 3]);

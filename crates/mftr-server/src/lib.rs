@@ -744,7 +744,7 @@ impl ServerCore {
         }
         // The scoreboard, about once a second (the same for everyone: it's what the Tab
         // breakdown shows, items and augments included, as in the reference game).
-        let scoreboard = (k.0 % mftr_sim::TICK_HZ == 0).then(|| Box::new(self.scoreboard(SimTime::end_of(k))));
+        let scoreboard = k.0.is_multiple_of(mftr_sim::TICK_HZ).then(|| Box::new(self.scoreboard(SimTime::end_of(k))));
         // Per team: the events it may receive, in order (the per-client parts follow).
         let mut team_events: [Vec<SimEvent>; 3] = [Vec::new(), Vec::new(), Vec::new()];
         for (i, list) in team_events.iter_mut().enumerate() {

@@ -590,6 +590,11 @@ impl ClientSession {
         self.issue(CommandKind::PickAugment(choice), now)
     }
 
+    /// Use the active of the item in inventory slot 0–5 (drink a potion). Predicted.
+    pub fn use_item(&mut self, slot: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::UseItem(slot), now)
+    }
+
     /// Reroll the open augment draft (once per draft). Predicted.
     pub fn reroll_augments(&mut self, now: f64) -> Option<Command> {
         self.issue(CommandKind::RerollAugments, now)

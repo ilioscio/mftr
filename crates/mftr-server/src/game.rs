@@ -401,6 +401,7 @@ fn kind_text(k: CommandKind) -> String {
         CommandKind::Undo => "undo".into(),
         CommandKind::PickAugment(choice) => format!("augment {choice}"),
         CommandKind::RerollAugments => "reroll".into(),
+        CommandKind::UseItem(slot) => format!("use {slot}"),
     }
 }
 
@@ -419,6 +420,7 @@ fn parse_kind(f: &[&str]) -> Option<CommandKind> {
         "undo" => CommandKind::Undo,
         "augment" => CommandKind::PickAugment(n(1)? as u8),
         "reroll" => CommandKind::RerollAugments,
+        "use" => CommandKind::UseItem(n(1)? as u8),
         _ => return None,
     })
 }

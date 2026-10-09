@@ -77,6 +77,20 @@ pub enum Passive {
     },
 }
 
+/// An item's active (01 §11: items 1–6): drunk with its slot's key.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Active {
+    None,
+    /// Heals `heal` over `duration_ms`; holds up to `charges` (stacked potions or a flask's
+    /// charges). Refillable ones refill whenever their holder can shop; the others are used up.
+    Consumable {
+        heal: f32,
+        duration_ms: u64,
+        charges: u8,
+        refills: bool,
+    },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Item {
     pub id: u8,
@@ -89,6 +103,7 @@ pub struct Item {
     pub recipe: &'static [u8],
     /// Boots: only one pair counts.
     pub boots: bool,
+    pub active: Active,
 }
 
 const fn b() -> Bonus {
@@ -97,13 +112,40 @@ const fn b() -> Bonus {
 
 macro_rules! item {
     ($id:expr, $name:expr, $cost:expr, $bonus:expr) => {
-        Item { id: $id, name: $name, cost: $cost, bonus: $bonus, passive: Passive::None, recipe: &[], boots: false }
+        Item {
+            id: $id,
+            name: $name,
+            cost: $cost,
+            bonus: $bonus,
+            passive: Passive::None,
+            recipe: &[],
+            boots: false,
+            active: Active::None,
+        }
     };
     ($id:expr, $name:expr, $cost:expr, $bonus:expr, $recipe:expr) => {
-        Item { id: $id, name: $name, cost: $cost, bonus: $bonus, passive: Passive::None, recipe: $recipe, boots: false }
+        Item {
+            id: $id,
+            name: $name,
+            cost: $cost,
+            bonus: $bonus,
+            passive: Passive::None,
+            recipe: $recipe,
+            boots: false,
+            active: Active::None,
+        }
     };
     ($id:expr, $name:expr, $cost:expr, $bonus:expr, $recipe:expr, $passive:expr) => {
-        Item { id: $id, name: $name, cost: $cost, bonus: $bonus, passive: $passive, recipe: $recipe, boots: false }
+        Item {
+            id: $id,
+            name: $name,
+            cost: $cost,
+            bonus: $bonus,
+            passive: $passive,
+            recipe: $recipe,
+            boots: false,
+            active: Active::None,
+        }
     };
 }
 
@@ -134,8 +176,20 @@ pub const WARDSTONE_MANTLE: u8 = 23;
 pub const ARC_TEMPEST: u8 = 24;
 pub const GALE_SABER: u8 = 25;
 pub const LIFELINE_TALISMAN: u8 = 26;
+pub const HEALTH_POTION: u8 = 27;
+pub const REFILLABLE_FLASK: u8 = 28;
 
-pub const CATALOG: [Item; 26] = [
+pub const CATALOG: [Item; 28] = [
+    // Consumables (the reference game's values): a potion heals 120 over 15 s and up to 5
+    // stack in a slot; the flask heals 100 over 12 s, twice, and refills at the fountain.
+    Item {
+        active: Active::Consumable { heal: 120.0, duration_ms: 15_000, charges: 5, refills: false },
+        ..item!(HEALTH_POTION, "Health Potion", 50.0, b())
+    },
+    Item {
+        active: Active::Consumable { heal: 100.0, duration_ms: 12_000, charges: 2, refills: true },
+        ..item!(REFILLABLE_FLASK, "Refillable Flask", 150.0, b())
+    },
     // Components.
     item!(LONG_KNIFE, "Long Knife", 350.0, Bonus { attack_damage: 10.0, ..b() }),
     item!(SPARK_SHARD, "Spark Shard", 435.0, Bonus { ability_power: 20.0, ..b() }),
@@ -240,6 +294,14 @@ pub fn item(id: u8) -> Option<&'static Item> {
 }
 
 /// Gold needed to buy `id` with this inventory, and the slots its recipe consumes.
+/// What a consumable does, if `id` is one: (heal, duration, most charges, refills).
+pub fn consumable(id: u8) -> Option<(f32, u64, u8, bool)> {
+    match item(id)?.active {
+        Active::Consumable { heal, duration_ms, charges, refills } => Some((heal, duration_ms, charges, refills)),
+        Active::None => None,
+    }
+}
+
 pub fn price(id: u8, inventory: &[u8; INVENTORY]) -> Option<(f32, Vec<usize>)> {
     let it = item(id)?;
     let mut used: Vec<usize> = Vec::new();

@@ -347,6 +347,10 @@ fn write_command(w: &mut BitWriter, c: &Command) {
             w.write(choice as u64, 2);
         }
         CommandKind::RerollAugments => w.write(10, 4),
+        CommandKind::UseItem(slot) => {
+            w.write(11, 4);
+            w.write(slot as u64, 3);
+        }
     }
 }
 
@@ -372,6 +376,7 @@ fn read_command(r: &mut BitReader) -> Result<Command, DecodeError> {
         8 => CommandKind::Undo,
         9 => CommandKind::PickAugment(r.read(2)? as u8),
         10 => CommandKind::RerollAugments,
+        11 => CommandKind::UseItem(r.read(3)? as u8),
         _ => return Err(DecodeError::Invalid("command kind")),
     };
     Ok(Command { player: PlayerId(0), seq, tick, sub, kind })
@@ -899,11 +904,17 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     for i in p.items {
         w.write_u8(i);
     }
+    for c in p.charges {
+        w.write(c as u64, 4);
+    }
     write_time(w, p.lifeline_ready);
     w.write(p.undo_len as u64, 3);
     for t in &p.undo[..p.undo_len as usize] {
         for i in t.items {
             w.write_u8(i);
+        }
+        for c in t.charges {
+            w.write(c as u64, 4);
         }
         w.write_f32(t.gold);
     }
@@ -935,6 +946,8 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
         w.write_u32(b.seq);
     }
     w.write_u8(s.attacks);
+    w.write_f32(s.potion_rate);
+    write_time(w, s.potion_until);
 }
 
 fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
@@ -1015,15 +1028,22 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     for i in items.iter_mut() {
         *i = r.read_u8()?;
     }
+    let mut charges = [0u8; INVENTORY];
+    for c in charges.iter_mut() {
+        *c = r.read(4)? as u8;
+    }
     let lifeline_ready = read_time(r)?;
     let undo_len = r.read(3)? as u8;
     if undo_len as usize > UNDO {
         return Err(DecodeError::Invalid("undo"));
     }
-    let mut undo = [Trade { items: [0; INVENTORY], gold: 0.0 }; UNDO];
+    let mut undo = [Trade { items: [0; INVENTORY], charges: [0; INVENTORY], gold: 0.0 }; UNDO];
     for t in undo.iter_mut().take(undo_len as usize) {
         for i in t.items.iter_mut() {
             *i = r.read_u8()?;
+        }
+        for c in t.charges.iter_mut() {
+            *c = r.read(4)? as u8;
         }
         t.gold = read_finite(r)?;
     }
@@ -1053,6 +1073,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         None
     };
     let attacks = r.read_u8()?;
+    let (potion_rate, potion_until) = (read_finite(r)?, read_time(r)?);
     let progress = Progress {
         level,
         xp,
@@ -1061,6 +1082,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         points,
         streak,
         items,
+        charges,
         lifeline_ready,
         undo,
         undo_len,
@@ -1105,6 +1127,8 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         recovery,
         buffered,
         attacks,
+        potion_rate,
+        potion_until,
     })
 }
 
@@ -1835,12 +1859,13 @@ mod tests {
                 points: 2,
                 streak: -3,
                 items: [19, 0, 7, 26, 0, 3],
+                charges: [0, 0, 2, 0, 0, 5],
                 lifeline_ready: SimTime(98_765),
                 undo: [
-                    Trade { items: [10, 0, 7, 26, 0, 3], gold: -2750.0 },
-                    Trade { items: [10, 0, 7, 26, 0, 0], gold: 280.0 },
-                    Trade { items: [0; INVENTORY], gold: 0.0 },
-                    Trade { items: [0; INVENTORY], gold: 0.0 },
+                    Trade { items: [10, 0, 7, 26, 0, 3], charges: [0, 0, 0, 0, 0, 0], gold: -2750.0 },
+                    Trade { items: [10, 0, 7, 26, 0, 27], charges: [0, 0, 0, 0, 0, 4], gold: 280.0 },
+                    Trade { items: [0; INVENTORY], charges: [0; INVENTORY], gold: 0.0 },
+                    Trade { items: [0; INVENTORY], charges: [0; INVENTORY], gold: 0.0 },
                 ],
                 undo_len: 2,
                 augments: [17, 2, 0, 0],
@@ -1862,6 +1887,8 @@ mod tests {
             recovery: Some(Recovery { hard_until: SimTime(123_500), until: SimTime(123_800) }),
             buffered: Some(BufferedCast { slot: 4, target: QPoint { x: 1234, y: 5678 }, seq: 77 }),
             attacks: 201,
+            potion_rate: 8.0,
+            potion_until: SimTime(77_000),
         }
     }
 

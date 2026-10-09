@@ -183,6 +183,8 @@ pub struct Progress {
     pub streak: i8,
     /// Inventory (item ids, 0 = empty).
     pub items: [u8; INVENTORY],
+    /// Charges of each slot's consumable (stacked potions, a flask's charges); 0 otherwise.
+    pub charges: [u8; INVENTORY],
     /// When the Lifeline passive is ready again (item cooldowns survive death).
     pub lifeline_ready: SimTime,
     /// Trades that can still be undone, oldest first (`undo_len` valid). Cleared when the
@@ -219,6 +221,7 @@ pub struct Progress {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Trade {
     pub items: [u8; INVENTORY],
+    pub charges: [u8; INVENTORY],
     pub gold: f32,
 }
 
@@ -239,8 +242,9 @@ impl Progress {
         points: 0,
         streak: 0,
         items: [0; INVENTORY],
+        charges: [0; INVENTORY],
         lifeline_ready: SimTime(0),
-        undo: [Trade { items: [0; INVENTORY], gold: 0.0 }; UNDO],
+        undo: [Trade { items: [0; INVENTORY], charges: [0; INVENTORY], gold: 0.0 }; UNDO],
         undo_len: 0,
         augments: [0; augments::SLOTS],
         offer: [0; augments::CHOICES],
@@ -269,11 +273,17 @@ impl Progress {
         for i in self.items {
             h.write_u8(i);
         }
+        for c in self.charges {
+            h.write_u8(c);
+        }
         h.write_u64(self.lifeline_ready.0);
         h.write_u8(self.undo_len);
         for t in &self.undo[..self.undo_len as usize] {
             for i in t.items {
                 h.write_u8(i);
+            }
+            for c in t.charges {
+                h.write_u8(c);
             }
             h.write_f32(t.gold);
         }
@@ -447,6 +457,9 @@ pub struct UnitState {
     pub buffered: Option<BufferedCast>,
     /// Basic attacks started (wrapping): picks the attack animation, the same on every client.
     pub attacks: u8,
+    /// A consumable healing over time: this much health a second until `potion_until`.
+    pub potion_rate: f32,
+    pub potion_until: SimTime,
 }
 
 /// A cast waiting to repeat (Echo): lines fly again from the caster's position then, areas land
@@ -489,6 +502,8 @@ impl UnitState {
             recovery: None,
             buffered: None,
             attacks: 0,
+            potion_rate: 0.0,
+            potion_until: SimTime(0),
         }
     }
 
@@ -835,6 +850,8 @@ impl UnitState {
             }
         }
         h.write_u8(self.attacks);
+        h.write_f32(self.potion_rate);
+        h.write_u64(self.potion_until.0);
     }
 }
 
@@ -992,6 +1009,8 @@ pub enum CommandKind {
     PickAugment(u8),
     /// Replace the open draft's choices (once per draft).
     RerollAugments,
+    /// Use the active of the item in an inventory slot (0–5): drink a potion.
+    UseItem(u8),
 }
 
 /// A player command, applied at `tick` at sub-tick position `sub` (03a §3).
@@ -1900,6 +1919,24 @@ impl World {
 
         // Phase 4: fountains, relics, passive gold, regeneration and shield expiry.
         fountains_and_relics(units, map, prediction, s1, events);
+        for u in units.iter_mut().filter(|u| u.kind == UnitKind::Champion) {
+            let st = &mut u.state;
+            if st.alive() && st.potion_until > s0 {
+                let secs = (st.potion_until.min(s1).0 - s0.0) as f32 / SUBTICKS_PER_SECOND as f32;
+                st.health = (st.health + st.potion_rate * secs).min(u.stats.max_health);
+            }
+            if st.potion_until <= s1 {
+                st.potion_rate = 0.0;
+            }
+            if can_shop(u, map, &rules) {
+                let p = &mut u.state.progress;
+                for s in 0..INVENTORY {
+                    if let Some((_, _, most, true)) = items::consumable(p.items[s]) {
+                        p.charges[s] = most;
+                    }
+                }
+            }
+        }
         if rules.passive_gold > 0.0 {
             for u in units.iter_mut().filter(|u| u.kind == UnitKind::Champion) {
                 u.state.progress.gold += rules.passive_gold * TICK_DT;
@@ -2300,6 +2337,7 @@ fn apply_command(
             }
         }
         CommandKind::Buy(_) | CommandKind::Sell(_) | CommandKind::Undo => shop(unit, c.kind, map, rules),
+        CommandKind::UseItem(slot) => use_item(unit, slot, t),
         CommandKind::PickAugment(choice) if rules.augments => augments::pick(&mut st.progress, choice),
         CommandKind::RerollAugments if rules.augments => augments::reroll(&mut st.progress),
         CommandKind::PickAugment(_) | CommandKind::RerollAugments => {}
@@ -2322,6 +2360,26 @@ fn shop(unit: &mut Unit, kind: CommandKind, map: &Map, rules: &Rules) {
     }
     let p = &mut unit.state.progress;
     match kind {
+        CommandKind::Buy(id) if items::consumable(id).is_some() => {
+            // Potions stack in a slot (up to its charges); a flask is one per champion, full.
+            let (Some(item), Some((_, _, most, refills))) = (items::item(id), items::consumable(id)) else { return };
+            if item.cost > p.gold {
+                return;
+            }
+            let held = p.items.iter().position(|i| *i == id);
+            let before = Trade { items: p.items, charges: p.charges, gold: -item.cost };
+            match held {
+                Some(_) if refills => return,
+                Some(s) if p.charges[s] < most => p.charges[s] += 1,
+                _ => {
+                    let Some(s) = p.items.iter().position(|i| *i == 0) else { return };
+                    p.items[s] = id;
+                    p.charges[s] = if refills { most } else { 1 };
+                }
+            }
+            p.push_trade(before);
+            p.gold -= item.cost;
+        }
         CommandKind::Buy(id) => {
             let (Some(item), Some((cost, used))) = (items::item(id), items::price(id, &p.items)) else { return };
             let mut inv = p.items;
@@ -2335,29 +2393,63 @@ fn shop(unit: &mut Unit, kind: CommandKind, map: &Map, rules: &Rules) {
                 return;
             }
             inv[slot] = id;
-            p.push_trade(Trade { items: p.items, gold: -cost });
+            p.push_trade(Trade { items: p.items, charges: p.charges, gold: -cost });
+            // Slots whose item changed hold no charges.
+            for ((c, new), old) in p.charges.iter_mut().zip(inv).zip(p.items) {
+                if new != old {
+                    *c = 0;
+                }
+            }
             p.items = inv;
             p.gold -= cost;
         }
         CommandKind::Sell(slot) => {
-            let before = p.items;
-            if let Some(i) = p.items.get_mut(slot as usize)
+            let (before, charges) = (p.items, p.charges);
+            let s = slot as usize;
+            if let Some(i) = p.items.get_mut(s)
                 && let Some(item) = items::item(*i)
             {
-                let refund = item.cost * items::SELL_REFUND;
+                // A stack of potions sells by the potion; anything else whole.
+                let n = match items::consumable(item.id) {
+                    Some((_, _, _, false)) => charges[s].max(1) as f32,
+                    _ => 1.0,
+                };
+                let refund = item.cost * n * items::SELL_REFUND;
                 *i = 0;
+                p.charges[s] = 0;
                 p.gold += refund;
-                p.push_trade(Trade { items: before, gold: refund });
+                p.push_trade(Trade { items: before, charges, gold: refund });
             }
         }
         CommandKind::Undo if p.undo_len > 0 => {
             p.undo_len -= 1;
             let t = p.undo[p.undo_len as usize];
             p.items = t.items;
+            p.charges = t.charges;
             p.gold -= t.gold;
         }
         _ => {}
     }
+}
+
+/// Drink the consumable in `slot` at `t`: it heals over time from now (a second one while one
+/// runs adds its time). A potion stack shrinks by one and is gone at zero; a flask keeps its
+/// slot and refills at the fountain.
+fn use_item(unit: &mut Unit, slot: u8, t: SimTime) {
+    let st = &mut unit.state;
+    let s = slot as usize;
+    if !st.alive() || s >= INVENTORY || st.progress.charges[s] == 0 {
+        return;
+    }
+    let Some((heal, duration_ms, _, refills)) = items::consumable(st.progress.items[s]) else { return };
+    st.progress.charges[s] -= 1;
+    if st.progress.charges[s] == 0 && !refills {
+        st.progress.items[s] = 0;
+    }
+    let duration = SimDuration::from_millis(duration_ms);
+    let rate = heal / duration.0 as f32 * SUBTICKS_PER_SECOND as f32;
+    st.potion_until = if st.potion_until > t { st.potion_until.plus(duration) } else { t.plus(duration) };
+    st.potion_rate = st.potion_rate.max(rate);
 }
 
 /// Validate and start a cast at `t` (03 §5: the sim validates everything). Skillshots and
@@ -4798,6 +4890,55 @@ mod tests {
         Command { player: PlayerId(player), seq, tick: Tick(tick), sub: SubTick::START, kind }
     }
 
+    /// Consumables (keys 1–6): potions stack in one slot and heal 120 over 15 s each, used up;
+    /// the flask heals 100 over 12 s, twice, keeps its slot and refills at the fountain. Undo
+    /// gives a stack back whole.
+    #[test]
+    fn potions_stack_heal_over_time_and_the_flask_refills() {
+        use crate::items::*;
+        let mut w = ranked_world();
+        w.set_map(MapId::Bridge.shared());
+        let fountain = bridge_point(Vec2::new(400.0, 1500.0));
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, fountain);
+        w.step(&[shop(0, 1, 1, CommandKind::Buy(HEALTH_POTION)), shop(0, 2, 1, CommandKind::Buy(HEALTH_POTION))]);
+        w.step(&[shop(0, 3, 2, CommandKind::Buy(REFILLABLE_FLASK)), shop(0, 4, 2, CommandKind::Buy(REFILLABLE_FLASK))]);
+        let p = w.unit(me).unwrap().state.progress;
+        assert_eq!((p.items[0], p.charges[0]), (HEALTH_POTION, 2), "two potions, one slot");
+        assert_eq!((p.items[1], p.charges[1]), (REFILLABLE_FLASK, 2), "one flask, full");
+        assert_eq!(p.items[2], 0, "a second flask isn't sold");
+        // Out in the lane and hurt: drink a potion. A twin who doesn't drink shows what the
+        // potion added on top of health regeneration.
+        let lane = bridge_point(Vec2::new(4000.0, 1500.0));
+        let twin =
+            w.spawn_champion(PlayerId(1), Team::Blue, ChampionId::Vesper, bridge_point(Vec2::new(4000.0, 1700.0)));
+        for (id, pos) in [(me, lane), (twin, bridge_point(Vec2::new(4000.0, 1700.0)))] {
+            let u = w.unit_mut(id).unwrap();
+            u.state.pos = pos;
+            u.state.health = 200.0;
+        }
+        let k = w.tick().0 + 1;
+        w.step(&[shop(0, 5, k, CommandKind::UseItem(0))]);
+        for _ in 0..(crate::time::TICK_HZ * 16) {
+            w.step(&[]);
+        }
+        let u = w.unit(me).unwrap();
+        let healed = u.state.health - w.unit(twin).unwrap().state.health;
+        assert!((healed - 120.0).abs() < 0.01, "120 over 15 s: {healed}");
+        assert_eq!((u.state.progress.items[0], u.state.progress.charges[0]), (HEALTH_POTION, 1));
+        // The flask twice, then empty, then refilled at the fountain.
+        let k = w.tick().0 + 1;
+        w.step(&[shop(0, 6, k, CommandKind::UseItem(1)), shop(0, 7, k, CommandKind::UseItem(1))]);
+        let p = w.unit(me).unwrap().state.progress;
+        assert_eq!((p.items[1], p.charges[1]), (REFILLABLE_FLASK, 0), "an empty flask keeps its slot");
+        w.unit_mut(me).unwrap().state.pos = fountain;
+        w.step(&[]);
+        assert_eq!(w.unit(me).unwrap().state.progress.charges[1], 2);
+        // The last potion: used up, the slot frees.
+        let k = w.tick().0 + 1;
+        w.step(&[shop(0, 8, k, CommandKind::UseItem(0))]);
+        assert_eq!(w.unit(me).unwrap().state.progress.items[0], 0);
+    }
+
     /// M2 slice 3: buying only in the own fountain or while dead; recipes consume components
     /// and cost the difference; selling refunds 70%; stats follow the next tick.
     #[test]
@@ -5095,7 +5236,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0x1a34_ebda_a31b_7841;
+    const GOLDEN_HASH_ARENA: u64 = 0xcb82_c1c5_d4d8_81b1;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -5152,7 +5293,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x29d8_b11b_fc0d_7253;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x363e_9b18_6913_52cb;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -5223,5 +5364,5 @@ mod tests {
 
     /// Recorded on x86_64-pc-windows-msvc when facing, follow-throughs and the input buffer
     /// joined the state (A2). CI checks Linux, macOS (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x8773_c750_4771_b539;
+    const GOLDEN_HASH: u64 = 0x1d8d_201f_13db_79e9;
 }

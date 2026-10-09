@@ -451,6 +451,15 @@ impl MatchClient {
         }
     }
 
+    /// Use the item in inventory slot 0–5 (keys 1–6): drink a potion.
+    #[func]
+    fn use_item(&mut self, slot: i64) {
+        let now = self.now();
+        if (0..INVENTORY as i64).contains(&slot) && self.session.use_item(slot as u8, now).is_some() {
+            self.send_input(now);
+        }
+    }
+
     /// Reroll the open augment draft (once per draft).
     #[func]
     fn reroll_augments(&mut self) {
@@ -507,6 +516,7 @@ impl MatchClient {
                 recipe.push(&(*r as i64).to_variant());
             }
             d.set("recipe", &recipe);
+            d.set("consumable", items::consumable(it.id).is_some());
             d.set("affordable", p.is_some_and(|p| p.gold >= price));
             d.set("owned", inv.contains(&it.id));
             out.push(&d.to_variant());
@@ -1011,6 +1021,9 @@ impl MatchClient {
                 inv.push(&(i as i64).to_variant());
             }
             d.set("items", &inv);
+            let charges: PackedInt32Array = s.progress.charges.iter().map(|c| *c as i32).collect();
+            d.set("charges", &charges);
+            d.set("potion", if s.potion_until > t { s.potion_until.secs_since(t) } else { 0.0 });
             d.set("can_undo", s.progress.undo_len > 0);
             d.set("hitbox", self.session.own_radius());
             // ARAM: Mayhem: held augments and the open draft.
