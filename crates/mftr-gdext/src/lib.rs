@@ -480,6 +480,15 @@ impl MatchClient {
         }
     }
 
+    /// Take utility spell `spell` (0 Barrier, 1 Claim) in the F slot, while shopping.
+    #[func]
+    fn choose_spell(&mut self, spell: i64) {
+        let now = self.now();
+        if (0..=1).contains(&spell) && self.session.choose_spell(spell as u8, now).is_some() {
+            self.send_input(now);
+        }
+    }
+
     /// Recall (B): an 8 s channel home, cancelled by acting or being hit.
     #[func]
     fn recall(&mut self) {
@@ -785,7 +794,7 @@ impl MatchClient {
         let Some(st) = self.session.own_state_now() else { return d };
         let champ = self.session.champion();
         let slot = slot.clamp(0, 5) as u8;
-        let spell = if slot == 5 { augments::spell(&st.progress.augments) } else { None };
+        let spell = if slot == 5 { st.progress.f_spell() } else { None };
         let Some(a) = spell.or_else(|| champ.ability(slot)) else { return d };
         let (stats, _) = items::champion_stats(champ.def(), &st.progress.stats_key());
         let ranked = slot < 4 && self.session.rules().ranked;
@@ -886,6 +895,22 @@ impl MatchClient {
             Effect::Blink(b) => {
                 d.set("kind", "blink");
                 d.set("range", b.range);
+            }
+            Effect::Claim(c) => {
+                d.set("kind", "claim");
+                d.set("range", c.range);
+                let mut m = VarDictionary::new();
+                m.set("kind", "true");
+                let camps = st.progress.camps;
+                let now = if camps >= mftr_sim::jungle::CLAIM_UPGRADE_CAMPS { c.upgraded } else { c.damage };
+                m.set("base", &per_rank(&|_| now));
+                m.set("ad", 0.0f32);
+                m.set("ap", 0.0f32);
+                m.set("total", now);
+                d.set("damage", &m);
+                d.set("claim_upgraded", c.upgraded);
+                d.set("claim_camps", camps as i64);
+                d.set("claim_upgrade_at", mftr_sim::jungle::CLAIM_UPGRADE_CAMPS as i64);
             }
             Effect::Shield(sh) => {
                 d.set("kind", "barrier");
@@ -1046,7 +1071,7 @@ impl MatchClient {
         d.set("champion", champ.def().name);
         let mut names = VarArray::new();
         // F may be an augment's spell in its place.
-        let spell = self.session.own_state_now().and_then(|s| augments::spell(&s.progress.augments));
+        let spell = self.session.own_state_now().and_then(|s| s.progress.f_spell());
         for slot in 0..SLOTS as u8 {
             let a = if slot == 5 { spell.or_else(|| champ.ability(slot)) } else { champ.ability(slot) };
             names.push(&a.map_or("", |a| a.name).to_variant());
@@ -1071,6 +1096,12 @@ impl MatchClient {
             let charges: PackedInt32Array = s.progress.charges.iter().map(|c| *c as i32).collect();
             d.set("charges", &charges);
             d.set("potion", if s.potion_until > t { s.potion_until.secs_since(t) } else { 0.0 });
+            // The F spell, big monsters taken (Claim's upgrade) and the jungle buffs' seconds left.
+            d.set("spell_f", s.progress.spell_f as i64);
+            d.set("camps", s.progress.camps as i64);
+            let left = |until: mftr_sim::SimTime| if until > t { until.secs_since(t) } else { 0.0 };
+            d.set("insight", left(s.progress.insight_until));
+            d.set("cinder", left(s.progress.cinder_until));
             // Recalling: seconds left of the channel (0 when not), and its full length.
             d.set("recall", if s.recalling() { s.recall_until.secs_since(t).max(0.0) } else { 0.0 });
             d.set("recall_total", mftr_sim::world::RECALL.0 as f64 / mftr_sim::time::SUBTICKS_PER_SECOND as f64);
@@ -1136,6 +1167,8 @@ impl MatchClient {
             d.set("anvil_cost", mftr_sim::anvils::COST);
             d.set("anvil_level", mftr_sim::anvils::MIN_LEVEL as i64);
             d.set("mayhem", self.session.rules().augments);
+            // A map with a jungle: Claim can be taken in F.
+            d.set("jungle", !self.session.map().layout.camps.is_empty());
             d.set("golden", s.progress.golden as i64 - 1);
             d.set("shield", if s.shield_until > t { s.shield } else { 0.0 });
             d.set("dead", !s.alive());
@@ -1259,8 +1292,16 @@ impl MatchClient {
                     UnitKind::Gatehouse => "gatehouse",
                     UnitKind::Base => "base",
                     UnitKind::Relic => "relic",
+                    UnitKind::Monster => "monster",
                 },
             );
+            // A jungle monster: its kind ("warden", "hound_alpha", …), name and size class.
+            if let Some(m) = u.monster {
+                d.set("monster", monster_key(m));
+                d.set("monster_name", m.def().name);
+                d.set("big", m.def().big);
+            }
+            d.set("neutral", u.team == Team::Neutral);
             d.set("protected", u.protected);
             d.set("recalling", u.recalling);
             d.set("plates", u.plates as i64);
@@ -1361,7 +1402,13 @@ impl MatchClient {
             d.set("augments", &augs);
             d.set("respawn", r.respawn_ds as f64 / 10.0);
             // The F spell's icon: Barrier, or an augment's spell in its place.
-            let f = augments::spell(&r.augments).or_else(|| r.champion.ability(5));
+            let f = augments::spell(&r.augments).or_else(|| {
+                if r.spell_f == mftr_sim::ability::SPELL_CLAIM {
+                    Some(mftr_sim::ability::CLAIM)
+                } else {
+                    r.champion.ability(5)
+                }
+            });
             d.set("spell_f", f.map_or("barrier", |a| icon_kind(&a)));
             out.push(&d.to_variant());
         }
@@ -1785,6 +1832,22 @@ fn item_lines(it: &items::Item) -> VarArray {
     out
 }
 
+/// A monster kind's key for the client ("warden", "hound_alpha", …).
+fn monster_key(m: mftr_sim::jungle::MonsterKind) -> &'static str {
+    use mftr_sim::jungle::MonsterKind as M;
+    match m {
+        M::Warden => "warden",
+        M::Brute => "brute",
+        M::HoundAlpha => "hound_alpha",
+        M::Hound => "hound",
+        M::Toad => "toad",
+        M::RavenAlpha => "raven_alpha",
+        M::Raven => "raven",
+        M::CrawlerElder => "crawler_elder",
+        M::Crawler => "crawler",
+    }
+}
+
 /// The icon kind of an ability (the HUD's glyphs): what its effect does.
 fn icon_kind(a: &mftr_sim::ability::Ability) -> &'static str {
     use mftr_sim::ability::Effect;
@@ -1796,6 +1859,7 @@ fn icon_kind(a: &mftr_sim::ability::Ability) -> &'static str {
         Effect::Dash(_) => "dash",
         Effect::Blink(_) => "blink",
         Effect::Shield(_) => "barrier",
+        Effect::Claim(_) => "claim",
         Effect::Support(s) if s.shield > 0.0 => "shield_ally",
         Effect::Support(_) => "heal",
     }

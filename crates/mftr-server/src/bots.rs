@@ -7,14 +7,19 @@
 //! shield hurt allies; when low, take a safe health relic, or go home where the fountain heals,
 //! recalling once no enemy champion is near (not in ARAM: there it keeps fighting from behind
 //! its wave); shop its build path in the fountain or while dead; spend ability points
-//! (ultimate first).
+//! (ultimate first). On a map with a jungle, one bot per team is the jungler: it takes Claim
+//! and clears the camps on its side of the river, finishing big monsters with Claim, and helps
+//! mid while they're down.
 
 use mftr_sim::ability::{Effect, SLOTS};
 use mftr_sim::champion::max_rank;
+use mftr_sim::jungle::Camp;
 use mftr_sim::lane::TURRET_ATTACK;
 use mftr_sim::rng::Pcg32;
-use mftr_sim::world::can_shop;
-use mftr_sim::{Command, CommandKind, PlayerId, QPoint, SimTime, SubTick, Team, Tick, Unit, UnitKind, Vec2, World};
+use mftr_sim::world::{Brain, can_shop};
+use mftr_sim::{
+    Command, CommandKind, PlayerId, QPoint, SimDuration, SimTime, SubTick, Team, Tick, Unit, UnitKind, Vec2, World,
+};
 
 /// How often a bot decides (ticks): ~5 times a second, staggered by player.
 const THINK_EVERY: u32 = 6;
@@ -25,6 +30,8 @@ const ENGAGE: f32 = 900.0;
 const LOW: f32 = 0.3;
 const HEALED: f32 = 0.9;
 const RELIEVED: f32 = 0.5;
+/// A jungler walks to a camp that spawns within this, to be there when it does.
+const JUNGLE_WAIT: SimDuration = SimDuration::from_millis(25_000);
 /// How far a low bot walks for a health relic.
 const RELIC_REACH: f32 = 2500.0;
 /// A low bot recalls with no enemy champion this close (else it walks home first), unless
@@ -33,6 +40,13 @@ const RECALL_SAFE: f32 = 1500.0;
 const WALK_HOME: f32 = 2500.0;
 /// Turret danger zone: its range plus a margin.
 const TURRET_DANGER: f32 = TURRET_ATTACK.range + 150.0;
+
+/// What a bot plays: a lane (index into the map's lanes) or the jungle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Role {
+    Lane(usize),
+    Jungle,
+}
 
 pub struct Bot {
     pub player: PlayerId,
@@ -83,6 +97,11 @@ impl Bot {
         if p.offer[0] != 0 {
             let choice = self.rng.next_u32() as usize % mftr_sim::augments::CHOICES;
             return Some(CommandKind::PickAugment(choice as u8));
+        }
+        let jungler = self.role(world, me.team) == Role::Jungle;
+        // The jungler takes Claim in the fountain.
+        if jungler && p.spell_f != mftr_sim::ability::SPELL_CLAIM && can_shop(me, world.map(), &world.rules()) {
+            return Some(CommandKind::ChooseSpell(mftr_sim::ability::SPELL_CLAIM));
         }
         // Shop (dead or in the fountain): the next affordable step of the build path.
         if can_shop(me, world.map(), &world.rules()) {
@@ -239,10 +258,18 @@ impl Bot {
             return self.go_to(CommandKind::Attack(target.id));
         }
 
+        // The jungler: the nearest standing (or soon spawning) camp on our side of the river.
+        if jungler && let Some(kind) = self.jungle(world, me, t, cautious) {
+            return kind;
+        }
+
         // Push with the wave in our lane: just behind the frontmost allied minion, out of unsafe
         // turret range. Progress is measured along the lane's path (lanes bend).
         let layout = &world.map().layout;
-        let lane = self.lane_of(world, team);
+        let lane = match self.role(world, team) {
+            Role::Lane(l) => l,
+            Role::Jungle => 1, // camps down: help mid
+        };
         let Some(path) = layout.lanes.get(lane).map(|l| &l[team as usize]) else {
             return self.go_to(CommandKind::AttackMove(QPoint::from_vec2(world.map().size * 0.5)));
         };
@@ -280,12 +307,77 @@ impl Bot {
         self.go_to(CommandKind::AttackMove(QPoint::from_vec2(goal)))
     }
 
-    /// This bot's lane: by its rank among its team's champions, one top, two mid, two bottom
-    /// (lane 0 on single-lane maps).
-    fn lane_of(&self, world: &World, team: Team) -> usize {
-        let n = world.map().layout.lanes.len();
+    /// Clear the nearest camp on our side that stands or spawns within `JUNGLE_WAIT`: wait by
+    /// it, hit its weakest monster (abilities too), finish a big one with Claim. None when no
+    /// camp of ours is up or due (or we're cautious): the bot plays mid meanwhile. Some(None):
+    /// keep doing what it's doing.
+    fn jungle(&mut self, world: &World, me: &Unit, t: SimTime, cautious: bool) -> Option<Option<CommandKind>> {
+        let layout = &world.map().layout;
+        let st = &me.state;
+        let (home, away) = (layout.champion_spawn[me.team as usize], layout.champion_spawn[1 - me.team as usize]);
+        let game = world.game();
+        let due = |i: usize| game.camps.get(i).is_some_and(|&at| at.0 == 0 || at.0 <= t.plus(JUNGLE_WAIT).0);
+        let camp = layout
+            .camps
+            .iter()
+            .enumerate()
+            .filter(|(i, c)| due(*i) && c.pos.distance(home) < c.pos.distance(away))
+            .min_by(|a, b| a.1.pos.distance(st.pos).total_cmp(&b.1.pos.distance(st.pos)))?;
+        if cautious {
+            return None;
+        }
+        Some(self.clear(world, me, t, camp.0 as u8, camp.1))
+    }
+
+    fn clear(&mut self, world: &World, me: &Unit, t: SimTime, index: u8, camp: &Camp) -> Option<CommandKind> {
+        let st = &me.state;
+        let monsters: Vec<&Unit> = world
+            .units()
+            .iter()
+            .filter(|u| u.state.alive() && matches!(u.brain, Some(Brain::Monster { camp, .. }) if camp == index))
+            .collect();
+        let Some(target) = monsters.iter().min_by(|a, b| a.state.health.total_cmp(&b.state.health)) else {
+            return self.go_to(CommandKind::MoveTo(QPoint::from_vec2(camp.pos)));
+        };
+        let d = target.state.pos.distance(st.pos);
+        if d > 1200.0 || world.hidden(me.team).contains(&target.id) {
+            return self.go_to(CommandKind::MoveTo(QPoint::from_vec2(camp.pos)));
+        }
+        // Claim a big monster in reach once Claim would finish it.
+        if let (Some(m), Some(mftr_sim::ability::Effect::Claim(c))) = (target.monster, me.ability(5).map(|a| a.effect))
+            && m.def().big
+            && st.can_cast(t, 5)
+            && d <= c.range
+        {
+            let power = if st.progress.camps >= mftr_sim::jungle::CLAIM_UPGRADE_CAMPS { c.upgraded } else { c.damage };
+            if target.state.health <= power {
+                return Some(cast(5, target.state.pos));
+            }
+        }
+        let champ = me.champion?;
+        let shots: Vec<u8> = (0..4u8)
+            .filter(|s| st.can_cast(t, *s))
+            .filter(|s| match champ.ability(*s).map(|a| a.effect) {
+                Some(Effect::Line(l)) => d <= l.range * 0.9,
+                Some(Effect::Area(a)) if a.range == 0.0 => d <= a.radius * 0.8,
+                Some(Effect::Area(a)) => d <= a.range,
+                _ => false,
+            })
+            .collect();
+        if !shots.is_empty() && self.rng.next_f32() < 0.4 {
+            let slot = shots[self.rng.next_u32() as usize % shots.len()];
+            return Some(cast(slot, target.state.pos));
+        }
+        self.go_to(CommandKind::Attack(target.id))
+    }
+
+    /// This bot's role: by its rank among its team's champions, top, mid, bottom, bottom and
+    /// the jungle (mid where the map has none; lane 0 on single-lane maps).
+    fn role(&self, world: &World, team: Team) -> Role {
+        let layout = &world.map().layout;
+        let n = layout.lanes.len();
         if n < 2 {
-            return 0;
+            return Role::Lane(0);
         }
         let mut mates: Vec<u8> = world
             .units()
@@ -295,7 +387,10 @@ impl Bot {
             .collect();
         mates.sort();
         let rank = mates.iter().position(|p| *p == self.player.0).unwrap_or(0);
-        [0, 1, 2, 2, 1][rank % 5].min(n - 1)
+        match rank % 5 {
+            4 if !layout.camps.is_empty() => Role::Jungle,
+            r => Role::Lane([0, 1, 2, 2, 1][r].min(n - 1)),
+        }
     }
 
     /// An enemy turret covers `p`, fewer than two allied minions are there to take its shots,

@@ -61,6 +61,8 @@ impl MapId {
 
 /// Grid cell size for navigation.
 pub const NAV_CELL: f32 = 25.0;
+/// Bucket size of the wall-edge index (sight and clearance tests).
+pub const EDGE_CELL: f32 = 500.0;
 /// Paths keep this clearance from walls (the champion collision radius).
 pub const NAV_CLEARANCE: f32 = 35.0;
 /// Extent of the M1 arena (0..MAP_SIZE on both axes), and of the open plane's nav grid.
@@ -103,6 +105,8 @@ pub struct Layout {
     pub plating: bool,
     /// Structures have backdoor protection (`lane::BACKDOOR_RANGE`).
     pub backdoor: bool,
+    /// Jungle camps (01 §7).
+    pub camps: Vec<crate::jungle::Camp>,
 }
 
 #[derive(Clone, Debug)]
@@ -119,6 +123,11 @@ pub struct Map {
     /// Lanes, structures and spawn points (empty on sandbox maps).
     pub layout: Layout,
     edges: Vec<(Vec2, Vec2)>,
+    /// The edges by `EDGE_CELL` buckets over the map (edges past it in the border buckets):
+    /// sight and clearance tests only look at the buckets a segment crosses.
+    edge_cells: Vec<Vec<u32>>,
+    edge_cols: usize,
+    edge_rows: usize,
     grid_w: usize,
     grid_h: usize,
     blocked: Vec<bool>,
@@ -144,7 +153,31 @@ impl Map {
         let grid_w = (size.x / NAV_CELL).ceil() as usize;
         let grid_h = (size.y / NAV_CELL).ceil() as usize;
         let layout = Layout::default();
-        let mut map = Map { id, walls, brush, bounded, size, layout, edges, grid_w, grid_h, blocked: Vec::new() };
+        let (edge_cols, edge_rows) =
+            ((size.x / EDGE_CELL).ceil().max(1.0) as usize, (size.y / EDGE_CELL).ceil().max(1.0) as usize);
+        let mut map = Map {
+            id,
+            walls,
+            brush,
+            bounded,
+            size,
+            layout,
+            edges,
+            edge_cells: vec![Vec::new(); edge_cols * edge_rows],
+            edge_cols,
+            edge_rows,
+            grid_w,
+            grid_h,
+            blocked: Vec::new(),
+        };
+        for (i, &(a, b)) in map.edges.iter().enumerate() {
+            let (c0, c1, r0, r1) = map.edge_span(a.min(b), a.max(b));
+            for r in r0..=r1 {
+                for c in c0..=c1 {
+                    map.edge_cells[r * edge_cols + c].push(i as u32);
+                }
+            }
+        }
         map.blocked = (0..grid_w * grid_h).map(|i| !map.walkable(map.cell_center(i), NAV_CLEARANCE)).collect();
         map
     }
@@ -159,7 +192,8 @@ impl Map {
         if self.walls.iter().any(|w| point_in_polygon(p, w)) {
             return false;
         }
-        self.edges.iter().all(|&(a, b)| dist_point_segment(p, a, b) >= radius)
+        let pad = Vec2::new(radius, radius);
+        self.edges_near(p - pad, p + pad).all(|(a, b)| dist_point_segment(p, a, b) >= radius)
     }
 
     /// A circle of `radius` at `p` lies inside the playable area (blinks never leave it).
@@ -171,12 +205,32 @@ impl Map {
 
     /// Line of sight between two points: no wall edge crossed (vision, 03 §10).
     pub fn line_of_sight(&self, a: Vec2, b: Vec2) -> bool {
-        !self.edges.iter().any(|&(p, q)| segments_intersect(a, b, p, q))
+        !self.edges_near(a.min(b), a.max(b)).any(|(p, q)| segments_intersect(a, b, p, q))
     }
 
     /// A straight move from `a` to `b` keeps `clearance` from every wall.
     pub fn segment_clear(&self, a: Vec2, b: Vec2, clearance: f32) -> bool {
-        self.line_of_sight(a, b) && self.edges.iter().all(|&(p, q)| dist_segment_segment(a, b, p, q) >= clearance)
+        let pad = Vec2::new(clearance, clearance);
+        self.line_of_sight(a, b)
+            && self
+                .edges_near(a.min(b) - pad, a.max(b) + pad)
+                .all(|(p, q)| dist_segment_segment(a, b, p, q) >= clearance)
+    }
+
+    /// The edge buckets (column and row ranges, inclusive) a box from `lo` to `hi` touches,
+    /// clamped to the grid.
+    fn edge_span(&self, lo: Vec2, hi: Vec2) -> (usize, usize, usize, usize) {
+        let cell = |v: f32, n: usize| ((v / EDGE_CELL).floor().max(0.0) as usize).min(n - 1);
+        (cell(lo.x, self.edge_cols), cell(hi.x, self.edge_cols), cell(lo.y, self.edge_rows), cell(hi.y, self.edge_rows))
+    }
+
+    /// Every edge in the buckets a box from `lo` to `hi` touches (an edge may come more than
+    /// once: callers only ask whether any or all pass a test).
+    fn edges_near(&self, lo: Vec2, hi: Vec2) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
+        let (c0, c1, r0, r1) = self.edge_span(lo, hi);
+        (r0..=r1)
+            .flat_map(move |r| (c0..=c1).map(move |c| r * self.edge_cols + c))
+            .flat_map(move |i| self.edge_cells[i].iter().map(move |&e| self.edges[e as usize]))
     }
 
     /// Index of the brush polygon containing `p`, if any.
@@ -500,6 +554,7 @@ fn bridge() -> Map {
         river: Vec::new(),
         plating: false,
         backdoor: false,
+        camps: Vec::new(),
     };
     map
 }
@@ -576,15 +631,61 @@ fn crossroads() -> Map {
     };
     let c = |pts: &[(f32, f32)]| -> Vec<Vec2> { pts.iter().map(|&(u, v)| uv(u, v)).collect() };
     let block = |pts: &[(f32, f32)]| roughen(chamfer(c(pts), 260.0));
+    // Three blocks have a clearing cut into them for a camp (01 §7): the buff camp opens onto
+    // the path to the river, the lone monster onto the river, the pack onto the path again.
     let jungle = vec![
         // The base wall, between the top lane and mid.
         block(&[(3250.0, 700.0), (5450.0, 700.0), (5450.0, 2900.0)]),
-        block(&[(5950.0, 700.0), (7750.0, 700.0), (7750.0, 2950.0), (5950.0, 2950.0)]),
+        block(&[
+            (5950.0, 700.0),
+            (7750.0, 700.0),
+            (7750.0, 2950.0),
+            (7200.0, 2950.0),
+            (7200.0, 2350.0),
+            (6500.0, 2350.0),
+            (6500.0, 2950.0),
+            (5950.0, 2950.0),
+        ]),
         block(&[(6000.0, 3450.0), (7750.0, 3450.0), (7750.0, 5200.0)]),
         // By the river.
-        block(&[(8250.0, 700.0), (9700.0, 700.0), (9700.0, 2950.0), (8250.0, 2950.0)]),
-        block(&[(8250.0, 3450.0), (9700.0, 3450.0), (9700.0, 7150.0), (8250.0, 5700.0)]),
+        block(&[
+            (8250.0, 700.0),
+            (9700.0, 700.0),
+            (9700.0, 1500.0),
+            (9100.0, 1500.0),
+            (9100.0, 2200.0),
+            (9700.0, 2200.0),
+            (9700.0, 2950.0),
+            (8250.0, 2950.0),
+        ]),
+        block(&[
+            (8250.0, 3450.0),
+            (8500.0, 3450.0),
+            (8500.0, 4050.0),
+            (9200.0, 4050.0),
+            (9200.0, 3450.0),
+            (9700.0, 3450.0),
+            (9700.0, 7150.0),
+            (8250.0, 5700.0),
+        ]),
     ];
+    // The camps in those clearings, facing out of them; the bottom side has the other buff and
+    // the other two small camps in the same spots, and red's sides are the half turn of blue's.
+    use crate::jungle::{Camp, CampKind};
+    let top_camps = [
+        (CampKind::Warden, CampKind::Brute, (6850.0, 2650.0), (0.0, 1.0)),
+        (CampKind::Toad, CampKind::Crawlers, (9400.0, 1850.0), (1.0, 0.0)),
+        (CampKind::Hounds, CampKind::Ravens, (8850.0, 3700.0), (0.0, -1.0)),
+    ];
+    let mut camps = Vec::new();
+    for (top, bottom, (u, v), (du, dv)) in top_camps {
+        let (pos, ahead) = (uv(u, v), uv(u + du, v + dv));
+        for (kind, pos, ahead) in [(top, pos, ahead), (bottom, crossroads_flip(pos), crossroads_flip(ahead))] {
+            for (p, a) in [(pos, ahead), (crossroads_turn(pos), crossroads_turn(ahead))] {
+                camps.push(Camp { kind, pos: p, facing: (a - p).normalize_or_zero() });
+            }
+        }
+    }
     // Brush: beside the top lane (twice), at the mid mouth of the first jungle path, in the
     // river by the path's mouth there, and up the second path from mid.
     let tall_grass = vec![
@@ -664,6 +765,7 @@ fn crossroads() -> Map {
         river: vec![Vec2::new(-1000.0, -1000.0), CROSSROADS_SIZE + Vec2::new(1000.0, 1000.0)],
         plating: true,
         backdoor: true,
+        camps,
     };
     map
 }
@@ -862,6 +964,14 @@ mod tests {
         let path = m.find_path(blue, red);
         let pathed = t.elapsed();
         assert!(path.last().is_some_and(|&p| p.distance(red) < 1.0), "{path:?}");
+        // Twelve camps, each standing in the open with its half-turn twin, two of each buff.
+        assert_eq!(l.camps.len(), 12);
+        for c in &l.camps {
+            assert!(l.camps.iter().any(|d| d.kind == c.kind && (d.pos - (CROSSROADS_SIZE - c.pos)).length() < 0.1));
+            for (kind, p) in c.spots() {
+                assert!(m.walkable(p, kind.def().radius.0 + 10.0), "{c:?}: {kind:?} at {p:?}");
+            }
+        }
         // Across the jungles: from blue's top-side jungle to red's, and to blue's bottom side.
         let k = std::f32::consts::FRAC_1_SQRT_2;
         let uv = |u: f32, v: f32| crossroads_point((u - v) * k, (u + v) * k);

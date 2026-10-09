@@ -234,6 +234,8 @@ pub struct MatchState {
     pub aggression: Vec<(UnitId, UnitId, SimTime)>,
     /// Set once a Base falls.
     pub winner: Option<(Team, SimTime)>,
+    /// Per jungle camp (`Layout::camps`): when it spawns next, or 0 while it stands.
+    pub camps: Vec<SimTime>,
 }
 
 impl MatchState {
@@ -253,6 +255,10 @@ impl MatchState {
                 h.write_u8(1 + team as u8);
                 h.write_u64(at.0);
             }
+        }
+        // Maps without a jungle hash as before.
+        for t in &self.camps {
+            h.write_u64(t.0);
         }
     }
 
@@ -375,8 +381,9 @@ pub fn update_structure_amp(units: &mut [Unit], secs: f32, backdoor: bool) {
     }
 }
 
+/// Lane minions and turrets fight the other team, never jungle monsters.
 fn enemy_valid(me: &Unit, s: &Seen, hidden: &[UnitId]) -> bool {
-    s.team != me.team && s.targetable && hidden.binary_search(&s.id).is_err()
+    s.team != me.team && s.kind != UnitKind::Monster && s.targetable && hidden.binary_search(&s.id).is_err()
 }
 
 /// The champion that recently attacked one of `team`'s champions inside `area` (center, radius),

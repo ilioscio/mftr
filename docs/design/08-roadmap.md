@@ -692,7 +692,27 @@ With A14 every champion in the roster has a model, clips, effects and sounds.
 - **Turret plating:** Crossroads' outer turrets carry 5 plates until 14:00. One breaks with each 20% of health lost, paying 125 gold split among the enemy champions near the turret. Plates show as segments and pips on the turret's health bar.
 - **Backdoor protection:** on Crossroads, a structure takes a third of champions' damage while none of their minions are within 1,000 u.
 - Both are map settings (`Layout::plating`, `Layout::backdoor`), so The Bridge plays as before; state hashes are unchanged for anything without plates or a recall.
-- Bot matches on Crossroads end in 17–44 minutes, with replays exact. Red wins 4 of 5 seeds, on The Bridge as well as Crossroads: the bots' fixed champion split (blue gets the even-numbered champions) is the likely cause, not the map.
+- Bot matches on Crossroads end in 17–44 minutes, with replays exact.
+
+### M4 slice 3 status (2026-10-09): ✅ done
+- **The jungle** (`jungle.rs`):
+  - Twelve camps on Crossroads, in clearings cut into the jungle blocks: the Azure Warden and Ember Brute buff camps, Thicket Hounds, Bog Toad, Ravenhawks and Stone Crawlers.
+  - Camps spawn at 1:30 and respawn on timers (buffs 5:00, others 2:15).
+  - Monsters are on a new **neutral team** (protocol 19: team takes 2 bits). A hit turns the whole camp on the attacker; it leashes 800 u from home and heals on the way back. Lane minions and turrets ignore monsters.
+  - The killing blow takes the gold and experience. The Warden gives **Insight** (+20 ability haste) and the Brute **Cinder** (true-damage burn and a slow on basic attacks), each for 2:00; killing a buff holder takes the buff.
+- **Claim:** an F spell chosen in the shop while in the fountain.
+  - 600 true damage to the monster or enemy minion nearest the cursor, 900 after 5 big monsters, and a 100 heal on monsters.
+  - The Tab breakdown shows each champion's F spell.
+- **Bots:** each team's fifth bot jungles. It takes Claim, waits at a camp due within 25 s on its side, clears it (Claim finishes big monsters), and plays mid while its camps are down. In 3 seeds, each team's jungler killed 46–116 monsters a match.
+- **Client:**
+  - Placeholder monsters: a faceted body in the camp's colors with horns on the guardians, a gold ring and a gold health bar, shown as gold dots on the minimap.
+  - A Claim glyph and tooltip, the F-spell switch in the shop, and Insight and Cinder timers above the health bar.
+  - `--shot-goto X,Y` walks the champion for captures.
+- **Performance:** wall edges are now indexed in 500 u buckets, so sight, clearance and walkability checks look only at nearby walls (results identical, golden hashes unchanged).
+  - Crossroads builds in 49 ms instead of 145 ms.
+  - The client's fog of war on Crossroads went from 12 to 104 fps once waves were out.
+- **Not yet:** monster models, camp respawn timers on the minimap, monsters that scale with match time, and bots that gank or invade.
+ Red wins 4 of 5 seeds, on The Bridge as well as Crossroads: the bots' fixed champion split (blue gets the even-numbered champions) is the likely cause, not the map.
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.

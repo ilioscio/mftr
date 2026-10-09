@@ -194,7 +194,22 @@ pub enum Effect {
     Shield(Shield),
     Support(Support),
     Lunge(Lunge),
+    /// True damage to the monster or enemy minion nearest the cursor (Claim).
+    Claim(Claim),
 }
+
+/// Claim (the jungler's utility spell, Smite-like): true damage to the monster or enemy minion
+/// closest to the cursor, within `range` of the caster and [`CLAIM_PICK`] of the cursor.
+/// `upgraded` once the caster has taken enough big monsters (`jungle::CLAIM_UPGRADE_CAMPS`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Claim {
+    pub range: f32,
+    pub damage: f32,
+    pub upgraded: f32,
+}
+
+/// How far from the cursor Claim looks for its target.
+pub const CLAIM_PICK: f32 = 250.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ability {
@@ -268,7 +283,9 @@ impl Ability {
             }
             Effect::Line(_) | Effect::Area(_) => Timing { follow_through: ms(200), ..Timing::NONE },
             Effect::Dash(_) | Effect::Lunge(_) => Timing { follow_through: ms(80), ..Timing::NONE },
-            Effect::Blink(_) | Effect::Shield(_) | Effect::Support(_) => Timing { mobile: true, ..Timing::NONE },
+            Effect::Blink(_) | Effect::Shield(_) | Effect::Support(_) | Effect::Claim(_) => {
+                Timing { mobile: true, ..Timing::NONE }
+            }
         }
     }
 }
@@ -313,6 +330,20 @@ pub const BARRIER: Ability = Ability {
     per_rank: RankScaling::NONE,
     transforms: Transforms::NONE,
 };
+
+/// Claim (01 §10): the utility spell junglers take in Barrier's place.
+pub const CLAIM: Ability = Ability {
+    name: "Claim",
+    cooldown: SimDuration::from_millis(15_000),
+    effect: Effect::Claim(Claim { range: 500.0, damage: 600.0, upgraded: 900.0 }),
+    reaction: ReactionClass::None,
+    per_rank: RankScaling::NONE,
+    transforms: Transforms::NONE,
+};
+
+/// The F-slot utility spells a champion can take (`Progress::spell_f`).
+pub const SPELL_BARRIER: u8 = 0;
+pub const SPELL_CLAIM: u8 = 1;
 
 /// The dodge-rig turret's shot (03 §14): a line missile timed like a hard-CC skillshot, on a
 /// steady cadence. It neither damages nor stuns: a hit shows the impact flash and counts in

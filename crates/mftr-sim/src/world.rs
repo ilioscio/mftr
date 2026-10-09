@@ -44,6 +44,8 @@ pub struct UnitId(pub u32);
 pub enum Team {
     Blue,
     Red,
+    /// Jungle monsters: hostile to both teams.
+    Neutral,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -60,6 +62,8 @@ pub enum UnitKind {
     Base,
     /// Health relic: walk over it to heal; respawns on a timer.
     Relic,
+    /// A jungle monster (team Neutral, 01 §7).
+    Monster,
 }
 
 impl UnitKind {
@@ -81,6 +85,7 @@ impl UnitKind {
             4 => UnitKind::Gatehouse,
             5 => UnitKind::Base,
             6 => UnitKind::Relic,
+            7 => UnitKind::Monster,
             _ => return None,
         })
     }
@@ -222,6 +227,13 @@ pub struct Progress {
     pub deaths: u16,
     pub assists: u16,
     pub cs: u16,
+    /// The F utility spell (`ability::SPELL_BARRIER` or `SPELL_CLAIM`).
+    pub spell_f: u8,
+    /// Big jungle monsters taken (Claim's upgrade).
+    pub camps: u8,
+    /// Jungle buffs: Insight and Cinder until these instants (0 = none).
+    pub insight_until: SimTime,
+    pub cinder_until: SimTime,
 }
 
 /// One buy or sell: the inventory before it and the gold it changed.
@@ -270,6 +282,10 @@ impl Progress {
         deaths: 0,
         assists: 0,
         cs: 0,
+        spell_f: 0,
+        camps: 0,
+        insight_until: SimTime(0),
+        cinder_until: SimTime(0),
     };
 
     pub fn hash_into(&self, h: &mut impl StateSink) {
@@ -322,6 +338,20 @@ impl Progress {
         for n in [self.kills, self.deaths, self.assists, self.cs] {
             h.write_u32(n as u32);
         }
+        // Without jungle state, the hash is what it was before the jungle.
+        if self.spell_f != 0 || self.camps != 0 || self.insight_until.0 != 0 || self.cinder_until.0 != 0 {
+            h.write_u8(self.spell_f);
+            h.write_u8(self.camps);
+            h.write_u64(self.insight_until.0);
+            h.write_u64(self.cinder_until.0);
+        }
+    }
+
+    /// The F slot's spell when it isn't the champion's own (Barrier): an augment's spell
+    /// (Mayhem), else Claim if taken.
+    pub fn f_spell(&self) -> Option<Ability> {
+        augments::spell(&self.augments)
+            .or((self.spell_f == crate::ability::SPELL_CLAIM).then_some(crate::ability::CLAIM))
     }
 
     /// What a champion's stats are computed from.
@@ -332,6 +362,7 @@ impl Progress {
             chaos_done: self.takedowns >= augments::CHAOS_TAKEDOWNS,
             hyper: self.hyper,
             anvil: self.anvil,
+            insight: self.insight_until.0 != 0,
         };
         (self.level, self.items, self.augments, growth)
     }
@@ -905,6 +936,9 @@ pub enum Brain {
     /// Lane turret (01 §3): keeps its target while valid; `heat` counts consecutive shots at
     /// champions (each one hits harder) until it cools at `cools_at`.
     Tower { heat: u8, cools_at: SimTime },
+    /// Jungle monster: stands at `home` until its camp (`Layout::camps` index) is attacked
+    /// (`jungle::monster_think`).
+    Monster { camp: u8, home: QPoint },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -933,6 +967,8 @@ pub struct Unit {
     pub lane: u8,
     /// Turret plates left (`lane::PLATES`; outer turrets on maps with plating, until 14:00).
     pub plates: u8,
+    /// A jungle monster's kind.
+    pub monster: Option<crate::jungle::MonsterKind>,
     /// Damage from champions is multiplied by this (structures, late in a match: D55).
     /// Recomputed every tick; 1 for everything else.
     pub champion_damage_taken: f32,
@@ -963,6 +999,7 @@ impl Unit {
             protected: false,
             lane: 0,
             plates: 0,
+            monster: None,
             champion_damage_taken: 1.0,
             stats_for: (1, [0; INVENTORY], [0; augments::SLOTS], augments::Growth::NONE),
         }
@@ -972,7 +1009,7 @@ impl Unit {
     pub fn ability(&self, slot: u8) -> Option<Ability> {
         if slot == 5
             && self.champion.is_some()
-            && let Some(spell) = augments::spell(&self.state.progress.augments)
+            && let Some(spell) = self.state.progress.f_spell()
         {
             return Some(spell);
         }
@@ -1061,7 +1098,13 @@ pub enum CommandKind {
     /// Channel home to the fountain (01 §12): `RECALL`, cancelled by moving, attacking,
     /// casting, using an item, stopping, crowd control or damage.
     Recall,
+    /// Take utility spell `ability::SPELL_*` in the F slot (while shopping). The spell starts
+    /// on at least `SPELL_SWAP_COOLDOWN`, so swapping never resets a cooldown.
+    ChooseSpell(u8),
 }
+
+/// Swapping the F spell puts it on at least this cooldown.
+pub const SPELL_SWAP_COOLDOWN: SimDuration = SimDuration::from_millis(15_000);
 
 /// A player command, applied at `tick` at sub-tick position `sub` (03a §3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1385,6 +1428,13 @@ enum Fired {
         cc: Cc,
         at: SimTime,
     },
+    /// Claim's true damage on its target.
+    Claim {
+        owner: UnitId,
+        target: UnitId,
+        power: f32,
+        at: SimTime,
+    },
     /// A heal and/or shield on an ally (on the caster itself it applies at once, predicted).
     Support {
         owner: UnitId,
@@ -1416,7 +1466,8 @@ pub struct World {
     /// Per team (blue, red): enemy units it can't see, which its units can't target with
     /// attack orders or attack-move. Set by the server from its vision every tick; client
     /// prediction only knows visible units anyway.
-    hidden: [Vec<UnitId>; 2],
+    /// Per team (Blue, Red, Neutral: always empty), the enemy units it can't see.
+    hidden: [Vec<UnitId>; 3],
     /// The match on a lane map (waves, aggression, winner); idle on sandbox maps.
     game: MatchState,
     rules: Rules,
@@ -1436,7 +1487,7 @@ impl World {
             struck: Vec::new(),
             prediction: false,
             events: Vec::new(),
-            hidden: [Vec::new(), Vec::new()],
+            hidden: [Vec::new(), Vec::new(), Vec::new()],
             game: MatchState::default(),
             rules: Rules::SANDBOX,
             map: MapId::Open.shared(),
@@ -1519,6 +1570,33 @@ impl World {
         id
     }
 
+    /// The map's jungle camps (server): each spawns `jungle::FIRST_SPAWN` into the match and
+    /// comes back its respawn time after its last monster dies.
+    fn update_camps(&mut self, now: SimTime) {
+        let camps = self.map.layout.camps.clone();
+        if camps.is_empty() || self.game.camps.len() != camps.len() {
+            return;
+        }
+        for (i, camp) in camps.iter().enumerate() {
+            let next = self.game.camps[i];
+            if next.0 == 0 {
+                let standing = self.units.iter().any(|u| {
+                    u.state.alive() && matches!(u.brain, Some(Brain::Monster { camp, .. }) if camp as usize == i)
+                });
+                if !standing {
+                    self.game.camps[i] = crate::jungle::respawn_at(camp.kind, now);
+                }
+            } else if next <= now {
+                for (kind, pos) in camp.spots() {
+                    let id = self.next_id();
+                    let u = crate::jungle::monster_unit(id, kind, i as u8, pos);
+                    self.units.push(u);
+                }
+                self.game.camps[i] = SimTime(0);
+            }
+        }
+    }
+
     pub fn spawn_rig_turret(&mut self, team: Team, pos: Vec2, range: u16) -> UnitId {
         let id = self.next_id();
         let mut u = Unit::new(
@@ -1564,7 +1642,9 @@ impl World {
         for p in placements {
             self.spawn_placement(p);
         }
-        self.game = MatchState { started_at: SimTime::end_of(self.tick), ..MatchState::default() };
+        let started_at = SimTime::end_of(self.tick);
+        let camps = vec![started_at.plus(crate::jungle::FIRST_SPAWN); self.map.layout.camps.len()];
+        self.game = MatchState { started_at, camps, ..MatchState::default() };
         if !self.map.layout.lanes.is_empty() {
             self.game.next_wave_at = Some(SimTime::end_of(self.tick).plus(self.map.layout.pacing.first_wave()));
         }
@@ -1725,7 +1805,7 @@ impl World {
         let prediction = self.prediction;
 
         // Phase 0: lane minions that died are gone; respawns; structure protection; waves.
-        self.units.retain(|u| u.state.alive() || !matches!(u.brain, Some(Brain::Laner { .. })));
+        self.units.retain(|u| u.state.alive() || !matches!(u.brain, Some(Brain::Laner { .. } | Brain::Monster { .. })));
         for u in self.units.iter_mut() {
             if u.state.respawn_at.is_some_and(|r| r <= s0) {
                 let mut progress = u.state.progress;
@@ -1757,6 +1837,9 @@ impl World {
         lane::update_plating(&mut self.units, secs);
         if !prediction && self.game.winner.is_none() && self.game.next_wave_at.is_some_and(|w| w <= s0) {
             self.spawn_wave();
+        }
+        if !prediction && self.game.winner.is_none() {
+            self.update_camps(s0);
         }
 
         let World {
@@ -1820,6 +1903,9 @@ impl World {
                         lane::laner_think(unit, &seen, lane, &recent, hide, map);
                     }
                     Some(Brain::Tower { .. }) => lane::tower_think(unit, &seen, &recent, hide, map),
+                    Some(Brain::Monster { .. }) if unit.state.alive() => {
+                        crate::jungle::monster_think(unit, &seen, TICK_DT, map)
+                    }
                     _ => {}
                 }
             }
@@ -1943,7 +2029,7 @@ impl World {
                 melee.push((owner, target, power, at));
                 continue;
             }
-            if matches!(f, Fired::Strike { .. } | Fired::Support { .. }) {
+            if matches!(f, Fired::Strike { .. } | Fired::Support { .. } | Fired::Claim { .. }) {
                 direct.push(f);
                 continue;
             }
@@ -1975,7 +2061,7 @@ impl World {
                         bolts.push(b);
                     }
                 }
-                Fired::Melee { .. } | Fired::Strike { .. } | Fired::Support { .. } => {}
+                Fired::Melee { .. } | Fired::Strike { .. } | Fired::Support { .. } | Fired::Claim { .. } => {}
             }
         }
         if !prediction {
@@ -1994,6 +2080,7 @@ impl World {
             resolve_direct(units, &mut direct, rng, s1, events);
             resolve_effects(units, missiles, areas, bolts, struck, rng, &start_pos, s0, s1, events);
             let had_winner = game.winner.is_some();
+            crate::jungle::aggro(units, &events[first_event..], map);
             note_outcomes(units, game, &events[first_event..], s1);
             if rules.ranked {
                 let tick_events: Vec<SimEvent> = events[first_event..].to_vec();
@@ -2008,6 +2095,12 @@ impl World {
         fountains_and_relics(units, map, prediction, s1, events);
         for u in units.iter_mut().filter(|u| u.kind == UnitKind::Champion) {
             let st = &mut u.state;
+            let p = &mut st.progress;
+            for until in [&mut p.insight_until, &mut p.cinder_until] {
+                if until.0 != 0 && *until <= s1 {
+                    *until = SimTime(0);
+                }
+            }
             if st.recalling() && st.recall_until <= s1 {
                 // Home: to the fountain's spawn point.
                 let at = st.recall_until;
@@ -2085,13 +2178,19 @@ impl World {
                     h.write_u8(heat);
                     h.write_u64(cools_at.0);
                 }
+                Some(Brain::Monster { camp, home }) => {
+                    h.write_u8(6);
+                    h.write_u8(camp);
+                    h.write_u16(home.x);
+                    h.write_u16(home.y);
+                }
             }
             // Plateless turrets (every one before plating existed) hash as before.
             if u.plates > 0 {
                 h.write_u8(0xA0 | u.plates);
             }
         }
-        for ids in &self.hidden {
+        for ids in &self.hidden[..2] {
             h.write_u32(ids.len() as u32);
             for id in ids {
                 h.write_u32(id.0);
@@ -2438,6 +2537,13 @@ fn apply_command(
             st.buffered = None;
             st.set_order(Order::Idle, map);
         }
+        CommandKind::ChooseSpell(spell) => {
+            let p = &mut st.progress;
+            if may_shop && spell <= crate::ability::SPELL_CLAIM && p.spell_f != spell {
+                p.spell_f = spell;
+                st.cooldowns[5] = st.cooldowns[5].max(t.plus(SPELL_SWAP_COOLDOWN));
+            }
+        }
         CommandKind::Recall => {
             // Champions on maps with a fountain, free to act (not casting, dashing or held).
             let home = map.layout.fountains[unit.team as usize].is_some();
@@ -2780,13 +2886,37 @@ fn try_cast(
             st.shield_until = t.plus(s.duration);
             events.push(SimEvent::Shielded { unit: id, amount: s.amount, at: t, until: st.shield_until });
         }
+        Effect::Claim(c) => {
+            // The visible monster or enemy minion closest to the cursor, in range; none, no cast.
+            let pick = ctx
+                .roster
+                .iter()
+                .filter(|r| {
+                    (r.kind == UnitKind::Monster || (r.kind == UnitKind::Minion && r.team != team))
+                        && !ctx.hidden.contains(&r.id)
+                        && (r.pos - st.pos).length() <= c.range + r.radius
+                        && (r.pos - target).length() <= crate::ability::CLAIM_PICK + r.radius
+                })
+                .min_by(|a, b| {
+                    (a.pos - target).length_sq().total_cmp(&(b.pos - target).length_sq()).then(a.id.cmp(&b.id))
+                });
+            let Some(victim) = pick else { return };
+            let power = if st.progress.camps >= crate::jungle::CLAIM_UPGRADE_CAMPS { c.upgraded } else { c.damage };
+            st.face((victim.pos - st.pos).normalize_or_zero());
+            ctx.fired.push(Fired::Claim { owner: id, target: victim.id, power, at: t });
+        }
     }
     // Instant casts (supports, shields, blinks, dashes, lunges) still tell clients a cast
     // happened, so they can animate it (and tell one dash from another, A10); `fire_at == at`
     // marks it instant.
     if matches!(
         ability.effect,
-        Effect::Support(_) | Effect::Shield(_) | Effect::Blink(_) | Effect::Dash(_) | Effect::Lunge(_)
+        Effect::Support(_)
+            | Effect::Shield(_)
+            | Effect::Blink(_)
+            | Effect::Dash(_)
+            | Effect::Lunge(_)
+            | Effect::Claim(_)
     ) {
         events.push(SimEvent::CastStarted { unit: id, slot, at: t, dir, point: target, fire_at: t, seq });
     }
@@ -2944,6 +3074,18 @@ fn on_hit(units: &mut [Unit], landed: &[(UnitId, UnitId, f32, SimTime)], events:
     for &(owner, target, dealt, at) in landed {
         let Some(o) = units.iter().find(|u| u.id == owner && u.kind == UnitKind::Champion) else { continue };
         let (passives, stats) = (items::passives(&o.state.progress.items), o.stats);
+        let cinder = (o.state.progress.cinder_until > at).then(|| crate::jungle::cinder_burn(o.state.progress.level));
+        if let Some(burn) = cinder
+            && let Some(t) = units.iter_mut().find(|u| u.id == target)
+        {
+            // Cinder: the hit burns (true damage) and slows.
+            deal_damage(t, owner, DamageOrigin::Attack, burn, DamageKind::True, at, events);
+            let st = &mut t.state;
+            if st.alive() {
+                st.slow = st.slow.max(crate::jungle::CINDER_SLOW);
+                st.slowed_until = st.slowed_until.max(at.plus(crate::jungle::CINDER_SLOW_FOR));
+            }
+        }
         if let Some((base, ap_ratio, item)) = passives.on_hit_magic
             && let Some(t) = units.iter_mut().find(|u| u.id == target)
         {
@@ -3084,7 +3226,9 @@ pub const PULL_SPEED: f32 = 1800.0;
 /// Lunge strikes and ally heals/shields, in time order (server only).
 fn resolve_direct(units: &mut [Unit], direct: &mut [Fired], rng: &mut Pcg32, s1: SimTime, events: &mut Vec<SimEvent>) {
     let at_of = |f: &Fired| match f {
-        Fired::Strike { at, owner, .. } | Fired::Support { at, owner, .. } => (*at, *owner),
+        Fired::Strike { at, owner, .. } | Fired::Support { at, owner, .. } | Fired::Claim { at, owner, .. } => {
+            (*at, *owner)
+        }
         _ => (SimTime(0), UnitId(0)),
     };
     direct.sort_by_key(at_of);
@@ -3099,6 +3243,19 @@ fn resolve_direct(units: &mut [Unit], direct: &mut [Fired], rng: &mut Pcg32, s1:
                         apply_cc(u, cc, at, p, s1, events);
                         let dealt = deal_damage(u, owner, DamageOrigin::Ability(slot), power, kind, at, events);
                         after_ability_hit(units, owner, target, dealt, at, events);
+                    }
+                }
+            }
+            Fired::Claim { owner, target, power, at } => {
+                let Some(u) = units.iter_mut().find(|u| u.id == target) else { continue };
+                let monster = u.kind == UnitKind::Monster;
+                deal_damage(u, owner, DamageOrigin::Ability(5), power, DamageKind::True, at, events);
+                // Claiming a monster heals the caster.
+                if monster && let Some(o) = units.iter_mut().find(|u| u.id == owner && u.state.alive()) {
+                    let amount = crate::jungle::CLAIM_HEAL.min(o.stats.max_health - o.state.health);
+                    if amount > 0.0 {
+                        o.state.health += amount;
+                        events.push(SimEvent::Healed { unit: owner, amount, at });
                     }
                 }
             }
@@ -3262,6 +3419,17 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
                     }
                 }
                 let gold = lane::bounty(vstreak);
+                // The jungle buffs go to the killer, with what time they had left.
+                let (insight, cinder) = (victim.state.progress.insight_until, victim.state.progress.cinder_until);
+                if let Some(u) = credit.and_then(|k| units.iter_mut().find(|u| u.id == k)) {
+                    let p = &mut u.state.progress;
+                    if insight > at {
+                        p.insight_until = p.insight_until.max(insight);
+                    }
+                    if cinder > at {
+                        p.cinder_until = p.cinder_until.max(cinder);
+                    }
+                }
                 if let Some(k) = credit {
                     pay.push((k, gold, 0, at));
                     if let Some(u) = units.iter_mut().find(|u| u.id == k) {
@@ -3294,6 +3462,25 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
                 }
                 let share = lane::shared_xp(140 + 30 * vlevel as u32, nearby.len());
                 pay.extend(nearby.iter().map(|id| (*id, 0.0, share, at)));
+            }
+            UnitKind::Monster => {
+                // The champion with the killing blow takes it all (and a buff camp's buff).
+                let Some(kind) = victim.monster else { continue };
+                let Some(k) = enemy_champ(killer) else { continue };
+                let def = kind.def();
+                pay.push((k, def.gold, def.xp, at));
+                if let Some(u) = units.iter_mut().find(|u| u.id == k) {
+                    let p = &mut u.state.progress;
+                    if def.big {
+                        p.camps = p.camps.saturating_add(1);
+                    }
+                    let until = at.plus(crate::jungle::BUFF_DURATION);
+                    match kind {
+                        crate::jungle::MonsterKind::Warden => p.insight_until = until,
+                        crate::jungle::MonsterKind::Brute => p.cinder_until = until,
+                        _ => {}
+                    }
+                }
             }
             UnitKind::Turret => {
                 let team: Vec<UnitId> =
@@ -5475,6 +5662,100 @@ mod tests {
         assert_eq!((w.unit(turret).unwrap().plates, w.unit(turret).unwrap().state.health), (0, health));
         assert_eq!(lane::plates_left(1.0, 5000.0), 1, "the last plate goes with the turret");
         assert_eq!(lane::plates_left(0.0, 5000.0), 0);
+    }
+
+    /// The jungle (01 §7): camps spawn at 1:30; hitting one monster turns its whole camp on
+    /// the attacker; Claim (in F) finishes a monster with true damage; the killer takes the gold,
+    /// experience and a buff camp's buff (Insight: +20 ability haste); the camp comes back later.
+    #[test]
+    fn jungle_camps_fight_back_pay_and_respawn() {
+        use crate::ability::SPELL_CLAIM;
+        use crate::jungle::{CampKind, MonsterKind};
+        let mut w = crossroads_world();
+        w.start_match();
+        assert!(w.game.camps.iter().all(|&t| t == w.game.started_at.plus(crate::jungle::FIRST_SPAWN)));
+        w.game.camps.iter_mut().for_each(|t| *t = SimTime(1));
+        w.step(&[]);
+        w.step(&[]);
+        let monsters = |w: &World| w.units().iter().filter(|u| u.kind == UnitKind::Monster && u.state.alive()).count();
+        assert_eq!(monsters(&w), 24, "every camp's monsters");
+        let layout = w.map().layout.clone();
+        let warden = layout.camps.iter().position(|c| c.kind == CampKind::Warden).unwrap();
+        let camp = layout.camps[warden];
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, camp.pos + camp.facing * 450.0);
+        w.unit_mut(me).unwrap().state.progress.spell_f = SPELL_CLAIM;
+        let boss =
+            w.units().iter().find(|u| u.monster == Some(MonsterKind::Warden) && u.state.pos == camp.pos).unwrap().id;
+        let k = w.tick().0 + 1;
+        w.step(&[attack(0, 1, k, boss)]);
+        run_until_quiet(&mut w, 30);
+        assert_eq!(w.unit(boss).unwrap().state.order, Order::Attack(me), "it fights back");
+        // Low enough to claim: 600 true damage.
+        w.unit_mut(boss).unwrap().state.health = 400.0;
+        let k = w.tick().0 + 1;
+        let at = QPoint::from_vec2(camp.pos);
+        w.step(&[shop(0, 2, k, CommandKind::Cast { slot: 5, target: at })]);
+        let ev = run_until_quiet(&mut w, 5);
+        assert!(ev.iter().any(|e| matches!(e, SimEvent::Died { unit, killer, .. } if *unit == boss && *killer == me)));
+        let gold: f32 = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::Reward { unit, gold, .. } if *unit == me => Some(*gold),
+                _ => None,
+            })
+            .sum();
+        assert_eq!(gold, MonsterKind::Warden.def().gold);
+        let u = w.unit(me).unwrap();
+        assert!(u.state.progress.insight_until > w.game.started_at && u.state.progress.camps == 1);
+        assert_eq!(u.stats.ability_haste, crate::jungle::INSIGHT_HASTE);
+        // Its comeback is scheduled 5 minutes after the kill (a few ticks ago).
+        let soon = SimTime::end_of(w.tick()).0 + crate::jungle::BUFF_RESPAWN.0;
+        let next = w.game.camps[warden].0;
+        assert!(next <= soon && next + crate::time::SUBTICKS_PER_SECOND >= soon, "{next} vs {soon}");
+        // Leash: hit a pack and walk away; it gives up, goes home and heals.
+        let hounds = layout.camps.iter().position(|c| c.kind == CampKind::Hounds).unwrap();
+        let pack = layout.camps[hounds];
+        let alpha = w
+            .units()
+            .iter()
+            .find(|u| u.monster == Some(MonsterKind::HoundAlpha) && u.state.pos == pack.pos)
+            .unwrap()
+            .id;
+        {
+            let u = w.unit_mut(me).unwrap();
+            u.state.pos = pack.pos + pack.facing * 500.0;
+        }
+        let k = w.tick().0 + 1;
+        w.step(&[attack(0, 3, k, alpha)]);
+        run_until_quiet(&mut w, 40);
+        let hurt = w.unit(alpha).unwrap().state.health;
+        assert!(hurt < MonsterKind::HoundAlpha.def().health, "hit");
+        let away = layout.champion_spawn[0];
+        let k = w.tick().0 + 1;
+        w.step(&[cmd(0, 4, k, 0, (away.x, away.y))]);
+        run_until_quiet(&mut w, crate::time::TICK_HZ * 12);
+        let a = w.unit(alpha).unwrap();
+        assert!(
+            a.state.pos.distance(pack.pos) < 60.0 && a.state.health == a.stats.max_health,
+            "reset: {:?}",
+            a.state.pos
+        );
+    }
+
+    /// The F spell is chosen in the fountain; a swap never shortens its cooldown.
+    #[test]
+    fn the_f_spell_is_chosen_while_shopping() {
+        use crate::ability::{SPELL_BARRIER, SPELL_CLAIM};
+        let mut w = crossroads_world();
+        let home = w.map().layout.champion_spawn[0];
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, home);
+        w.step(&[shop(0, 1, 1, CommandKind::ChooseSpell(SPELL_CLAIM))]);
+        let u = w.unit(me).unwrap();
+        assert_eq!((u.state.progress.spell_f, u.ability(5).map(|a| a.name)), (SPELL_CLAIM, Some("Claim")));
+        assert!(u.state.cooldowns[5] >= SimTime::end_of(Tick(0)).plus(SPELL_SWAP_COOLDOWN));
+        w.unit_mut(me).unwrap().state.pos = crate::map::crossroads_point(7000.0, 7000.0);
+        w.step(&[shop(0, 2, 2, CommandKind::ChooseSpell(SPELL_BARRIER))]);
+        assert_eq!(w.unit(me).unwrap().state.progress.spell_f, SPELL_CLAIM, "not out in the map");
     }
 
     fn arena_world(seed: u64) -> World {

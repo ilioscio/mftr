@@ -103,6 +103,21 @@ Gold is the only currency. It is spent at the shop while in the fountain (or any
 ### Camps
 Neutral camps in each quadrant respawn on timers. Two **buff camps** per side give the killer a temporary buff (start: one grants mana/energy regen + ability haste, the other grants on-hit slow + damage over time). Smaller camps give gold and XP.
 
+*As built on Crossroads (M4 slice 3):*
+- **Camps:** three per quadrant, twelve in all, each in a clearing cut into a jungle block.
+  - Blue's top side has the **Azure Warden** (buff), the **Bog Toad** (alone, by the river) and the **Thicket Hounds** (an alpha and two pups).
+  - The bottom side has the **Ember Brute** (buff), the **Stone Crawlers** (an elder and a young one) and the **Ravenhawks** (a matriarch and three).
+  - Red's sides mirror blue's.
+- **Timing:** camps spawn at 1:30. A buff camp returns 5:00 after its last monster dies, the others after 2:15.
+- **Behavior:** monsters belong to a neutral team that both sides can hit; lane minions and turrets ignore them.
+  - Hitting one turns its whole camp on the attacker.
+  - A camp gives up once it or its target is 800 u from home, walks back and heals 25% a second.
+- **Rewards:** the champion with the killing blow takes the monster's gold and experience (a buff camp pays 90 gold).
+  - The **Warden** grants **Insight**: +20 ability haste for 2:00.
+  - The **Brute** grants **Cinder** for 2:00: basic attacks burn for 6 + 2 per level true damage and slow 15% for 1 s.
+  - Killing a champion who holds a buff takes it with the time it had left.
+- *(start)* Tuning: a level-1 champion clears a buff camp alone in about 40 s for about half its health.
+
 ### Epic objectives (placeholder names)
 
 | Objective | Inspired by | Spawns | Reward |
@@ -158,7 +173,7 @@ Two per champion, chosen before the match. *(start)* list:
 | Name | Inspired by | Effect |
 |---|---|---|
 | Blink | Flash | Short-range instant teleport, ~400 u, long cooldown |
-| Claim | Smite | True damage to monsters/minions. Upgrades as you clear camps. Required for junglers |
+| Claim | Smite | True damage to monsters/minions. Upgrades as you clear camps. Required for junglers. *As built (M4 slice 3):* F's alternative to Barrier, chosen in the shop while in the fountain. It strikes the monster or enemy minion nearest the cursor within 500 u for 600 true damage, 900 once you've taken 5 big monsters, and heals you 100 on a monster. 15 s cooldown; a swap puts F on at least that cooldown |
 | Ignite | Ignite | True damage over time + healing reduction |
 | Mend | Heal | Heal self + ally, brief haste |
 | Barrier | Barrier | Short self shield |

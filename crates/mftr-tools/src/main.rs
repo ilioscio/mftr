@@ -115,6 +115,9 @@ fn main() {
                 m.structures_destroyed,
                 started.elapsed().as_secs_f64()
             );
+            if m.monsters_killed != [0, 0] {
+                println!("jungle monsters killed: blue {}, red {}", m.monsters_killed[0], m.monsters_killed[1]);
+            }
             for (t, team, kind, tier) in &m.falls {
                 let s = t.0 / 30;
                 println!("  {:>2}:{:02}  {team:?} {kind:?} (tier {tier})", s / 60, s % 60);

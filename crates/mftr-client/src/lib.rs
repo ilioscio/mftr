@@ -122,6 +122,8 @@ pub struct RemoteRender {
     pub champion: Option<ChampionId>,
     /// A minion's kind (which model to draw).
     pub minion: Option<mftr_sim::MinionKind>,
+    /// A jungle monster's kind.
+    pub monster: Option<mftr_sim::jungle::MonsterKind>,
     /// Held augments (indicators above the health bar).
     pub augments: [u8; mftr_sim::augments::SLOTS],
     pub gameplay_radius: f32,
@@ -607,6 +609,11 @@ impl ClientSession {
     /// Use the active of the item in inventory slot 0–5 (drink a potion). Predicted.
     pub fn use_item(&mut self, slot: u8, now: f64) -> Option<Command> {
         self.issue(CommandKind::UseItem(slot), now)
+    }
+
+    /// Take utility spell `spell` in the F slot (while shopping). Predicted.
+    pub fn choose_spell(&mut self, spell: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::ChooseSpell(spell), now)
     }
 
     /// Channel home to the fountain (B). Predicted.
@@ -1296,6 +1303,7 @@ impl ClientSession {
                     windup_slot,
                     champion: l.champion,
                     minion: l.minion,
+                    monster: l.monster,
                     augments: l.augments,
                     gameplay_radius: track.gameplay_radius(),
                     health: l.health as f32,

@@ -406,6 +406,7 @@ fn kind_text(k: CommandKind) -> String {
         CommandKind::BuyAnvil => "anvil".into(),
         CommandKind::PickAnvil(choice) => format!("pickanvil {choice}"),
         CommandKind::Recall => "recall".into(),
+        CommandKind::ChooseSpell(spell) => format!("spell {spell}"),
     }
 }
 
@@ -428,6 +429,7 @@ fn parse_kind(f: &[&str]) -> Option<CommandKind> {
         "anvil" => CommandKind::BuyAnvil,
         "pickanvil" => CommandKind::PickAnvil(n(1)? as u8),
         "recall" => CommandKind::Recall,
+        "spell" => CommandKind::ChooseSpell(n(1)? as u8),
         _ => return None,
     })
 }

@@ -340,6 +340,7 @@ impl ServerCore {
                     items: p.items,
                     augments: p.augments,
                     respawn_ds: (respawn * 10.0).ceil().min(u16::MAX as f32) as u16,
+                    spell_f: u.state.progress.spell_f,
                 })
             })
             .take(msg::MAX_SCORE_ROWS)
@@ -707,6 +708,7 @@ impl ServerCore {
                     recalling: st.recalling(),
                     plates: u.plates,
                     champion: u.champion,
+                    monster: u.monster,
                     minion: (u.kind == UnitKind::Minion)
                         .then(|| MinionKind::from_attack_range(u.attack.map_or(0.0, |a| a.range))),
                     augments: if u.champion.is_some() { st.progress.augments } else { [0; mftr_sim::augments::SLOTS] },
@@ -981,6 +983,8 @@ pub struct BotMatch {
     pub ticks: u32,
     pub champion_kills: u32,
     pub structures_destroyed: u32,
+    /// Jungle monsters killed by each team's champions (blue, red).
+    pub monsters_killed: [u32; 2],
     /// Structures that fell: when, whose, what, tier.
     pub falls: Vec<(Tick, Team, mftr_sim::UnitKind, u8)>,
     pub replay: Replay,
@@ -991,6 +995,7 @@ pub struct BotMatch {
 pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
     let mut core = ServerCore::new(ServerConfig { record: true, ..cfg }, 0.0);
     let (mut kills, mut structures) = (0, 0);
+    let mut monsters = [0u32; 2];
     let mut falls = Vec::new();
     for _ in 0..max_ticks {
         let k = core.game.world.tick().next();
@@ -1000,11 +1005,16 @@ pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
         }
         let (events, _) = core.game.step(due);
         for e in &events {
-            if let SimEvent::Died { unit, .. } = e
+            if let SimEvent::Died { unit, killer, .. } = e
                 && let Some(u) = core.game.world.unit(*unit)
             {
                 match u.kind {
                     mftr_sim::UnitKind::Champion => kills += 1,
+                    mftr_sim::UnitKind::Monster => {
+                        if let Some(k) = core.game.world.unit(*killer).filter(|k| k.team != Team::Neutral) {
+                            monsters[k.team as usize] += 1;
+                        }
+                    }
                     kind if kind.is_structure() => {
                         structures += 1;
                         falls.push((k, u.team, kind, u.tier));
@@ -1020,6 +1030,7 @@ pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
                 ticks: core.game.world.tick().0,
                 champion_kills: kills,
                 structures_destroyed: structures,
+                monsters_killed: monsters,
                 falls,
                 replay: core.game.replay(),
             };
@@ -1030,6 +1041,7 @@ pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
         ticks: core.game.world.tick().0,
         champion_kills: kills,
         structures_destroyed: structures,
+        monsters_killed: monsters,
         falls,
         replay: core.game.replay(),
     }

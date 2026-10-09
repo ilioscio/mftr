@@ -203,6 +203,12 @@ func _ready() -> void:
 			_shot_charge = true
 		elif args[i] == "--shot-recall":
 			_shot_recall = true
+		elif args[i] == "--shot-claim":
+			_shot_claim = true
+		elif args[i] == "--shot-goto" and i + 1 < args.size():
+			var xy := args[i + 1].split(",")
+			_shot_goto = Vector2(float(xy[0]), float(xy[1]))
+			i += 1
 		elif args[i] == "--shot-menu":
 			_shot_menu = true
 		elif args[i] == "--keep-points":
@@ -326,6 +332,8 @@ var _shot_tab := false                    # `--shot-tab`: hold the match breakdo
 var _shot_numbers := false                # `--shot-numbers`: sample damage numbers, for review
 var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
 var _shot_recall := false                 # `--shot-recall`: walk out, then recall 3 s before the shot
+var _shot_claim := false                 # `--shot-claim`: take Claim in F at the start
+var _shot_goto = null                     # `--shot-goto X,Y`: walk there (game units) from 2 s on
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
 var _shot_keep_points := false            # `--keep-points`: don't spend the starting points
 
@@ -368,6 +376,8 @@ func _update_shot(delta: float) -> void:
 	if not _shot_moved and _shot_timer > 1.0:
 		for slot in 0 if _shot_keep_points else 3:
 			client.level_up(slot)  # ranked modes start with points to spend
+		if _shot_claim:
+			client.choose_spell(1)
 		if _shot_shop:
 			for item in [7, 1, 3]:  # Boots, Long Knife, Vital Crystal from the fountain
 				client.buy(item)
@@ -380,6 +390,8 @@ func _update_shot(delta: float) -> void:
 		_show_click_marker(_to_world(own + inward * 600.0 - side * 500.0), OWN_COLOR)
 	elif _shot_moved and _shot_timer > 1.7 and _shot_timer - delta <= 1.7:
 		client.cast(4, own + side * 400.0)
+	elif _shot_goto != null and _shot_moved and _shot_timer > 2.0 and fmod(_shot_timer, 2.0) < delta:
+		client.move_to(_shot_goto)
 	elif _shot_recall and _shot_moved and _shot_timer > _shot_at - 3.0 and _shot_timer - delta <= _shot_at - 3.0:
 		client.recall()
 	elif _shot_charge and _shot_moved and _shot_timer > 2.0 and _shot_timer <= _shot_at:
@@ -1350,6 +1362,8 @@ func _update_remotes(delta: float) -> void:
 				b = _make_turret(team_color, u.radius)
 			elif u.minion:
 				b = _make_minion(MINION_BLUE if u.ally else MINION_RED, u.radius, u.get("minion_kind", ""))
+			elif u.kind == "monster":
+				b = _make_monster(u.get("monster", ""), u.radius)
 			else:
 				b = _make_champion(ALLY_COLOR if u.ally else ENEMY_COLOR, u.champion)
 			b.add_child(_make_windup_indicator())
@@ -1387,7 +1401,7 @@ func _update_remotes(delta: float) -> void:
 			p.y = 0.45
 		elif u.turret:
 			p.y = 1.2
-		elif u.kind in ["gatehouse", "base", "relic"]:
+		elif u.kind in ["gatehouse", "base", "relic", "monster"]:
 			p.y = 0.0
 		body.position = p
 		if u.champion != "":
@@ -1435,6 +1449,71 @@ func _update_remotes(delta: float) -> void:
 ## Minions: their pack's model (A5) in the team color, else a short capsule; either way the
 ## ground ring is the *collision* radius, so minion block is visible exactly as the simulation
 ## sees it (D11).
+## Jungle monsters' colors (01 §7): the buff camps in their buff's color, the others in the
+## jungle's own browns, greens and greys.
+const MONSTER_COLORS := {
+	"warden": Color(0.32, 0.5, 0.85), "brute": Color(0.82, 0.32, 0.14),
+	"hound_alpha": Color(0.42, 0.38, 0.34), "hound": Color(0.5, 0.46, 0.4),
+	"toad": Color(0.34, 0.52, 0.24), "raven_alpha": Color(0.32, 0.24, 0.4), "raven": Color(0.38, 0.3, 0.46),
+	"crawler_elder": Color(0.5, 0.5, 0.48), "crawler": Color(0.58, 0.57, 0.53),
+}
+const NEUTRAL_COLOR := Color(0.95, 0.75, 0.25)
+
+
+## A placeholder jungle monster (no models yet): a faceted body sized to its hitbox, a head
+## facing ahead, horns on the buff camps' guardians and ears on the hounds, a gold ring at its
+## feet. The ring and bar are the neutral gold, so any team reads it as "not a champion".
+func _make_monster(key: String, collision_radius_u: float) -> Node3D:
+	var color: Color = MONSTER_COLORS.get(key, Color(0.5, 0.45, 0.4))
+	var r := collision_radius_u * UNITS_TO_METERS
+	var root := Node3D.new()
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.roughness = 0.9
+	var body := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = r
+	sphere.height = r * 1.5
+	sphere.radial_segments = 7
+	sphere.rings = 4
+	body.mesh = sphere
+	body.position = Vector3(0, r * 0.75, 0)
+	body.material_override = mat
+	root.add_child(body)
+	var head := MeshInstance3D.new()
+	var hs := SphereMesh.new()
+	hs.radius = r * 0.45
+	hs.height = r * 0.8
+	hs.radial_segments = 6
+	hs.rings = 3
+	head.mesh = hs
+	head.position = Vector3(0, r * 1.15, r * 0.8)
+	head.material_override = mat
+	root.add_child(head)
+	if key in ["warden", "brute", "crawler_elder", "hound_alpha", "hound"]:
+		for side in [-1.0, 1.0]:
+			var horn := MeshInstance3D.new()
+			var cone := CylinderMesh.new()
+			cone.top_radius = 0.0
+			cone.bottom_radius = r * 0.12
+			cone.height = r * (0.7 if key in ["warden", "brute"] else 0.4)
+			cone.radial_segments = 4
+			horn.mesh = cone
+			horn.position = head.position + Vector3(side * r * 0.3, r * 0.4, -r * 0.05)
+			horn.rotation_degrees = Vector3(-20, 0, side * -25)
+			horn.material_override = _unshaded(color.lightened(0.45))
+			root.add_child(horn)
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.outer_radius = r
+	torus.inner_radius = r - 0.03
+	ring.mesh = torus
+	ring.position = Vector3(0, 0.02, 0)
+	ring.material_override = _unshaded(NEUTRAL_COLOR)
+	root.add_child(ring)
+	return root
+
+
 func _make_minion(color: Color, collision_radius_u: float, kind := "") -> MeshInstance3D:
 	var body := MeshInstance3D.new()
 	var capsule := CapsuleMesh.new()
@@ -2181,6 +2260,10 @@ func _draw_overlay() -> void:
 		var color := Color(0.3, 0.7, 0.95) if u.ally else Color(0.9, 0.25, 0.2)
 		var size := Vector2(110, 12) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
 		var lift := 1.25 if champ else (2.6 if structure else 0.6)
+		if u.get("neutral", false):
+			color = NEUTRAL_COLOR
+			size = Vector2(110, 9) if u.get("big", false) else Vector2(62, 6)
+			lift = float(u.radius) * UNITS_TO_METERS * 1.9 + 0.3
 		if remote_bodies[id].has_meta("prop"):
 			lift = {"turret": 7.0, "gatehouse": 5.4, "base": 6.2}.get(u.kind, 3.0)
 		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color, id, u.level if champ else 0, 100.0 if champ else 0.0)
@@ -2444,6 +2527,14 @@ func _draw_bottom_hud(font: Font) -> void:
 			overlay.draw_texture_rect(ItemIcons.icon(pot), Rect2(hb.position + Vector2(2.0 * k, -2.0 * k), Vector2(pi, pi)), false)
 		Hud.text(overlay, font, hb.position + Vector2(pi + 6.0 * k, hb.size.y / 2.0 + 5.0 * k), "%d s" % ceili(potion), roundi(12.0 * k), Color(0.6, 1.0, 0.65))
 	Hud.text(overlay, bold, hb.position + Vector2(0, hb.size.y / 2.0 + 5.0 * k), hp_text, roundi(14.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, hb.size.x)
+	# Jungle buffs: their names and seconds left, just above the health bar.
+	var bx := hb.position.x
+	for buff in [["insight", "Insight", Color(0.45, 0.68, 1.0)], ["cinder", "Cinder", Color(1.0, 0.5, 0.25)]]:
+		var left: float = own_status.get(buff[0], 0.0)
+		if left > 0.0:
+			var label := "◆ %s %d:%02d" % [buff[1], int(left) / 60, int(left) % 60]
+			Hud.text(overlay, font, Vector2(bx, hb.position.y - 5.0 * k), label, roundi(12.0 * k), buff[2])
+			bx += font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, roundi(12.0 * k)).x + 12.0 * k
 	var recall: float = own_status.get("recall", 0.0)
 	if recall > 0.0:
 		# Recalling: a channel bar above the panel, filling as home gets closer.
@@ -3267,6 +3358,7 @@ const SHOP_GAP := Vector2(10, 26)        # between build-path nodes
 var shop_panel: PanelContainer
 var shop_title: Label
 var shop_anvil: Button
+var shop_spell: Button
 var shop_inventory: HBoxContainer
 var shop_stats: Label
 var shop_undo: Button
@@ -3317,6 +3409,13 @@ func _build_shop() -> void:
 	shop_anvil.theme_type_variation = "PrimaryButton"
 	shop_anvil.pressed.connect(func(): client.buy_anvil(); _shop_refresh = 0.0)
 	top.add_child(shop_anvil)
+	# On a map with a jungle: Barrier or Claim in F.
+	shop_spell = Button.new()
+	shop_spell.focus_mode = Control.FOCUS_NONE
+	shop_spell.pressed.connect(func():
+		client.choose_spell(0 if own_status.get("spell_f", 0) == 1 else 1)
+		_shop_refresh = 0.0)
+	top.add_child(shop_spell)
 	Windows.make_movable(shop_panel, "shop", settings)
 	var body := HBoxContainer.new()
 	body.add_theme_constant_override("separation", 14)
@@ -3439,6 +3538,13 @@ func _update_shop(delta: float) -> void:
 	var open: bool = client.can_shop()
 	var gold: int = own_status.get("gold", 0)
 	shop_title.text = "Shop   ·   %d gold%s" % [gold, "" if open else "   (closed: return to your fountain, or shop while dead)"]
+	var jungle: bool = own_status.get("jungle", false)
+	shop_spell.visible = jungle
+	if jungle:
+		var claim: bool = own_status.get("spell_f", 0) == 1
+		shop_spell.text = "F: %s   ⇄   %s" % ["Claim" if claim else "Barrier", "Barrier" if claim else "Claim"]
+		shop_spell.disabled = not open
+		shop_spell.tooltip_text = "Swap your F spell. Claim (for junglers) strikes a monster or minion for true damage and heals you on monsters; Barrier shields you. A swap puts it on at least a 15 s cooldown."
 	var mayhem: bool = own_status.get("mayhem", false)
 	shop_anvil.visible = mayhem
 	if mayhem:
@@ -4576,7 +4682,7 @@ func _update_minimap(delta: float, playing: bool) -> void:
 			var u: Dictionary = remote_info[id]
 			if u.get("health", 1.0) <= 0.0:
 				continue
-			var team := "ally" if u.get("ally", false) else "enemy"
+			var team := "ally" if u.get("ally", false) else ("neutral" if u.get("neutral", false) else "enemy")
 			icons.append({"pos": u.pos, "kind": u.get("kind", ""), "team": team, "champion": u.get("champion", ""),
 				"color": CHAMPION_COLORS.get(u.get("champion", ""), Color.GRAY),
 				"face": portraits.portrait(u.get("champion", ""), "small")})

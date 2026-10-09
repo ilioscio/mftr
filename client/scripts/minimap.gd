@@ -125,8 +125,11 @@ func _draw_icons() -> void:
 	var k := size.x / BASE_WIDTH
 	for i in icons:
 		var p := to_px(i.pos)
-		var team_color: Color = {"own": Color(0.35, 0.65, 1.0), "ally": Color(0.3, 0.85, 0.8), "enemy": Color(0.95, 0.32, 0.25)}[i.team]
+		var team_color: Color = {"own": Color(0.35, 0.65, 1.0), "ally": Color(0.3, 0.85, 0.8), "enemy": Color(0.95, 0.32, 0.25), "neutral": Color(0.95, 0.75, 0.25)}[i.team]
 		match i.kind:
+			"monster":
+				_layer.draw_circle(p, maxf(2.0, 3.0 * k), Color(0.08, 0.08, 0.1))
+				_layer.draw_circle(p, maxf(1.5, 2.2 * k), team_color)
 			"minion":
 				_layer.draw_circle(p, maxf(1.6, 2.4 * k), team_color.darkened(0.15))
 			"turret":

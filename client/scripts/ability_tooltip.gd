@@ -217,6 +217,10 @@ func _describe(info: Dictionary, now: int) -> void:
 			t.append_text("Dashes toward the cursor, through units, sliding along walls.")
 		"blink":
 			t.append_text("Teleports toward the cursor, landing short of walls.")
+		"claim":
+			t.append_text("Strikes the monster or enemy minion nearest the cursor for ")
+			_damage(info.damage, now)
+			t.append_text(". On a monster it also heals you. Becomes [color=#%s]%s[/color] once you've taken %d big monsters ([color=#%s]%d[/color] so far)." % [C_NUM, _num(info.claim_upgraded, 0), info.claim_upgrade_at, C_NUM, info.claim_camps])
 		"barrier":
 			t.append_text("Shields you for ")
 			t.add_image(icon("shield"), 17, 17)

@@ -27,6 +27,16 @@ impl Vec2 {
         self.dot(self)
     }
 
+    /// Componentwise minimum.
+    pub fn min(self, o: Vec2) -> Vec2 {
+        Vec2::new(self.x.min(o.x), self.y.min(o.y))
+    }
+
+    /// Componentwise maximum.
+    pub fn max(self, o: Vec2) -> Vec2 {
+        Vec2::new(self.x.max(o.x), self.y.max(o.y))
+    }
+
     pub fn length(self) -> f32 {
         self.length_sq().sqrt()
     }
