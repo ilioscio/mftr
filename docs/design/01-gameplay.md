@@ -136,6 +136,16 @@ Epic monsters are secured with the jungler's **Claim** utility spell (Smite-equi
 - Each unit has a vision radius. **Walls and brush block line of sight.**
 - **Wards** are placeable vision sources: trinket wards (limited charges), control wards (reveal and disable enemy wards, one at a time), and support-item wards.
 - **Sweeper** trinket reveals and disables wards in an area.
+
+*As built on Crossroads (M4 slice 4):*
+- **Wards are units.** Each gives its team 900 u of vision, brush rules included. Basic attacks take them down one point at a time; abilities, minions and turrets leave them alone.
+- **Stealth ward:** 3 hits, lasts 90 s + 3 s a level, and pays 15 gold to whoever destroys it. Enemies see it only where they reveal it.
+- **Control ward:** 4 hits, pays 30 gold. It's a shop item (75 gold, 2 to a slot, used at the cursor) that stays until destroyed and can be seen. It reveals enemy stealth wards in its sight and disables them, so they give their team no vision.
+- **Limits:** a champion keeps at most 3 stealth wards and 1 control ward out; placing another removes the oldest. Wards are placed up to 600 u away.
+- **Trinkets (T):** every champion carries one, swapped in the shop while in the fountain (30 s before the new one is ready).
+  - **Warding Totem:** 2 charges, one back every 2:00, and it starts with 1.
+  - **Sweeping Lens:** reveals and disables enemy stealth wards within 450 u of its champion for 6 s, on a 90 s cooldown.
+- The Bridge (ARAM) has no wards and no trinkets.
 - Vision is computed **on the server** and only visible entities are sent to each team. Map hacks are impossible by construction (see [03](03-netcode.md#10-fog-of-war-culling)).
 
 ## 9. Champions
@@ -221,7 +231,7 @@ edges, at a speed the player sets; Esc closes settings, then the shop, then open
 | Attack-move | A + left click, or "attack-move on right-click" option |
 | Abilities | Q W E R |
 | Utility spells | D F |
-| Items / trinket | 1–6 / 4 (as built: 1–6 use an item's active, a potion) |
+| Items / trinket | 1–6 / T (as built: 1–6 use an item's active, a potion or a control ward at the cursor; T uses the trinket at the cursor) |
 | Match breakdown | Tab (hold): laid out like the reference game's, teams side by side and mirrored, kills and turrets on top; every champion's augments, spells, level, respawn timer, minions killed, K/D/A and items, all with tooltips |
 | Spectators: next champion | N |
 | Stop | S |

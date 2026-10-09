@@ -20,6 +20,7 @@ pub mod projectile;
 pub mod rng;
 pub mod time;
 pub mod vision;
+pub mod wards;
 pub mod world;
 
 pub use champion::ChampionId;

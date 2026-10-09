@@ -258,6 +258,11 @@ impl Bot {
             return self.go_to(CommandKind::Attack(target.id));
         }
 
+        // Ward brush within reach that no allied ward watches yet (maps with wards).
+        if let Some(spot) = self.ward_spot(world, me) {
+            return Some(CommandKind::UseTrinket(QPoint::from_vec2(spot)));
+        }
+
         // The jungler: the nearest standing (or soon spawning) camp on our side of the river.
         if jungler && let Some(kind) = self.jungle(world, me, t, cautious) {
             return kind;
@@ -369,6 +374,31 @@ impl Bot {
             return Some(cast(slot, target.state.pos));
         }
         self.go_to(CommandKind::Attack(target.id))
+    }
+
+    /// A brush to ward: with a totem charge, the nearest brush patch a little past placing
+    /// range (the ward lands at the range, toward it) that no allied ward watches.
+    fn ward_spot(&self, world: &World, me: &Unit) -> Option<Vec2> {
+        use mftr_sim::wards::{PLACE_RANGE, TRINKET_TOTEM, WARD_VISION};
+        let p = &me.state.progress;
+        if !world.map().layout.wards || p.trinket != TRINKET_TOTEM || p.trinket_charges == 0 {
+            return None;
+        }
+        let watched = |c: Vec2| {
+            world.units().iter().any(|u| {
+                u.kind == UnitKind::Ward
+                    && u.team == me.team
+                    && u.state.alive()
+                    && u.state.pos.distance(c) < WARD_VISION
+            })
+        };
+        world
+            .map()
+            .brush
+            .iter()
+            .map(|b| b.iter().fold(Vec2::ZERO, |s, v| s + *v) * (1.0 / b.len().max(1) as f32))
+            .filter(|c| c.distance(me.state.pos) <= PLACE_RANGE + 300.0 && !watched(*c))
+            .min_by(|a, b| a.distance(me.state.pos).total_cmp(&b.distance(me.state.pos)))
     }
 
     /// This bot's role: by its rank among its team's champions, top, mid, bottom, bottom and

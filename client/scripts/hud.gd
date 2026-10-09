@@ -27,6 +27,10 @@ const GLYPHS := {
 	"blink": '<path d="M16 46l26-26" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-dasharray="1 8" opacity=".7"/><path d="M46 6c1.5 7 3.5 9 10 10-6.5 1.5-8.5 3.5-10 10-1.5-6.5-3.5-8.5-10-10 6.5-1 8.5-3 10-10z" fill="#fff"/><path d="M16 38c1 5 2.5 6.5 7 7.5-4.5 1-6 2.5-7 7.5-1-5-2.5-6.5-7-7.5 4.5-1 6-2.5 7-7.5z" fill="#fff" opacity=".8"/>',
 	"barrier": '<path d="M32 8l20 7v14c0 13-9 22-20 27-11-5-20-14-20-27V15z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/><path d="M32 16v32" stroke="#fff" stroke-width="4" opacity=".6"/>',
 	"heal": '<path d="M26 10h12v16h16v12H38v16H26V38H10V26h16z" fill="#fff"/>',
+	# An eye on a stake: a ward.
+	"ward": '<path d="M30 36h4l2 20h-8z" fill="#fff" opacity=".8"/><path d="M10 24c6-9 14-13 22-13s16 4 22 13c-6 9-14 13-22 13s-16-4-22-13z" fill="none" stroke="#fff" stroke-width="5"/><circle cx="32" cy="24" r="7" fill="#fff"/>',
+	# A lens sweeping an arc.
+	"lens": '<circle cx="26" cy="26" r="14" fill="none" stroke="#fff" stroke-width="5"/><path d="M36 36l16 16" stroke="#fff" stroke-width="7" stroke-linecap="round"/><path d="M8 50a40 40 0 0 1 10-30" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="3 5" opacity=".7"/>',
 	# Three talons closing on a gem.
 	"claim": '<path d="M14 10c10 6 14 16 14 28M32 6c3 10 3 20 0 32M50 10c-10 6-14 16-14 28" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/><path d="M32 40l8 8-8 10-8-10z" fill="#fff"/>',
 	"shield_ally": '<path d="M32 8l20 7v14c0 13-9 22-20 27-11-5-20-14-20-27V15z" fill="#fff" opacity=".9"/><path d="M29 22h6v8h8v6h-8v8h-6v-8h-8v-6h8z" fill="#000" opacity=".55"/>',

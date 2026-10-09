@@ -127,6 +127,10 @@ func _draw_icons() -> void:
 		var p := to_px(i.pos)
 		var team_color: Color = {"own": Color(0.35, 0.65, 1.0), "ally": Color(0.3, 0.85, 0.8), "enemy": Color(0.95, 0.32, 0.25), "neutral": Color(0.95, 0.75, 0.25)}[i.team]
 		match i.kind:
+			"ward":
+				var s := maxf(2.5, 3.5 * k)
+				var d := PackedVector2Array([p + Vector2(0, -s), p + Vector2(s, 0), p + Vector2(0, s), p + Vector2(-s, 0)])
+				_layer.draw_colored_polygon(d, team_color.lightened(0.25))
 			"monster":
 				_layer.draw_circle(p, maxf(2.0, 3.0 * k), Color(0.08, 0.08, 0.1))
 				_layer.draw_circle(p, maxf(1.5, 2.2 * k), team_color)

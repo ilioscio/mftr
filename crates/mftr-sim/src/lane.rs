@@ -381,9 +381,12 @@ pub fn update_structure_amp(units: &mut [Unit], secs: f32, backdoor: bool) {
     }
 }
 
-/// Lane minions and turrets fight the other team, never jungle monsters.
+/// Lane minions and turrets fight the other team, never jungle monsters or wards.
 fn enemy_valid(me: &Unit, s: &Seen, hidden: &[UnitId]) -> bool {
-    s.team != me.team && s.kind != UnitKind::Monster && s.targetable && hidden.binary_search(&s.id).is_err()
+    s.team != me.team
+        && !matches!(s.kind, UnitKind::Monster | UnitKind::Ward)
+        && s.targetable
+        && hidden.binary_search(&s.id).is_err()
 }
 
 /// The champion that recently attacked one of `team`'s champions inside `area` (center, radius),

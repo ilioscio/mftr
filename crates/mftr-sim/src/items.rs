@@ -89,6 +89,10 @@ pub enum Active {
         charges: u8,
         refills: bool,
     },
+    /// Placed at the cursor as a control ward (01 §8); up to `charges` stack in a slot.
+    ControlWard {
+        charges: u8,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -178,8 +182,9 @@ pub const GALE_SABER: u8 = 25;
 pub const LIFELINE_TALISMAN: u8 = 26;
 pub const HEALTH_POTION: u8 = 27;
 pub const REFILLABLE_FLASK: u8 = 28;
+pub const CONTROL_WARD: u8 = 29;
 
-pub const CATALOG: [Item; 28] = [
+pub const CATALOG: [Item; 29] = [
     // Consumables (the reference game's values): a potion heals 120 over 15 s and up to 5
     // stack in a slot; the flask heals 100 over 12 s, twice, and refills at the fountain.
     Item {
@@ -190,6 +195,8 @@ pub const CATALOG: [Item; 28] = [
         active: Active::Consumable { heal: 100.0, duration_ms: 12_000, charges: 2, refills: true },
         ..item!(REFILLABLE_FLASK, "Refillable Flask", 150.0, b())
     },
+    // Vision (01 §8, maps with wards): a control ward, two to a slot.
+    Item { active: Active::ControlWard { charges: 2 }, ..item!(CONTROL_WARD, "Control Ward", 75.0, b()) },
     // Components.
     item!(LONG_KNIFE, "Long Knife", 350.0, Bonus { attack_damage: 10.0, ..b() }),
     item!(SPARK_SHARD, "Spark Shard", 435.0, Bonus { ability_power: 20.0, ..b() }),
@@ -298,8 +305,23 @@ pub fn item(id: u8) -> Option<&'static Item> {
 pub fn consumable(id: u8) -> Option<(f32, u64, u8, bool)> {
     match item(id)?.active {
         Active::Consumable { heal, duration_ms, charges, refills } => Some((heal, duration_ms, charges, refills)),
+        Active::None | Active::ControlWard { .. } => None,
+    }
+}
+
+/// Items that stack in a slot or carry charges: how many, and whether they refill (potions, a
+/// flask, control wards).
+pub fn stackable(id: u8) -> Option<(u8, bool)> {
+    match item(id)?.active {
+        Active::Consumable { charges, refills, .. } => Some((charges, refills)),
+        Active::ControlWard { charges } => Some((charges, false)),
         Active::None => None,
     }
+}
+
+/// Placed at the cursor (a control ward).
+pub fn placeable(id: u8) -> bool {
+    item(id).is_some_and(|i| matches!(i.active, Active::ControlWard { .. }))
 }
 
 pub fn price(id: u8, inventory: &[u8; INVENTORY]) -> Option<(f32, Vec<usize>)> {

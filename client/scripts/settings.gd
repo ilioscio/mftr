@@ -42,6 +42,7 @@ const BINDINGS := [
 	["attack_move", "Attack-move (then click)", "A"],
 	["stop", "Stop", "S"],
 	["recall", "Recall (8 s home)", "B"],
+	["trinket", "Trinket: ward at the cursor / sweep", "T"],
 	["toggle_shop", "Open / close the shop", "G"],
 	["camera_lock", "Lock / unlock the camera", "Y"],
 	["camera_center", "Center the camera (hold)", "Space"],

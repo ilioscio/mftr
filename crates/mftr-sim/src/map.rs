@@ -107,6 +107,8 @@ pub struct Layout {
     pub backdoor: bool,
     /// Jungle camps (01 §7).
     pub camps: Vec<crate::jungle::Camp>,
+    /// Champions carry a trinket and can place wards (01 §8).
+    pub wards: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -555,6 +557,7 @@ fn bridge() -> Map {
         plating: false,
         backdoor: false,
         camps: Vec::new(),
+        wards: false,
     };
     map
 }
@@ -766,6 +769,7 @@ fn crossroads() -> Map {
         plating: true,
         backdoor: true,
         camps,
+        wards: true,
     };
     map
 }

@@ -205,6 +205,8 @@ func _ready() -> void:
 			_shot_recall = true
 		elif args[i] == "--shot-claim":
 			_shot_claim = true
+		elif args[i] == "--shot-ward":
+			_shot_ward = true
 		elif args[i] == "--shot-goto" and i + 1 < args.size():
 			var xy := args[i + 1].split(",")
 			_shot_goto = Vector2(float(xy[0]), float(xy[1]))
@@ -333,6 +335,7 @@ var _shot_numbers := false                # `--shot-numbers`: sample damage numb
 var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
 var _shot_recall := false                 # `--shot-recall`: walk out, then recall 3 s before the shot
 var _shot_claim := false                 # `--shot-claim`: take Claim in F at the start
+var _shot_ward := false                  # `--shot-ward`: place a stealth ward ahead at 2.5 s
 var _shot_goto = null                     # `--shot-goto X,Y`: walk there (game units) from 2 s on
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
 var _shot_keep_points := false            # `--keep-points`: don't spend the starting points
@@ -390,6 +393,8 @@ func _update_shot(delta: float) -> void:
 		_show_click_marker(_to_world(own + inward * 600.0 - side * 500.0), OWN_COLOR)
 	elif _shot_moved and _shot_timer > 1.7 and _shot_timer - delta <= 1.7:
 		client.cast(4, own + side * 400.0)
+	elif _shot_ward and _shot_moved and _shot_timer > 2.5 and _shot_timer - delta <= 2.5:
+		client.use_trinket(own + inward * 450.0)
 	elif _shot_goto != null and _shot_moved and _shot_timer > 2.0 and fmod(_shot_timer, 2.0) < delta:
 		client.move_to(_shot_goto)
 	elif _shot_recall and _shot_moved and _shot_timer > _shot_at - 3.0 and _shot_timer - delta <= _shot_at - 3.0:
@@ -1129,8 +1134,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Items 1–6: their actives (a potion).
 	for slot in 6:
 		if event.is_action_pressed("item_%d" % (slot + 1), false, true):
-			client.use_item(slot)
+			var inv: Array = own_status.get("items", [])
+			var id: int = inv[slot] if slot < inv.size() else 0
+			if _catalog.get(id, {}).get("placeable", false):
+				# A control ward: at the cursor.
+				var at = _cursor_ground()
+				if at != null:
+					client.use_item_at(slot, at)
+			else:
+				client.use_item(slot)
 			return
+	if event.is_action_pressed("trinket") and own_status.get("wards", false):
+		var at = _cursor_ground()
+		if at != null:
+			client.use_trinket(at)
+		return
 	# Level-ups (default Alt + Q/W/E/R, 01 §13) before casts: both match exactly, modifiers
 	# included, so Alt+Q never also casts Q.
 	for slot in 4:
@@ -1364,6 +1382,8 @@ func _update_remotes(delta: float) -> void:
 				b = _make_minion(MINION_BLUE if u.ally else MINION_RED, u.radius, u.get("minion_kind", ""))
 			elif u.kind == "monster":
 				b = _make_monster(u.get("monster", ""), u.radius)
+			elif u.kind == "ward":
+				b = _make_ward(u.get("ward", "stealth"), ALLY_COLOR if u.ally else ENEMY_COLOR)
 			else:
 				b = _make_champion(ALLY_COLOR if u.ally else ENEMY_COLOR, u.champion)
 			b.add_child(_make_windup_indicator())
@@ -1401,7 +1421,7 @@ func _update_remotes(delta: float) -> void:
 			p.y = 0.45
 		elif u.turret:
 			p.y = 1.2
-		elif u.kind in ["gatehouse", "base", "relic", "monster"]:
+		elif u.kind in ["gatehouse", "base", "relic", "monster", "ward"]:
 			p.y = 0.0
 		body.position = p
 		if u.champion != "":
@@ -1449,6 +1469,44 @@ func _update_remotes(delta: float) -> void:
 ## Minions: their pack's model (A5) in the team color, else a short capsule; either way the
 ## ground ring is the *collision* radius, so minion block is visible exactly as the simulation
 ## sees it (D11).
+## A ward (01 §8): a stake with a glowing eye in its team's color (a stealth ward a little
+## see-through, as its own team sees it), and a pink crystal on a control ward.
+func _make_ward(kind: String, color: Color) -> Node3D:
+	var root := Node3D.new()
+	var stake := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.04
+	cyl.bottom_radius = 0.07
+	cyl.height = 0.9
+	cyl.radial_segments = 5
+	stake.mesh = cyl
+	stake.position = Vector3(0, 0.45, 0)
+	var wood := StandardMaterial3D.new()
+	wood.albedo_color = Color(0.36, 0.26, 0.17)
+	stake.material_override = wood
+	root.add_child(stake)
+	var eye := MeshInstance3D.new()
+	var gem := SphereMesh.new()
+	gem.radius = 0.16 if kind == "stealth" else 0.2
+	gem.height = gem.radius * (2.0 if kind == "stealth" else 3.0)
+	gem.radial_segments = 6
+	gem.rings = 3
+	eye.mesh = gem
+	eye.position = Vector3(0, 1.0, 0)
+	var glow := color.lerp(Color.WHITE, 0.3) if kind == "stealth" else Color(0.95, 0.35, 0.65)
+	eye.material_override = _unshaded(glow, 0.7 if kind == "stealth" else 1.0)
+	root.add_child(eye)
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.outer_radius = 0.35
+	torus.inner_radius = 0.31
+	ring.mesh = torus
+	ring.position = Vector3(0, 0.02, 0)
+	ring.material_override = _unshaded(color, 0.8)
+	root.add_child(ring)
+	return root
+
+
 ## Jungle monsters' colors (01 §7): the buff camps in their buff's color, the others in the
 ## jungle's own browns, greens and greys.
 const MONSTER_COLORS := {
@@ -2260,6 +2318,9 @@ func _draw_overlay() -> void:
 		var color := Color(0.3, 0.7, 0.95) if u.ally else Color(0.9, 0.25, 0.2)
 		var size := Vector2(110, 12) if champ else (Vector2(150, 10) if structure else Vector2(62, 6))
 		var lift := 1.25 if champ else (2.6 if structure else 0.6)
+		if u.kind == "ward":
+			size = Vector2(36, 5)
+			lift = 1.4
 		if u.get("neutral", false):
 			color = NEUTRAL_COLOR
 			size = Vector2(110, 9) if u.get("big", false) else Vector2(62, 6)
@@ -2401,6 +2462,8 @@ func _draw_bottom_hud(font: Font) -> void:
 	var port := 100.0 * k
 	var abil_w := 4.0 * A + 3.0 * G + 14.0 * k + 2.0 * S + G
 	var items_w := 3.0 * I.x + 2.0 * 5.0 * k if ranked else 0.0
+	if ranked and own_status.get("wards", false):
+		items_w += I.x + 4.0 * k  # the trinket's column
 	var w := pad + (stats_w + pad if ranked else 0.0) + port + pad + abil_w + (pad + items_w if ranked else 0.0) + pad
 	var h := 136.0 * k
 	var limit: float = minimap.position.x - 10.0 * k if minimap != null and minimap.visible else overlay.size.x
@@ -3359,6 +3422,8 @@ var shop_panel: PanelContainer
 var shop_title: Label
 var shop_anvil: Button
 var shop_spell: Button
+var shop_trinket: Button
+var _trinket_box := Rect2()
 var shop_inventory: HBoxContainer
 var shop_stats: Label
 var shop_undo: Button
@@ -3416,6 +3481,13 @@ func _build_shop() -> void:
 		client.choose_spell(0 if own_status.get("spell_f", 0) == 1 else 1)
 		_shop_refresh = 0.0)
 	top.add_child(shop_spell)
+	# On a map with wards: the Warding Totem or the Sweeping Lens.
+	shop_trinket = Button.new()
+	shop_trinket.focus_mode = Control.FOCUS_NONE
+	shop_trinket.pressed.connect(func():
+		client.choose_trinket(0 if own_status.get("trinket", 0) == 1 else 1)
+		_shop_refresh = 0.0)
+	top.add_child(shop_trinket)
 	Windows.make_movable(shop_panel, "shop", settings)
 	var body := HBoxContainer.new()
 	body.add_theme_constant_override("separation", 14)
@@ -3545,6 +3617,13 @@ func _update_shop(delta: float) -> void:
 		shop_spell.text = "F: %s   ⇄   %s" % ["Claim" if claim else "Barrier", "Barrier" if claim else "Claim"]
 		shop_spell.disabled = not open
 		shop_spell.tooltip_text = "Swap your F spell. Claim (for junglers) strikes a monster or minion for true damage and heals you on monsters; Barrier shields you. A swap puts it on at least a 15 s cooldown."
+	var wards: bool = own_status.get("wards", false)
+	shop_trinket.visible = wards
+	if wards:
+		var lens: bool = own_status.get("trinket", 0) == 1
+		shop_trinket.text = "T: %s   ⇄   %s" % ["Lens" if lens else "Totem", "Totem" if lens else "Lens"]
+		shop_trinket.disabled = not open
+		shop_trinket.tooltip_text = "Swap your trinket. The Warding Totem places stealth wards (2 charges, one back every 2 min); the Sweeping Lens reveals and disables enemy stealth wards around you for 6 s (90 s cooldown). A swap leaves the new one unready for 30 s."
 	var mayhem: bool = own_status.get("mayhem", false)
 	shop_anvil.visible = mayhem
 	if mayhem:
@@ -3813,6 +3892,23 @@ func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 		var n: int = charges[slot] if slot < charges.size() else 0
 		if id != 0 and _catalog.get(id, {}).get("consumable", false):
 			Hud.text(overlay, _bold_font(), Vector2(box.position.x, box.end.y - 3.0 * k), "%d" % n, roundi(14.0 * k), Color.WHITE if n > 0 else Color(1, 0.4, 0.35), HORIZONTAL_ALIGNMENT_RIGHT, box.size.x - 3.0 * k)
+	# The trinket (maps with wards): a seventh box right of the items.
+	if own_status.get("wards", false):
+		var tb := Rect2(origin + Vector2(3.0 * (I.x + gap) + 4.0 * k, (I.y + gap) / 2.0), I)
+		var lens: bool = own_status.get("trinket", 0) == 1
+		var charges_left: int = own_status.get("trinket_charges", 0)
+		var ready_in: float = own_status.get("trinket_ready", 0.0)
+		var usable := (ready_in <= 0.0) if lens else charges_left > 0
+		overlay.draw_rect(tb, Color(0.075, 0.085, 0.105))
+		var icon := Hud.ability_icon("lens" if lens else "ward", Color(0.75, 0.6, 0.25))
+		overlay.draw_texture_rect(icon, tb.grow(-2.0 * k), false, Color(1, 1, 1, 1.0 if usable else 0.35))
+		overlay.draw_rect(tb, Hud.GOLD if usable else Color(0.25, 0.27, 0.31), false, 1.0 * k)
+		overlay.draw_string(font, tb.position + Vector2(3.0 * k, tb.size.y - 3.0 * k), settings.primary_binding("trinket"), HORIZONTAL_ALIGNMENT_LEFT, -1, roundi(10.0 * k), Color(0.85, 0.87, 0.9, 0.8))
+		if not lens:
+			Hud.text(overlay, _bold_font(), Vector2(tb.position.x, tb.end.y - 3.0 * k), "%d" % charges_left, roundi(14.0 * k), Color.WHITE if charges_left > 0 else Color(1, 0.4, 0.35), HORIZONTAL_ALIGNMENT_RIGHT, tb.size.x - 3.0 * k)
+		if ready_in > 0.0 and (lens or charges_left == 0):
+			Hud.text(overlay, _bold_font(), tb.position + Vector2(0, tb.size.y / 2.0 + 6.0 * k), "%d" % ceili(ready_in), roundi(15.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, tb.size.x)
+		_trinket_box = tb
 	# Gold under the items.
 	var gy := origin.y + 2.0 * (I.y + gap) + 2.0 * k
 	var ic := 16.0 * k

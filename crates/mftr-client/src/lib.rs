@@ -124,6 +124,8 @@ pub struct RemoteRender {
     pub minion: Option<mftr_sim::MinionKind>,
     /// A jungle monster's kind.
     pub monster: Option<mftr_sim::jungle::MonsterKind>,
+    /// A ward's kind.
+    pub ward: Option<mftr_sim::wards::WardKind>,
     /// Held augments (indicators above the health bar).
     pub augments: [u8; mftr_sim::augments::SLOTS],
     pub gameplay_radius: f32,
@@ -614,6 +616,21 @@ impl ClientSession {
     /// Take utility spell `spell` in the F slot (while shopping). Predicted.
     pub fn choose_spell(&mut self, spell: u8, now: f64) -> Option<Command> {
         self.issue(CommandKind::ChooseSpell(spell), now)
+    }
+
+    /// Use the trinket at `at` (T): place a stealth ward, or sweep. Predicted.
+    pub fn use_trinket(&mut self, at: Vec2, now: f64) -> Option<Command> {
+        self.issue(CommandKind::UseTrinket(QPoint::from_vec2(at)), now)
+    }
+
+    /// Use the item in `slot` at `at`: place a control ward. Predicted.
+    pub fn use_item_at(&mut self, slot: u8, at: Vec2, now: f64) -> Option<Command> {
+        self.issue(CommandKind::UseItemAt { slot, target: QPoint::from_vec2(at) }, now)
+    }
+
+    /// Take trinket `trinket` (while shopping). Predicted.
+    pub fn choose_trinket(&mut self, trinket: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::ChooseTrinket(trinket), now)
     }
 
     /// Channel home to the fountain (B). Predicted.
@@ -1304,6 +1321,7 @@ impl ClientSession {
                     champion: l.champion,
                     minion: l.minion,
                     monster: l.monster,
+                    ward: l.ward,
                     augments: l.augments,
                     gameplay_radius: track.gameplay_radius(),
                     health: l.health as f32,
