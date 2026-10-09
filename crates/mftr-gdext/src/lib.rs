@@ -714,8 +714,10 @@ impl MatchClient {
     }
 
     /// The match map for drawing: `{ walls: [PackedVector2Array], brush: [PackedVector2Array],
-    /// size: Vector2, fountains: [{ center, radius, ally }] }` in game units. Valid once the
-    /// phase is "playing".
+    /// size: Vector2, fountains: [{ center, radius, ally }], roads: [PackedVector2Array],
+    /// river: PackedVector2Array }` in game units. Roads run blue to red, one per lane: on a
+    /// one-lane map from fountain to fountain and on past both (the old straight road), else
+    /// from blue's Base out its lane to red's. Valid once the phase is "playing".
     #[func]
     fn map_geometry(&self) -> VarDictionary {
         let to_arrays = |polys: &[Vec<Vec2>]| {
@@ -742,6 +744,21 @@ impl MatchClient {
             }
         }
         d.set("fountains", &fountains);
+        let layout = &map.layout;
+        let mut roads: Vec<Vec<Vec2>> = Vec::new();
+        if let ([_], [Some((a, _)), Some((b, _))]) = (layout.lanes.as_slice(), layout.fountains) {
+            let dir = (b - a).normalize_or_zero();
+            roads.push(vec![a - dir * 4000.0, b + dir * 4000.0]);
+        } else {
+            let base =
+                layout.placements.iter().find(|p| p.kind == UnitKind::Base && p.team == Team::Blue).map(|p| p.pos);
+            for (lane, spawns) in layout.lanes.iter().zip(&layout.wave_spawn) {
+                roads.push(base.into_iter().chain([spawns[0]]).chain(lane[0].iter().copied()).collect());
+            }
+        }
+        d.set("roads", &to_arrays(&roads).to_variant());
+        let river: PackedVector2Array = layout.river.iter().map(|v| Vector2::new(v.x, v.y)).collect();
+        d.set("river", &river);
         d
     }
 

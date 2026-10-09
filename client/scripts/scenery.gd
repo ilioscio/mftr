@@ -21,6 +21,7 @@ var _size := Vector2.ZERO
 var _lane_mid := Vector2.ZERO
 var _across := Vector2.ZERO
 
+var _probe_camera_side := false
 var _batches := {}                        # prop id -> [Transform3D, Color]
 var _rng := RandomNumberGenerator.new()
 
@@ -35,6 +36,9 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 	var brush: Array = geo.brush
 	var fountains: Array = geo.get("fountains", [])
 	var lane_map := fountains.size() == 2
+	# Several lanes (Crossroads): whether a spot is on the camera's side of the ground it
+	# borders is probed per spot, not taken from one lane's axis.
+	_probe_camera_side = lane_map and geo.get("roads", []).size() > 1
 	if lane_map:
 		var a: Vector2 = fountains[0].center
 		var b: Vector2 = fountains[1].center
@@ -57,7 +61,7 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 			var p := Vector2(x + _rng.randf_range(-110, 110), y + _rng.randf_range(-110, 110))
 			var edge := _edge_distance(p, walls, size)
 			if edge > 0.0:
-				_forest_at(p, edge, (p - _lane_mid).dot(_across) > 0.0, lane_map)
+				_forest_at(p, edge, _near_camera(p, edge), lane_map)
 			x += step
 		y += step
 	# Small walls (outcrops in the lane) are drawn as rock clusters (`is_outcrop`).
@@ -124,6 +128,17 @@ func _forest_at(p: Vector2, edge: float, near_camera: bool, lane_map: bool) -> v
 		_add(id, p, _rng.randf_range(0.85, 1.35))
 	elif _rng.randf() < 0.5:
 		_add(["rock_1", "rock_3"][_rng.randi() % 2], p, _rng.randf_range(1.0, 1.8))
+
+
+## Whether `p` (unwalkable, `edge` from walkable ground) stands between the camera and the
+## ground it borders: that ground lies up-screen of it (the camera looks up the screen). The
+## probe reaches 1.5 × `edge` up, so ground beyond a diagonal edge (√2 × `edge`) counts.
+func _near_camera(p: Vector2, edge: float) -> bool:
+	if not _probe_camera_side:
+		return (p - _lane_mid).dot(_across) > 0.0
+	if edge >= 520.0:
+		return false
+	return _edge_distance(p + Vector2(0, -(edge * 1.5 + 80.0)), _walls, _size) == 0.0
 
 
 ## A wall small enough to be a boulder in the field rather than a cliff (the client draws it

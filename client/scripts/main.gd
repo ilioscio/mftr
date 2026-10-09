@@ -148,6 +148,9 @@ func _ready() -> void:
 		elif args[i] == "--blind-seconds" and i + 1 < args.size():
 			blind_seconds = float(args[i + 1])
 			i += 1
+		elif args[i] == "--dump-terrain" and i + 1 < args.size():
+			_dump_terrain = args[i + 1]
+			i += 1
 		elif args[i] == "--zoom" and i + 1 < args.size():
 			camera_zoom = maxf(0.05, float(args[i + 1]))
 			i += 1
@@ -1317,7 +1320,13 @@ func _update_remotes(delta: float) -> void:
 			if not body.has_meta("faced"):
 				# Face down the lane, toward the enemy's side of the map.
 				var dir := Vector2(1, 0)
-				if _lane_axis.size() == 2:
+				if _road_segments.size() > 1:
+					# Several lanes: along the nearest road, away from its own fountain.
+					dir = _road_direction(u.pos)
+					for f in client.map_geometry().fountains:
+						if f.ally == u.ally and dir.dot(u.pos - f.center) < 0.0:
+							dir = -dir
+				elif _lane_axis.size() == 2:
 					dir = _lane_axis[1]
 					var half: float = (client.map_geometry().size / 2.0 - _lane_axis[0]).dot(dir)
 					if (u.pos - _lane_axis[0]).dot(dir) > half:
@@ -1405,6 +1414,7 @@ func _make_minion(color: Color, collision_radius_u: float, kind := "") -> MeshIn
 ## announced. The same polygons drive collision, pathing and vision in the simulation.
 var _map_built := false
 var _lane_axis := []                      # a lane map's [blue fountain, unit direction to red's]
+var _road_segments := PackedVector4Array()  # its roads (blue to red) as segments, in meters
 
 
 ## The ground covers the map and the scenery around it (`margin_u` past every edge).
@@ -1440,14 +1450,20 @@ func _build_map() -> void:
 	for c in dressing.get_children():
 		c.layers = MAP_LAYERS
 	if geo.fountains.size() == 2:
-		# A lane map: the road runs from one fountain to the other, at whatever angle.
+		# A lane map: roads down its lanes (one from fountain to fountain on The Bridge), and
+		# the river if it has one.
 		var a: Vector2 = geo.fountains[0].center
 		var b: Vector2 = geo.fountains[1].center
 		var gm: ShaderMaterial = ground.material_override
 		gm.set_shader_parameter("lane_mode", 1.0)
-		gm.set_shader_parameter("lane_origin", (a + b) / 2.0 * UNITS_TO_METERS)
-		gm.set_shader_parameter("lane_dir", (b - a).normalized())
-		gm.set_shader_parameter("lane_width", 13.0)
+		var roads: Array = geo.get("roads", [])
+		_road_segments = _segments(roads)
+		gm.set_shader_parameter("roads", _road_segments)
+		gm.set_shader_parameter("road_count", _road_segments.size())
+		gm.set_shader_parameter("lane_width", 13.0 if roads.size() <= 1 else 9.5)
+		var river := _segments([geo.get("river", PackedVector2Array())])
+		gm.set_shader_parameter("river", river)
+		gm.set_shader_parameter("river_count", river.size())
 		_lane_axis = [a, (b - a).normalized()]
 	for f in geo.fountains:
 		# The spawn platform (a prop the size of the fountain's circle), else a tinted disk.
@@ -4364,6 +4380,35 @@ var _icon_refresh := 0.0
 ## one top-down render sees only that, never units or structures (those are icons).
 const MAP_LAYERS := 3
 var _terrain_pending := false
+var _dump_terrain := ""                   # --dump-terrain FILE: save the minimap's render
+
+
+## Polylines (game units) as the ground shader's segments (meters), at most 48.
+func _segments(polylines: Array) -> PackedVector4Array:
+	var out := PackedVector4Array()
+	for line in polylines:
+		var pts: PackedVector2Array = line
+		for i in range(1, pts.size()):
+			if out.size() < 48:
+				var a := pts[i - 1] * UNITS_TO_METERS
+				var b := pts[i] * UNITS_TO_METERS
+				out.append(Vector4(a.x, a.y, b.x, b.y))
+	return out
+
+
+## The direction (blue to red) of the road segment nearest `p` (game units).
+func _road_direction(p: Vector2) -> Vector2:
+	var best := INF
+	var dir := Vector2(1, 0)
+	var m := p * UNITS_TO_METERS
+	for s in _road_segments:
+		var a := Vector2(s.x, s.y)
+		var b := Vector2(s.z, s.w)
+		var d := m.distance_to(Geometry2D.get_closest_point_to_segment(m, a, b))
+		if d < best and a != b:
+			best = d
+			dir = (b - a).normalized()
+	return dir
 
 
 ## Paints the minimap's terrain: one orthographic render of the map from above, units left out.
@@ -4399,7 +4444,12 @@ func _render_minimap_terrain() -> void:
 	add_child(vp)
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
-	minimap.terrain = ImageTexture.create_from_image(vp.get_texture().get_image())
+	var top_down := vp.get_texture().get_image()
+	minimap.terrain = ImageTexture.create_from_image(top_down)
+	if _dump_terrain != "":
+		# Map review: the render from above, as the minimap shows it.
+		top_down.save_png(_dump_terrain)
+		print("MFTR: terrain saved to ", _dump_terrain)
 	if atmosphere != null:
 		atmosphere.suspend(false)
 	minimap.queue_redraw()

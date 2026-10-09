@@ -1,7 +1,8 @@
 // Procedural ground: no textures, only noise (D4), quantized to chunky texels so it sits with
-// the faceted PS1-style models (10 §2). Two-tone grass with a few flowers; on lane maps a dirt
-// road down the middle, ragged at its edges, paved with worn cobbles along its spine. Low
-// contrast, so gameplay reads on top (05 §1 value hierarchy).
+// the faceted PS1-style models (10 §2). Two-tone grass with a few flowers; on lane maps dirt
+// roads down the lanes, ragged at their edges, paved with worn cobbles along their spines, and
+// a shallow river where the map has one. Low contrast, so gameplay reads on top (05 §1 value
+// hierarchy).
 shader_type spatial;
 render_mode diffuse_lambert, specular_disabled;
 #include "res://shaders/clouds.gdshaderinc"
@@ -12,11 +13,18 @@ uniform vec3 dirt : source_color = vec3(0.45, 0.37, 0.26);
 uniform vec3 dirt_dark : source_color = vec3(0.34, 0.28, 0.2);
 uniform vec3 cobble : source_color = vec3(0.47, 0.45, 0.41);
 uniform float lane_width = 9.0;
-// 0: a diagonal lane (the M1 arena); 1: a lane through lane_origin along lane_dir (lane maps,
-// at any angle; meters, world x/z).
+// 0: a diagonal lane (the M1 arena); 1: the roads below (lane maps).
 uniform float lane_mode = 0.0;
-uniform vec2 lane_origin = vec2(0.0);
-uniform vec2 lane_dir = vec2(1.0, 0.0);
+// Road segments (a.xy, b.xy; meters, world x/z): every lane's polyline, cut into pieces.
+uniform vec4 roads[48];
+uniform int road_count = 0;
+// The river's segments, and its width (meters).
+uniform vec4 river[8];
+uniform int river_count = 0;
+uniform float river_width = 10.0;
+uniform vec3 water_deep : source_color = vec3(0.16, 0.33, 0.36);
+uniform vec3 water_shallow : source_color = vec3(0.3, 0.46, 0.42);
+uniform vec3 mud : source_color = vec3(0.3, 0.27, 0.19);
 // The size of a "texel" of grain, in meters.
 uniform float texel = 0.0625;
 
@@ -94,6 +102,12 @@ vec2 cobbles(vec2 p) {
 	return vec2(d2 - d1, id);
 }
 
+float segment_distance(vec2 p, vec4 s) {
+	vec2 ab = s.zw - s.xy;
+	float t = clamp(dot(p - s.xy, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0);
+	return length(p - s.xy - ab * t);
+}
+
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
@@ -112,8 +126,13 @@ void fragment() {
 	// (Literal colors are linear; these are sRGB 0.72/0.68/0.42 and 0.66/0.5/0.62.)
 	grass = mix(grass, mix(vec3(0.48, 0.42, 0.15), vec3(0.39, 0.21, 0.34), hash(q + 3.0)), flower * 0.8);
 	// The road: a dirt band with ragged, grassy edges.
-	vec2 rel = p - lane_origin;
-	float d = lane_mode > 0.5 ? abs(rel.x * lane_dir.y - rel.y * lane_dir.x) : abs(p.x - p.y) / sqrt(2.0);
+	float d = abs(p.x - p.y) / sqrt(2.0);
+	if (lane_mode > 0.5) {
+		d = 1e6;
+		for (int i = 0; i < road_count; i++) {
+			d = min(d, segment_distance(p, roads[i]));
+		}
+	}
 	float edge = lane_width * 0.5 + (fbm(p * 0.25) - 0.5) * 3.0 + (fbm(q * 1.7) - 0.5) * 0.7;
 	float lane = 1.0 - smoothstep(edge - 0.35, edge + 0.35, d);
 	vec3 road = mix(mix(dirt_dark, dirt, 0.55), dirt, smoothstep(0.3, 0.7, fbm(p * 0.45 + 7.0)));
@@ -132,6 +151,24 @@ void fragment() {
 	float pebble = step(0.93, pb.y) * smoothstep(0.12, 0.2, pb.x) * (1.0 - paved);
 	road = mix(road, cobble * (0.72 + 0.3 * hash(floor(p * 5.0 + 31.0))), pebble * 0.7);
 	vec3 ground = mix(grass, road, lane);
+	if (river_count > 0) {
+		// The river: shallow water with a muddy bank, deeper and darker toward its middle, its
+		// edges as ragged as the roads'. Where a road crosses, it fords: the road shows through.
+		float dr = 1e6;
+		for (int i = 0; i < river_count; i++) {
+			dr = min(dr, segment_distance(p, river[i]));
+		}
+		float bank = river_width * 0.5 + (fbm(p * 0.2 + 5.0) - 0.5) * 3.0 + (fbm(q * 1.5) - 0.5) * 0.6;
+		float wet = 1.0 - smoothstep(bank + 0.4, bank + 1.8, dr);
+		float water = 1.0 - smoothstep(bank - 0.3, bank + 0.3, dr);
+		float depth = 1.0 - smoothstep(0.0, bank, dr);
+		vec3 w = mix(water_shallow, water_deep, depth * (0.7 + 0.3 * fbm(p * 0.15 + 2.0)));
+		// Ripples: thin bright bands across the current, in chunky texels.
+		float ripple = smoothstep(0.62, 0.7, fbm(q * 0.8 + vec2(p.x + p.y) * 0.05));
+		w = mix(w, water_shallow * 1.35, ripple * 0.35) * (0.94 + 0.1 * (grain - 0.5));
+		ground = mix(ground, mud * (0.85 + 0.2 * mid), wet * (1.0 - lane * 0.6));
+		ground = mix(ground, w, water * (1.0 - lane * 0.45));
+	}
 	if (lane_mode < 0.5) {
 		// Subtle 1 m grid to help judge distances in the sandbox.
 		vec2 g = abs(fract(p) - 0.5);

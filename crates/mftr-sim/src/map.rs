@@ -97,6 +97,8 @@ pub struct Layout {
     pub placements: Vec<Placement>,
     /// How waves are paced on this map.
     pub pacing: crate::lane::Pacing,
+    /// The river's course, if the map has one (drawn by the client; walls bound it).
+    pub river: Vec<Vec2>,
 }
 
 #[derive(Clone, Debug)]
@@ -491,6 +493,7 @@ fn bridge() -> Map {
         fountain_heals: false,
         placements,
         pacing: crate::lane::Pacing::Aram,
+        river: Vec::new(),
     };
     map
 }
@@ -651,6 +654,8 @@ fn crossroads() -> Map {
         fountain_heals: true,
         placements,
         pacing: crate::lane::Pacing::Classic,
+        // Corner to corner, top left to bottom right, a little past the map at both ends.
+        river: vec![Vec2::new(-1000.0, -1000.0), CROSSROADS_SIZE + Vec2::new(1000.0, 1000.0)],
     };
     map
 }

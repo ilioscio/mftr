@@ -24,6 +24,7 @@ Inspired by the classic 3-lane layout:
 - **Jungle:** four quadrants between the lanes, split by a **river** running corner to corner.
 - **Brush:** patches of tall grass that block vision from outside. Units inside are hidden unless an enemy is also inside or has a ward there.
 - **Walls:** impassable terrain that blocks vision. Some are thin enough for dashes and blinks to cross.
+- *(start, M4 slice 1)* A 14,500 u square, blue's base in the bottom-left corner and red's in the top-right. It is symmetric across both diagonals, so neither team nor either side lane is favored by the layout.
 
 ### Structures (per team)
 

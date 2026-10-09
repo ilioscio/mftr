@@ -666,6 +666,24 @@ With A14 every champion in the roster has a model, clips, effects and sounds.
 
 **Exit:** full-length matches show the intended rhythm (laning → skirmish → teamfight) in telemetry from community playtests; late-game teamfight stays within performance targets on minimum spec.
 
+### M4 slices (in order of dependency)
+1. Crossroads and Classic rules: the 3-lane map, lane-by-lane structures, per-map wave pacing, `--scenario classic`, roads and river in the client, bots spread over the lanes.
+2. Recall, turret plating (until 14:00), backdoor protection.
+3. Jungle camps, Claim (smite), buff camps.
+4. Vision: wards, the trinket sweeper, control wards.
+5. Epic objectives: wyrms and Wyrm Soul, Elder, Mites, Siege Beast, Colossus.
+6. Blind and Draft pick with bans and roles.
+7. Items to ~80, the support item quest.
+8. Role bots: laning, jungling, rotations.
+
+### M4 slice 1 status (2026-10-09): in progress
+- Maps can have several lanes: each lane has its own path per team, wave spawns and structures. Tiers 1–4 fall in order down their own lane; base turrets can be hurt once any Gatehouse is down, the Base once both base turrets are down too. A Gatehouse down empowers only its own lane's waves.
+- **Crossroads** (`MapId::Crossroads`): 14,500 u square, blue's base bottom left, red's top right. Top, mid and bottom lanes, a river corner to corner, four jungle quadrants of diagonal blocks with paths between them, and brush. It is authored once (blue's top-side jungle) and laid out four ways, so it is symmetric across both diagonals. `mftr-tools map svg crossroads` draws the layout for review.
+- **Classic rules** (`--scenario classic`, protocol 19): level 1, 500 gold, 2.04 gold/s, fountains that heal. Waves are paced per map: Crossroads' first wave comes at 1:05, then one every 30 s, with a siege minion every third wave (every second from 15:00, every wave from 25:00) and upgrades every 90 s. The Bridge keeps ARAM's pacing.
+- Bots split over the lanes by rank (top, mid, bottom, bottom, mid). A 10-bot Classic match plays to a natural end (24:05 in the first run) and its replay re-simulates exactly.
+- Client: roads down every lane and a shallow river that fords the roads, drawn by the ground shader from the map's polylines (The Bridge's road is unchanged). Jungle edges facing the camera get low props only, so trees never hide the paths. `--dump-terrain FILE` saves the minimap's render from above.
+- For now, Classic's champion select is ARAM's all-random pick (Draft comes in slice 6).
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.
