@@ -9,9 +9,9 @@ use mftr_sim::{ChampionId, SimTime, UnitId, UnitKind};
 use std::collections::VecDeque;
 
 /// Hits further apart than this end a fight: the recap covers the last continuous one.
-pub const FIGHT_GAP_S: f32 = 5.0;
+pub const FIGHT_GAP_S: f32 = 8.0;
 /// The recap never reaches further back than this.
-pub const MAX_WINDOW_S: f32 = 20.0;
+pub const MAX_WINDOW_S: f32 = 30.0;
 
 /// One hit on the own champion.
 #[derive(Clone, Copy, Debug, PartialEq)]
