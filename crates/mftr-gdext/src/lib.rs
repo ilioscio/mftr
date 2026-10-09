@@ -1684,21 +1684,6 @@ fn item_text(it: &items::Item) -> String {
     parts.join(", ")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use mftr_sim::SimDuration;
-
-    #[test]
-    fn areas_of_one_radius_are_told_apart_by_their_delay() {
-        // Marrow's Siphon (a nova) and Ossuary are both 300 u wide.
-        assert_eq!(area_action(ChampionId::Marrow, 300.0, SimDuration(0)), Some("q"));
-        assert_eq!(area_action(ChampionId::Marrow, 300.0, SimDuration::from_millis(1300)), Some("r"));
-        // An unknown delay still falls back to the radius alone.
-        assert_eq!(area_action(ChampionId::Cairn, 180.0, SimDuration(7)), Some("e"));
-    }
-}
-
 /// A Stat Anvil's bonus as text: "+10 attack damage", "+6% move speed".
 fn anvil_text(stat: mftr_sim::anvils::Stat, units: u16) -> String {
     use mftr_sim::anvils::Stat;
@@ -1715,4 +1700,19 @@ fn anvil_text(stat: mftr_sim::anvils::Stat, units: u16) -> String {
     };
     let pct = matches!(stat, Stat::AttackSpeed | Stat::MoveSpeed);
     format!("+{}{} {}", (v * 10.0).round() / 10.0, if pct { "%" } else { "" }, stat.name())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mftr_sim::SimDuration;
+
+    #[test]
+    fn areas_of_one_radius_are_told_apart_by_their_delay() {
+        // Marrow's Siphon (a nova) and Ossuary are both 300 u wide.
+        assert_eq!(area_action(ChampionId::Marrow, 300.0, SimDuration(0)), Some("q"));
+        assert_eq!(area_action(ChampionId::Marrow, 300.0, SimDuration::from_millis(1300)), Some("r"));
+        // An unknown delay still falls back to the radius alone.
+        assert_eq!(area_action(ChampionId::Cairn, 180.0, SimDuration(7)), Some("e"));
+    }
 }
