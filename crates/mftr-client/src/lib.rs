@@ -595,9 +595,9 @@ impl ClientSession {
         self.issue(CommandKind::UseItem(slot), now)
     }
 
-    /// Reroll the open augment draft (once per draft). Predicted.
-    pub fn reroll_augments(&mut self, now: f64) -> Option<Command> {
-        self.issue(CommandKind::RerollAugments, now)
+    /// Reroll choice 0–2 of the open augment draft (each once per draft). Predicted.
+    pub fn reroll_augment(&mut self, choice: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::RerollAugment(choice), now)
     }
 
     /// Whether the shop is open for the own champion right now (predicted state).

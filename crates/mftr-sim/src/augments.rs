@@ -687,6 +687,18 @@ pub fn make_offer(seed: u32, draft: u8, roll: u8, held: &[u8; SLOTS], previous: 
     offer
 }
 
+/// One draft in this many (Silver or Gold) has a golden reroll on one of its choices: it
+/// rolls that choice one tier up.
+pub const GOLDEN_ONE_IN: u32 = 4;
+
+/// The tier above.
+pub fn tier_up(t: Tier) -> Tier {
+    match t {
+        Tier::Silver => Tier::Gold,
+        Tier::Gold | Tier::Prismatic => Tier::Prismatic,
+    }
+}
+
 /// Open the next draft once the champion's level reaches it (one at a time).
 pub fn update_draft(p: &mut Progress) {
     let d = p.drafted as usize;
@@ -694,8 +706,17 @@ pub fn update_draft(p: &mut Progress) {
         return;
     }
     p.offer = make_offer(p.augment_seed, p.drafted, 0, &p.augments, &[0; CHOICES]);
+    // Sometimes a Silver or Gold draft brings a golden reroll on one choice (06 §3, like the
+    // reference game's): shown before it's used, so it's a decision, not a surprise.
+    let mut rng = Pcg32::new(p.augment_seed as u64, 1000 + p.drafted as u64);
+    let roll = rng.next_u32();
+    p.golden = if tier_of(p.augment_seed, p.drafted) != Tier::Prismatic && roll.is_multiple_of(GOLDEN_ONE_IN) {
+        1 + (rng.next_u32() % CHOICES as u32) as u8
+    } else {
+        0
+    };
     p.drafted += 1;
-    p.rerolled = false;
+    p.rerolled = 0;
 }
 
 /// Keep choice `choice` of the open offer.
@@ -712,13 +733,30 @@ pub fn pick(p: &mut Progress, choice: u8) {
     }
 }
 
-/// Replace the open offer with three new choices (once per draft).
-pub fn reroll(p: &mut Progress) {
-    if p.offer[0] == 0 || p.rerolled || p.drafted == 0 {
+/// Replace one choice of the open offer (each choice once per draft, 06 §3): another
+/// augment of the same tier that isn't held, offered or the one replaced; the golden reroll
+/// rolls one tier up.
+pub fn reroll(p: &mut Progress, choice: u8) {
+    let c = choice as usize;
+    if c >= CHOICES || p.offer[c] == 0 || p.rerolled & (1 << c) != 0 || p.drafted == 0 {
         return;
     }
-    p.offer = make_offer(p.augment_seed, p.drafted - 1, 1, &p.augments, &p.offer);
-    p.rerolled = true;
+    let draft = p.drafted - 1;
+    let mut tier = augment(p.offer[c]).map_or(tier_of(p.augment_seed, draft), |a| a.tier);
+    if p.golden == choice + 1 {
+        tier = tier_up(tier);
+    }
+    let pool: Vec<u8> = CATALOG
+        .iter()
+        .filter(|a| a.tier == tier && !p.augments.contains(&a.id) && !p.offer.contains(&a.id))
+        .map(|a| a.id)
+        .collect();
+    if pool.is_empty() {
+        return;
+    }
+    let mut rng = Pcg32::new(p.augment_seed as u64, 2000 + draft as u64 * 8 + c as u64);
+    p.offer[c] = pool[rng.next_u32() as usize % pool.len()];
+    p.rerolled |= 1 << c;
 }
 
 #[cfg(test)]
@@ -751,6 +789,31 @@ mod tests {
         }
     }
 
+    /// A golden reroll rolls its choice one tier up; some Silver and Gold drafts have one,
+    /// Prismatic ones never.
+    #[test]
+    fn a_golden_reroll_rolls_one_tier_up() {
+        let mut p = Progress { level: 3, augment_seed: 5, ..Progress::SANDBOX };
+        update_draft(&mut p);
+        p.golden = 3;
+        reroll(&mut p, 2);
+        assert_eq!(augment(p.offer[2]).unwrap().tier, Tier::Gold);
+        assert_eq!(augment(p.offer[0]).unwrap().tier, Tier::Silver);
+        let mut seen = [false; 2];
+        for seed in 0..200 {
+            for draft in 0..SLOTS as u8 {
+                let level = DRAFT_LEVELS[draft as usize];
+                let mut q = Progress { level, augment_seed: seed, drafted: draft, ..Progress::SANDBOX };
+                update_draft(&mut q);
+                if q.golden != 0 {
+                    assert_ne!(tier_of(seed, draft), Tier::Prismatic);
+                    seen[(q.golden - 1).min(1) as usize] = true;
+                }
+            }
+        }
+        assert!(seen.iter().any(|s| *s), "golden rerolls happen");
+    }
+
     #[test]
     fn drafts_open_by_level_and_picks_fill_slots() {
         let mut p = Progress { level: 3, augment_seed: 77, ..Progress::SANDBOX };
@@ -760,12 +823,20 @@ mod tests {
         assert!(first.iter().all(|id| augment(*id).is_some_and(|a| a.tier == Tier::Silver)));
         update_draft(&mut p);
         assert_eq!(p.offer, first, "one draft at a time");
-        reroll(&mut p);
-        assert!(p.rerolled);
-        assert!(p.offer.iter().all(|id| !first.contains(id)), "a reroll shows new choices");
+        // Each choice rerolls once, into one that wasn't shown, of the same tier.
+        p.golden = 0;
+        reroll(&mut p, 1);
+        assert_eq!(p.rerolled, 0b010);
+        assert_eq!((p.offer[0], p.offer[2]), (first[0], first[2]), "only that choice changes");
+        assert!(!first.contains(&p.offer[1]), "a reroll shows a new choice");
+        assert_eq!(augment(p.offer[1]).unwrap().tier, Tier::Silver);
         let again = p.offer;
-        reroll(&mut p);
-        assert_eq!(p.offer, again, "one reroll per draft");
+        reroll(&mut p, 1);
+        assert_eq!(p.offer, again, "one reroll per choice");
+        reroll(&mut p, 0);
+        reroll(&mut p, 2);
+        assert_eq!(p.rerolled, 0b111, "three rerolls a draft, one per choice");
+        let again = p.offer;
         pick(&mut p, 1);
         assert_eq!(p.augments, [again[1], 0, 0, 0]);
         assert_eq!(p.offer, [0; CHOICES]);

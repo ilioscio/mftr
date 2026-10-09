@@ -197,8 +197,10 @@ pub struct Progress {
     pub offer: [u8; augments::CHOICES],
     /// Drafts opened so far (the open one included).
     pub drafted: u8,
-    /// The open draft was rerolled.
-    pub rerolled: bool,
+    /// Which choices of the open draft were rerolled (bit per choice: each once).
+    pub rerolled: u8,
+    /// The choice (1–3) whose reroll is golden (one tier up) this draft; 0 for none.
+    pub golden: u8,
     /// Seeds this champion's offers, so picks and rerolls are predicted exactly.
     pub augment_seed: u32,
     /// Unstable Experiment's current roll: tiny (else huge).
@@ -249,7 +251,8 @@ impl Progress {
         augments: [0; augments::SLOTS],
         offer: [0; augments::CHOICES],
         drafted: 0,
-        rerolled: false,
+        rerolled: 0,
+        golden: 0,
         augment_seed: 0,
         unstable_tiny: false,
         stacks: 0,
@@ -294,7 +297,8 @@ impl Progress {
             h.write_u8(a);
         }
         h.write_u8(self.drafted);
-        h.write_u8(self.rerolled as u8);
+        h.write_u8(self.rerolled);
+        h.write_u8(self.golden);
         h.write_u32(self.augment_seed);
         h.write_u8(self.unstable_tiny as u8);
         h.write_u32(self.stacks as u32);
@@ -1007,8 +1011,8 @@ pub enum CommandKind {
     Undo,
     /// Keep choice 0–2 of the open augment draft.
     PickAugment(u8),
-    /// Replace the open draft's choices (once per draft).
-    RerollAugments,
+    /// Replace choice 0–2 of the open draft (each once per draft).
+    RerollAugment(u8),
     /// Use the active of the item in an inventory slot (0–5): drink a potion.
     UseItem(u8),
 }
@@ -2339,8 +2343,8 @@ fn apply_command(
         CommandKind::Buy(_) | CommandKind::Sell(_) | CommandKind::Undo => shop(unit, c.kind, map, rules),
         CommandKind::UseItem(slot) => use_item(unit, slot, t),
         CommandKind::PickAugment(choice) if rules.augments => augments::pick(&mut st.progress, choice),
-        CommandKind::RerollAugments if rules.augments => augments::reroll(&mut st.progress),
-        CommandKind::PickAugment(_) | CommandKind::RerollAugments => {}
+        CommandKind::RerollAugment(choice) if rules.augments => augments::reroll(&mut st.progress, choice),
+        CommandKind::PickAugment(_) | CommandKind::RerollAugment(_) => {}
     }
 }
 
@@ -4467,7 +4471,7 @@ mod tests {
         let mut plain = ranked_world();
         let other = plain.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Bastion, Vec2::new(1000.0, 1000.0));
         plain.step(&[]);
-        plain.step(&[pick(1, 2, CommandKind::PickAugment(0)), pick(2, 2, CommandKind::RerollAugments)]);
+        plain.step(&[pick(1, 2, CommandKind::PickAugment(0)), pick(2, 2, CommandKind::RerollAugment(0))]);
         let p = plain.unit(other).unwrap().state.progress;
         assert_eq!((p.offer, p.augments, p.drafted), ([0; 3], [0; 4], 0), "ARAM without Mayhem has no drafts");
     }
@@ -5236,7 +5240,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0xcb82_c1c5_d4d8_81b1;
+    const GOLDEN_HASH_ARENA: u64 = 0xe739_b029_e345_7ce9;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -5293,7 +5297,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0x363e_9b18_6913_52cb;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x1261_203e_690c_f431;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -5364,5 +5368,5 @@ mod tests {
 
     /// Recorded on x86_64-pc-windows-msvc when facing, follow-throughs and the input buffer
     /// joined the state (A2). CI checks Linux, macOS (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0x1d8d_201f_13db_79e9;
+    const GOLDEN_HASH: u64 = 0xe4b3_9b41_4e57_b381;
 }

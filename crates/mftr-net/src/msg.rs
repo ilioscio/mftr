@@ -346,7 +346,10 @@ fn write_command(w: &mut BitWriter, c: &Command) {
             w.write(9, 4);
             w.write(choice as u64, 2);
         }
-        CommandKind::RerollAugments => w.write(10, 4),
+        CommandKind::RerollAugment(choice) => {
+            w.write(10, 4);
+            w.write(choice as u64, 2);
+        }
         CommandKind::UseItem(slot) => {
             w.write(11, 4);
             w.write(slot as u64, 3);
@@ -375,7 +378,7 @@ fn read_command(r: &mut BitReader) -> Result<Command, DecodeError> {
         7 => CommandKind::Sell(r.read(3)? as u8),
         8 => CommandKind::Undo,
         9 => CommandKind::PickAugment(r.read(2)? as u8),
-        10 => CommandKind::RerollAugments,
+        10 => CommandKind::RerollAugment(r.read(2)? as u8),
         11 => CommandKind::UseItem(r.read(3)? as u8),
         _ => return Err(DecodeError::Invalid("command kind")),
     };
@@ -922,7 +925,8 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
         w.write_u8(*a);
     }
     w.write(p.drafted as u64, 3);
-    w.write_bool(p.rerolled);
+    w.write(p.rerolled as u64, 3);
+    w.write(p.golden as u64, 2);
     w.write_u32(p.augment_seed);
     w.write_bool(p.unstable_tiny);
     w.write(p.stacks as u64, 16);
@@ -1056,7 +1060,8 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         *a = r.read_u8()?;
     }
     let drafted = r.read(3)? as u8;
-    let rerolled = r.read_bool()?;
+    let rerolled = r.read(3)? as u8;
+    let golden = r.read(2)? as u8;
     let augment_seed = r.read_u32()?;
     let unstable_tiny = r.read_bool()?;
     let stacks = r.read(16)? as u16;
@@ -1090,6 +1095,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         offer,
         drafted,
         rerolled,
+        golden,
         augment_seed,
         unstable_tiny,
         stacks,
@@ -1745,7 +1751,7 @@ mod tests {
             c(48, CommandKind::Sell(5)),
             c(49, CommandKind::Undo),
             c(50, CommandKind::PickAugment(2)),
-            c(51, CommandKind::RerollAugments),
+            c(51, CommandKind::RerollAugment(2)),
         ];
         // At most 8 commands per packet: two packets cover every kind.
         for commands in [commands[..8].to_vec(), commands[8..].to_vec()] {
@@ -1871,7 +1877,8 @@ mod tests {
                 augments: [17, 2, 0, 0],
                 offer: [11, 13, 16],
                 drafted: 3,
-                rerolled: true,
+                rerolled: 0b101,
+                golden: 2,
                 augment_seed: 0xdead_beef,
                 unstable_tiny: true,
                 stacks: 37,

@@ -460,11 +460,11 @@ impl MatchClient {
         }
     }
 
-    /// Reroll the open augment draft (once per draft).
+    /// Reroll choice 0–2 of the open augment draft (each once per draft).
     #[func]
-    fn reroll_augments(&mut self) {
+    fn reroll_augment(&mut self, choice: i64) {
         let now = self.now();
-        if self.session.reroll_augments(now).is_some() {
+        if (0..augments::CHOICES as i64).contains(&choice) && self.session.reroll_augment(choice as u8, now).is_some() {
             self.send_input(now);
         }
     }
@@ -1064,7 +1064,15 @@ impl MatchClient {
                 offer.push(&card(*id).to_variant());
             }
             d.set("offer", &offer);
-            d.set("can_reroll", s.progress.offer[0] != 0 && !s.progress.rerolled);
+            // Per choice: can it still be rerolled, and is its reroll golden (one tier up)?
+            let open = s.progress.offer[0] != 0;
+            let can: Vec<bool> = (0..augments::CHOICES).map(|c| open && s.progress.rerolled & (1 << c) == 0).collect();
+            let mut rerolls = VarArray::new();
+            for c in can {
+                rerolls.push(&c.to_variant());
+            }
+            d.set("can_reroll", &rerolls);
+            d.set("golden", s.progress.golden as i64 - 1);
             d.set("shield", if s.shield_until > t { s.shield } else { 0.0 });
             d.set("dead", !s.alive());
             d.set("respawn_in", s.respawn_at.map_or(0.0, |r| r.secs_since(t)));
