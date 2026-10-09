@@ -173,10 +173,18 @@ Two per champion, chosen before the match. *(start)* list:
 - **As built:** the items by tier with their icons and prices (click to look, right-click or
   double-click to buy); the chosen item's build path as a tree of its components, the ones you
   own marked and the rest of their branch dimmed, what it builds into, and Buy at your price.
+- **Consumables, as built:** a Health Potion (50 gold) heals 120 over 15 s, up to 5 stacked in a
+  slot; the Refillable Flask (150, one per champion) heals 100 over 12 s, twice, and refills
+  wherever its holder can shop. Items' actives go on 1–6.
 
 ## 12. Death, respawn & recall
 
 - **Respawn timer:** grows with level (start: ~6 s at L1 to ~50 s at L18) and a late-game multiplier.
+  ARAM, as built (D55): 11 → 40 s by level (13 s at level 2, 40 s at 16, then +2 s a level).
+- **Death recap, as built:** while dead, exactly what killed you, from the server's own damage
+  events (every hit on you is sent, from unseen sources too): the total and how long it took,
+  physical/magic/true, shields, seconds stunned, rooted and slowed, and each source by basic
+  attacks, ability (with its key) and item or augment effect, with hit counts. Nothing estimated.
 - **Recall:** an 8 s channel to the fountain, cancelled by moving, taking damage or casting.
 - Gray-screen spectating while dead. The shop works while dead in the fountain.
 
@@ -193,7 +201,9 @@ edges, at a speed the player sets; Esc closes settings, then the shop, then open
 | Attack-move | A + left click, or "attack-move on right-click" option |
 | Abilities | Q W E R |
 | Utility spells | D F |
-| Items / trinket | 1–6 / 4 |
+| Items / trinket | 1–6 / 4 (as built: 1–6 use an item's active, a potion) |
+| Match breakdown | Tab (hold): every champion's level, K/D/A, minions killed, items, augments, respawn timer |
+| Spectators: next champion | N |
 | Stop | S |
 | Recall | B |
 | Level-up ability | Alt + Q/W/E/R or Ctrl + Q/W/E/R (Alt+R is also the NVIDIA and AMD overlays' hotkey), or click the ability's + |

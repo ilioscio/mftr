@@ -35,8 +35,9 @@ pub const STATS: [Stat; 8] = [
     Stat::MoveSpeed,
 ];
 
-/// Tier odds, in percent: Silver, Gold, Prismatic.
+/// Tier odds, in percent: Silver, Gold, Prismatic; and with Blacksmith's Blessing.
 pub const ODDS: [u32; 3] = [60, 30, 10];
+pub const LUCKY_ODDS: [u32; 3] = [20, 50, 30];
 /// What one tier is worth, in units of a stat's step: Silver 5, Gold 9, Prismatic 15.
 pub const TIER_UNITS: [u16; 3] = [5, 9, 15];
 
@@ -84,12 +85,14 @@ pub fn unpack(c: u8) -> Option<(u8, Stat)> {
 }
 
 /// The `n`th anvil a champion with this seed buys: a tier, and three different stats of it.
-pub fn roll(seed: u32, n: u8) -> [u8; CHOICES] {
+/// `lucky` (Blacksmith's Blessing) rolls higher tiers.
+pub fn roll(seed: u32, n: u8, lucky: bool) -> [u8; CHOICES] {
+    let odds = if lucky { LUCKY_ODDS } else { ODDS };
     let mut rng = Pcg32::new(seed as u64, 5000 + n as u64);
     let r = rng.next_u32() % 100;
-    let tier = if r < ODDS[0] {
+    let tier = if r < odds[0] {
         0
-    } else if r < ODDS[0] + ODDS[1] {
+    } else if r < odds[0] + odds[1] {
         1
     } else {
         2
@@ -110,14 +113,18 @@ mod tests {
     #[test]
     fn anvils_offer_three_different_stats_of_one_tier() {
         let mut tiers = [0; 3];
+        let mut lucky = [0; 3];
         for seed in 0..300 {
-            let offer = roll(seed, 0);
+            let t = unpack(roll(seed, 0, true)[0]).unwrap().0;
+            lucky[t as usize] += 1;
+            let offer = roll(seed, 0, false);
             let parsed: Vec<(u8, Stat)> = offer.iter().map(|c| unpack(*c).unwrap()).collect();
             assert!(parsed.iter().all(|(t, _)| *t == parsed[0].0), "one tier");
             assert!(parsed[0].1 != parsed[1].1 && parsed[1].1 != parsed[2].1 && parsed[0].1 != parsed[2].1);
             tiers[parsed[0].0 as usize] += 1;
         }
         assert!(tiers[0] > tiers[1] && tiers[1] > tiers[2] && tiers[2] > 0, "{tiers:?}");
+        assert!(lucky[2] > tiers[2] * 2 && lucky[1] > lucky[0], "Blacksmith's Blessing: {lucky:?}");
         assert_eq!(Stat::AttackDamage.bonus(TIER_UNITS[0]).attack_damage, 10.0);
         assert_eq!(Stat::Health.bonus(TIER_UNITS[2]).health, 450.0);
     }

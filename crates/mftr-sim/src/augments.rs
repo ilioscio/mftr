@@ -81,6 +81,8 @@ pub enum Effect {
     Spellblade,
     /// Takedowns refresh Q, W and E.
     Reset,
+    /// Stat Anvils roll higher tiers.
+    AnvilLuck,
     /// A quest: enough takedowns grant a large stat reward.
     ChampionOfChaos,
     /// No ultimate; Q, W and E hit harder.
@@ -201,6 +203,7 @@ pub struct Mods {
     pub reset: bool,
     pub chaos: bool,
     pub fundamentals: bool,
+    pub anvil_luck: bool,
 }
 
 pub fn mods(slots: &[u8; SLOTS]) -> Mods {
@@ -216,6 +219,7 @@ pub fn mods(slots: &[u8; SLOTS]) -> Mods {
             Effect::Thorns => m.thorns = true,
             Effect::Spellblade => m.spellblade = true,
             Effect::Reset => m.reset = true,
+            Effect::AnvilLuck => m.anvil_luck = true,
             Effect::ChampionOfChaos => m.chaos = true,
             Effect::Fundamentals => m.fundamentals = true,
             _ => {}
@@ -647,6 +651,14 @@ pub const CATALOG: &[Augment] = &[
         "+800 health, +60 ability power and +30 ability haste.",
         Bonus { health: 800.0, ability_power: 60.0, ability_haste: 30.0, ..b() }
     ),
+    aug!(
+        61,
+        Gold,
+        "Blacksmith's Blessing",
+        "Stat Anvils roll higher: 20% Silver, 50% Gold, 30% Prismatic. +10 ability haste.",
+        Bonus { ability_haste: 10.0, ..b() },
+        Effect::AnvilLuck
+    ),
 ];
 
 pub fn augment(id: u8) -> Option<&'static Augment> {
@@ -780,12 +792,13 @@ mod tests {
         }
     }
 
-    /// M3 slice 4: sixty augments, every id from 1 to 60 once, spread over the tiers.
+    /// M3 slice 4: sixty augments (and one more since), every id from 1 once, spread over
+    /// the tiers.
     #[test]
-    fn catalog_has_sixty_augments() {
+    fn catalog_has_every_augment_id_once() {
         let mut ids: Vec<u8> = CATALOG.iter().map(|a| a.id).collect();
         ids.sort();
-        assert_eq!(ids, (1..=60).collect::<Vec<u8>>());
+        assert_eq!(ids, (1..=61).collect::<Vec<u8>>());
         for tier in [Tier::Silver, Tier::Gold, Tier::Prismatic] {
             assert!(CATALOG.iter().filter(|a| a.tier == tier).count() >= 15, "{tier:?}");
         }

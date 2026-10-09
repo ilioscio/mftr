@@ -128,6 +128,12 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
   current rank with their AD/AP scaling (colored by damage type; status effects with icons),
   every rank, and what the next rank changes. The top right has K/D, the clock, fps and ping;
   the full net graph is on F1.
+- **Windows** (the augment draft, the shop, the anvil, the match breakdown, the death recap,
+  settings) are dragged by any spot that isn't a button and stay where they were left (saved as
+  fractions of the screen). Tooltips draw above them all: items (icon, cost, stats colored by
+  stat, passive, active) and augments (on hover above the HUD) as well as abilities.
+- **The cursor** is a steel gauntlet drawn as SVG: red plates and a blade over an enemy that can
+  be attacked, teal over an ally, a red reticle while an attack-move waits for its click.
 - **Over units:** health bars with a frame, 100-health ticks, a level box, a draining damage
   chip; champions' names, and icons for stun, root and slow. Damage numbers show only what
   concerns the player (dealt, taken, healed), colored by damage type, sized by the hit.

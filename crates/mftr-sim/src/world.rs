@@ -2366,7 +2366,8 @@ fn apply_command(
         CommandKind::BuyAnvil if rules.augments && may_shop => {
             let p = &mut st.progress;
             if p.level >= crate::anvils::MIN_LEVEL && p.gold >= crate::anvils::COST && p.anvil_offer[0] == 0 {
-                p.anvil_offer = crate::anvils::roll(p.augment_seed, p.anvils);
+                let lucky = augments::mods(&p.augments).anvil_luck;
+                p.anvil_offer = crate::anvils::roll(p.augment_seed, p.anvils, lucky);
                 p.anvils = p.anvils.saturating_add(1);
                 p.gold -= crate::anvils::COST;
             }
