@@ -6,7 +6,7 @@ use crate::{Scenario, ServerConfig};
 use mftr_sim::vision::Vision;
 use mftr_sim::{
     Brain, ChampionId, Command, CommandKind, MinionKind, PlayerId, QPoint, SimEvent, SimTime, SubTick, Team, Tick,
-    UnitId, Vec2, World,
+    UnitId, UnitKind, Vec2, World,
 };
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -44,6 +44,13 @@ pub enum ReplayEntry {
     /// back to champion select after a Base fell.
     Restart {
         tick: Tick,
+    },
+    /// A joining player took over `player`'s seat (a bot's) with `champion` before tick
+    /// `tick + 1` (13 §3).
+    Takeover {
+        tick: Tick,
+        player: PlayerId,
+        champion: ChampionId,
     },
     /// The state hash after tick `tick`.
     Hash {
@@ -135,13 +142,69 @@ impl Match {
             pos = duel_spawn(team, player);
         }
         if scenario.is_match() {
-            // In the fountain, spread out in a small arc per player.
-            let base = self.world.map().layout.champion_spawn[team as usize];
-            let k = (player.0 / 2) as f32;
-            pos = base + Vec2::new(0.0, 90.0 * (k - 2.0));
+            pos = self.fountain_spot(team, player);
         }
         let unit = self.world.spawn_champion(player, team, champion, pos);
         (unit, team, champion)
+    }
+
+    /// In the fountain, spread out in a small arc per player.
+    fn fountain_spot(&self, team: Team, player: PlayerId) -> Vec2 {
+        let base = self.world.map().layout.champion_spawn[team as usize];
+        let k = (player.0 / 2) as f32;
+        base + Vec2::new(0.0, 90.0 * (k - 2.0))
+    }
+
+    /// 13 §3: a joining player takes over `player`'s seat (a bot's) with `champion`. The old
+    /// champion leaves; the new one appears in the fountain (dead on the same timer, if the old
+    /// one was) with its level and experience (every ability point unspent), its score and
+    /// augments, and its gold plus the full price of its items. Returns the new unit.
+    pub fn takeover(&mut self, player: PlayerId, champion: ChampionId) -> Option<(UnitId, Team)> {
+        let old = self.world.units().iter().find(|u| u.owner == Some(player) && u.kind == UnitKind::Champion)?;
+        let (old_id, team, was, respawn_at) = (old.id, old.team, old.state.progress, old.state.respawn_at);
+        self.record(ReplayEntry::Takeover { tick: self.world.tick(), player, champion });
+        self.world.despawn(old_id);
+        let pos = self.fountain_spot(team, player);
+        let ranked = self.world.rules().ranked;
+        let unit = self.world.spawn_champion(player, team, champion, pos);
+        let u = self.world.unit_mut(unit)?;
+        let mut p = u.state.progress;
+        let refund: f32 = was.items.iter().zip(was.charges).map(|(&id, charges)| worth(id, charges)).sum();
+        p.level = was.level;
+        p.xp = was.xp;
+        p.gold = was.gold + refund;
+        if ranked {
+            p.ranks = [0; 4];
+            p.points = was.level;
+        }
+        p.streak = was.streak;
+        p.kills = was.kills;
+        p.deaths = was.deaths;
+        p.assists = was.assists;
+        p.cs = was.cs;
+        p.takedowns = was.takedowns;
+        p.augments = was.augments;
+        p.offer = was.offer;
+        p.drafted = was.drafted;
+        p.rerolled = was.rerolled;
+        p.golden = was.golden;
+        p.augment_seed = was.augment_seed;
+        p.unstable_tiny = was.unstable_tiny;
+        p.stacks = was.stacks;
+        p.anvil = was.anvil;
+        p.anvil_offer = was.anvil_offer;
+        p.anvils = was.anvils;
+        p.camps = was.camps;
+        p.insight_until = was.insight_until;
+        p.cinder_until = was.cinder_until;
+        u.state.progress = p;
+        u.reset_stats();
+        u.state.health = u.stats.max_health;
+        if respawn_at.is_some() {
+            u.state =
+                mftr_sim::UnitState { respawn_at, progress: p, ..mftr_sim::UnitState::new(pos, u.state.move_speed) };
+        }
+        Some((unit, team))
     }
 
     /// Everyone playing, humans and bots.
@@ -253,6 +316,9 @@ impl Replay {
                     }
                     ReplayEntry::Leave { player, .. } => m.leave(*player),
                     ReplayEntry::Restart { .. } => m.restart(),
+                    ReplayEntry::Takeover { player, champion, .. } => {
+                        m.takeover(*player, *champion);
+                    }
                     ReplayEntry::Commands { commands, .. } => due = commands.clone(),
                     ReplayEntry::Hash { .. } => {}
                 }
@@ -320,6 +386,9 @@ impl Replay {
                 ReplayEntry::Restart { tick } => {
                     let _ = writeln!(s, "R {}", tick.0);
                 }
+                ReplayEntry::Takeover { tick, player, champion } => {
+                    let _ = writeln!(s, "T {} {} {}", tick.0, player.0, champion.def().name);
+                }
                 ReplayEntry::Hash { tick, hash } => {
                     let _ = writeln!(s, "H {} {hash:016x}", tick.0);
                 }
@@ -349,6 +418,7 @@ impl Replay {
             arena_max: num(f[6])? as f32,
             scenario: Scenario::by_name(f[7]).ok_or(format!("scenario {}", f[7]))?,
             map: None,
+            coop: false,
         };
         let mut cfg = cfg;
         let mut entries: Vec<ReplayEntry> = Vec::new();
@@ -384,6 +454,10 @@ impl Replay {
                 }
                 Some("L") => entries.push(ReplayEntry::Leave { tick, player: PlayerId(int(2)? as u8) }),
                 Some("R") => entries.push(ReplayEntry::Restart { tick }),
+                Some("T") => {
+                    let champion = f.get(3).and_then(|n| ChampionId::by_name(n)).ok_or_else(bad)?;
+                    entries.push(ReplayEntry::Takeover { tick, player: PlayerId(int(2)? as u8), champion });
+                }
                 Some("H") => {
                     let hash = f.get(2).and_then(|h| u64::from_str_radix(h, 16).ok()).ok_or_else(bad)?;
                     entries.push(ReplayEntry::Hash { tick, hash });
@@ -414,9 +488,22 @@ impl ReplayEntry {
             ReplayEntry::Join { tick, .. }
             | ReplayEntry::Leave { tick, .. }
             | ReplayEntry::Restart { tick }
+            | ReplayEntry::Takeover { tick, .. }
             | ReplayEntry::Commands { tick, .. }
             | ReplayEntry::Hash { tick, .. } => *tick,
         }
+    }
+}
+
+/// What an item in a slot was bought for: its full price (each of a stack of potions or
+/// control wards; a refillable flask once).
+fn worth(id: u8, charges: u8) -> f32 {
+    let Some(it) = mftr_sim::items::item(id) else { return 0.0 };
+    match it.active {
+        mftr_sim::items::Active::Consumable { refills: false, .. } | mftr_sim::items::Active::ControlWard { .. } => {
+            it.cost * charges.max(1) as f32
+        }
+        _ => it.cost,
     }
 }
 

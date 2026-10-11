@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # MFTR dedicated server (M2 slice 6). Build: `docker build -t mftr-server .`
-# Run:   `docker run --rm -p 7777:7777/udp mftr-server` (an ARAM server with 10 bots and
-# champion select; see docs/hosting.md for every option). The server key is created in /data:
+# Run:   `docker run --rm -p 7777:7777/udp mftr-server` (every mode, as many matches as
+# players fill; see docs/hosting.md for every option). The server key is created in /data:
 # mount a volume there to keep it.
 
 FROM rust:1-slim-bookworm AS build
@@ -24,4 +24,4 @@ COPY --from=build --chown=nonroot:nonroot /data-empty /data
 WORKDIR /data
 EXPOSE 7777/udp
 ENTRYPOINT ["/usr/local/bin/mftr-server", "--bind", "0.0.0.0:7777"]
-CMD ["--scenario", "aram", "--bots", "10", "--lobby"]
+CMD []

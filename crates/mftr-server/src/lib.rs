@@ -1,8 +1,9 @@
 //! `mftr-server`: the authoritative match server core.
 //!
 //! Transport- and clock-agnostic: feed it packets with timestamps, call [`ServerCore::step`]
-//! when [`ServerCore::next_tick_due`] has passed, and send the packets it returns. The UDP
-//! binary (`main.rs`) and the virtual-time Netcode Lab both drive this same core.
+//! when [`ServerCore::next_tick_due`] has passed, and send the packets it returns. The
+//! virtual-time Netcode Lab drives one core; the UDP binary (`main.rs`) drives a [`Hub`] of
+//! them, one per match instance (13).
 
 use mftr_net::PROTOCOL_VERSION;
 use mftr_net::delta::{self, UnitUpdate};
@@ -19,9 +20,11 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub mod bots;
 pub mod game;
+pub mod hub;
 pub mod lobby;
 pub use bots::Bot;
 pub use game::{Fog, Match, Replay, ReplayCheck, ReplayEntry};
+pub use hub::{Hub, HubConfig, QueueSpec};
 use lobby::Lobby;
 
 /// Opaque per-connection address key, assigned by the transport.
@@ -33,8 +36,14 @@ const MAX_LATENESS: f64 = 0.250;
 const MAX_LEAD_TICKS: u32 = 90;
 const REPORT_REPEAT_TICKS: u32 = 15;
 const TIMEOUT: f64 = 10.0;
-/// A disconnected player's champion waits this long for a reconnect (M2 slice 5).
+/// A disconnected player's champion waits this long for a reconnect in the sandboxes (M2
+/// slice 5). In a match a bot plays it until the player returns, and a match whose humans
+/// have all dropped stops this long after the last one did (13 §4–5).
 pub const RECONNECT_GRACE: f64 = 60.0;
+/// Seconds a player joining a match in progress has to choose a champion (13 §3).
+pub const MIDJOIN_SECONDS: f64 = 20.0;
+/// Rerolls a player joining an ARAM match in progress gets.
+const MIDJOIN_REROLLS: u8 = 1;
 /// Spectators a server accepts (they don't count toward the player limit).
 pub const MAX_SPECTATORS: usize = 8;
 /// Spectator connections use these ids (they have no unit and issue no commands).
@@ -143,6 +152,9 @@ pub struct ServerConfig {
     /// A custom map's text (`*.mftrmap`, 12 §4) to play instead of the scenario's map; sent to
     /// each player as they join.
     pub map: Option<std::sync::Arc<str>>,
+    /// Co-op vs bots (13 §1): humans play blue only. Teams follow player ids, so replays
+    /// don't need it.
+    pub coop: bool,
 }
 
 impl Default for ServerConfig {
@@ -157,6 +169,7 @@ impl Default for ServerConfig {
             arena_max: 3500.0,
             scenario: Scenario::Empty,
             map: None,
+            coop: false,
         }
     }
 }
@@ -170,6 +183,18 @@ pub struct ServerStats {
     pub bytes_in: u64,
     pub bytes_out: u64,
     pub decode_errors: u64,
+}
+
+impl ServerStats {
+    pub fn add(&mut self, o: &ServerStats) {
+        self.ticks += o.ticks;
+        self.commands += o.commands;
+        self.commands_late += o.commands_late;
+        self.commands_dropped += o.commands_dropped;
+        self.bytes_in += o.bytes_in;
+        self.bytes_out += o.bytes_out;
+        self.decode_errors += o.decode_errors;
+    }
 }
 
 struct Conn {
@@ -228,15 +253,27 @@ struct Pending {
     player: PlayerId,
     last_heard: f64,
     send: SendTracker,
+    /// Joining the match in progress instead (13 §3): `player` is the bot's seat to take.
+    mid: Option<MidJoin>,
 }
 
-/// A player whose connection dropped: the champion stays until `deadline`.
+/// A champion being chosen to join a match in progress with.
+#[derive(Clone, Copy, Debug)]
+struct MidJoin {
+    champion: ChampionId,
+    rerolls: u8,
+    ready: bool,
+    /// When the player joins, ready or not (server clock).
+    deadline: f64,
+}
+
+/// A player whose connection dropped (at `since`): their seat, until they're back.
 struct Dropped {
     token: u64,
     player: PlayerId,
     unit: UnitId,
     team: Team,
-    deadline: f64,
+    since: f64,
 }
 
 pub struct ServerCore {
@@ -251,6 +288,8 @@ pub struct ServerCore {
     /// Session tokens (independent of the world RNG, so replays are unaffected).
     tokens: mftr_sim::rng::Pcg32,
     lobby_steps: u32,
+    /// The map's name, for champion select.
+    map_name: String,
     /// Matches finished: each champion select after one draws from a new seed.
     rounds: u64,
     start: f64,
@@ -267,7 +306,8 @@ impl ServerCore {
     pub fn new(cfg: ServerConfig, start: f64) -> Self {
         let mut game = Match::new(cfg.clone());
         let mut bots = Vec::new();
-        let lobby = cfg.lobby.then(|| Lobby::new(cfg.seed, cfg.max_players, cfg.bots));
+        let lobby =
+            cfg.lobby.then(|| Lobby::new(cfg.seed, cfg.max_players, cfg.bots, cfg.scenario == Scenario::Classic));
         if !cfg.lobby {
             for _ in 0..cfg.bots.min(cfg.max_players) {
                 let Some(player) = game.free_player() else { break };
@@ -283,6 +323,10 @@ impl ServerCore {
             dropped: Vec::new(),
             tokens: mftr_sim::rng::Pcg32::new(cfg.seed ^ 0x746f_6b65_6e73, 7),
             lobby_steps: 0,
+            map_name: match &cfg.map {
+                Some(text) => mftr_sim::mapspec::MapSpec::parse(text).map_or_else(|_| "?".into(), |s| s.name),
+                None => hub::map_name(cfg.scenario).to_string(),
+            },
             rounds: 0,
             cfg,
             start,
@@ -305,6 +349,56 @@ impl ServerCore {
     /// Server bots playing (champion-select bots count once the match starts).
     pub fn bot_count(&self) -> usize {
         self.bots.len()
+    }
+
+    /// Humans with a stake in this match (13 §5): playing, in champion select, or holding a
+    /// dropped seat. Spectators don't count.
+    pub fn humans(&self) -> usize {
+        self.conns.values().filter(|c| !c.spectator).count() + self.pending.len() + self.dropped.len()
+    }
+
+    /// Humans connected and playing or in champion select.
+    pub fn connected_humans(&self) -> usize {
+        self.conns.values().filter(|c| !c.spectator).count() + self.pending.len()
+    }
+
+    /// Nobody to play for (13 §5): no human connected, and none dropped within
+    /// `RECONNECT_GRACE`. The hub stops such a match.
+    pub fn abandoned(&self, now: f64) -> bool {
+        self.connected_humans() == 0 && self.dropped.iter().all(|d| now - d.since >= RECONNECT_GRACE)
+    }
+
+    pub fn spectators(&self) -> usize {
+        self.conns.values().filter(|c| c.spectator).count()
+    }
+
+    /// Whether connection `key` is here (playing, watching or in champion select).
+    pub fn knows(&self, key: ClientKey) -> bool {
+        self.conns.contains_key(&key) || self.pending.contains_key(&key)
+    }
+
+    /// Whether a player with session token `token` is here or holds a dropped seat.
+    pub fn holds_token(&self, token: u64) -> bool {
+        token != 0 && (self.conns.values().any(|c| c.token == token) || self.dropped.iter().any(|d| d.token == token))
+    }
+
+    /// Still in champion select (no match playing yet).
+    pub fn in_champion_select(&self) -> bool {
+        self.lobby.is_some()
+    }
+
+    /// Whether a new human can join now (13 §2): a seat in champion select, a bot's seat in
+    /// the match being played, or a free slot on a server without champion select.
+    pub fn has_room(&self) -> bool {
+        match &self.lobby {
+            Some(lobby) => lobby.team_for_human(self.cfg.coop).is_some(),
+            None if self.cfg.lobby => self.free_seat().is_some(),
+            None => self.game.player_count() < self.cfg.max_players as usize,
+        }
+    }
+
+    pub fn cfg(&self) -> &ServerConfig {
+        &self.cfg
     }
 
     /// The match driver (replay recording, joins).
@@ -377,7 +471,7 @@ impl ServerCore {
         };
         let mut out = Vec::new();
         match message {
-            ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate } => {
+            ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate, .. } => {
                 if protocol != PROTOCOL_VERSION {
                     out.push((from, self.reject(RejectReason::ProtocolMismatch)));
                     return out;
@@ -399,22 +493,36 @@ impl ServerCore {
                         let token = self.new_token();
                         self.conns.insert(from, Conn::new(SPECTATOR.0, SPECTATOR.1, Team::Blue, token, true, now));
                     } else if let Some(i) = self.dropped.iter().position(|d| resume != 0 && d.token == resume) {
-                        // Reconnect: the champion is still there.
+                        // Reconnect: the champion is still there (in a match, the bot playing
+                        // it hands it back).
                         let d = self.dropped.remove(i);
+                        self.bots.retain(|b| b.player != d.player);
                         self.conns.insert(from, Conn::new(d.player, d.unit, d.team, d.token, false, now));
                     } else if let Some(old) = live {
                         // The same player from a new address (a restarted client): take over.
                         let c = self.conns.remove(&old).unwrap();
                         self.conns.insert(from, Conn::new(c.player, c.unit, c.team, c.token, false, now));
                     } else if let Some(lobby) = &mut self.lobby {
-                        let Some(player) = lobby.add_human(now) else {
+                        let Some(player) = lobby.add_human(now, self.cfg.coop) else {
                             out.push((from, self.reject(RejectReason::ServerFull)));
                             return out;
                         };
-                        self.pending.insert(from, Pending { player, last_heard: now, send: SendTracker::default() });
+                        self.pending
+                            .insert(from, Pending { player, last_heard: now, send: SendTracker::default(), mid: None });
                         out.extend(self.lobby_packet(from, player, now));
                         return out;
-                    } else if self.game.player_count() >= self.cfg.max_players as usize {
+                    } else if let Some(seat) = self.free_seat() {
+                        // A match in progress: choose a champion, then take over a bot (13 §3).
+                        let champion = self.deal(seat, &[]);
+                        let rerolls = if self.pick() { 0 } else { MIDJOIN_REROLLS };
+                        let mid = MidJoin { champion, rerolls, ready: false, deadline: now + MIDJOIN_SECONDS };
+                        self.pending.insert(
+                            from,
+                            Pending { player: seat, last_heard: now, send: SendTracker::default(), mid: Some(mid) },
+                        );
+                        out.extend(self.lobby_packet(from, seat, now));
+                        return out;
+                    } else if self.cfg.lobby || self.game.player_count() >= self.cfg.max_players as usize {
                         out.push((from, self.reject(RejectReason::ServerFull)));
                         return out;
                     } else {
@@ -428,12 +536,14 @@ impl ServerCore {
                 out.extend(self.welcome(from, client_time_us, now));
             }
             ClientMessage::Lobby(action) => {
-                if let Some(p) = self.pending.get_mut(&from)
-                    && let Some(lobby) = &mut self.lobby
-                {
+                if let Some(p) = self.pending.get_mut(&from) {
                     p.last_heard = now;
                     let player = p.player;
-                    lobby.act(player, action);
+                    if p.mid.is_some() {
+                        self.midjoin_act(from, action);
+                    } else if let Some(lobby) = &mut self.lobby {
+                        lobby.act(player, action);
+                    }
                     out.extend(self.lobby_packet(from, player, now));
                 }
             }
@@ -580,14 +690,151 @@ impl ServerCore {
 
     /// Champion select as `player` sees it.
     fn lobby_packet(&mut self, key: ClientKey, player: PlayerId, now: f64) -> Option<(ClientKey, Vec<u8>)> {
-        let lobby = self.lobby.as_mut()?;
-        let starts_in = lobby.starts_in(now).unwrap_or(lobby::LOBBY_SECONDS);
-        let state = lobby.state_for(player, starts_in);
+        let mut state = match self.pending.get(&key)?.mid {
+            Some(mid) => self.midjoin_state(player, mid, now),
+            None => {
+                let lobby = self.lobby.as_mut()?;
+                let starts_in = lobby.starts_in(now).unwrap_or(lobby::LOBBY_SECONDS);
+                lobby.state_for(player, starts_in)
+            }
+        };
+        state.mode = self.cfg.scenario.mode();
+        state.map = self.map_name.clone();
         let seq = self.pending.get_mut(&key)?.send.next_seq();
         let h = PacketHeader { seq, ack: 0, ack_bits: 0 };
         let bytes = msg::encode_server(&h, &ServerMessage::Lobby(Box::new(state)));
         self.stats.bytes_out += bytes.len() as u64;
         Some((key, bytes))
+    }
+
+    /// Champion select picks (Classic) instead of dealing (ARAM modes).
+    fn pick(&self) -> bool {
+        self.cfg.scenario == Scenario::Classic
+    }
+
+    /// The seat a new human takes in the match being played (13 §2–3): a bot's that isn't
+    /// held for a dropped player or being taken by another joiner, on the team with fewer
+    /// humans (in Co-op, blue). None once the match is decided.
+    fn free_seat(&self) -> Option<PlayerId> {
+        if !self.cfg.lobby || !self.cfg.scenario.is_match() || self.lobby.is_some() {
+            return None;
+        }
+        if self.game.world.game().winner.is_some() {
+            return None;
+        }
+        let held: Vec<PlayerId> = self
+            .dropped
+            .iter()
+            .map(|d| d.player)
+            .chain(self.pending.values().filter(|p| p.mid.is_some()).map(|p| p.player))
+            .collect();
+        let humans = |team: Team| {
+            self.conns.values().filter(|c| !c.spectator && c.team == team).count()
+                + held.iter().filter(|p| lobby::team_of(**p) == team).count()
+        };
+        let seat = |team: Team| {
+            self.bots.iter().map(|b| b.player).filter(|p| !held.contains(p) && lobby::team_of(*p) == team).min()
+        };
+        let mut teams = if self.cfg.coop { vec![Team::Blue] } else { vec![Team::Blue, Team::Red] };
+        teams.sort_by_key(|t| humans(*t));
+        teams.into_iter().find_map(seat)
+    }
+
+    /// Champions `seat`'s team has, apart from the seat's own: on the field, and chosen by
+    /// other joiners.
+    fn team_champions(&self, seat: PlayerId) -> Vec<ChampionId> {
+        let team = lobby::team_of(seat);
+        let field = self
+            .game
+            .world
+            .units()
+            .iter()
+            .filter(|u| u.team == team && u.kind == UnitKind::Champion && u.owner != Some(seat))
+            .filter_map(|u| u.champion);
+        let joining = self
+            .pending
+            .values()
+            .filter(|p| p.player != seat && lobby::team_of(p.player) == team)
+            .filter_map(|p| p.mid.map(|m| m.champion));
+        field.chain(joining).collect()
+    }
+
+    /// A random champion `seat`'s team doesn't have, other than `besides` (not part of the
+    /// simulation: the takeover records the choice).
+    fn deal(&mut self, seat: PlayerId, besides: &[ChampionId]) -> ChampionId {
+        let taken = self.team_champions(seat);
+        let free: Vec<ChampionId> =
+            ChampionId::ALL.into_iter().filter(|c| !taken.contains(c) && !besides.contains(c)).collect();
+        let pool = if free.is_empty() { ChampionId::ALL.to_vec() } else { free };
+        pool[self.tokens.next_u32() as usize % pool.len()]
+    }
+
+    /// A joiner's champion select action: ready, a reroll (ARAM modes), a pick (Classic).
+    fn midjoin_act(&mut self, key: ClientKey, action: msg::LobbyAction) {
+        let Some((seat, mut mid)) = self.pending.get(&key).and_then(|p| Some((p.player, p.mid?))) else { return };
+        match action {
+            msg::LobbyAction::Ready(r) => mid.ready = r,
+            msg::LobbyAction::Reroll if !self.pick() && mid.rerolls > 0 => {
+                mid.champion = self.deal(seat, &[mid.champion]);
+                mid.rerolls -= 1;
+            }
+            msg::LobbyAction::Take(c) if self.pick() && !self.team_champions(seat).contains(&c) => mid.champion = c,
+            _ => {}
+        }
+        if let Some(p) = self.pending.get_mut(&key) {
+            p.mid = Some(mid);
+        }
+    }
+
+    /// Champion select as a joiner sees it: the match's champions, our seat with our choice.
+    fn midjoin_state(&self, you: PlayerId, mid: MidJoin, now: f64) -> msg::LobbyState {
+        let slots = self
+            .game
+            .players()
+            .into_iter()
+            .map(|p| {
+                let current = self
+                    .game
+                    .world
+                    .units()
+                    .iter()
+                    .find(|u| u.owner == Some(p) && u.kind == UnitKind::Champion)
+                    .and_then(|u| u.champion);
+                let mine = p == you;
+                msg::LobbySlot {
+                    player: p,
+                    team: lobby::team_of(p),
+                    champion: if mine { mid.champion } else { current.unwrap_or(ChampionId::Ember) },
+                    rerolls: if mine { mid.rerolls } else { 0 },
+                    ready: if mine { mid.ready } else { true },
+                    bot: !mine && self.bots.iter().any(|b| b.player == p),
+                }
+            })
+            .collect();
+        msg::LobbyState {
+            you,
+            slots,
+            bench: Vec::new(),
+            starts_in_ms: ((mid.deadline - now).max(0.0) * 1000.0) as u32,
+            mode: msg::GameMode::Empty,
+            map: String::new(),
+            pick: self.pick(),
+            midgame: true,
+        }
+    }
+
+    /// A joiner is ready (or out of time): their champion takes the bot's seat (13 §3), and
+    /// they get their connection and a Welcome.
+    fn finish_midjoin(&mut self, key: ClientKey, now: f64) -> Option<(ClientKey, Vec<u8>)> {
+        let p = self.pending.remove(&key)?;
+        let mid = p.mid?;
+        let (unit, team) = self.game.takeover(p.player, mid.champion)?;
+        self.bots.retain(|b| b.player != p.player);
+        let token = self.new_token();
+        let mut conn = Conn::new(p.player, unit, team, token, false, now);
+        conn.send = p.send;
+        self.conns.insert(key, conn);
+        self.welcome(key, 0, now)
     }
 
     /// Champion select is over: everyone joins the match in slot order; bots get brains, and
@@ -620,13 +867,20 @@ impl ServerCore {
     fn return_to_lobby(&mut self, now: f64) -> Vec<(ClientKey, Vec<u8>)> {
         self.rounds += 1;
         let seed = self.cfg.seed.wrapping_add(self.rounds);
-        let mut lobby = Lobby::new(seed, self.cfg.max_players, self.cfg.bots);
+        let mut lobby = Lobby::new(seed, self.cfg.max_players, self.cfg.bots, self.pick());
         let players: Vec<ClientKey> = self.conns.iter().filter(|(_, c)| !c.spectator).map(|(k, _)| *k).collect();
+        // Those who were still choosing a champion to join with come along.
+        let joining = std::mem::take(&mut self.pending);
         for key in players {
             let c = self.conns.remove(&key).expect("listed");
-            if let Some(player) = lobby.add_human(now) {
+            if let Some(player) = lobby.add_human(now, self.cfg.coop) {
                 // The packet sequence carries over, so the client accepts what follows.
-                self.pending.insert(key, Pending { player, last_heard: c.last_heard, send: c.send });
+                self.pending.insert(key, Pending { player, last_heard: c.last_heard, send: c.send, mid: None });
+            }
+        }
+        for (key, p) in joining {
+            if let Some(player) = lobby.add_human(now, self.cfg.coop) {
+                self.pending.insert(key, Pending { player, last_heard: p.last_heard, send: p.send, mid: None });
             }
         }
         for player in self.game.players() {
@@ -644,32 +898,45 @@ impl ServerCore {
         pending.into_iter().filter_map(|(key, player)| self.lobby_packet(key, player, now)).collect()
     }
 
+    /// A player said goodbye. In a match a bot plays on with their champion (13 §4; the seat
+    /// isn't held, they chose to leave); elsewhere the champion goes.
     fn leave(&mut self, key: ClientKey) {
         if let Some(c) = self.conns.remove(&key)
             && !c.spectator
         {
-            self.game.leave(c.player);
             self.queue.retain(|cmd| cmd.player != c.player);
+            if self.cfg.scenario.is_match() {
+                self.bots.push(Bot::new(c.player, self.cfg.seed));
+            } else {
+                self.game.leave(c.player);
+            }
         }
     }
 
     /// Simulate the next tick and build one snapshot per client.
     pub fn step(&mut self, now: f64) -> Vec<(ClientKey, Vec<u8>)> {
-        // Silent connections: spectators go, players' champions wait for a reconnect.
+        // Silent connections: spectators go, players' champions wait for a reconnect. In a
+        // match a bot plays the champion meanwhile (13 §4).
         let timed_out: Vec<ClientKey> =
             self.conns.iter().filter(|(_, c)| now - c.last_heard > TIMEOUT).map(|(k, _)| *k).collect();
         for key in timed_out {
             let c = self.conns.remove(&key).unwrap();
             if !c.spectator {
                 self.queue.retain(|cmd| cmd.player != c.player);
-                let deadline = now + RECONNECT_GRACE;
-                self.dropped.push(Dropped { token: c.token, player: c.player, unit: c.unit, team: c.team, deadline });
+                if self.cfg.scenario.is_match() {
+                    self.bots.push(Bot::new(c.player, self.cfg.seed));
+                }
+                self.dropped.push(Dropped { token: c.token, player: c.player, unit: c.unit, team: c.team, since: now });
             }
         }
-        let (gone, kept): (Vec<Dropped>, Vec<Dropped>) = self.dropped.drain(..).partition(|d| now > d.deadline);
-        self.dropped = kept;
-        for d in gone {
-            self.game.leave(d.player);
+        // The sandboxes: a champion waits `RECONNECT_GRACE`, then goes.
+        if !self.cfg.scenario.is_match() {
+            let (gone, kept): (Vec<Dropped>, Vec<Dropped>) =
+                self.dropped.drain(..).partition(|d| now - d.since > RECONNECT_GRACE);
+            self.dropped = kept;
+            for d in gone {
+                self.game.leave(d.player);
+            }
         }
         // After a match, servers with champion select hold another one for everyone still here.
         if self.cfg.lobby && self.lobby.is_none() && self.game.restart_due() {
@@ -703,6 +970,21 @@ impl ServerCore {
         }
 
         let k = self.game.world.tick().next();
+        // Players joining the match in progress (13 §3): silent ones go (the seat stays a
+        // bot's); ready ones, or those out of time, take over their seat before this tick; the
+        // rest see their champion select a few times a second.
+        let mut joined = Vec::new();
+        let joining: Vec<(ClientKey, PlayerId, f64, MidJoin)> =
+            self.pending.iter().filter_map(|(key, p)| Some((*key, p.player, p.last_heard, p.mid?))).collect();
+        for (key, player, heard, mid) in joining {
+            if now - heard > TIMEOUT {
+                self.pending.remove(&key);
+            } else if mid.ready || now >= mid.deadline {
+                joined.extend(self.finish_midjoin(key, now));
+            } else if k.0.is_multiple_of(10) {
+                joined.extend(self.lobby_packet(key, player, now));
+            }
+        }
         let (mut due, later): (Vec<Command>, Vec<Command>) = self.queue.drain(..).partition(|c| c.tick <= k);
         self.queue = later;
         for bot in &mut self.bots {
@@ -833,7 +1115,8 @@ impl ServerCore {
             }
         }
 
-        let mut out = Vec::with_capacity(self.conns.len());
+        let mut out = joined;
+        out.reserve(self.conns.len());
         for (key, conn) in self.conns.iter_mut() {
             while conn.reports.front().is_some_and(|(at, _)| k.0.saturating_sub(at.0) > REPORT_REPEAT_TICKS) {
                 conn.reports.pop_front();
@@ -1107,6 +1390,7 @@ mod tests {
                 champion: None,
                 resume: 0,
                 spectate: false,
+                queue: None,
             },
         );
         core.handle_packet(key, &bytes, 0.0);
@@ -1134,7 +1418,14 @@ mod tests {
     }
 
     fn hello_msg(resume: u64, spectate: bool) -> ClientMessage {
-        ClientMessage::Hello { protocol: PROTOCOL_VERSION, client_time_us: 0, champion: None, resume, spectate }
+        ClientMessage::Hello {
+            protocol: PROTOCOL_VERSION,
+            client_time_us: 0,
+            champion: None,
+            resume,
+            spectate,
+            queue: None,
+        }
     }
 
     fn welcome_of(msgs: &[ServerMessage]) -> Option<(UnitId, u64, bool)> {
@@ -1223,6 +1514,161 @@ mod tests {
         assert!(welcome_of(&send(&mut core, 5, hello_msg(other_token, false), t)).is_some_and(|w| w.0 != other));
     }
 
+    /// 13 §4: in a match, a bot plays a dropped player's champion (and its commands are
+    /// recorded like anyone's) until the player returns with their token, from any address;
+    /// the match counts as abandoned only once its last human has been gone a while. A player
+    /// who says goodbye leaves their champion to a bot as well.
+    #[test]
+    fn a_bot_plays_a_dropped_champion_until_its_player_returns() {
+        let cfg = ServerConfig { seed: 3, bots: 9, record: true, scenario: Scenario::Aram, ..Default::default() };
+        let mut core = ServerCore::new(cfg, 0.0);
+        let (unit, token, _) = welcome_of(&send(&mut core, 1, hello_msg(0, false), 0.0)).unwrap();
+        let player = core.world().unit(unit).unwrap().owner.unwrap();
+        assert_eq!(core.bot_count(), 9);
+        let mut t = 0.0;
+        while t < 12.0 {
+            t += 1.0 / 30.0;
+            core.step(t);
+        }
+        assert_eq!(core.bot_count(), 10, "a bot took over");
+        assert_eq!((core.connected_humans(), core.humans()), (0, 1), "the seat is held");
+        assert!(core.holds_token(token));
+        let dropped_at = core.world().tick();
+        while t < 40.0 {
+            t += 1.0 / 30.0;
+            core.step(t);
+        }
+        assert!(!core.abandoned(t), "within the grace period");
+        assert!(core.abandoned(t + RECONNECT_GRACE), "nobody came back");
+        let bot_orders = core.game().replay().entries.iter().any(|e| match e {
+            ReplayEntry::Commands { tick, commands } => {
+                *tick > dropped_at && commands.iter().any(|c| c.player == player)
+            }
+            _ => false,
+        });
+        assert!(bot_orders, "the bot plays the champion");
+
+        let (back, same, _) = welcome_of(&send(&mut core, 7, hello_msg(token, false), t)).unwrap();
+        assert_eq!((back, same), (unit, token), "the same champion, from a new address");
+        assert_eq!(core.bot_count(), 9, "the bot handed it back");
+        assert_eq!(core.humans(), 1);
+
+        let bye = encode_client(&PacketHeader::default(), &ClientMessage::Bye);
+        core.handle_packet(7, &bye, t);
+        assert_eq!(core.bot_count(), 10, "a bot plays on for the leaver");
+        assert!(core.world().unit(unit).is_some());
+        assert_eq!(core.humans(), 0, "a goodbye holds no seat");
+        assert!(core.abandoned(t));
+    }
+
+    /// Play `core` until `until`, keeping connections `keys` alive.
+    fn run_until(core: &mut ServerCore, keys: &[ClientKey], t: &mut f64, until: f64) {
+        while *t < until {
+            *t += 1.0 / 30.0;
+            if ((*t * 30.0) as u32).is_multiple_of(30) {
+                for key in keys {
+                    send(core, *key, hello_msg(0, false), *t);
+                }
+            }
+            core.step(*t);
+        }
+    }
+
+    fn lobby_of(msgs: &[ServerMessage]) -> Option<msg::LobbyState> {
+        msgs.iter().find_map(|m| if let ServerMessage::Lobby(l) = m { Some((**l).clone()) } else { None })
+    }
+
+    /// 13 §3: a player joining an ARAM match in progress gets a champion select of their own
+    /// (a dealt champion, one reroll), then takes over a bot on the team with fewer humans:
+    /// in the fountain, at the bot's level with every point unspent, with its gold plus the
+    /// price of its items. The match goes on meanwhile, and its replay re-simulates exactly.
+    #[test]
+    fn a_player_joins_a_match_in_progress_by_taking_over_a_bot() {
+        let cfg = ServerConfig {
+            seed: 5,
+            bots: 10,
+            lobby: true,
+            record: true,
+            scenario: Scenario::Aram,
+            ..Default::default()
+        };
+        let mut core = ServerCore::new(cfg, 0.0);
+        let first = lobby_of(&send(&mut core, 1, hello_msg(0, false), 0.0)).unwrap();
+        assert!(!first.midgame && !first.pick && first.mode == msg::GameMode::Aram && first.map == "The Bridge");
+        send(&mut core, 1, ClientMessage::Lobby(msg::LobbyAction::Ready(true)), 0.0);
+        let mut t = 0.0;
+        run_until(&mut core, &[1], &mut t, 120.0);
+        assert!(!core.in_champion_select() && core.has_room());
+
+        let l = lobby_of(&send(&mut core, 2, hello_msg(0, false), t)).unwrap();
+        assert!(l.midgame);
+        let me = *l.slots.iter().find(|s| s.player == l.you).unwrap();
+        assert_eq!(me.team, Team::Red, "the team without a human");
+        assert_eq!(me.rerolls, MIDJOIN_REROLLS);
+        let seat = l.you;
+        let old = core.world().units().iter().find(|u| u.owner == Some(seat)).unwrap().clone();
+        let was = old.state.progress;
+        assert!(was.items.iter().any(|i| *i != 0), "the bot bought something");
+
+        let l = lobby_of(&send(&mut core, 2, ClientMessage::Lobby(msg::LobbyAction::Reroll), t)).unwrap();
+        let mine = l.slots.iter().find(|s| s.player == seat).unwrap();
+        assert!(mine.champion != me.champion && mine.rerolls == 0);
+        let teammates: Vec<ChampionId> =
+            l.slots.iter().filter(|s| s.team == Team::Red && s.player != seat).map(|s| s.champion).collect();
+        assert!(!teammates.contains(&mine.champion), "not one the team has");
+        send(&mut core, 2, ClientMessage::Lobby(msg::LobbyAction::Ready(true)), t);
+        let gold = core.world().units().iter().find(|u| u.owner == Some(seat)).unwrap().state.progress.gold;
+        t += 1.0 / 30.0;
+        let welcome = core.step(t).into_iter().filter(|(to, _)| *to == 2).map(|(_, b)| decode_server(&b).unwrap().1);
+        let welcome: Vec<ServerMessage> = welcome.collect();
+        let (unit, token, _) = welcome_of(&welcome).expect("welcomed into the match");
+        assert!(token != 0);
+        assert_eq!(core.bot_count(), 8);
+        let new = core.world().unit(unit).unwrap();
+        assert_eq!((new.owner, new.champion), (Some(seat), Some(mine.champion)));
+        assert!(core.world().unit(old.id).is_none(), "the bot's champion left");
+        let p = new.state.progress;
+        assert_eq!((p.level, p.xp, p.points, p.ranks), (was.level, was.xp, was.level, [0; 4]));
+        assert!(p.items.iter().all(|i| *i == 0));
+        let refund: f32 = was.items.iter().filter_map(|i| mftr_sim::items::item(*i)).map(|i| i.cost).sum();
+        assert!((p.gold - (gold + refund)).abs() < 50.0, "{} vs {} + {refund}", p.gold, gold);
+        let fountain = core.world().map().layout.champion_spawn[Team::Red as usize];
+        assert!(new.state.pos.distance(fountain) < 400.0);
+
+        run_until(&mut core, &[1], &mut t, 140.0);
+        let replay = Replay::from_text(&core.game().replay().to_text()).unwrap();
+        assert!(replay.entries.iter().any(|e| matches!(e, ReplayEntry::Takeover { .. })));
+        let check = replay.verify();
+        assert_eq!(check.mismatch, None);
+        assert_eq!(check.final_hash, core.world().state_hash());
+    }
+
+    /// 13 §3: in Classic, a joiner picks any champion their team doesn't have.
+    #[test]
+    fn classic_joiners_pick() {
+        let cfg = ServerConfig { seed: 2, bots: 10, lobby: true, scenario: Scenario::Classic, ..Default::default() };
+        let mut core = ServerCore::new(cfg, 0.0);
+        let first = lobby_of(&send(&mut core, 1, hello_msg(0, false), 0.0)).unwrap();
+        assert!(first.pick && first.map == "Crossroads");
+        send(&mut core, 1, ClientMessage::Lobby(msg::LobbyAction::Ready(true)), 0.0);
+        let mut t = 0.0;
+        run_until(&mut core, &[1], &mut t, 5.0);
+        let l = lobby_of(&send(&mut core, 2, hello_msg(0, false), t)).unwrap();
+        assert!(l.midgame && l.pick);
+        let team = l.slots.iter().find(|s| s.player == l.you).unwrap().team;
+        let mate = l.slots.iter().find(|s| s.team == team && s.player != l.you).unwrap().champion;
+        let l2 = lobby_of(&send(&mut core, 2, ClientMessage::Lobby(msg::LobbyAction::Take(mate)), t)).unwrap();
+        assert_ne!(l2.slots.iter().find(|s| s.player == l.you).unwrap().champion, mate, "a teammate has it");
+        let free =
+            ChampionId::ALL.into_iter().find(|c| !l.slots.iter().any(|s| s.team == team && s.champion == *c)).unwrap();
+        let l3 = lobby_of(&send(&mut core, 2, ClientMessage::Lobby(msg::LobbyAction::Take(free)), t)).unwrap();
+        assert_eq!(l3.slots.iter().find(|s| s.player == l.you).unwrap().champion, free);
+        // Out of time, joining anyway.
+        run_until(&mut core, &[1, 2], &mut t, 5.0 + MIDJOIN_SECONDS + 1.0);
+        assert!(core.world().units().iter().any(|u| u.owner == Some(l.you) && u.champion == Some(free)));
+        assert_eq!(core.connected_humans(), 2);
+    }
+
     /// Spectators see every unit (no fog), have no unit and don't take a player slot.
     #[test]
     fn spectators_see_everything() {
@@ -1306,6 +1752,7 @@ mod tests {
                 champion: Some(champion),
                 resume: 0,
                 spectate: false,
+                queue: None,
             },
         );
         core.handle_packet(key, &bytes, 0.0);

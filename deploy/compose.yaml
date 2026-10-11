@@ -1,32 +1,23 @@
 # MFTR on a server: `docker compose -f deploy/compose.yaml up -d` from the repository root.
-# One ARAM server with champion select and bots filling empty slots, recording a replay of the
-# session into the `replays` volume (copy it out with
-# `docker compose -f deploy/compose.yaml cp aram:/data/session.replay .`, then check it with
-# `mftr-tools replay session.replay`). Each server keeps its key (`server.key`, created on first
-# start) in its volume: players' clients pin it, so keep the volumes. `docker compose logs`
-# shows each key's fingerprint.
+# One server on UDP 7777 plays every mode (players pick ARAM, Mayhem, Hyper or Classic, Versus
+# or Co-op vs bots), as many matches at once as players fill. It records every match into the
+# `data` volume's `replays` folder (copy one out with
+# `docker compose -f deploy/compose.yaml cp mftr:/data/replays .`, then check it with
+# `mftr-tools replay FILE`). The server keeps its key (`server.key`, created on first start) in
+# the same volume: players' clients pin it, so keep the volume. `docker compose logs` shows the
+# key's fingerprint.
 services:
-  aram:
+  mftr:
     build: ..
     image: mftr-server
     restart: unless-stopped
     ports:
       - "7777:7777/udp"
     volumes:
-      - replays:/data
-    command: ["--scenario", "aram", "--bots", "10", "--lobby", "--seed", "1", "--replay", "/data/session.replay"]
-
-  # A second, smaller game on another port: the Duel Sandbox for practice.
-  duel:
-    image: mftr-server
-    depends_on: [aram]
-    restart: unless-stopped
-    ports:
-      - "7778:7777/udp"
-    volumes:
-      - duel:/data
-    command: ["--scenario", "duel", "--max-players", "4"]
+      - data:/data
+    command: ["--seed", "1", "--replay", "/data/replays"]
+    # More: "--modes", "aram,classic" to offer fewer modes; "--map", "/data/maps/x.mftrmap" for
+    # Classic on a map from the map editor (put the file in the volume first).
 
 volumes:
-  replays:
-  duel:
+  data:

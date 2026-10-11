@@ -225,6 +225,8 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-menu":
 			_shot_menu = true
+		elif args[i] == "--shot-queues":
+			_shot_queues = true
 		elif args[i] == "--keep-points":
 			_shot_keep_points = true
 		elif args[i] == "--hover-slot" and i + 1 < args.size():
@@ -236,6 +238,9 @@ func _ready() -> void:
 			_shot_loading = true
 		elif args[i] == "--menu-join":
 			_menu_auto_join = true
+		elif args[i] == "--queue" and i + 1 < args.size():
+			_auto_queue = int(args[i + 1])
+			i += 1
 		elif args[i] == "--spectate":
 			_menu_mode = 1
 			client.set_spectate(true)
@@ -321,9 +326,11 @@ func _minion_model(kind: String) -> MftrModel:
 func _connect(address: String) -> void:
 	_server_address = address
 	_remembered = false
-	# Reconnect: a session to this server from moments ago gets its champion back.
+	# Reconnect: a match on this server we dropped out of holds our seat (a bot plays it
+	# meanwhile, 13 §4) and gives the champion back. A token the server no longer holds is
+	# ignored, so trying costs nothing.
 	var saved := _load_session()
-	var recent: bool = Time.get_unix_time_from_system() - float(saved.get("at", 0.0)) < 55.0
+	var recent: bool = Time.get_unix_time_from_system() - float(saved.get("at", 0.0)) < 7200.0
 	client.set_resume_token(saved.get("token", "") if saved.get("address", "") == address and recent else "")
 	if not client.connect_to_server(address):
 		_show_menu("Could not connect to %s: %s" % [address, client.last_error()])
@@ -356,12 +363,21 @@ var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's re
 var _shot_ward := false                  # `--shot-ward`: place a stealth ward ahead at 2.5 s
 var _shot_goto = null                     # `--shot-goto X,Y`: walk there (game units) from 2 s on
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
+var _shot_queues := false                 # `--shot-queues`: capture the server's queue list
 var _shot_keep_points := false            # `--keep-points`: don't spend the starting points
 
 
 func _update_shot(delta: float) -> void:
 	if _shot_path != "" and _shot_menu:
 		_shot_timer += delta
+		if _shot_timer > 1.2:
+			get_viewport().get_texture().get_image().save_png(_shot_path)
+			print("MFTR: saved screenshot to ", _shot_path)
+			get_tree().quit()
+		return
+	if _shot_path != "" and _shot_queues:
+		if client.phase() == "queues":
+			_shot_timer += delta
 		if _shot_timer > 1.2:
 			get_viewport().get_texture().get_image().save_png(_shot_path)
 			print("MFTR: saved screenshot to ", _shot_path)
@@ -1237,6 +1253,7 @@ func _process(delta: float) -> void:
 	if phase in ["lobby", "joining", "playing"]:
 		_remember_server()
 	_update_connecting(phase)
+	_update_queues(phase)
 	_update_backdrop(phase)
 	if playing and not _map_built:
 		_build_map()
@@ -3926,7 +3943,8 @@ func _update_lobby(delta: float, phase: String) -> void:
 	if l.is_empty():
 		return
 	_last_lobby = l
-	portraits.prepare(l.slots.map(func(x): return x.champion) + Array(l.bench))
+	var all_names: Array = Array(client.champion_names()) if l.get("pick", false) else []
+	portraits.prepare(l.slots.map(func(x): return x.champion) + Array(l.bench) + all_names)
 	if _lobby_timer != null and is_instance_valid(_lobby_timer):
 		_lobby_timer.text = "%d" % ceili(l.starts_in)
 	# Rebuild only when something but the countdown changed, so buttons keep their hover and
@@ -3947,12 +3965,14 @@ func _update_lobby(delta: float, phase: String) -> void:
 	var titles := VBoxContainer.new()
 	titles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	titles.size_flags_stretch_ratio = 1.0
+	var midgame: bool = l.get("midgame", false)
+	var pick: bool = l.get("pick", false)
 	var title := Label.new()
-	title.text = "Champion select"
+	title.text = "Join the match" if midgame else "Champion select"
 	title.theme_type_variation = "TitleLabel"
 	titles.add_child(title)
 	var sub := Label.new()
-	sub.text = "%s  ·  ALL RANDOM  ·  The Bridge" % client.game_type().to_upper()
+	sub.text = "%s  ·  %s  ·  %s" % [String(l.get("mode", "")).to_upper(), "PICK" if pick else "ALL RANDOM", l.get("map", "")]
 	sub.theme_type_variation = "HeaderLabel"
 	titles.add_child(sub)
 	top.add_child(titles)
@@ -3966,7 +3986,7 @@ func _update_lobby(delta: float, phase: String) -> void:
 	_lobby_timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	clock.add_child(_lobby_timer)
 	var until := Label.new()
-	until.text = "THE MATCH STARTS WHEN EVERYONE IS READY"
+	until.text = "IN PROGRESS  ·  YOU TAKE OVER A BOT'S SEAT WHEN READY" if midgame else "THE MATCH STARTS WHEN EVERYONE IS READY"
 	until.theme_type_variation = "HintLabel"
 	until.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	clock.add_child(until)
@@ -3976,8 +3996,31 @@ func _update_lobby(delta: float, phase: String) -> void:
 	top.add_child(right)
 	lobby_box.add_child(top)
 
+	# A pick (Classic): every champion, those a teammate holds greyed out (a bot teammate's
+	# can be taken in champion select: the bot gets ours).
+	if pick:
+		var picks := HFlowContainer.new()
+		picks.alignment = FlowContainer.ALIGNMENT_CENTER
+		picks.add_theme_constant_override("h_separation", 8)
+		var held := {}
+		for slot in l.slots:
+			if slot.ally and not slot.you and (midgame or not slot.bot):
+				held[slot.champion] = true
+		for name in all_names:
+			var b := Button.new()
+			b.custom_minimum_size = Vector2(56, 56)
+			b.focus_mode = Control.FOCUS_NONE
+			b.icon = portraits.portrait(name, "bust")
+			b.expand_icon = true
+			b.text = "" if b.icon != null else String(name).left(2)
+			b.disabled = held.has(name) or name == me.get("champion", "")
+			b.tooltip_text = ("A teammate plays %s" % name) if held.has(name) else ("Play %s" % name)
+			b.pressed.connect(func(): client.lobby_take(name); _lobby_refresh = 0.0)
+			picks.add_child(b)
+		lobby_box.add_child(picks)
 	# The bench, across the top: champions anyone on the team can swap theirs for.
 	var bench := HBoxContainer.new()
+	bench.visible = not pick and not midgame
 	bench.alignment = BoxContainer.ALIGNMENT_CENTER
 	bench.add_theme_constant_override("separation", 10)
 	var bench_label := Label.new()
@@ -4041,6 +4084,7 @@ func _update_lobby(delta: float, phase: String) -> void:
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER
 	actions.add_theme_constant_override("separation", 14)
 	var reroll := Button.new()
+	reroll.visible = not pick
 	reroll.text = "⟳  Reroll (%d)" % me.get("rerolls", 0)
 	reroll.disabled = me.get("rerolls", 0) == 0
 	reroll.focus_mode = Control.FOCUS_NONE
@@ -4158,7 +4202,7 @@ func _lobby_card(slot: Dictionary, team: Color) -> Control:
 		who.text = "Picking…"
 	else:
 		who.text = "You" if you else ("Bot" if slot.bot else "Player %d" % slot.player)
-		if you:
+		if you and not _last_lobby.get("pick", false):
 			who.text += "   ·   %d reroll%s" % [slot.rerolls, "" if slot.rerolls == 1 else "s"]
 	who.theme_type_variation = "HintLabel"
 	names.add_child(who)
@@ -4343,7 +4387,7 @@ func _remember_server() -> void:
 		return
 	_remembered = true
 	var list := _load_servers().filter(func(e): return e.get("address", "") != _server_address)
-	list.push_front({"address": _server_address, "game": game, "at": Time.get_unix_time_from_system()})
+	list.push_front({"address": _server_address, "game": game, "queue": _picked_queue, "at": Time.get_unix_time_from_system()})
 	_save_servers(list)
 
 
@@ -4491,6 +4535,7 @@ func _show_menu(error: String) -> void:
 		menu_address.grab_focus()
 		if _menu_auto_join and servers.size() > 0:
 			_menu_auto_join = false
+			_auto_queue_key = servers[0].get("queue", "")
 			await get_tree().create_timer(1.0).timeout
 			_menu_join(servers[0].get("address", ""))
 
@@ -4544,6 +4589,120 @@ func _update_connecting(phase: String) -> void:
 	var err: String = client.last_error()
 	connecting_label.text = "Connecting to %s…%s" % [_server_address, ("\n\n" + err) if err != "" else ""]
 	_center(connecting_panel)
+
+
+## ---- Queues (13 §1): what to play on this server ---------------------------------------------
+## A server offers modes on maps, each Versus (humans on both teams, bots in the empty seats) or
+## Co-op vs bots (humans on blue). Picking one puts the player in a match of it (champion select,
+## or a new match). The list refreshes every few seconds with how many play each.
+
+var queues_panel: PanelContainer
+var _queues_sig := ""
+var _auto_queue := -1                    # `--queue N`: pick queue N as soon as the list arrives
+var _auto_queue_key := ""                # `--menu-join`: the queue picked last time on that server
+var _picked_queue := ""                  # "mode|map|side" of the queue picked, remembered with the server
+
+
+func _queue_key(q: Dictionary) -> String:
+	return "%s|%s|%s" % [q.get("mode", ""), q.get("map", ""), "coop" if q.get("coop", false) else "versus"]
+
+
+func _choose_queue(i: int, q: Dictionary) -> void:
+	_picked_queue = _queue_key(q)
+	print("MFTR: queue %s" % _picked_queue)
+	client.choose_queue(i)
+
+
+## The server's last pick on this address (from the remembered servers).
+func _last_queue_here() -> String:
+	for e in _load_servers():
+		if e.get("address", "") == _server_address:
+			return e.get("queue", "")
+	return ""
+
+
+func _update_queues(phase: String) -> void:
+	if phase != "queues":
+		if queues_panel != null:
+			queues_panel.queue_free()
+			queues_panel = null
+			_queues_sig = ""
+		return
+	var queues: Array = client.queues()
+	if _auto_queue >= 0 and _auto_queue < queues.size():
+		var i := _auto_queue
+		_auto_queue = -1
+		_choose_queue(i, queues[i])
+		return
+	if _auto_queue_key != "":
+		var key := _auto_queue_key
+		_auto_queue_key = ""
+		for i in queues.size():
+			if _queue_key(queues[i]) == key:
+				_choose_queue(i, queues[i])
+				return
+	var sig := JSON.stringify(queues)
+	if sig == _queues_sig and queues_panel != null:
+		return
+	_queues_sig = sig
+	if queues_panel != null:
+		queues_panel.queue_free()
+	var made := _panel(640)
+	queues_panel = made[0]
+	var v: VBoxContainer = made[1]
+	var title := Label.new()
+	title.text = ("Watch on %s" if _menu_mode == 1 else "Play on %s") % _server_address.get_slice("#", 0)
+	title.theme_type_variation = "TitleLabel"
+	v.add_child(title)
+	# One row per mode and map: Versus and Co-op side by side.
+	var rows := {}
+	var order: Array = []
+	for i in queues.size():
+		var q: Dictionary = queues[i]
+		var row_key := "%s|%s" % [q.get("mode", ""), q.get("map", "")]
+		if not rows.has(row_key):
+			rows[row_key] = {}
+			order.append(row_key)
+		rows[row_key]["coop" if q.get("coop", false) else "versus"] = i
+	var last := _last_queue_here()
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 8)
+	for row_key in order:
+		var parts: PackedStringArray = row_key.split("|")
+		var name := Label.new()
+		name.text = "%s   ·   %s" % [parts[0], parts[1]]
+		name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(name)
+		for side in ["versus", "coop"]:
+			if not rows[row_key].has(side):
+				grid.add_child(Control.new())
+				continue
+			var i: int = rows[row_key][side]
+			var q: Dictionary = queues[i]
+			var b := Button.new()
+			var humans := int(q.get("humans", 0))
+			b.text = ("Versus" if side == "versus" else "Co-op vs bots") + ("   ·   %d playing" % humans if humans > 0 else "")
+			b.custom_minimum_size = Vector2(170, 0)
+			b.tooltip_text = "Humans on both teams; bots fill the empty seats." if side == "versus" else "Humans together on blue, against bots."
+			if _queue_key(q) == last:
+				b.theme_type_variation = "PrimaryButton"
+			b.pressed.connect(func(): _choose_queue(i, q))
+			grid.add_child(b)
+	v.add_child(grid)
+	var hint := Label.new()
+	hint.text = "You join a match of it in champion select, or a new one when they're all full."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.theme_type_variation = "HintLabel"
+	v.add_child(hint)
+	var back := Button.new()
+	back.text = "Back to the server list"
+	back.pressed.connect(_leave)
+	v.add_child(back)
+	await get_tree().process_frame
+	if queues_panel != null:
+		_center(queues_panel)
 
 
 func _toggle_pause_menu() -> void:
