@@ -6119,7 +6119,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_ARENA, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_ARENA: u64 = 0xe845_b3e4_e35b_90c9;
+    const GOLDEN_HASH_ARENA: u64 = 0xc506_0738_4f81_b84f;
 
     /// Determinism canary for the lane match loop: waves, minion and turret AI, relics and
     /// fountains on The Bridge, with four champions fighting through it.
@@ -6176,7 +6176,7 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0xb3d5_88f8_9bd9_b6b1;
+    const GOLDEN_HASH_BRIDGE: u64 = 0xecb9_e15d_c580_0689;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.

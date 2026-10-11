@@ -795,6 +795,8 @@ players.
    becomes a pick.
 4. Scale: instances step on worker threads; a load test of many matches with headless
    clients; NixOS hosts one server; measurements in 13 §8.
+5. Pathfinding for scale: jump-point search instead of A* over every cell (D58), so a server
+   can host many Classic matches.
 
 ### S slice 1 status (2026-10-10): ✅ done
 - **The hub** (`mftr-server/src/hub.rs`): one process, one port. A hello without a queue gets
@@ -859,6 +861,28 @@ players.
   makes the start of a test match hitch when ten clicks land in one tick. Next for scale.
 - The server log reports tick time against the 33 ms budget instead of a share of a core.
 - NixOS hosts one server (slice 1).
+
+### S slice 5 status (2026-10-11): ✅ done
+- **Jump-point search** (D58) on the same 25 u grid: the same octile costs, no corner cutting
+  and deterministic tie-breaks, so paths are as short as before (a different one among equally
+  short ones). Sight and clearance tests visit only the edge buckets along a segment (and each
+  edge is filed only in the buckets it crosses), and every blocked cell's nearest walkable cell
+  is found when the map is built. Neither changes a result.
+- **A path to a random point** (2,000 of them, `path_bench`): Crossroads 1.2 → 0.20 ms on
+  average, worst 10 → 1.2 ms; The Bridge 0.27 → 0.07 ms, worst 3.0 → 0.4 ms. The search itself
+  is 8× cheaper; paths are 0.03% shorter in all with fewer waypoints (truncated paths, over 12
+  waypoints, 22 → 12 in 2,000).
+- **Load test** (13 §8): a Classic match costs 0.7% of a core instead of 3.3%, and the tick
+  where ten first clicks land together takes 12 ms instead of 80 ms; 32 Classic matches on
+  eight workers take 2.9 ms of each 33 ms tick. ARAM: 0.3% instead of 0.8%.
+- Checked: golden hashes for the arena and The Bridge regenerated on purpose (paths changed;
+  the bucket changes alone left every hash as it was); a new test walks 150 random paths on
+  Crossroads and checks every leg keeps its clearance; old and new paths drawn over
+  Crossroads' walls match or are straighter; Classic bot matches still finish and replay
+  exactly; the client plays a Classic match. A netlab check (every one of six players reaches
+  level 5 in four minutes of ARAM) failed on one seed: before this change it failed on 3 seeds
+  of 8 too, and the levels in all were the same, so it now asks for level 4 each and 5 on
+  average.
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
