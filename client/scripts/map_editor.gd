@@ -1,6 +1,6 @@
 extends Control
 ## The map editor (12): draw blue's half of a lane map (lanes, the river, jungle paths, tall grass,
-## clearings, camps, great objectives); red's half is its mirror across the river. Every change is
+## clearings, camps, great objectives); red's half is it turned half a turn about the center. Every change is
 ## rebuilt with the game's own code (`MftrMaps`) and checked, so the canvas shows the walls the
 ## game will build and the right panel lists what still breaks the rules.
 ##
@@ -15,12 +15,12 @@ const MAPS_DIR := "user://maps"
 const CONFIG := "user://map_editor.cfg"
 const TOOLS := [
 	["select", "Select / move", "Drag points, camps, objectives, clearings and turrets (along their lane). Delete removes; Ctrl+Z undoes."],
-	["lane", "Lane", "From inside the base out to the river line (the dashed diagonal). Click points; double-click, Enter or right-click to finish. 1–5 lanes; turrets place themselves."],
-	["river", "River", "Along the river line. Its mirror makes the other bank."],
+	["lane", "Lane", "From inside the base out to the river line (the dashed diagonal). Click points; double-click, Enter or right-click to finish. 1–5 lanes; turrets place themselves. The top and bottom lanes pair up (each runs on into the other's turned half), so their ends snap to matching spots; a middle lane ends at the center."],
+	["river", "River", "Along the river line. Its turned copy makes the other bank."],
 	["jungle", "Jungle path", "Paths must join a lane, the river or the base."],
 	["grass", "Tall grass", "Brush: hides what's inside from outside."],
 	["clearing", "Clearing", "Open ground: click to place (radius from the slider)."],
-	["camp", "Camp", "Click to place the chosen camp (it carves its own clearing). Each side needs 3, with both buff camps."],
+	["camp", "Camp", "Click to place the chosen camp (it carves its own clearing). Each side needs 3, with both buff camps. Red's copy is turned: blue's top-side camps are red's bottom side."],
 	["objective", "Great objective", "Click to place one and its twin across the center. Shift-click for a single one (1-lane maps only)."],
 ]
 const LINE_KINDS := ["lane", "river", "jungle", "grass"]
@@ -86,6 +86,19 @@ var overlay_slider: HSlider
 var overlay_check: CheckBox
 var align_button: Button
 var file_dialog: FileDialog
+var actual_check: CheckButton
+var angle_check: CheckBox
+
+# The Actual view: the map as the game builds it, in 3D, over the canvas.
+const MapView := preload("res://scripts/map_view.gd")
+const ALLY := Color(0.3, 0.6, 1.0)
+const ENEMY := Color(0.95, 0.35, 0.25)
+var view_box: SubViewportContainer
+var view_port: SubViewport
+var view_cam: Camera3D
+var view_root: Node3D
+var view_stale := true
+var view_rebuild_in := 0.0
 
 
 func _ready() -> void:
@@ -98,6 +111,12 @@ func _ready() -> void:
 	_load_config()
 	await get_tree().process_frame
 	_fit_view()
+
+
+## Switch to the Actual view (`--editor-actual`, for captures).
+func show_actual_view(game_angle := false) -> void:
+	angle_check.button_pressed = game_angle
+	actual_check.button_pressed = true
 
 
 ## Open the editor on a reference image right away (`--dev-overlay FILE`).
@@ -195,6 +214,16 @@ func _build_ui() -> void:
 	fit.text = "Fit to view"
 	fit.pressed.connect(_fit_view)
 	lv.add_child(fit)
+	actual_check = CheckButton.new()
+	actual_check.text = "Actual view"
+	actual_check.tooltip_text = "The map as the game builds it: cliffs, roads, the river, trees, rocks, tall grass and structures. Zoom and pan as usual."
+	actual_check.toggled.connect(_show_actual)
+	lv.add_child(actual_check)
+	angle_check = CheckBox.new()
+	angle_check.text = "Game camera angle"
+	angle_check.tooltip_text = "Look at the Actual view from the game's camera angle instead of straight down."
+	angle_check.toggled.connect(func(_on: bool): _place_view_camera())
+	lv.add_child(angle_check)
 
 	lv.add_child(_header("REFERENCE IMAGE"))
 	var load_ref := Button.new()
@@ -416,6 +445,9 @@ func _rebuild_now() -> void:
 			t += "[color=#ff8a70]•[/color] %s\n" % p
 	problems_label.text = t
 	title_label.text = "Map editor%s" % ("  •" if dirty else "")
+	view_stale = true
+	if view_box != null and view_box.visible:
+		view_rebuild_in = 0.4
 	canvas.queue_redraw()
 
 
@@ -424,6 +456,12 @@ func _process(delta: float) -> void:
 		rebuild_in -= delta
 		if rebuild_in <= 0.0:
 			_rebuild_now()
+	if view_box != null and view_box.visible:
+		if view_rebuild_in > 0.0:
+			view_rebuild_in -= delta
+			if view_rebuild_in <= 0.0:
+				_build_view()
+		_place_view_camera()
 
 
 func _resize_map(i: int) -> void:
@@ -489,6 +527,8 @@ func _draw_canvas() -> void:
 	var s := float(spec.size)
 	var k := _scale()
 	var font := get_theme_default_font()
+	if view_box != null and view_box.visible:
+		return
 	c.draw_rect(Rect2(to_screen(Vector2.ZERO), Vector2(s, s) * k), Color(0.3, 0.38, 0.25))
 	if overlay_tex != null and overlay_shown:
 		c.draw_texture_rect(overlay_tex, Rect2(to_screen(overlay_rect.position), overlay_rect.size * k), false, Color(1, 1, 1, overlay_alpha))
@@ -499,7 +539,7 @@ func _draw_canvas() -> void:
 			_fill(_screen_poly(poly), wall_color)
 		for poly in built.brush:
 			_fill(_screen_poly(poly), Color(0.2, 0.5, 0.18, 0.7))
-	# Red's half (the mirror), shaded; the river line.
+	# Red's half (blue's turned), shaded; the river line.
 	c.draw_colored_polygon(PackedVector2Array([to_screen(Vector2.ZERO), to_screen(Vector2(s, 0)), to_screen(Vector2(s, s))]), Color(0.6, 0.1, 0.1, 0.12))
 	_dashed(to_screen(Vector2.ZERO), to_screen(Vector2(s, s)), Color(0.6, 0.8, 1.0, 0.6))
 	var b: float = built.get("base_side", s * 0.27)
@@ -514,7 +554,7 @@ func _draw_canvas() -> void:
 			var mirrored := PackedVector2Array()
 			var mine := PackedVector2Array()
 			for p in pts:
-				mirrored.append(to_screen(Vector2(p.y, p.x)))
+				mirrored.append(to_screen(Vector2(s, s) - p))
 				mine.append(to_screen(p))
 			var w := maxf(2.0, float(l.width) * k)
 			var sel: bool = selected.get("what", "") == "line" and selected.kind == kind and selected.index == i
@@ -531,7 +571,7 @@ func _draw_canvas() -> void:
 		var p: Vector2 = cl.pos
 		var sel: bool = selected.get("what", "") == "clearing" and selected.index == i
 		c.draw_arc(to_screen(p), float(cl.radius) * k, 0, TAU, 40, Color(0.9, 0.9, 0.7, 0.9 if sel else 0.6), 2.0)
-		c.draw_arc(to_screen(Vector2(p.y, p.x)), float(cl.radius) * k, 0, TAU, 40, Color(0.9, 0.9, 0.7, 0.25), 1.5)
+		c.draw_arc(to_screen(Vector2(s, s) - p), float(cl.radius) * k, 0, TAU, 40, Color(0.9, 0.9, 0.7, 0.25), 1.5)
 		c.draw_circle(to_screen(p), 4.0, Color(0.95, 0.95, 0.8))
 	for i in spec.camps.size():
 		var cp: Dictionary = spec.camps[i]
@@ -539,7 +579,7 @@ func _draw_canvas() -> void:
 		var info: Array = _camp_info(cp.kind)
 		var sel: bool = selected.get("what", "") == "camp" and selected.index == i
 		var r := maxf(7.0, 170.0 * k)
-		c.draw_circle(to_screen(Vector2(p.y, p.x)), r, Color(info[3], 0.3))
+		c.draw_circle(to_screen(Vector2(s, s) - p), r, Color(info[3], 0.3))
 		c.draw_circle(to_screen(p), r + (3.0 if sel else 1.5), Color.WHITE if sel else Color.BLACK)
 		c.draw_circle(to_screen(p), r, info[3])
 		c.draw_string(font, to_screen(p) + Vector2(-r, r * 0.42), info[2], HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, int(maxf(10.0, r * 1.15)), Color.WHITE)
@@ -560,7 +600,7 @@ func _draw_canvas() -> void:
 			var col := Color(0.35, 0.6, 1.0) if blue else Color(1.0, 0.4, 0.35)
 			if not blue:
 				col.a = 0.55
-			var sel: bool = selected.get("what", "") == "structure" and blue and selected.lane == st.lane and selected.tier == st.tier
+			var sel: bool = selected.get("what", "") == "structure" and blue and selected.lane == st.spec_lane and selected.tier == st.tier
 			match st.kind:
 				"base":
 					c.draw_circle(p, maxf(8.0, 260.0 * k), col)
@@ -592,7 +632,7 @@ func _draw_canvas() -> void:
 			c.draw_rect(Rect2(p - Vector2(7, 7), Vector2(14, 14)), Color(1, 0.85, 0.2))
 			c.draw_rect(Rect2(p - Vector2(7, 7), Vector2(14, 14)), Color.BLACK, false, 2.0)
 	# Where the cursor is.
-	var half := "blue's half" if mouse_map.y >= mouse_map.x else "red's half (mirror)"
+	var half := "blue's half" if mouse_map.y >= mouse_map.x else "red's half (blue's, turned)"
 	c.draw_string(font, Vector2(10, c.size.y - 12), "%d, %d   ·   %s   ·   zoom %d%%" % [roundi(mouse_map.x), roundi(mouse_map.y), half, roundi(zoom * 100.0)], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.88, 0.92))
 
 
@@ -723,9 +763,9 @@ func _press(p: Vector2, double: bool, shift: bool) -> void:
 	canvas.queue_redraw()
 
 
-## A point on blue's half (one placed on red's is mirrored there).
+## A point on blue's half (one placed on red's is turned onto blue's).
 func _blue(p: Vector2) -> Vector2:
-	return p if p.y >= p.x else Vector2(p.y, p.x)
+	return p if p.y >= p.x else Vector2(spec.size, spec.size) - p
 
 
 func _finish_line() -> void:
@@ -733,15 +773,29 @@ func _finish_line() -> void:
 		_snapshot()
 		var pts := drawing
 		if tool == "lane":
-			# A lane ends on the river line when it's close.
-			var last := pts[pts.size() - 1]
-			var on := Vector2((last.x + last.y) / 2.0, (last.x + last.y) / 2.0)
-			if last.distance_to(on) < 700.0:
-				pts[pts.size() - 1] = on
+			pts[pts.size() - 1] = _lane_end(pts[pts.size() - 1])
 		spec[tool].append({"width": widths[tool], "points": pts})
 		_changed(false)
 	drawing = PackedVector2Array()
 	canvas.queue_redraw()
+
+
+## Where a lane drawn to `last` should end: on the river line when it's close; then at the map's
+## center (a middle lane) or at the turned end of a lane it pairs with, when one is near.
+func _lane_end(last: Vector2) -> Vector2:
+	var on := Vector2((last.x + last.y) / 2.0, (last.x + last.y) / 2.0)
+	if last.distance_to(on) >= 700.0:
+		return last
+	var s := float(spec.size)
+	var center := Vector2(s, s) / 2.0
+	if on.distance_to(center) < 900.0:
+		return center
+	for l in spec.lane:
+		var pts: PackedVector2Array = l.points
+		var partner := Vector2(s, s) - pts[pts.size() - 1]
+		if on.distance_to(partner) < 1500.0:
+			return partner
+	return on
 
 
 ## The handle or line under the cursor (within a few pixels): structures first, then points,
@@ -750,7 +804,7 @@ func _pick(p: Vector2) -> Dictionary:
 	if built.get("ok", false):
 		for st in built.structures:
 			if st.team == "blue" and int(st.tier) <= 4 and _near(st.pos, p, 4.0):
-				return {"what": "structure", "lane": int(st.lane), "tier": int(st.tier)}
+				return {"what": "structure", "lane": int(st.spec_lane), "tier": int(st.tier)}
 	var objs: PackedVector2Array = spec.objectives
 	for i in objs.size():
 		if _near(objs[i], p, 4.0):
@@ -994,6 +1048,163 @@ func _export() -> void:
 	_ask_file(FileDialog.FILE_MODE_SAVE_FILE, ["*.mftrmap ; MFTR maps"], func(path: String):
 		if _write(path):
 			status_label.text = "Exported %s: it can be played with  mftr-server --scenario classic --map %s" % [path.get_file(), path.get_file()])
+
+
+# ---- the Actual view -------------------------------------------------------------------------
+
+func _show_actual(on: bool) -> void:
+	if on and view_box == null:
+		view_box = SubViewportContainer.new()
+		view_box.stretch = true
+		view_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		view_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		canvas.add_child(view_box)
+		view_port = SubViewport.new()
+		view_port.own_world_3d = true
+		view_port.msaa_3d = Viewport.MSAA_4X
+		view_box.add_child(view_port)
+		var env := WorldEnvironment.new()
+		var e := Environment.new()
+		e.background_mode = Environment.BG_COLOR
+		e.background_color = Color(0.08, 0.09, 0.1)
+		e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		e.ambient_light_color = Color(0.56, 0.66, 0.82)
+		e.ambient_light_energy = 0.62
+		e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+		e.tonemap_exposure = 1.25
+		e.tonemap_white = 4.0
+		e.adjustment_enabled = true
+		e.adjustment_contrast = 1.08
+		e.adjustment_saturation = 1.18
+		env.environment = e
+		view_port.add_child(env)
+		var sun := DirectionalLight3D.new()
+		sun.rotation_degrees = Vector3(-52, -38, 0)
+		sun.light_color = Color(1.0, 0.94, 0.84)
+		sun.light_energy = 1.25
+		sun.shadow_enabled = true
+		sun.shadow_opacity = 0.72
+		sun.directional_shadow_max_distance = 200.0
+		view_port.add_child(sun)
+		view_cam = Camera3D.new()
+		view_cam.far = 400.0
+		view_port.add_child(view_cam)
+	if view_box == null:
+		return
+	view_box.visible = on
+	if on:
+		# Outside a match nothing is fogged.
+		RenderingServer.global_shader_parameter_set("fog_on", 0.0)
+		if view_stale:
+			_build_view()
+		_place_view_camera()
+	canvas.queue_redraw()
+
+
+## The game's own map from the current spec: ground, roads, river, cliffs, brush, scenery and
+## fountains (`map_view.gd`, as in a match), with the structures and camps on it.
+func _build_view() -> void:
+	view_rebuild_in = 0.0
+	if not built.get("ok", false):
+		return
+	if view_root != null:
+		view_root.queue_free()
+	view_root = Node3D.new()
+	view_port.add_child(view_root)
+	var s := float(spec.size)
+	var fountains: PackedVector2Array = built.fountains
+	var geo := {
+		"walls": built.walls, "brush": built.brush, "size": Vector2(s, s), "roads": built.lanes, "river": built.river,
+		"fountains": [{"center": fountains[0], "radius": 750.0, "ally": true}, {"center": fountains[1], "radius": 750.0, "ally": false}],
+	}
+	var ground := MapView.make_ground()
+	view_root.add_child(ground)
+	var world: Node3D = MapView.new()
+	view_root.add_child(world)
+	world.build(geo, ground, ALLY, ENEMY)
+	var segs: PackedVector4Array = world.road_segments
+	for st in built.structures:
+		var blue: bool = st.team == "blue"
+		var color := ALLY if blue else ENEMY
+		var kind: String = st.kind
+		var node: Node3D = MapView.prop_node(kind, color)
+		if node == null:
+			node = _stand_in(kind, color)
+		var p: Vector2 = st.pos
+		node.position = Vector3(p.x, 0, p.y) * MapView.U
+		# Facing along its lane, away from its own base.
+		var home: Vector2 = fountains[0] if blue else fountains[1]
+		var dir := _road_dir(segs, p)
+		if dir.dot(p - home) < 0.0:
+			dir = -dir
+		node.rotation.y = atan2(dir.x, dir.y)
+		view_root.add_child(node)
+	for cp in built.camps:
+		var info: Array = _camp_info(cp.kind)
+		var marker := MeshInstance3D.new()
+		var cap := CapsuleMesh.new()
+		cap.radius = 0.55 if cp.kind in ["warden", "brute"] else 0.4
+		cap.height = cap.radius * 2.6
+		marker.mesh = cap
+		var m := StandardMaterial3D.new()
+		m.albedo_color = info[3]
+		marker.material_override = m
+		var p: Vector2 = cp.pos
+		marker.position = Vector3(p.x * MapView.U, cap.height / 2.0, p.y * MapView.U)
+		view_root.add_child(marker)
+	view_stale = false
+
+
+## A plain shape where a structure's prop pack is missing.
+func _stand_in(kind: String, color: Color) -> Node3D:
+	var n := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = {"base": 2.0, "gatehouse": 1.6}.get(kind, 0.7)
+	cyl.bottom_radius = cyl.top_radius * 1.1
+	cyl.height = {"base": 2.0, "gatehouse": 2.4}.get(kind, 3.2)
+	n.mesh = cyl
+	var m := StandardMaterial3D.new()
+	m.albedo_color = color
+	n.material_override = m
+	n.position.y = cyl.height / 2.0
+	var root := Node3D.new()
+	root.add_child(n)
+	return root
+
+
+func _road_dir(segs: PackedVector4Array, p: Vector2) -> Vector2:
+	var m := p * MapView.U
+	var best := INF
+	var dir := Vector2(1, 0)
+	for sg in segs:
+		var a := Vector2(sg.x, sg.y)
+		var b := Vector2(sg.z, sg.w)
+		var d := m.distance_to(Geometry2D.get_closest_point_to_segment(m, a, b))
+		if d < best and a != b:
+			best = d
+			dir = (b - a).normalized()
+	return dir
+
+
+## The 3D camera frames what the canvas frames: straight down (orthographic), or from the game's
+## angle (perspective) at the canvas's center.
+func _place_view_camera() -> void:
+	if view_cam == null:
+		return
+	var center := to_map(canvas.size / 2.0) * MapView.U
+	var span := canvas.size.y / _scale() * MapView.U
+	if angle_check.button_pressed:
+		view_cam.projection = Camera3D.PROJECTION_PERSPECTIVE
+		view_cam.fov = 45.0
+		var pitch := deg_to_rad(56.0)
+		var dist := span * 0.9
+		view_cam.position = Vector3(center.x, sin(pitch) * dist, center.y + cos(pitch) * dist)
+		view_cam.look_at(Vector3(center.x, 0, center.y), Vector3.UP)
+	else:
+		view_cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+		view_cam.size = span
+		view_cam.position = Vector3(center.x, 120.0, center.y)
+		view_cam.rotation_degrees = Vector3(-90, 0, 0)
 
 
 func _close() -> void:

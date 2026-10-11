@@ -635,7 +635,7 @@ fn bridge() -> Map {
 
 /// Crossroads (M4, the 5v5 map): built from its spec (`maps/crossroads.mftrmap`, 12): three
 /// lanes, a river corner to corner and the jungle between, on a 14,500 u square, blue's base in
-/// the bottom-left corner and red's, its mirror across the river, in the top right.
+/// the bottom-left corner and red's, its half-turn image, in the top right.
 pub const CROSSROADS_SIZE: Vec2 = Vec2::new(14_500.0, 14_500.0);
 
 /// Crossroads' spec.
@@ -791,11 +791,11 @@ mod tests {
         }
     }
 
-    /// Crossroads: blue bottom left, red top right; mirrored across the river (every structure
-    /// and camp has its twin); its spec has no problems; every lane walks from spawn to the enemy
+    /// Crossroads: blue bottom left, red top right; turned half a turn (every structure and camp
+    /// has its twin; red's top lane is blue's bottom lane turned); its spec has no problems; every lane walks from spawn to the enemy
     /// Base; each lane's turrets fall in order from the river back home.
     #[test]
-    fn crossroads_is_mirrored_walkable_and_ordered() {
+    fn crossroads_is_turned_walkable_and_ordered() {
         let t = std::time::Instant::now();
         let m = MapId::Crossroads.shared();
         let built = t.elapsed();
@@ -805,19 +805,20 @@ mod tests {
         assert_eq!((l.lanes.len(), l.wave_spawn.len(), l.camps.len()), (3, 3, 12));
         let (blue, red) = (l.champion_spawn[0], l.champion_spawn[1]);
         assert!(blue.x < red.x && blue.y > red.y, "blue bottom left, red top right: {blue:?} {red:?}");
-        let mirror = |p: Vec2| Vec2::new(p.y, p.x);
+        let turn = |p: Vec2| CROSSROADS_SIZE - p;
         for p in &l.placements {
             assert!(
                 l.placements.iter().any(|q| q.kind == p.kind
                     && q.tier == p.tier
                     && q.team != p.team
-                    && (q.pos - mirror(p.pos)).length() < 0.1),
+                    && (p.tier > crate::lane::GATEHOUSE_TIER || q.lane == 2 - p.lane)
+                    && (q.pos - turn(p.pos)).length() < 0.1),
                 "{p:?} has no twin"
             );
             assert!(m.walkable(p.pos, 1.0), "{p:?} stands in a wall");
         }
         for c in &l.camps {
-            assert!(l.camps.iter().any(|d| d.kind == c.kind && (d.pos - mirror(c.pos)).length() < 0.1));
+            assert!(l.camps.iter().any(|d| d.kind == c.kind && (d.pos - turn(c.pos)).length() < 0.1));
             for (kind, p) in c.spots() {
                 assert!(m.walkable(p, kind.def().radius.0), "{c:?}: {kind:?} at {p:?}");
             }

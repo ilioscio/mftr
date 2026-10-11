@@ -1,12 +1,14 @@
 //! Map specs (12, D56): a lane map as a map maker draws it. Lines with widths (lanes, the
 //! river, jungle paths, tall grass), clearings, camps and great-objective points, on blue's half
 //! of a square map (below the river line, the diagonal from the top-left corner to the bottom
-//! right). Red's half is blue's mirrored across the river. Everything not drawn is wall.
+//! right). Red's half is blue's turned half a turn about the map's center (like the reference
+//! 5v5 map: blue's top-side jungle is red's bottom side), so both teams get the same map.
+//! Everything not drawn is wall.
 //!
 //! Building a map from a spec (`build`) is deterministic, so a server can send just the spec and
 //! every client builds the same map:
 //! 1. The lines become capsules on a grid of `CELL` cells, their edges gently wavy.
-//! 2. The grid is mirrored across the river; ground cut off from the base becomes wall.
+//! 2. The grid is turned onto red's half; ground cut off from the base becomes wall.
 //! 3. Wall outlines are traced tile by tile (each outline a simple polygon, as the simulation
 //!    needs), smoothed and simplified.
 
@@ -29,7 +31,7 @@ pub const BASE_SHARE: f32 = 0.27;
 pub const BUFF_CLEARING: f32 = 520.0;
 pub const CAMP_CLEARING: f32 = 460.0;
 pub const OBJECTIVE_CLEARING: f32 = 700.0;
-/// A lane ends this close to the river line (and is joined to its mirror there).
+/// A lane ends this close to the river line, where it joins its partner's turned half.
 pub const LANE_END_SLACK: f32 = 450.0;
 /// Rules: camps on a side, jungle ground as a share of a half.
 pub const MIN_CAMPS: usize = 3;
@@ -85,9 +87,19 @@ impl MapSpec {
         self.size * BASE_SHARE
     }
 
-    /// Red's image of a point: mirrored across the river.
-    pub fn mirror(p: Vec2) -> Vec2 {
-        Vec2::new(p.y, p.x)
+    /// Red's image of a point: half a turn about the map's center.
+    pub fn turn(&self, p: Vec2) -> Vec2 {
+        Vec2::new(self.size - p.x, self.size - p.y)
+    }
+
+    /// The lanes in order down the river line, top first (by where each ends on it). A lane
+    /// pairs with the lane as far from the other end: blue's top lane runs on into red's half
+    /// of blue's bottom lane, turned (the middle lane of an odd count pairs with itself).
+    pub fn lane_order(&self) -> Vec<usize> {
+        let along = |i: usize| self.lanes[i].points.last().map_or(0.0, |p| p.x + p.y);
+        let mut order: Vec<usize> = (0..self.lanes.len()).collect();
+        order.sort_by(|a, b| along(*a).total_cmp(&along(*b)).then(a.cmp(b)));
+        order
     }
 
     /// A point on blue's half (or on the river line).
@@ -197,19 +209,31 @@ impl MapSpec {
 
     // ---- geometry -----------------------------------------------------------------------
 
-    /// Each lane's full path for blue, base to red's Base: blue's half, then red's half
-    /// backwards (joined on the river line).
-    pub fn lane_path(&self, lane: usize) -> Vec<Vec2> {
-        let Some(l) = self.lanes.get(lane) else { return Vec::new() };
-        let mut path = l.points.clone();
-        let last = *path.last().unwrap_or(&Vec2::ZERO);
-        // Onto the river line.
-        let on_axis = Vec2::new((last.x + last.y) / 2.0, (last.x + last.y) / 2.0);
-        if on_axis.distance(last) > 1.0 {
-            path.push(on_axis);
+    /// The full path of lane `li` (in lane order) for blue, base to red's Base: blue's half to
+    /// the river line, then its partner's half turned, backwards from the river line.
+    pub fn lane_path(&self, li: usize) -> Vec<Vec2> {
+        let order = self.lane_order();
+        let n = order.len();
+        if li >= n {
+            return Vec::new();
         }
-        let back: Vec<Vec2> = l.points.iter().rev().map(|p| MapSpec::mirror(*p)).collect();
-        path.extend(back.into_iter().filter(|p| p.distance(on_axis) > 1.0));
+        let (mine, theirs) = (&self.lanes[order[li]].points, &self.lanes[order[n - 1 - li]].points);
+        let on_axis = |p: Vec2| Vec2::new((p.x + p.y) / 2.0, (p.x + p.y) / 2.0);
+        let mut path = mine.clone();
+        let mut push = |p: Vec2| {
+            if path.last().is_none_or(|q| q.distance(p) > 1.0) {
+                path.push(p);
+            }
+        };
+        let my_end = *mine.last().unwrap_or(&Vec2::ZERO);
+        push(on_axis(my_end));
+        let their: Vec<Vec2> = theirs.iter().rev().map(|p| self.turn(*p)).collect();
+        if let Some(first) = their.first() {
+            push(on_axis(*first));
+        }
+        for p in their {
+            push(p);
+        }
         path
     }
 
@@ -348,14 +372,14 @@ fn paint_circle(cells: &mut [bool], n: usize, c: Vec2, radius: f32) {
     }
 }
 
-/// Union each cell with its mirror across the river (the grid's diagonal).
-fn mirror_cells(cells: &mut [bool], n: usize) {
-    for r in 0..n {
-        for c in 0..r {
-            let v = cells[r * n + c] || cells[c * n + r];
-            cells[r * n + c] = v;
-            cells[c * n + r] = v;
-        }
+/// Union each cell with its image half a turn about the grid's center.
+fn turn_cells(cells: &mut [bool], n: usize) {
+    let total = n * n;
+    for i in 0..total / 2 {
+        let j = total - 1 - i;
+        let v = cells[i] || cells[j];
+        cells[i] = v;
+        cells[j] = v;
     }
 }
 
@@ -383,7 +407,7 @@ impl Grid {
         for (o, j) in open.iter_mut().zip(&jungle) {
             *o |= *j;
         }
-        mirror_cells(&mut open, n);
+        turn_cells(&mut open, n);
         // Open ground cut off from the base is wall.
         let start = {
             let f = spec.corner(600.0, 600.0);
@@ -416,7 +440,7 @@ impl Grid {
         for (i, l) in spec.grass.iter().enumerate() {
             paint_line(&mut grass, n, l, 0.2, 400 + i as u32);
         }
-        mirror_cells(&mut grass, n);
+        turn_cells(&mut grass, n);
         for (g, o) in grass.iter_mut().zip(&open) {
             *g &= *o;
         }
@@ -608,39 +632,44 @@ pub fn build(spec: &MapSpec, id: MapId) -> Map {
     let grid = Grid::build(spec);
     let size = Vec2::new(spec.size, spec.size);
     let mut map = Map::new(id, walls(&grid), grass(&grid), Some(size));
-    let red = |p: Vec2| MapSpec::mirror(p);
-    // Structures: per lane on blue's half (bases fixed in the corner), mirrored for red.
+    let red = |p: Vec2| spec.turn(p);
+    let order = spec.lane_order();
+    let n = order.len();
+    // Structures: per lane on blue's half (bases fixed in the corner); red's are blue's turned,
+    // on the partner lane.
     let mut blue: Vec<(UnitKind, Vec2, u8, u8)> = Vec::new();
-    for lane in 0..spec.lanes.len() {
+    for (li, &lane) in order.iter().enumerate() {
         for tier in 1..=GATEHOUSE_TIER {
             let kind = if tier == GATEHOUSE_TIER { UnitKind::Gatehouse } else { UnitKind::Turret };
             if let Some(p) = spec.structure_spot(lane, tier) {
-                blue.push((kind, p, tier, lane as u8));
+                blue.push((kind, p, tier, li as u8));
             }
         }
     }
-    let mid = (spec.lanes.len() / 2) as u8;
+    let mid = (n / 2) as u8;
     blue.push((UnitKind::Turret, spec.corner(2500.0, 2050.0), BASE_TURRET_TIER, mid));
     blue.push((UnitKind::Turret, spec.corner(2050.0, 2500.0), BASE_TURRET_TIER, mid));
     blue.push((UnitKind::Base, spec.corner(1800.0, 1800.0), BASE_TURRET_TIER + 1, mid));
     let mut placements = Vec::new();
     for (kind, pos, tier, lane) in blue {
+        let red_lane = if tier > GATEHOUSE_TIER { lane } else { (n - 1) as u8 - lane };
         placements.push(Placement { kind, team: Team::Blue, pos, tier, lane });
-        placements.push(Placement { kind, team: Team::Red, pos: red(pos), tier, lane });
+        placements.push(Placement { kind, team: Team::Red, pos: red(pos), tier, lane: red_lane });
     }
     let red_base = red(spec.corner(1800.0, 1800.0));
     let mut lanes = Vec::new();
     let mut wave_spawn = Vec::new();
-    for lane in 0..spec.lanes.len() {
-        let mut path = spec.lane_path(lane);
+    for li in 0..n {
+        let mut path = spec.lane_path(li);
         let start = path[0];
         let mut blue_path: Vec<Vec2> = path.iter().skip(1).copied().collect();
         blue_path.push(red_base);
         path.reverse();
+        let red_start = path[0];
         let mut red_path: Vec<Vec2> = path.iter().skip(1).copied().collect();
         red_path.push(spec.corner(1800.0, 1800.0));
         lanes.push([blue_path, red_path]);
-        wave_spawn.push([start, red(start)]);
+        wave_spawn.push([start, red_start]);
     }
     // Camps on both halves, facing the nearest open ground away from their wall.
     let mut camps = Vec::new();
@@ -650,9 +679,11 @@ pub fn build(spec: &MapSpec, id: MapId) -> Map {
         }
     }
     let (home, fountain) = (spec.corner(800.0, 800.0), spec.corner(600.0, 600.0));
+    // The river's course for drawing: blue's bank line, then red's (the jump between them runs
+    // along the river).
     let river = spec.river.first().map(|l| {
         let mut pts = l.points.clone();
-        pts.extend(l.points.iter().rev().map(|p| red(*p)));
+        pts.extend(l.points.iter().map(|p| red(*p)));
         pts
     });
     map.layout = Layout {
@@ -704,6 +735,25 @@ pub fn problems(spec: &MapSpec) -> Vec<String> {
         }
         if (last.x - last.y).abs() / std::f32::consts::SQRT_2 > LANE_END_SLACK {
             out.push(format!("Lane {} must end on the river line.", i + 1));
+        }
+    }
+    // Paired lanes meet on the river line: each ends where its partner's turned end is.
+    let order = spec.lane_order();
+    let n = order.len();
+    for li in 0..n.div_ceil(2) {
+        let (a, b) = (order[li], order[n - 1 - li]);
+        let (ea, eb) = (*spec.lanes[a].points.last().unwrap(), *spec.lanes[b].points.last().unwrap());
+        let along = |p: Vec2| (p.x + p.y) / 2.0;
+        if (along(ea) + along(eb) - spec.size).abs() > 2.0 * LANE_END_SLACK {
+            out.push(if a == b {
+                format!("Lane {} is the middle lane: it must end at the map's center.", a + 1)
+            } else {
+                format!(
+                    "Lanes {} and {} must end at matching spots on the river line (each where the other's turned end is).",
+                    a + 1,
+                    b + 1
+                )
+            });
         }
     }
     let grid = Grid::build(spec);
@@ -791,13 +841,13 @@ mod tests {
     }
 
     #[test]
-    fn a_built_map_is_mirrored_connected_and_valid() {
+    fn a_built_map_is_turned_connected_and_valid() {
         let s = tiny();
         assert_eq!(problems(&s), Vec::<String>::new());
         let m = build(&s, MapId::Custom);
-        // Mirrored: open where its mirror is open.
+        // Turned: open where its turned image is open.
         for p in [Vec2::new(2500.0, 4300.0), Vec2::new(5000.0, 5000.0), Vec2::new(3000.0, 6500.0)] {
-            assert_eq!(m.walkable(p, 1.0), m.walkable(MapSpec::mirror(p), 1.0), "{p:?}");
+            assert_eq!(m.walkable(p, 1.0), m.walkable(s.turn(p), 1.0), "{p:?}");
         }
         assert!(m.walkable(Vec2::new(2500.0, 4300.0), 60.0), "the camp's clearing");
         assert!(!m.walkable(Vec2::new(500.0, 5000.0), 1.0), "undrawn is wall");

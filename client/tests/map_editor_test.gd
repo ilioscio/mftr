@@ -31,7 +31,7 @@ func _init() -> void:
 	ed.camp_kind = "brute"
 	ed._press(Vector2(9000, 5000), false, false)
 	var cp: Vector2 = ed.spec.camps[0].pos
-	check(cp == Vector2(5000, 9000), "a camp on red's half is mirrored onto blue's")
+	check(cp == Vector2(S - 9000, S - 5000), "a camp on red's half is turned onto blue's")
 	ed._set_tool("objective")
 	ed._press(Vector2(4000, 3500), false, false)
 	check(ed.spec.objectives.size() == 2 and ed.spec.objectives[1] == Vector2(S, S) - Vector2(4000, 3500), "an objective comes with its twin")

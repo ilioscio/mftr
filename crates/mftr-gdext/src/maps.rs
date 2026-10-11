@@ -116,7 +116,8 @@ impl MftrMaps {
     }
 
     /// The map the game builds from map text, for drawing: `walls` and `brush` (polygons),
-    /// `size`, `lanes` (blue's full paths), `structures` (`[{ kind, team, tier, lane, pos }]`),
+    /// `size`, `lanes` (blue's full paths, top first), `structures` (`[{ kind, team, tier, lane,
+    /// spec_lane, pos }]`),
     /// `camps` (`[{ kind, pos }]`, both halves), `fountains` (centers), `river` (the river's
     /// course) and `ok` (false when the text doesn't read).
     #[func]
@@ -137,6 +138,7 @@ impl MftrMaps {
             lanes.push(&points(&spec.lane_path(lane)).to_variant());
         }
         d.set("lanes", &lanes);
+        let order = spec.lane_order();
         let mut structures = VarArray::new();
         for p in &l.placements {
             let mut e = VarDictionary::new();
@@ -151,6 +153,8 @@ impl MftrMaps {
             e.set("team", if p.team == mftr_sim::Team::Blue { "blue" } else { "red" });
             e.set("tier", p.tier as i64);
             e.set("lane", p.lane as i64);
+            // The lane's index in the spec (as drawn), for moving blue's structures.
+            e.set("spec_lane", order.get(p.lane as usize).copied().unwrap_or(0) as i64);
             e.set("pos", v(p.pos));
             structures.push(&e.to_variant());
         }
