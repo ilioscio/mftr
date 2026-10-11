@@ -862,6 +862,15 @@ players.
 - The server log reports tick time against the 33 ms budget instead of a share of a core.
 - NixOS hosts one server (slice 1).
 
+### S follow-up (2026-10-11): NixOS sandboxes and sides
+- `--modes` entries can name one side: `aram-coop`, `classic-versus` (a mode alone offers both).
+- NixOS: `services.mftr.sandboxes.<name>` runs the Duel Sandbox, the dodge rig and the other
+  test grounds as hardened services of their own. Every server keeps its state in
+  `/var/lib/mftr/<name>` (the main one in `server`), the layout the old per-mode services had,
+  so a sandbox named like an old server keeps its key; `adoptKeyFrom` gives the main server an
+  old server's key on its first start. The VM test plants an old-layout key and checks the
+  main server adopts it, plus a duel sandbox with its own key.
+
 ### S slice 5 status (2026-10-11): ✅ done
 - **Jump-point search** (D58) on the same 25 u grid: the same octile costs, no corner cutting
   and deterministic tie-breaks, so paths are as short as before (a different one among equally

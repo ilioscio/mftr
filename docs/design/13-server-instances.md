@@ -13,7 +13,8 @@ What a server offers is a list of **queues**, each a mode on a map, played one o
 | **Mode** | ARAM, ARAM: Mayhem, ARAM: Hyper (on The Bridge), Classic (on Crossroads, or on each map file the host lists: one queue per map) |
 | **Side** | **Versus**: humans on both teams, bots filling in. **Co-op vs bots**: humans on blue, bots on red |
 
-So a server with one extra map offers 5 × 2 = 10 queues. The host can narrow the modes. The
+So a server with one extra map offers 5 × 2 = 10 queues. The host can narrow the modes, and
+offer a mode on one side only (`aram-coop`, `classic-versus`). The
 sandboxes (Duel, Minions, Dodge, Empty) aren't offered by hosted servers; `--scenario NAME`
 still runs a single-queue server of any scenario for development and tests.
 
@@ -93,7 +94,9 @@ mftr-server [--bind ADDR] [--key FILE] [--modes aram,mayhem,hyper,classic]
 mftr-server --scenario NAME [...]   # one queue, any scenario (development)
 ```
 
-NixOS: one `services.mftr` server (§ hosting.md) replaces `services.mftr.servers.<name>`.
+NixOS: one `services.mftr` server replaces `services.mftr.servers.<name>`, and
+`services.mftr.sandboxes.<name>` runs the Duel Sandbox, the dodge rig and the other test
+grounds as servers of their own (hosting.md).
 
 ## 8. Measurements
 

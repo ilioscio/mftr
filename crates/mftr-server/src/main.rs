@@ -2,7 +2,7 @@
 //! process on one port plays whatever its players ask for (13): they pick a queue, and the
 //! server runs match instances of it, creating and stopping them as players come and go.
 //!
-//! Usage: mftr-server [--bind 0.0.0.0:7777] [--key FILE] [--seed N] [--modes aram,mayhem,hyper,classic]
+//! Usage: mftr-server [--bind 0.0.0.0:7777] [--key FILE] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,...]
 //!                    [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR]
 //!        mftr-server --scenario NAME [--bots N] [--lobby] [--max-players N] [--map FILE.mftrmap] [...]
 //!        mftr-server [--key FILE] --fingerprint
@@ -13,7 +13,7 @@
 //!
 //! By default the server offers every full-match mode (ARAM, Mayhem, Hyper, Classic), each
 //! Versus and Co-op vs bots, with champion select and bots in every seat a human doesn't take;
-//! `--modes` narrows the list. Each `--map FILE` (from the map editor) adds Classic on that
+//! `--modes` narrows the list (`aram` offers both sides, `aram-versus` or `aram-coop` one). Each `--map FILE` (from the map editor) adds Classic on that
 //! map. `--max-matches N` caps the instances running at once; `--workers N` threads step them
 //! (default: one per core). `--replay DIR` records every
 //! match into DIR (rewritten every minute and when a match ends); check one with
@@ -25,7 +25,7 @@
 //! there: a match starts for them, and runs while anyone watches.
 
 use mftr_net::secure::{Fingerprint, Identity, Received, SecureServer};
-use mftr_server::hub::{self, HOSTED_MODES};
+use mftr_server::hub::{self, HOSTED_MODES, ModeOffer};
 use mftr_server::{ClientKey, Hub, HubConfig, QueueSpec, Scenario, ServerConfig};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -33,7 +33,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem,hyper,classic] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]";
+const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,...] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]";
 /// Instances running at once, by default.
 const MAX_MATCHES: usize = 32;
 
@@ -99,7 +99,7 @@ fn main() -> std::io::Result<()> {
     let mut fingerprint_only = false;
     let mut base = ServerConfig::default();
     let mut scenario: Option<Scenario> = None;
-    let mut modes: Option<Vec<Scenario>> = None;
+    let mut modes: Option<Vec<ModeOffer>> = None;
     let mut maps: Vec<(String, Arc<str>)> = Vec::new();
     let mut max_matches = MAX_MATCHES;
     let mut workers: Option<usize> = None;
@@ -129,17 +129,10 @@ fn main() -> std::io::Result<()> {
                 scenario = Some(Scenario::by_name(&name).unwrap_or_else(|| panic!("unknown scenario {name}\n{USAGE}")));
             }
             "--modes" => {
-                let list = args.next().expect("--modes needs a list, like aram,classic");
+                let list = args.next().expect("--modes needs a list, like aram,classic-coop");
                 modes = Some(
                     list.split(',')
-                        .map(|name| {
-                            let s = Scenario::by_name(name.trim())
-                                .unwrap_or_else(|| panic!("unknown mode {name}\n{USAGE}"));
-                            if !HOSTED_MODES.contains(&s) {
-                                panic!("{name} isn't a full match: run it alone with --scenario {name}");
-                            }
-                            s
-                        })
+                        .map(|name| ModeOffer::parse(name).unwrap_or_else(|e| panic!("{e}\n{USAGE}")))
                         .collect(),
                 );
             }
@@ -173,7 +166,8 @@ fn main() -> std::io::Result<()> {
             base.max_players = 10;
             base.bots = 10;
             base.lobby = true;
-            hub::hosted_queues(modes.as_deref().unwrap_or(&HOSTED_MODES), &maps)
+            let modes = modes.unwrap_or_else(|| HOSTED_MODES.map(ModeOffer::both).to_vec());
+            hub::hosted_queues(&modes, &maps)
         }
     };
     if let Some(dir) = &replay_dir {
