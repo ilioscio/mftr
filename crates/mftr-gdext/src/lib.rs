@@ -21,6 +21,7 @@ use mftr_sim::{ChampionId, Team, UnitId, UnitKind, Vec2};
 use std::net::UdpSocket;
 use std::time::Instant;
 
+mod maps;
 mod model;
 
 struct MftrExtension;

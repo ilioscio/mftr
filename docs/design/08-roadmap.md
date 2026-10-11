@@ -742,6 +742,26 @@ objective pits.
 4. Hosting maps: `--map FILE`, the spec sent to players as they join.
 5. The official Classic map: the owner's exported map, built in.
 
+### E slice 1 status (2026-10-10): ✅ done
+- `mapspec.rs`: the text format, the builder and validation.
+  - The builder turns lines into wavy-edged capsules on a 25 u grid and mirrors them across the river; ground cut off from the base becomes wall. Walls are traced per tile into simple polygons, then smoothed and simplified.
+  - Validation checks lanes, connectivity, jungle size, camps, objective pairs and that nothing stands in a wall.
+- Crossroads is now built from `maps/crossroads.mftrmap`, a starter layout after the reference 5v5 map's structure. `mftr-tools map svg FILE` renders any map file and prints its problems.
+- Speed:
+  - Collision sweeps and detours look only at nearby wall edges, walls keep bounding boxes, and A* reuses its bookkeeping (identical results).
+  - A 30-minute Classic bot match simulates in 6.5 s.
+  - Dev builds compile the sim optimized.
+
+### E slice 2 status (2026-10-10): ✅ done
+- **The editor** (main menu → Map editor, or `--map-editor`):
+  - A canvas of blue's half with red's mirrored and shaded. Zoom, pan and fit.
+  - Tools: lane, river, jungle path, tall grass, clearing, camp (each kind) and great objective (with its twin).
+  - Select and move: line points, camps, clearings, objectives, and turrets along their lane. Width and radius sliders; Delete and Ctrl+Z.
+  - Every change is rebuilt and checked by the game's own code (`MftrMaps`), so the canvas shows the walls the game will build, and the problems panel lists what still breaks the rules.
+  - Files: new, open, save, save as, export (only without problems), and the built-in Crossroads as a starting point.
+- **Reference image:** load any image to trace over, with opacity and corner handles to align it. `--dev-overlay FILE` opens the editor on it. The reference 5v5 render starts pre-aligned to the map square.
+- `client/tests/map_editor_test.gd` runs the editor headless: drawing, placing, dragging, deleting, undo and the saved text.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

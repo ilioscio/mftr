@@ -205,6 +205,11 @@ func _ready() -> void:
 			_shot_recall = true
 		elif args[i] == "--shot-claim":
 			_shot_claim = true
+		elif args[i] == "--map-editor":
+			_start_editor = true
+		elif args[i] == "--dev-overlay" and i + 1 < args.size():
+			_dev_overlay = args[i + 1]
+			i += 1
 		elif args[i] == "--shot-ward":
 			_shot_ward = true
 		elif args[i] == "--shot-goto" and i + 1 < args.size():
@@ -239,7 +244,9 @@ func _ready() -> void:
 		i += 1
 	if blind_enabled:
 		_menu_mode = 2
-	if address == "" or _back_to_menu:
+	if _start_editor:
+		_open_map_editor.call_deferred()
+	elif address == "" or _back_to_menu:
 		_back_to_menu = false
 		_show_menu("")
 	else:
@@ -335,6 +342,8 @@ var _shot_numbers := false                # `--shot-numbers`: sample damage numb
 var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
 var _shot_recall := false                 # `--shot-recall`: walk out, then recall 3 s before the shot
 var _shot_claim := false                 # `--shot-claim`: take Claim in F at the start
+var _start_editor := false               # `--map-editor`: open the map editor at start
+var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's reference image
 var _shot_ward := false                  # `--shot-ward`: place a stealth ward ahead at 2.5 s
 var _shot_goto = null                     # `--shot-goto X,Y`: walk there (game units) from 2 s on
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
@@ -4549,6 +4558,11 @@ func _show_menu(error: String) -> void:
 		err.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4))
 		v.add_child(err)
 	v.add_child(HSeparator.new())
+	var editor := Button.new()
+	editor.text = "Map editor"
+	editor.tooltip_text = "Draw lane maps: lanes, river, jungle and camps; export one for a server to host."
+	editor.pressed.connect(_open_map_editor)
+	v.add_child(editor)
 	var quit := Button.new()
 	quit.text = "Quit"
 	quit.pressed.connect(func(): get_tree().quit())
@@ -4563,6 +4577,18 @@ func _show_menu(error: String) -> void:
 			_menu_auto_join = false
 			await get_tree().create_timer(1.0).timeout
 			_menu_join(servers[0].get("address", ""))
+
+
+## The map editor (12), over everything; closing it brings the menu back.
+func _open_map_editor() -> void:
+	if menu_panel != null:
+		menu_panel.queue_free()
+		menu_panel = null
+	var editor: Control = preload("res://scripts/map_editor.gd").new()
+	overlay.get_parent().add_child(editor)
+	if _dev_overlay != "":
+		editor.call_deferred("set_overlay_file", _dev_overlay)
+	editor.closed.connect(func(): _show_menu(""))
 
 
 func _menu_join(address: String) -> void:
