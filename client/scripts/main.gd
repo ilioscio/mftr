@@ -326,9 +326,11 @@ func _minion_model(kind: String) -> MftrModel:
 func _connect(address: String) -> void:
 	_server_address = address
 	_remembered = false
-	# Reconnect: a session to this server from moments ago gets its champion back.
+	# Reconnect: a match on this server we dropped out of holds our seat (a bot plays it
+	# meanwhile, 13 §4) and gives the champion back. A token the server no longer holds is
+	# ignored, so trying costs nothing.
 	var saved := _load_session()
-	var recent: bool = Time.get_unix_time_from_system() - float(saved.get("at", 0.0)) < 55.0
+	var recent: bool = Time.get_unix_time_from_system() - float(saved.get("at", 0.0)) < 7200.0
 	client.set_resume_token(saved.get("token", "") if saved.get("address", "") == address and recent else "")
 	if not client.connect_to_server(address):
 		_show_menu("Could not connect to %s: %s" % [address, client.last_error()])
@@ -3941,7 +3943,8 @@ func _update_lobby(delta: float, phase: String) -> void:
 	if l.is_empty():
 		return
 	_last_lobby = l
-	portraits.prepare(l.slots.map(func(x): return x.champion) + Array(l.bench))
+	var all_names: Array = Array(client.champion_names()) if l.get("pick", false) else []
+	portraits.prepare(l.slots.map(func(x): return x.champion) + Array(l.bench) + all_names)
 	if _lobby_timer != null and is_instance_valid(_lobby_timer):
 		_lobby_timer.text = "%d" % ceili(l.starts_in)
 	# Rebuild only when something but the countdown changed, so buttons keep their hover and
@@ -3962,12 +3965,14 @@ func _update_lobby(delta: float, phase: String) -> void:
 	var titles := VBoxContainer.new()
 	titles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	titles.size_flags_stretch_ratio = 1.0
+	var midgame: bool = l.get("midgame", false)
+	var pick: bool = l.get("pick", false)
 	var title := Label.new()
-	title.text = "Champion select"
+	title.text = "Join the match" if midgame else "Champion select"
 	title.theme_type_variation = "TitleLabel"
 	titles.add_child(title)
 	var sub := Label.new()
-	sub.text = "%s  ·  ALL RANDOM  ·  The Bridge" % client.game_type().to_upper()
+	sub.text = "%s  ·  %s  ·  %s" % [String(l.get("mode", "")).to_upper(), "PICK" if pick else "ALL RANDOM", l.get("map", "")]
 	sub.theme_type_variation = "HeaderLabel"
 	titles.add_child(sub)
 	top.add_child(titles)
@@ -3981,7 +3986,7 @@ func _update_lobby(delta: float, phase: String) -> void:
 	_lobby_timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	clock.add_child(_lobby_timer)
 	var until := Label.new()
-	until.text = "THE MATCH STARTS WHEN EVERYONE IS READY"
+	until.text = "IN PROGRESS  ·  YOU TAKE OVER A BOT'S SEAT WHEN READY" if midgame else "THE MATCH STARTS WHEN EVERYONE IS READY"
 	until.theme_type_variation = "HintLabel"
 	until.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	clock.add_child(until)
@@ -3991,8 +3996,31 @@ func _update_lobby(delta: float, phase: String) -> void:
 	top.add_child(right)
 	lobby_box.add_child(top)
 
+	# A pick (Classic): every champion, those a teammate holds greyed out (a bot teammate's
+	# can be taken in champion select: the bot gets ours).
+	if pick:
+		var picks := HFlowContainer.new()
+		picks.alignment = FlowContainer.ALIGNMENT_CENTER
+		picks.add_theme_constant_override("h_separation", 8)
+		var held := {}
+		for slot in l.slots:
+			if slot.ally and not slot.you and (midgame or not slot.bot):
+				held[slot.champion] = true
+		for name in all_names:
+			var b := Button.new()
+			b.custom_minimum_size = Vector2(56, 56)
+			b.focus_mode = Control.FOCUS_NONE
+			b.icon = portraits.portrait(name, "bust")
+			b.expand_icon = true
+			b.text = "" if b.icon != null else String(name).left(2)
+			b.disabled = held.has(name) or name == me.get("champion", "")
+			b.tooltip_text = ("A teammate plays %s" % name) if held.has(name) else ("Play %s" % name)
+			b.pressed.connect(func(): client.lobby_take(name); _lobby_refresh = 0.0)
+			picks.add_child(b)
+		lobby_box.add_child(picks)
 	# The bench, across the top: champions anyone on the team can swap theirs for.
 	var bench := HBoxContainer.new()
+	bench.visible = not pick and not midgame
 	bench.alignment = BoxContainer.ALIGNMENT_CENTER
 	bench.add_theme_constant_override("separation", 10)
 	var bench_label := Label.new()
@@ -4056,6 +4084,7 @@ func _update_lobby(delta: float, phase: String) -> void:
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER
 	actions.add_theme_constant_override("separation", 14)
 	var reroll := Button.new()
+	reroll.visible = not pick
 	reroll.text = "⟳  Reroll (%d)" % me.get("rerolls", 0)
 	reroll.disabled = me.get("rerolls", 0) == 0
 	reroll.focus_mode = Control.FOCUS_NONE
@@ -4173,7 +4202,7 @@ func _lobby_card(slot: Dictionary, team: Color) -> Control:
 		who.text = "Picking…"
 	else:
 		who.text = "You" if you else ("Bot" if slot.bot else "Player %d" % slot.player)
-		if you:
+		if you and not _last_lobby.get("pick", false):
 			who.text += "   ·   %d reroll%s" % [slot.rerolls, "" if slot.rerolls == 1 else "s"]
 	who.theme_type_variation = "HintLabel"
 	names.add_child(who)

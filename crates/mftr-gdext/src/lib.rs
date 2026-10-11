@@ -219,7 +219,9 @@ impl MatchClient {
         let mode = self.session.game_mode();
         GString::from(match self.session.phase() {
             Phase::Connecting | Phase::Queues => "",
-            Phase::Lobby if mode == mftr_net::msg::GameMode::Empty => mftr_net::msg::GameMode::Aram.label(),
+            Phase::Lobby if mode == mftr_net::msg::GameMode::Empty => {
+                self.session.lobby().map_or(mftr_net::msg::GameMode::Aram, |l| l.mode).label()
+            }
             _ => mode.label(),
         })
     }
@@ -413,8 +415,10 @@ impl MatchClient {
         self.session.is_spectator()
     }
 
-    /// Champion select: `{ you, starts_in, bench: [names], slots: [{ player, team, ally, you,
-    /// champion, rerolls, ready, bot }] }`, or an empty dictionary outside it.
+    /// Champion select: `{ you, starts_in, mode, map, pick, midgame, bench: [names], slots:
+    /// [{ player, team, ally, you, champion, rerolls, ready, bot }] }`, or an empty dictionary
+    /// outside it. `pick`: take any champion the team doesn't have (Classic) instead of all
+    /// random; `midgame`: joining a match in progress (13 §3).
     #[func]
     fn lobby_state(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -422,6 +426,10 @@ impl MatchClient {
         let my_team = l.slots.iter().find(|s| s.player == l.you).map(|s| s.team);
         d.set("you", l.you.0 as i64);
         d.set("starts_in", l.starts_in_ms as f64 / 1000.0);
+        d.set("mode", l.mode.label());
+        d.set("map", l.map.as_str());
+        d.set("pick", l.pick);
+        d.set("midgame", l.midgame);
         let mut bench = VarArray::new();
         for c in &l.bench {
             bench.push(&c.def().name.to_variant());

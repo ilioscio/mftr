@@ -99,8 +99,17 @@ pub struct LobbyState {
     pub slots: Vec<LobbySlot>,
     /// Each team's bench of rerolled champions (only the own team's is sent).
     pub bench: Vec<ChampionId>,
-    /// Milliseconds until the match starts.
+    /// Milliseconds until the match starts (`midgame`: until we join it).
     pub starts_in_ms: u32,
+    /// What's being played, and on which map (by name).
+    pub mode: GameMode,
+    pub map: String,
+    /// A pick (Classic, 13 §3): `LobbyAction::Take` takes any champion the team doesn't have.
+    /// Else all random: rerolls, and `Take` swaps with the bench.
+    pub pick: bool,
+    /// Joining a match in progress (13 §3): only our own slot is ours to change; the match
+    /// goes on meanwhile.
+    pub midgame: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1827,6 +1836,14 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
                 write_champion(&mut w, Some(*c));
             }
             w.write_u32(l.starts_in_ms);
+            w.write(l.mode as u64, 3);
+            w.write_bool(l.pick);
+            w.write_bool(l.midgame);
+            let map = truncate_utf8(&l.map, MAX_QUEUE_NAME);
+            w.write_u8(map.len() as u8);
+            for b in map.bytes() {
+                w.write_u8(b);
+            }
             w.finish()
         }
     }
@@ -1987,7 +2004,16 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             let bench = (0..n)
                 .map(|_| read_champion(&mut r)?.ok_or(DecodeError::Invalid("champion")))
                 .collect::<Result<_, _>>()?;
-            ServerMessage::Lobby(Box::new(LobbyState { you, slots, bench, starts_in_ms: r.read_u32()? }))
+            let starts_in_ms = r.read_u32()?;
+            let mode = GameMode::from_u8(r.read(3)? as u8).ok_or(DecodeError::Invalid("game mode"))?;
+            let (pick, midgame) = (r.read_bool()?, r.read_bool()?);
+            let len = r.read_u8()? as usize;
+            if len > MAX_QUEUE_NAME {
+                return Err(DecodeError::Invalid("map name"));
+            }
+            let bytes = (0..len).map(|_| r.read_u8()).collect::<Result<Vec<u8>, _>>()?;
+            let map = String::from_utf8(bytes).map_err(|_| DecodeError::Invalid("map name"))?;
+            ServerMessage::Lobby(Box::new(LobbyState { you, slots, bench, starts_in_ms, mode, map, pick, midgame }))
         }
         _ => return Err(DecodeError::Invalid("message kind")),
     };
@@ -2064,6 +2090,10 @@ mod tests {
             slots: ChampionId::ALL.iter().enumerate().map(|(i, c)| slot(i as u8 + 2, *c)).collect(),
             bench: vec![ChampionId::Lumen, ChampionId::Ember],
             starts_in_ms: 42_000,
+            mode: GameMode::Classic,
+            map: "Crossroads".into(),
+            pick: true,
+            midgame: true,
         }));
         assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
     }

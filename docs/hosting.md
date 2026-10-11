@@ -151,11 +151,15 @@ Players pinned the old servers' keys, so keep the one on the port they know with
 | `--scenario NAME` | | For development: offer this one scenario instead, any of the above or `duel` (the Duel Sandbox), `minions`, `dodge`, `empty` (test grounds). With it, `--bots N` adds server bots (they count toward `--max-players N`, default 10) and `--lobby` holds champion select first. |
 
 **How matches fill.** A player who picks a queue joins the match of it with the most players
-that still has a seat in champion select, or starts a new match. Versus puts them on the team
-with fewer humans; Co-op puts every human on blue, against bots. Bots take every seat no human
-has. When a match ends, its players go to champion select together for the next one. A match
-with no players left stops. Players who lose their connection keep their champion for 60 s and
-get it back when their client reconnects, even from a new address.
+that still has a bot's seat to take, or starts a new match. Versus puts them on the team with
+fewer humans; Co-op puts every human on blue, against bots. Bots take every seat no human has.
+Joining a match in progress, the player chooses a champion (ARAM: dealt, one reroll; Classic:
+picked) and takes over a bot: in the fountain, at its level, with its gold plus a refund of
+its items. When a match ends, its players go to champion select together for the next one. A match
+with no players left stops (one whose players all lost their connection waits 60 s for them
+first). A player who loses their connection keeps their seat for the rest of the match while a
+bot plays their champion, and gets it back when their client reconnects, even from a new
+address. A player who leaves leaves their champion to a bot.
 
 ## The server key
 

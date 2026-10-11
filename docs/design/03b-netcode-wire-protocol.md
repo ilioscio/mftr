@@ -128,6 +128,8 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 > again; the match it lands in counts its packets from 1, so the client resets its receive
 > window when it picks. Rejects gain `ServerBusy` (every match of the queue is full and the
 > server runs its limit) and `NothingToWatch` (a spectator's queue has no match).
+> Champion select (`Lobby`) gains its mode, its map's name, `pick` (Classic: `Take` takes any
+> champion the team doesn't have) and `midgame` (joining a match in progress, 13 §3).
 
 > **Implemented (A5, protocol 17):** a minion's kind (melee, caster, siege, super) travels in the static group, 2 bits on minions only, so clients draw the right model.
 >

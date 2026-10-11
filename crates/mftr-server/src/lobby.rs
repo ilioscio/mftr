@@ -1,9 +1,11 @@
-//! Champion select for ARAM (M2 slice 5, 06 §2): all-random with rerolls and a team bench.
+//! Champion select (M2 slice 5, 06 §2; 13 §3).
 //!
-//! Every player gets a random champion no teammate has. A reroll trades it for another random
-//! one the team doesn't have (on the field or on the bench); the old one goes to the team bench,
-//! where any teammate can take it (swapping their own onto the bench). The match starts when
-//! every human is ready, or when the countdown runs out. Bots fill the remaining slots.
+//! ARAM modes are all random: every player gets a random champion no teammate has. A reroll
+//! trades it for another random one the team doesn't have (on the field or on the bench); the
+//! old one goes to the team bench, where any teammate can take it (swapping their own onto the
+//! bench). Classic is a pick: each human starts with a random champion and may take any other
+//! no human teammate has (a bot teammate holding it gets theirs in exchange). The match starts
+//! when every human is ready, or when the countdown runs out. Bots fill the remaining slots.
 
 use mftr_net::msg::{LobbyAction, LobbySlot, LobbyState};
 use mftr_sim::rng::Pcg32;
@@ -41,17 +43,20 @@ pub struct Lobby {
     bench: [Vec<ChampionId>; 2],
     rng: Pcg32,
     max_players: u8,
+    /// A pick instead of all random (Classic).
+    pick: bool,
     /// When the match starts (wall clock); set when the first human joins.
     starts_at: Option<f64>,
 }
 
 impl Lobby {
-    pub fn new(seed: u64, max_players: u8, bots: u8) -> Self {
+    pub fn new(seed: u64, max_players: u8, bots: u8, pick: bool) -> Self {
         let mut lobby = Self {
             slots: Vec::new(),
             bench: [Vec::new(), Vec::new()],
             rng: Pcg32::new(seed, 0x6c6f_6262),
             max_players,
+            pick,
             starts_at: None,
         };
         for _ in 0..bots.min(max_players) {
@@ -119,7 +124,8 @@ impl Lobby {
         let parity = if team == Team::Blue { 0 } else { 1 };
         let player = (0..=u8::MAX).filter(|p| p % 2 == parity).find(|p| !used.contains(p)).map(PlayerId)?;
         let champion = self.draw(team_of(player))?;
-        self.slots.push(Slot { player, champion, rerolls: if bot { 0 } else { REROLLS }, ready: bot, bot });
+        let rerolls = if bot || self.pick { 0 } else { REROLLS };
+        self.slots.push(Slot { player, champion, rerolls, ready: bot, bot });
         self.slots.sort_by_key(|s| s.player);
         Some(player)
     }
@@ -180,6 +186,19 @@ impl Lobby {
                 self.slots[i].rerolls -= 1;
                 self.bench[team].push(old);
             }
+            // A pick: any champion no human teammate has; a bot teammate trades.
+            LobbyAction::Take(c) if self.pick => {
+                let old = self.slots[i].champion;
+                let holder = self.slots.iter().position(|s| s.team() as usize == team && s.champion == c);
+                match holder {
+                    Some(h) if !self.slots[h].bot => {}
+                    Some(h) => {
+                        self.slots[h].champion = old;
+                        self.slots[i].champion = c;
+                    }
+                    None => self.slots[i].champion = c,
+                }
+            }
             LobbyAction::Take(c) => {
                 let Some(b) = self.bench[team].iter().position(|x| *x == c) else { return };
                 let old = self.slots[i].champion;
@@ -217,6 +236,11 @@ impl Lobby {
                 .collect(),
             bench: self.bench[team_of(you) as usize].clone(),
             starts_in_ms: (starts_in * 1000.0) as u32,
+            // The server fills in what's played and where.
+            mode: mftr_net::msg::GameMode::Empty,
+            map: String::new(),
+            pick: self.pick,
+            midgame: false,
         }
     }
 }
@@ -227,7 +251,7 @@ mod tests {
 
     #[test]
     fn all_random_with_rerolls_and_a_bench() {
-        let mut l = Lobby::new(5, 10, 4);
+        let mut l = Lobby::new(5, 10, 4, false);
         assert_eq!(l.slots().len(), 4);
         let me = l.add_human(0.0, false).unwrap();
         let other = l.add_human(0.0, false).unwrap();
@@ -266,7 +290,7 @@ mod tests {
 
     #[test]
     fn countdown_and_ready() {
-        let mut l = Lobby::new(1, 10, 9);
+        let mut l = Lobby::new(1, 10, 9, false);
         assert_eq!(l.starts_in(0.0), None, "nothing starts without a human");
         let me = l.add_human(10.0, false).unwrap();
         assert_eq!(l.slots().len(), 10, "the human took a bot's place");
@@ -276,18 +300,46 @@ mod tests {
         assert_eq!(l.starts_in(23.5), Some(0.0));
     }
 
+    /// 13 §3: Classic is a pick: no rerolls; take any champion no human teammate has (a bot
+    /// teammate holding it gets ours); one a human teammate holds stays theirs.
+    #[test]
+    fn classic_picks() {
+        let mut l = Lobby::new(8, 10, 10, true);
+        let me = l.add_human(0.0, false).unwrap();
+        let mate = l.add_human(0.0, false).unwrap();
+        let mate = if team_of(mate) == team_of(me) { mate } else { l.add_human(0.0, false).unwrap() };
+        assert_eq!(team_of(mate), team_of(me));
+        let slot = |l: &Lobby, p| *l.slots().iter().find(|s| s.player == p).unwrap();
+        assert_eq!(slot(&l, me).rerolls, 0);
+        let mine = slot(&l, me).champion;
+        let theirs = slot(&l, mate).champion;
+        l.act(me, LobbyAction::Take(theirs));
+        assert_eq!(slot(&l, me).champion, mine, "a human teammate's champion stays theirs");
+        let bot = *l.slots().iter().find(|s| s.bot && s.team() == team_of(me)).unwrap();
+        l.act(me, LobbyAction::Take(bot.champion));
+        assert_eq!(slot(&l, me).champion, bot.champion);
+        assert_eq!(slot(&l, bot.player).champion, mine, "the bot took ours");
+        let free = ChampionId::ALL
+            .into_iter()
+            .find(|c| !l.slots().iter().any(|s| s.team() == team_of(me) && s.champion == *c))
+            .unwrap();
+        l.act(me, LobbyAction::Take(free));
+        assert_eq!(slot(&l, me).champion, free);
+        assert!(l.state_for(me, 0.0).pick);
+    }
+
     /// 13 §2: humans go to the team with fewer humans (blue on a tie), taking bots' places;
     /// in co-op they all play blue, and a full blue has no room. A human who leaves leaves a
     /// bot behind.
     #[test]
     fn humans_balance_or_play_together() {
-        let mut l = Lobby::new(2, 10, 10);
+        let mut l = Lobby::new(2, 10, 10, false);
         let teams: Vec<Team> = (0..4).map(|_| team_of(l.add_human(0.0, false).unwrap())).collect();
         assert_eq!(teams, [Team::Blue, Team::Red, Team::Blue, Team::Red]);
         assert_eq!(l.slots().len(), 10);
         assert_eq!(l.humans(), 4);
 
-        let mut l = Lobby::new(3, 10, 10);
+        let mut l = Lobby::new(3, 10, 10, false);
         for _ in 0..5 {
             assert_eq!(team_of(l.add_human(0.0, true).unwrap()), Team::Blue);
         }

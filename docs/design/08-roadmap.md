@@ -817,6 +817,34 @@ players.
   headless clients on two queues (each queue in its own match, both stopped when they left,
   both replays re-simulate exactly), and the real client picking a queue into champion select.
 
+### S slice 2 status (2026-10-10): ✅ done
+- **Drops:** in a match, a bot takes over a player whose connection goes silent (10 s), with
+  their champion, items and gold. Their seat is held for the rest of the match: their client
+  reconnects with its session token (from any address, up to 2 hours later) and the bot hands
+  the champion back as it is. A match whose humans have all dropped stops 60 s after the last
+  one did.
+- **Leaving** (Esc → leave) hands the champion to a bot too, without holding the seat.
+- The sandboxes keep their old rule: a dropped champion waits 60 s, then goes.
+
+### S slice 3 status (2026-10-11): ✅ done
+- **Joining a match in progress:** a match with a bot's seat free (not held for a dropped
+  player, not being taken by another joiner) takes newcomers; the hub prefers the match with
+  the most humans, so players end up together. The joiner gets a champion select of their own
+  (`midgame`, 20 s): ARAM modes deal a champion the team doesn't have, with one reroll;
+  Classic picks. Ready (or out of time), they take over the bot on the team with fewer humans
+  (in Co-op, blue): the bot's champion leaves, theirs appears in the fountain (dead on the same
+  timer if the bot was) at the bot's level and experience with every point unspent, its score
+  and augments, and its gold plus the full price of its items.
+- The takeover is a replay entry (`T tick player champion`) and re-simulates exactly.
+- **Classic's champion select is a pick:** any champion no human teammate has (a bot teammate
+  holding it trades); no rerolls. Champion select now says its mode and map (it said ARAM on
+  The Bridge everywhere).
+- Checked: core tests (an ARAM joiner rerolls, readies and takes over with the right level,
+  gold and spot, and the replay matches; a Classic joiner picks), a hub test (a newcomer joins
+  the match in progress instead of opening one), and the real client: Classic's picker, the
+  mid-match champion select, and playing after the takeover (level 3, 3 points to spend,
+  1,897 gold, respawning on the bot's timer).
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

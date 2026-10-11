@@ -269,7 +269,8 @@ impl Hub {
         self.instances.iter().map(|i| i.core.next_tick_due()).min_by(f64::total_cmp)
     }
 
-    /// Step every instance whose tick is due, then stop those without humans (13 §5).
+    /// Step every instance whose tick is due, then stop those nobody plays for any more
+    /// (13 §5).
     pub fn step(&mut self, now: f64) -> Vec<(ClientKey, Vec<u8>)> {
         let mut out = Vec::new();
         for inst in &mut self.instances {
@@ -278,7 +279,7 @@ impl Hub {
             }
         }
         let (gone, kept): (Vec<Instance>, Vec<Instance>) =
-            std::mem::take(&mut self.instances).into_iter().partition(|i| i.core.humans() == 0);
+            std::mem::take(&mut self.instances).into_iter().partition(|i| i.core.abandoned(now));
         self.instances = kept;
         self.stopped.extend(gone);
         let instances = &self.instances;
@@ -368,6 +369,27 @@ mod tests {
         let msgs = replies(hub.handle_packet(50, &hello(None, 0, false), 0.0), 50);
         let Some(ServerMessage::Queues(qs)) = msgs.first() else { panic!() };
         assert_eq!((qs[aram as usize].humans, qs[aram as usize].matches), (11, 2));
+    }
+
+    /// 13 §2–3: a match in progress with a bot's seat takes a newcomer (into a champion
+    /// select of their own) before a new match opens.
+    #[test]
+    fn newcomers_join_a_match_in_progress() {
+        let mut hub = hub(8);
+        let aram = queue_index(&hub, Scenario::Aram, false);
+        hub.handle_packet(1, &hello(Some(aram), 0, false), 0.0);
+        let ready = encode_client(&PacketHeader::default(), &ClientMessage::Lobby(msg::LobbyAction::Ready(true)));
+        hub.handle_packet(1, &ready, 0.0);
+        let mut t = 0.0;
+        while t < 5.0 {
+            t += 1.0 / 30.0;
+            hub.step(t);
+        }
+        assert!(!hub.instances()[0].core.in_champion_select());
+        let msgs = replies(hub.handle_packet(2, &hello(Some(aram), 0, false), t), 2);
+        let Some(ServerMessage::Lobby(l)) = msgs.first() else { panic!("{msgs:?}") };
+        assert!(l.midgame);
+        assert_eq!(hub.instances().len(), 1);
     }
 
     /// 13 §2: in co-op, five humans fill blue and the sixth opens another instance; in
