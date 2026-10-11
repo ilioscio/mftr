@@ -7,7 +7,7 @@ use mftr_sim::map::{Map, MapId};
 use mftr_sim::mapspec::{self, Line, MapSpec};
 
 #[derive(GodotClass)]
-#[class(base = RefCounted, init)]
+#[class(base = RefCounted, no_init)]
 pub struct MftrMaps {
     base: Base<RefCounted>,
 }
