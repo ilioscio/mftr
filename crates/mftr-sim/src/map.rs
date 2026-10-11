@@ -1,9 +1,11 @@
 //! Map geometry (04 §3 "Navigation"): walls and brush as vector polygons, a navigation grid
-//! derived from them, deterministic A* pathfinding with string pulling, and line-of-sight.
+//! derived from them, deterministic pathfinding (jump-point search) with string pulling, and
+//! line-of-sight.
 //!
-//! M1 uses a fine grid (25 u cells) plus string pulling, which yields the same any-angle
-//! waypoint paths a navmesh with a funnel pass would. A true navmesh can replace the grid
-//! behind this API when the full map needs it (D24).
+//! A fine grid (25 u cells) plus string pulling yields the same any-angle waypoint paths a
+//! navmesh with a funnel pass would. Jump-point search finds the same shortest grid paths as
+//! A* over every cell, touching a fraction of them (13 §8). A true navmesh can replace the grid
+//! behind this API when a map needs it (D24).
 
 use crate::math::Vec2;
 use crate::world::{Team, UnitKind};
@@ -141,6 +143,8 @@ pub struct Map {
     grid_w: usize,
     grid_h: usize,
     blocked: Vec<bool>,
+    /// Each cell's nearest walkable cell (itself if walkable; `u32::MAX` if none is).
+    nearest_open: Vec<u32>,
 }
 
 impl Map {
@@ -180,18 +184,34 @@ impl Map {
             grid_w,
             grid_h,
             blocked: Vec::new(),
+            nearest_open: Vec::new(),
         };
         map.wall_boxes =
             map.walls.iter().map(|w| w.iter().fold((w[0], w[0]), |(lo, hi), &v| (lo.min(v), hi.max(v)))).collect();
-        for (i, &(a, b)) in map.edges.iter().enumerate() {
-            let (c0, c1, r0, r1) = map.edge_span(a.min(b), a.max(b));
-            for r in r0..=r1 {
-                for c in c0..=c1 {
-                    map.edge_cells[r * edge_cols + c].push(i as u32);
-                }
+        for i in 0..map.edges.len() {
+            let (a, b) = map.edges[i];
+            let cells: Vec<usize> = map.buckets_along(a, b, 0.0).collect();
+            for c in cells {
+                map.edge_cells[c].push(i as u32);
             }
         }
         map.blocked = (0..grid_w * grid_h).map(|i| !map.walkable(map.cell_center(i), NAV_CLEARANCE)).collect();
+        // Breadth-first from every walkable cell at once (in cell order, deterministic).
+        let mut nearest = vec![u32::MAX; map.blocked.len()];
+        let mut queue = std::collections::VecDeque::new();
+        for i in (0..map.blocked.len()).filter(|&i| !map.blocked[i]) {
+            nearest[i] = i as u32;
+            queue.push_back(i);
+        }
+        while let Some(i) = queue.pop_front() {
+            for n in map.neighbors4(i) {
+                if nearest[n] == u32::MAX {
+                    nearest[n] = nearest[i];
+                    queue.push_back(n);
+                }
+            }
+        }
+        map.nearest_open = nearest;
         map
     }
 
@@ -235,16 +255,43 @@ impl Map {
 
     /// Line of sight between two points: no wall edge crossed (vision, 03 §10).
     pub fn line_of_sight(&self, a: Vec2, b: Vec2) -> bool {
-        !self.edges_near(a.min(b), a.max(b)).any(|(p, q)| segments_intersect(a, b, p, q))
+        !self.edges_along(a, b, 0.0).any(|(p, q)| segments_intersect(a, b, p, q))
     }
 
     /// A straight move from `a` to `b` keeps `clearance` from every wall.
     pub fn segment_clear(&self, a: Vec2, b: Vec2, clearance: f32) -> bool {
-        let pad = Vec2::new(clearance, clearance);
         self.line_of_sight(a, b)
-            && self
-                .edges_near(a.min(b) - pad, a.max(b) + pad)
-                .all(|(p, q)| dist_segment_segment(a, b, p, q) >= clearance)
+            && self.edges_along(a, b, clearance).all(|(p, q)| dist_segment_segment(a, b, p, q) >= clearance)
+    }
+
+    /// Every edge in the buckets within `pad` of the segment from `a` to `b` (every edge
+    /// that comes that close, and some more; an edge may come more than once). Unlike the
+    /// segment's bounding box, a long diagonal only visits the buckets along it.
+    fn edges_along(&self, a: Vec2, b: Vec2, pad: f32) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
+        self.buckets_along(a, b, pad).flat_map(move |i| self.edge_cells[i].iter().map(move |&e| self.edges[e as usize]))
+    }
+
+    /// The buckets within `pad` of the segment from `a` to `b` (and a unit more: the buckets
+    /// are a superset, so rounding can't lose one), row by row.
+    fn buckets_along(&self, a: Vec2, b: Vec2, pad: f32) -> impl Iterator<Item = usize> + '_ {
+        let pad = pad + 1.0;
+        let (_, _, r0, r1) = self.edge_span(a.min(b) - Vec2::new(pad, pad), a.max(b) + Vec2::new(pad, pad));
+        let last = self.edge_rows - 1;
+        (r0..=r1).flat_map(move |r| {
+            // The part of the segment within `pad` of this row of buckets (border rows
+            // reach past the map, as their buckets do).
+            let lo = if r == 0 { f32::NEG_INFINITY } else { r as f32 * EDGE_CELL - pad };
+            let hi = if r == last { f32::INFINITY } else { (r + 1) as f32 * EDGE_CELL + pad };
+            let (x0, x1) = if a.y == b.y {
+                (a.x.min(b.x), a.x.max(b.x))
+            } else {
+                let at = |y: f32| a.x + (b.x - a.x) * ((y - a.y) / (b.y - a.y)).clamp(0.0, 1.0);
+                let (xa, xb) = (at(lo.max(a.y.min(b.y))), at(hi.min(a.y.max(b.y))));
+                (xa.min(xb), xa.max(xb))
+            };
+            let (c0, c1, _, _) = self.edge_span(Vec2::new(x0 - pad, 0.0), Vec2::new(x1 + pad, 0.0));
+            (c0..=c1).map(move |c| r * self.edge_cols + c)
+        })
     }
 
     /// The edge buckets (column and row ranges, inclusive) a box from `lo` to `hi` touches,
@@ -281,28 +328,11 @@ impl Map {
         Vec2::new((x as f32 + 0.5) * NAV_CELL, (y as f32 + 0.5) * NAV_CELL)
     }
 
-    /// Nearest walkable cell to `p` (breadth-first over the grid, deterministic).
+    /// Nearest walkable cell to `p` (fewest grid steps, found when the map was built).
     fn nearest_open_cell(&self, p: Vec2) -> Option<usize> {
         let clamped = Vec2::new(p.x.clamp(0.0, self.size.x - 1.0), p.y.clamp(0.0, self.size.y - 1.0));
-        let start = self.cell_of(clamped)?;
-        if !self.blocked[start] {
-            return Some(start);
-        }
-        let mut seen = vec![false; self.blocked.len()];
-        let mut queue = std::collections::VecDeque::from([start]);
-        seen[start] = true;
-        while let Some(i) = queue.pop_front() {
-            if !self.blocked[i] {
-                return Some(i);
-            }
-            for n in self.neighbors4(i) {
-                if !seen[n] {
-                    seen[n] = true;
-                    queue.push_back(n);
-                }
-            }
-        }
-        None
+        let i = self.nearest_open[self.cell_of(clamped)?];
+        (i != u32::MAX).then_some(i as usize)
     }
 
     fn neighbors4(&self, i: usize) -> impl Iterator<Item = usize> + '_ {
@@ -314,9 +344,10 @@ impl Map {
         })
     }
 
-    /// Any-angle path from `from` to `to`: grid A* (integer costs, deterministic tie-breaks)
-    /// followed by string pulling against wall clearance. Returns the waypoints after `from`;
-    /// the last one is `to`, or the nearest reachable point when `to` is inside a wall.
+    /// Any-angle path from `from` to `to`: a grid search (jump-point search: integer costs,
+    /// deterministic tie-breaks) followed by string pulling against wall clearance. Returns the
+    /// waypoints after `from`; the last one is `to`, or the nearest reachable point when `to`
+    /// is inside a wall.
     /// Returns `vec![to]` when the straight line is already clear (the common case).
     pub fn find_path(&self, from: Vec2, to: Vec2) -> Vec<Vec2> {
         if self.walls.is_empty() || (self.segment_clear(from, to, NAV_CLEARANCE) && self.walkable(to, NAV_CLEARANCE)) {
@@ -355,61 +386,144 @@ impl Map {
         ASTAR.with(|scratch| self.astar_in(&mut scratch.borrow_mut(), start, goal))
     }
 
+    /// Whether grid cell (x, y) is on the grid and walkable.
+    fn open_xy(&self, x: isize, y: isize) -> bool {
+        x >= 0
+            && y >= 0
+            && (x as usize) < self.grid_w
+            && (y as usize) < self.grid_h
+            && !self.blocked[y as usize * self.grid_w + x as usize]
+    }
+
+    /// Jump-point search (Harabor & Grastien, with diagonal steps only between two open
+    /// sides, so no corner cutting): A* over the cells where an optimal path may turn, with the
+    /// same octile costs (10 straight, 14 diagonal) and the same shortest length as A* over
+    /// every cell, at a fraction of the cells touched. Returns every cell of the path.
     fn astar_in(&self, s: &mut AstarScratch, start: usize, goal: usize) -> Vec<usize> {
         let n = self.blocked.len();
         s.begin(n);
-        let (gx, gy) = ((goal % self.grid_w) as i64, (goal / self.grid_w) as i64);
-        let h = |i: usize| -> u32 {
-            let (dx, dy) = (((i % self.grid_w) as i64 - gx).abs(), ((i / self.grid_w) as i64 - gy).abs());
-            (10 * (dx + dy) - 6 * dx.min(dy)) as u32 // octile with costs 10 / 14
+        let w = self.grid_w;
+        let xy = |i: usize| ((i % w) as isize, (i / w) as isize);
+        let (gx, gy) = xy(goal);
+        let octile = |dx: isize, dy: isize| -> u32 {
+            let (dx, dy) = (dx.unsigned_abs() as u32, dy.unsigned_abs() as u32);
+            10 * (dx + dy) - 6 * dx.min(dy)
+        };
+        let h = |i: usize| {
+            let (x, y) = xy(i);
+            octile(x - gx, y - gy)
         };
         // Max-heap of Reverse-ordered keys: (f, h, cell) — deterministic tie-breaking.
         let mut open = BinaryHeap::new();
         s.set_g(start, 0, usize::MAX);
         open.push(std::cmp::Reverse((h(start), h(start), start)));
+        let mut dirs: Vec<(isize, isize)> = Vec::with_capacity(8);
         while let Some(std::cmp::Reverse((_, _, cur))) = open.pop() {
             if s.closed(cur) {
                 continue;
             }
             if cur == goal {
-                let mut path = vec![goal];
-                let mut c = goal;
-                while c != start {
-                    c = s.came[c] as usize;
-                    path.push(c);
-                }
-                path.reverse();
-                return path;
+                return self.unpack(s, start, goal);
             }
             s.close(cur);
-            let (x, y) = ((cur % self.grid_w) as isize, (cur / self.grid_w) as isize);
-            for (dx, dy, cost) in
-                [(1, 0, 10), (-1, 0, 10), (0, 1, 10), (0, -1, 10), (1, 1, 14), (1, -1, 14), (-1, 1, 14), (-1, -1, 14)]
-            {
-                let (nx, ny) = (x + dx, y + dy);
-                if nx < 0 || ny < 0 || nx as usize >= self.grid_w || ny as usize >= self.grid_h {
-                    continue;
-                }
-                let nb = ny as usize * self.grid_w + nx as usize;
-                if self.blocked[nb] || s.closed(nb) {
-                    continue;
-                }
-                // No corner cutting.
+            let (x, y) = xy(cur);
+            dirs.clear();
+            let from = s.came[cur] as usize;
+            if cur == start {
+                dirs.extend([(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]);
+            } else {
+                let (px, py) = xy(from);
+                let (dx, dy) = ((x - px).signum(), (y - py).signum());
                 if dx != 0 && dy != 0 {
-                    let a = y as usize * self.grid_w + nx as usize;
-                    let b = ny as usize * self.grid_w + x as usize;
-                    if self.blocked[a] || self.blocked[b] {
-                        continue;
+                    dirs.extend([(dx, 0), (0, dy), (dx, dy)]);
+                } else if dx != 0 {
+                    dirs.push((dx, 0));
+                    for side in [1, -1] {
+                        if self.open_xy(x, y + side) && !self.open_xy(x - dx, y + side) {
+                            dirs.extend([(0, side), (dx, side)]);
+                        }
+                    }
+                } else {
+                    dirs.push((0, dy));
+                    for side in [1, -1] {
+                        if self.open_xy(x + side, y) && !self.open_xy(x + side, y - dy) {
+                            dirs.extend([(side, 0), (side, dy)]);
+                        }
                     }
                 }
-                let ng = s.g(cur) + cost;
-                if ng < s.g(nb) {
-                    s.set_g(nb, ng, cur);
-                    open.push(std::cmp::Reverse((ng + h(nb), h(nb), nb)));
+            }
+            for &(dx, dy) in &dirs {
+                let Some(jp) = self.jump(x, y, dx, dy, goal) else { continue };
+                if s.closed(jp) {
+                    continue;
+                }
+                let (jx, jy) = xy(jp);
+                let ng = s.g(cur) + octile(jx - x, jy - y);
+                if ng < s.g(jp) {
+                    s.set_g(jp, ng, cur);
+                    open.push(std::cmp::Reverse((ng + h(jp), h(jp), jp)));
                 }
             }
         }
         Vec::new()
+    }
+
+    /// The next jump point from (x, y) stepping (dx, dy): the goal, a cell with a forced
+    /// neighbor (an optimal path may turn there), or, going diagonally, a cell from which a
+    /// straight jump finds one. None when the way is blocked first.
+    fn jump(&self, mut x: isize, mut y: isize, dx: isize, dy: isize, goal: usize) -> Option<usize> {
+        let w = self.grid_w as isize;
+        loop {
+            if dx != 0 && dy != 0 && !(self.open_xy(x + dx, y) && self.open_xy(x, y + dy)) {
+                return None; // no corner cutting
+            }
+            x += dx;
+            y += dy;
+            if !self.open_xy(x, y) {
+                return None;
+            }
+            let i = (y * w + x) as usize;
+            if i == goal {
+                return Some(i);
+            }
+            if dx != 0 && dy != 0 {
+                if self.jump(x, y, dx, 0, goal).is_some() || self.jump(x, y, 0, dy, goal).is_some() {
+                    return Some(i);
+                }
+            } else if dx != 0 {
+                if (self.open_xy(x, y + 1) && !self.open_xy(x - dx, y + 1))
+                    || (self.open_xy(x, y - 1) && !self.open_xy(x - dx, y - 1))
+                {
+                    return Some(i);
+                }
+            } else if (self.open_xy(x + 1, y) && !self.open_xy(x + 1, y - dy))
+                || (self.open_xy(x - 1, y) && !self.open_xy(x - 1, y - dy))
+            {
+                return Some(i);
+            }
+        }
+    }
+
+    /// The cells of a found path: its jump points, joined by the straight or diagonal runs
+    /// between them.
+    fn unpack(&self, s: &AstarScratch, start: usize, goal: usize) -> Vec<usize> {
+        let w = self.grid_w as isize;
+        let mut path = vec![goal];
+        let mut c = goal;
+        while c != start {
+            let p = s.came[c] as usize;
+            let (cx, cy, px, py) = ((c as isize % w), (c as isize / w), (p as isize % w), (p as isize / w));
+            let (dx, dy) = ((px - cx).signum(), (py - cy).signum());
+            let (mut x, mut y) = (cx, cy);
+            while (x, y) != (px, py) {
+                x += dx;
+                y += dy;
+                path.push((y * w + x) as usize);
+            }
+            c = p;
+        }
+        path.reverse();
+        path
     }
 }
 
@@ -843,6 +957,75 @@ mod tests {
             }
         }
         eprintln!("crossroads: built in {built:?}, {} walls, {} brush", m.walls.len(), m.brush.len());
+    }
+
+    /// `n` pairs of points on `m`: a walkable start and any goal (as a click might be).
+    fn random_pairs(m: &Map, n: usize) -> Vec<(Vec2, Vec2)> {
+        let mut rng = crate::rng::Pcg32::new(7, 1);
+        let mut pt = || Vec2::new(rng.range_f32(0.0, m.size.x), rng.range_f32(0.0, m.size.y));
+        let mut pairs = Vec::new();
+        while pairs.len() < n {
+            let (a, b) = (pt(), pt());
+            if m.walkable(a, NAV_CLEARANCE) {
+                pairs.push((a, b));
+            }
+        }
+        pairs
+    }
+
+    /// Paths across Crossroads keep their clearance from walls on every leg, and end at the
+    /// goal or, for a goal in a wall, near it.
+    #[test]
+    fn crossroads_paths_keep_clear_of_walls() {
+        let m = MapId::Crossroads.shared();
+        for (a, b) in random_pairs(&m, 150) {
+            let path = m.find_path(a, b);
+            let mut at = a;
+            for &p in &path {
+                assert!(m.segment_clear(at, p, NAV_CLEARANCE - 1.0), "{a:?} -> {b:?}: {at:?} -> {p:?} clips a wall");
+                at = p;
+            }
+            let end = *path.last().unwrap();
+            assert!(end == b || !m.walkable(b, NAV_CLEARANCE), "{a:?} -> {b:?} ends at {end:?}");
+        }
+    }
+
+    /// Paths between random points: time per path (all of `find_path`, and the grid search
+    /// alone) and their total length. `cargo test --release -p mftr-sim path_bench --
+    /// --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn path_bench() {
+        for id in [MapId::Bridge, MapId::Crossroads] {
+            let m = id.shared();
+            let pairs = random_pairs(&m, 2000);
+            let (mut total, mut worst, mut search, mut search_worst, mut length) = (0.0, 0.0f64, 0.0, 0.0f64, 0.0f64);
+            for &(a, b) in &pairs {
+                let t = std::time::Instant::now();
+                let path = m.find_path(a, b);
+                let dt = t.elapsed().as_secs_f64() * 1000.0;
+                (total, worst) = (total + dt, worst.max(dt));
+                let mut at = a;
+                for &p in &path {
+                    length += at.distance(p) as f64;
+                    at = p;
+                }
+                if let (Some(s), Some(g)) = (m.nearest_open_cell(a), m.nearest_open_cell(b)) {
+                    let t = std::time::Instant::now();
+                    std::hint::black_box(m.astar(s, g));
+                    let dt = t.elapsed().as_secs_f64() * 1000.0;
+                    (search, search_worst) = (search + dt, search_worst.max(dt));
+                }
+            }
+            let n = pairs.len() as f64;
+            eprintln!(
+                "{id:?}: find_path {:.3} ms avg, {:.2} ms worst; search {:.3} ms avg, {:.2} ms worst; length {length:.0}",
+                total / n,
+                worst,
+                search / n,
+                search_worst,
+            );
+        }
     }
 
     #[test]

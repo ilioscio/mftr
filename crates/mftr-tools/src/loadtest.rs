@@ -74,6 +74,7 @@ pub fn run(cfg: &LoadConfig) -> LoadResult {
         base: ServerConfig { seed: cfg.seed, max_players: 10, bots: 10, lobby: true, ..Default::default() },
         max_matches: cfg.matches,
         workers: cfg.workers,
+        development: false,
     });
     let size = mftr_sim::map::MapId::shared(cfg.scenario.map()).size;
     let n = cfg.matches * cfg.humans;

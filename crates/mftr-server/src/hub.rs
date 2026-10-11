@@ -78,6 +78,9 @@ pub struct HubConfig {
     pub max_matches: usize,
     /// Threads that step instances (13 §5); 1 steps them in turn.
     pub workers: usize,
+    /// A development server (`--scenario`): spectators may watch bots alone (a match is
+    /// started for them if none runs), and a match keeps running while anyone watches it.
+    pub development: bool,
 }
 
 /// One match instance.
@@ -233,14 +236,32 @@ impl Hub {
             None if self.cfg.queues.len() == 1 => 0,
             _ => return self.queues_packet(from, now).into_iter().collect(),
         };
-        let target = if spectate { self.busiest(queue) } else { self.with_room(queue) };
+        let target = match spectate {
+            true if self.cfg.development => {
+                self.busiest(queue).or_else(|| self.instances.iter().find(|i| i.queue == queue).map(|i| i.id))
+            }
+            true => self.busiest(queue),
+            false => self.with_room(queue),
+        };
         let id = match target {
             Some(id) => id,
-            None if spectate => return vec![(from, self.reject(RejectReason::NothingToWatch))],
+            None if spectate && !self.cfg.development => {
+                return vec![(from, self.reject(RejectReason::NothingToWatch))];
+            }
             None if self.instances.len() >= self.cfg.max_matches => {
                 return vec![(from, self.reject(RejectReason::ServerBusy))];
             }
-            None => self.create(queue, now),
+            None => {
+                let inst = self.create(queue, now);
+                if !spectate && !inst.core.has_room() {
+                    // Its bots take every seat (`--bots` counts toward `--max-players`): a
+                    // match started for the newcomer would turn them away and stop at once.
+                    return vec![(from, self.reject(RejectReason::ServerFull))];
+                }
+                let id = inst.id;
+                self.instances.push(inst);
+                id
+            }
         };
         self.place(from, id, bytes, now)
     }
@@ -275,7 +296,8 @@ impl Hub {
             .map(|i| i.id)
     }
 
-    fn create(&mut self, queue: usize, now: f64) -> u32 {
+    /// A new instance of `queue` (the caller adds it to the hub).
+    fn create(&mut self, queue: usize, now: f64) -> Instance {
         let id = self.next_id;
         self.next_id += 1;
         let q = &self.cfg.queues[queue];
@@ -291,8 +313,7 @@ impl Hub {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         // Every instance ticks on the same grid, so they're due together and step in parallel.
         let start = (now / TICK_DT_F64).ceil() * TICK_DT_F64;
-        self.instances.push(Instance { id, queue, core: ServerCore::new(cfg, start), created: now, created_unix });
-        id
+        Instance { id, queue, core: ServerCore::new(cfg, start), created: now, created_unix }
     }
 
     fn queues_packet(&mut self, to: ClientKey, now: f64) -> Option<(ClientKey, Vec<u8>)> {
@@ -355,8 +376,9 @@ impl Hub {
         }
         // Oldest first, whichever thread stepped them.
         self.instances.sort_by_key(|i| i.id);
+        let watched = |i: &Instance| self.cfg.development && i.core.spectators() > 0;
         let (gone, kept): (Vec<Instance>, Vec<Instance>) =
-            std::mem::take(&mut self.instances).into_iter().partition(|i| i.core.abandoned(now));
+            std::mem::take(&mut self.instances).into_iter().partition(|i| i.core.abandoned(now) && !watched(i));
         self.instances = kept;
         self.stopped.extend(gone);
         let instances = &self.instances;
@@ -399,6 +421,7 @@ mod tests {
             base: ServerConfig { max_players: 10, bots: 10, lobby: true, ..Default::default() },
             max_matches,
             workers,
+            development: false,
         })
     }
 
@@ -555,5 +578,48 @@ mod tests {
         assert!(hub.instance_of(3).is_none(), "the spectator is back at the front desk");
         let msgs = replies(hub.handle_packet(2, &hello(Some(hyper), 0, false), 1.0), 2);
         assert!(matches!(msgs.first(), Some(ServerMessage::Lobby(_))));
+    }
+
+    /// A development server (`--scenario classic --bots 10`): its bots take every seat, so a
+    /// player is turned away without a match started and stopped for them; a spectator gets a
+    /// match of bots to watch, which runs until they leave.
+    #[test]
+    fn development_servers_show_bots_to_spectators() {
+        let mut hub = Hub::new(HubConfig {
+            queues: vec![QueueSpec {
+                scenario: Scenario::Classic,
+                coop: false,
+                map_name: map_name(Scenario::Classic).into(),
+                map: None,
+            }],
+            base: ServerConfig { scenario: Scenario::Classic, max_players: 10, bots: 10, ..Default::default() },
+            max_matches: 4,
+            workers: 1,
+            development: true,
+        });
+        for t in [0.0, 2.0, 4.0] {
+            let msgs = replies(hub.handle_packet(1, &hello(None, 0, false), t), 1);
+            assert_eq!(msgs, vec![ServerMessage::Reject { reason: RejectReason::ServerFull }]);
+            hub.step(t + 0.1);
+        }
+        assert!(hub.instances().is_empty() && hub.take_stopped().is_empty(), "no match started for nobody");
+
+        let msgs = replies(hub.handle_packet(2, &hello(None, 0, true), 5.0), 2);
+        assert!(msgs.iter().any(|m| matches!(m, ServerMessage::Welcome { spectator: true, .. })), "{msgs:?}");
+        let msgs = replies(hub.handle_packet(3, &hello(None, 0, true), 5.0), 3);
+        assert!(msgs.iter().any(|m| matches!(m, ServerMessage::Welcome { spectator: true, .. })), "{msgs:?}");
+        assert_eq!(hub.instances().len(), 1, "both watch the same match");
+        for k in 0..30 {
+            hub.step(5.0 + k as f64 / 30.0);
+        }
+        assert_eq!(hub.instances().len(), 1, "a watched match keeps running");
+        assert!(hub.instances()[0].core.world().tick().0 > 20, "and plays");
+
+        let bye = encode_client(&PacketHeader::default(), &ClientMessage::Bye);
+        hub.handle_packet(2, &bye, 6.0);
+        hub.handle_packet(3, &bye, 6.0);
+        hub.step(6.1);
+        assert!(hub.instances().is_empty());
+        assert_eq!(hub.take_stopped().len(), 1);
     }
 }

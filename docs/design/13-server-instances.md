@@ -64,6 +64,10 @@ A spectator picks a queue too and watches its busiest instance.
 - An instance with no humans (connected, in champion select, choosing a champion, or holding
   a dropped seat) stops. One whose humans have all dropped stops 60 s after the last one did,
   so a solo player with a flaky connection can still come back.
+- On a `--scenario` server (development) a spectator can watch bots alone: a match starts for
+  them if none runs, and it keeps running while anyone watches. When its bots take every seat
+  (`--bots` counts toward `--max-players`), a player is told the server is full; no match is
+  started for them.
 - When a match ends, its players go back to champion select together, as today.
 - Instances tick on one shared grid, so they're due together, and step in parallel on a pool
   of worker threads (one per core by default, `--workers N`). The threads live as long as the
@@ -96,7 +100,20 @@ NixOS: one `services.mftr` server (§ hosting.md) replaces `services.mftr.server
 `mftr-tools loadtest` runs many full matches in one hub, in process: ten simulated players per
 match click around the whole map (moves and stops, 3–8 clicks a second in bursts) while server
 bots fight in the other seats. It times only the server's work (no sockets or encryption).
-Measured on a 16-thread desktop (release build, Windows), 20 s per run:
+Measured on a 16-thread desktop (release build, Windows), 20 s per run, with jump-point
+search (D58):
+
+| Mode | Matches | Workers | Time per tick (avg / worst) | Share of one core | Per match | Down per player |
+|---|---|---|---|---|---|---|
+| ARAM | 1 | 1 | 0.11 / 5.3 ms | 0.3% | 0.3% | 8.1 KB/s |
+| ARAM | 8 | 1 | 0.87 / 7.4 ms | 2.7% | 0.3% | 8.2 KB/s |
+| ARAM | 32 | 1 | 3.5 / 10 ms | 11% | 0.3% | 8.3 KB/s |
+| Classic | 1 | 1 | 0.23 / 12 ms | 0.7% | 0.7% | 8.5 KB/s |
+| Classic | 8 | 1 | 1.9 / 20 ms | 5.9% | 0.7% | 8.6 KB/s |
+| Classic | 8 | 8 | 1.1 / 17 ms | (wall) 3.4% | | 8.6 KB/s |
+| Classic | 32 | 8 | 2.9 / 22 ms | (wall) 9.0% | | 8.7 KB/s |
+
+Before D58 (A* over every cell), the same machine:
 
 | Mode | Matches | Workers | Time per tick (avg / worst) | Share of one core | Per match | Down per player |
 |---|---|---|---|---|---|---|
@@ -105,8 +122,8 @@ Measured on a 16-thread desktop (release build, Windows), 20 s per run:
 | ARAM | 8 | 8 | 1.5 / 27 ms | (wall) 4.4% | | 8.2 KB/s |
 | ARAM | 32 | 1 | 8.6 / 37 ms | 26% | 0.8% | 8.3 KB/s |
 | ARAM | 32 | 8 | 3.7 / 30 ms | (wall) 11% | | 8.3 KB/s |
-| Classic | 1 | 1 | 1.1 / 80 ms | 3.2% | 3.2% | 8.5 KB/s |
-| Classic | 8 | 1 | 9.1 / 130 ms | 28% | 3.4% | 8.6 KB/s |
+| Classic | 1 | 1 | 1.1 / 80 ms | 3.3% | 3.3% | 8.5 KB/s |
+| Classic | 8 | 1 | 9.4 / 131 ms | 28% | 3.5% | 8.6 KB/s |
 
 A real server (encrypted UDP on loopback) with two full ARAM matches of headless clients used
 3.1% of one core in all, about 1.6% per match: sockets and encryption double the in-process
@@ -115,14 +132,14 @@ cost. It sent 172 KB/s (8.6 KB/s per player) and its ticks took 0.7 ms (worst 2.
 What it means:
 - **The simulation is cheap; players cost.** Ten bots alone simulate an ARAM tick in 0.015 ms
   and a Classic one in 0.034 ms. A match's cost is its players' snapshots (vision, deltas,
-  encoding) and above all **pathfinding** for their clicks: a path to a random point averages
-  0.4 ms on The Bridge and 1.7 ms on Crossroads (worst 10 ms), on grids of 425² and 580² cells.
+  encoding) and **pathfinding** for their clicks. With A* over every cell, a path to a random
+  point averaged 0.27 ms on The Bridge and 1.2 ms on Crossroads (worst 10 ms), on grids of 425²
+  and 580² cells; jump-point search (D58) brings that to 0.07 ms and 0.20 ms (worst 1.2 ms):
+  `cargo test --release -p mftr-sim path_bench -- --ignored --nocapture`.
 - **Spikes come from clicks landing together.** Each test match has one big tick, when all ten
-  players' first clicks arrive at once and ten long paths are searched out of the fountain
-  (13 ms on The Bridge; 80 ms on Crossroads). Afterwards an ARAM match stays under 4 ms. Real
-  players don't click in lockstep, but Classic's pathfinding is the first thing to speed up
-  (a coarser or hierarchical grid, or jump-point search) before a server hosts many Classic
-  matches; it changes the paths, so it's a simulation change.
-- **Capacity:** per core, about 60 ARAM matches or 25 Classic ones (with networking, against
-  the 33 ms tick). Bandwidth: 85 KB/s per match (0.7 Mbit/s), so a 100 Mbit/s uplink carries
-  about 140 matches. On a small VPS, bandwidth or the default `--max-matches 32` comes first.
+  players' first clicks arrive at once and ten long paths are searched out of the fountain:
+  12 ms on Crossroads now (80 ms with A*), 5 ms on The Bridge. Real players don't click in
+  lockstep.
+- **Capacity:** per core, about 150 ARAM matches or 70 Classic ones (with networking, which
+  about doubles the in-process cost, against the 33 ms tick). Bandwidth: 85 KB/s per match
+  (0.7 Mbit/s), so a 100 Mbit/s uplink carries about 140 matches. On a small VPS, bandwidth or the default `--max-matches 32` comes first.
