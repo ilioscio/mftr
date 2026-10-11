@@ -193,7 +193,7 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                         c.next_hello = t + 0.033;
                     }
                 }
-                Phase::Joining => {}
+                Phase::Queues | Phase::Joining => {}
                 Phase::Playing => {
                     match &mut c.bot {
                         Bot::Click(b) => b.act(&mut c.session, local, t),

@@ -251,6 +251,8 @@ pub struct ClientStats {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
     Connecting,
+    /// The server offered its queues (13 §1): pick one with `choose_queue`.
+    Queues,
     /// In champion select (keep sending Hello as a keepalive until the Welcome).
     Lobby,
     /// Welcomed onto a custom map: downloading its text (12 §4) before joining.
@@ -276,6 +278,10 @@ pub struct ClientSession {
     /// Ask to watch, and whether we are watching.
     spectate: bool,
     spectator: bool,
+    /// The server's queues (13 §1), the one picked, and why the server last turned us away.
+    queues: Vec<msg::QueueInfo>,
+    queue: Option<u8>,
+    rejected: Option<msg::RejectReason>,
     lobby: Option<msg::LobbyState>,
     /// What the server runs (from the welcome).
     mode: msg::GameMode,
@@ -365,6 +371,9 @@ impl ClientSession {
             token: 0,
             spectate: false,
             spectator: false,
+            queues: Vec::new(),
+            queue: None,
+            rejected: None,
             lobby: None,
             mode: msg::GameMode::Empty,
             welcome_seq: 0,
@@ -430,6 +439,37 @@ impl ClientSession {
 
     pub fn is_spectator(&self) -> bool {
         self.spectator
+    }
+
+    /// The queues the server offers (13 §1), once it has said.
+    pub fn queues(&self) -> &[msg::QueueInfo] {
+        &self.queues
+    }
+
+    /// The queue picked (or set before connecting), if any.
+    pub fn queue(&self) -> Option<u8> {
+        self.queue
+    }
+
+    /// Play queue `q`: the next hello asks for it. From the queue list, the server places us
+    /// in one of its matches, whose packets count from 1 again.
+    pub fn choose_queue(&mut self, q: u8) {
+        self.queue = Some(q);
+        self.rejected = None;
+        if self.phase == Phase::Queues {
+            self.phase = Phase::Connecting;
+            self.recv = ReceiveTracker::default();
+        }
+    }
+
+    /// Back to the queue list (the next hello asks for it).
+    pub fn clear_queue(&mut self) {
+        self.queue = None;
+    }
+
+    /// Why the server last turned us away (cleared once it lets us in).
+    pub fn rejected(&self) -> Option<msg::RejectReason> {
+        self.rejected
     }
 
     /// Champion select, while in it.
@@ -508,6 +548,7 @@ impl ClientSession {
                 champion: self.champion_request,
                 resume: self.resume,
                 spectate: self.spectate,
+                queue: self.queue,
             },
         );
         self.finish_packet(bytes)
@@ -850,6 +891,7 @@ impl ClientSession {
                 ..
             } => {
                 if matches!(self.phase, Phase::Connecting | Phase::Lobby) {
+                    self.rejected = None;
                     self.welcome_seq = header.seq;
                     self.since_welcome = 0;
                     self.mode = mode;
@@ -880,7 +922,17 @@ impl ClientSession {
             ServerMessage::Snapshot(s) if self.phase != Phase::Map => self.on_snapshot(*s, now),
             ServerMessage::Snapshot(_) => {}
             ServerMessage::MapChunk { hash, total, offset, bytes } => self.on_map_chunk(hash, total, offset, &bytes),
-            ServerMessage::Reject { .. } => {}
+            ServerMessage::Reject { reason } => {
+                if matches!(self.phase, Phase::Connecting | Phase::Queues) {
+                    self.rejected = Some(reason);
+                }
+            }
+            ServerMessage::Queues(queues) => {
+                if matches!(self.phase, Phase::Connecting | Phase::Queues) && self.queue.is_none() {
+                    self.queues = queues;
+                    self.phase = Phase::Queues;
+                }
+            }
             ServerMessage::Lobby(l) => {
                 // The match ended and the server holds champion select again (packets from the
                 // select before our welcome may still arrive late: those don't count).
@@ -889,6 +941,7 @@ impl ClientSession {
                     self.back_to_lobby();
                 }
                 if matches!(self.phase, Phase::Connecting | Phase::Lobby) {
+                    self.rejected = None;
                     self.phase = Phase::Lobby;
                     self.lobby = Some(*l);
                 }
@@ -905,6 +958,7 @@ impl ClientSession {
             phase: Phase::Lobby,
             champion_request: old.champion_request,
             spectate: old.spectate,
+            queue: old.queue,
             mode: old.mode,
             next_seq: old.next_seq,
             margin: old.margin,
@@ -1162,7 +1216,7 @@ impl ClientSession {
         }
         self.own_cc = cc;
         match self.phase {
-            Phase::Connecting | Phase::Lobby | Phase::Map => {}
+            Phase::Connecting | Phase::Queues | Phase::Lobby | Phase::Map => {}
             Phase::Joining => {
                 self.start_playing(s.tick, server_state);
                 self.update(now);
