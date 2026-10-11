@@ -97,44 +97,91 @@ nix flake update mftr && sudo nixos-rebuild switch --flake .#myserver
 To test a branch, point the input at it (`url = "github:ilioscio/mftr/my-branch";`), or at a
 local checkout with `--override-input mftr path:/home/me/mftr`.
 
+A fuller setup: the main server with the modes you want, plus the Duel Sandbox and the dodge
+rig as servers of their own.
+
 ```nix
 services.mftr = {
   enable = true;
-  openFirewall = true;
-  maps = [ ./maps/twin-rivers.mftrmap ];   # Classic on a map from the map editor, too
-  replay = true;
+  openFirewall = true;                   # the main port, and sandboxes' unless they say otherwise
+  port = 7777;
+  modes = [ "aram" "mayhem" "classic" "hyper-coop" ];   # "-versus" / "-coop": one side only
+  maps = [ ./maps/twin-rivers.mftrmap ]; # Classic on a map from the map editor, too
+  maxMatches = 32;
+  replay = true;                         # every match → /var/lib/mftr/server/replays
+  sandboxes = {
+    duel = { port = 7780; scenario = "duel"; maxPlayers = 4; };
+    dodge = { port = 7781; scenario = "dodge"; };   # the blind playtest's dodge rig
+  };
 };
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
-| `address`, `port` | `0.0.0.0`, `7777` | Where to listen (`::` for IPv6 as well). |
-| `openFirewall` | `false` | Open the UDP port. |
-| `modes` | `[ "aram" "mayhem" "hyper" "classic" ]` | As `--modes`. |
+| `address`, `port` | `0.0.0.0`, `7777` | Where the main server listens (`::` for IPv6 as well). |
+| `openFirewall` | `false` | Open the main server's UDP port (and sandboxes', by default). |
+| `modes` | `[ "aram" "mayhem" "hyper" "classic" ]` | As `--modes`: a mode alone offers Versus and Co-op vs bots, `aram-versus` or `aram-coop` one of them. Every match has 10 seats, champion select and bots in the empty seats. |
 | `maps` | `[ ]` | Map files from the map editor (`*.mftrmap`): each adds Classic on that map. |
-| `maxMatches` | `32` | As `--max-matches`. |
+| `maxMatches`, `workers` | `32`, one per core | As `--max-matches` and `--workers`. |
 | `seed` | `1` | As `--seed`. |
-| `keyFile` | `/var/lib/mftr/server.key` | The server's key (see [The server key](#the-server-key)). |
-| `replay` | `false` | Record every match into `/var/lib/mftr/replays`. |
+| `replay` | `false` | Record every match into `/var/lib/mftr/server/replays`. |
+| `adoptKeyFrom` | `null` | The name of an older server whose key the main server takes on its first start (see below). |
+| `keyFile` | `/var/lib/mftr/server/server.key` | The main server's key (see [The server key](#the-server-key)). |
 | `extraArgs` | `[ ]` | More `mftr-server` options. |
+| `sandboxes.<name>` | `{ }` | A server running one scenario: `port`, `scenario` (`duel`, `dodge`, `minions`, `empty`, or a full-match one as a single game), `maxPlayers` (`10`), `bots` (`0`), `lobby`, `seed`, `replay` (into `/var/lib/mftr/<name>/replays`), `address`, `openFirewall`, `extraArgs`, `enable`. One service `mftr-<name>` each. |
 
-The server runs as an unprivileged, sandboxed user and keeps its key (and replays) in
-`/var/lib/mftr`, which survives rebuilds and upgrades. The fingerprint to give players:
+Every server runs as an unprivileged, sandboxed user and keeps its key (and replays) in
+`/var/lib/mftr/<name>`, the main one in `/var/lib/mftr/server`; these survive rebuilds and
+upgrades. The fingerprints to give players:
 
 ```sh
-journalctl -u mftr | grep fingerprint
-# or: sudo mftr-server --key /var/lib/mftr/server.key --fingerprint
+journalctl -u mftr | grep fingerprint          # the main server; mftr-duel for a sandbox
+# or: sudo mftr-server --key /var/lib/mftr/server/server.key --fingerprint
 ```
 
-`mftr-tools` is installed too, e.g. `sudo mftr-tools replay /var/lib/mftr/replays/<file>`, or a
-bot to check the server from the machine:
+`mftr-tools` is installed too, e.g. `sudo mftr-tools replay /var/lib/mftr/server/replays/<file>`,
+or a bot to check a server from the machine:
 `mftr-tools bot --server '127.0.0.1:7777#<fingerprint>' --queue classic-coop`.
 Without NixOS, `nix build github:ilioscio/mftr` gives `result/bin/mftr-server`.
 
 **From `services.mftr.servers` (one service per mode, before 0.11):** that option is gone, and
-evaluating a configuration that sets it says so. Remove it; one server now offers every mode.
-Players pinned the old servers' keys, so keep the one on the port they know with
-`keyFile = "/var/lib/mftr/aram/server.key";` (if that server was named `aram`).
+evaluating a configuration that sets it says so. The old servers kept their keys in
+`/var/lib/mftr/<name>`, and the new layout leaves those alone:
+- Full-match servers become `modes` on the main server. Players pinned the key of the one on
+  the main port: set `adoptKeyFrom` to that server's name, and the main server copies its key
+  on its first start (the log says "adopted the server key"). Check the fingerprint after the
+  switch.
+- Sandboxes become `sandboxes.<name>`. Give each the old server's name and it keeps its key.
+
+For example, this old configuration
+
+```nix
+services.mftr.servers = {
+  aram = { port = 7778; replay = true; };
+  mayhem = { port = 7777; scenario = "mayhem"; replay = true; };
+  classic = { port = 7779; scenario = "classic"; replay = true; };
+  duel = { port = 7780; scenario = "duel"; maxPlayers = 4; };
+  dodge = { port = 7781; scenario = "dodge"; };
+};
+```
+
+becomes
+
+```nix
+services.mftr = {
+  port = 7777;                       # players who used :7778 or :7779 switch to :7777
+  adoptKeyFrom = "mayhem";           # the key players pinned on :7777
+  modes = [ "aram" "mayhem" "classic" ];
+  replay = true;
+  sandboxes = {
+    duel = { port = 7780; scenario = "duel"; maxPlayers = 4; };   # keeps duel's key
+    dodge = { port = 7781; scenario = "dodge"; };                 # keeps dodge's key
+  };
+};
+```
+
+0.11.0's module kept the main server in `/var/lib/mftr` itself; a server set up with it takes
+that key over the same way, without `adoptKeyFrom`.
 
 ## Options
 
@@ -143,7 +190,7 @@ Players pinned the old servers' keys, so keep the one on the port they know with
 | `--bind ADDR` | `0.0.0.0:7777` | Address and UDP port to listen on. |
 | `--key FILE` | `server.key` | The server's key, created on first start (see below). |
 | `--fingerprint` | | Print the key's fingerprint and exit. |
-| `--modes LIST` | `aram,mayhem,hyper,classic` | What players can pick, each Versus or Co-op vs bots. `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM: Mayhem, ARAM with augment drafts. `hyper`: Mayhem under Hyper rules (+300 ability haste on Q, W and E, +50% attack speed). `classic`: Classic 5v5 on Crossroads, three lanes and a jungle (M4, in progress). |
+| `--modes LIST` | `aram,mayhem,hyper,classic` | What players can pick: a mode alone offers Versus and Co-op vs bots, `aram-versus` or `aram-coop` one of them. `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM: Mayhem, ARAM with augment drafts. `hyper`: Mayhem under Hyper rules (+300 ability haste on Q, W and E, +50% attack speed). `classic`: Classic 5v5 on Crossroads, three lanes and a jungle (M4, in progress). |
 | `--map FILE` | none | Add Classic on a map from the map editor (`*.mftrmap`); repeat for more maps. The server checks each at start (and refuses a map that breaks a rule, listing what's wrong); players download it as they join (a few hundred milliseconds), and replays carry it. |
 | `--max-matches N` | `32` | Matches running at once, at most. Past it, a player who'd need a new match is told the server is busy, and their client keeps asking. |
 | `--workers N` | one per core | Threads that step the matches. |
@@ -165,7 +212,7 @@ address. A player who leaves leaves their champion to a bot.
 ## The server key
 
 On first start the server creates its key (`--key`, default `server.key` in the working
-directory; `/data/server.key` in Docker, `/var/lib/mftr/server.key` on NixOS) and prints its
+directory; `/data/server.key` in Docker, `/var/lib/mftr/server/server.key` on NixOS) and prints its
 fingerprint:
 
 ```text

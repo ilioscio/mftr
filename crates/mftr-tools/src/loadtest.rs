@@ -67,7 +67,7 @@ struct Client {
 }
 
 pub fn run(cfg: &LoadConfig) -> LoadResult {
-    let queues = hub::hosted_queues(&[cfg.scenario], &[]);
+    let queues = hub::hosted_queues(&[hub::ModeOffer::both(cfg.scenario)], &[]);
     let queue = queues.iter().position(|q| !q.coop).expect("a Versus queue") as u8;
     let mut hub = Hub::new(HubConfig {
         queues,

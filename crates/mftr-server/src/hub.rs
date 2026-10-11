@@ -50,18 +50,66 @@ pub fn map_name(scenario: Scenario) -> &'static str {
     }
 }
 
-/// A hosted server's queues: each mode Versus and Co-op, Classic on Crossroads and on each
-/// of `maps` (name, text).
-pub fn hosted_queues(modes: &[Scenario], maps: &[(String, Arc<str>)]) -> Vec<QueueSpec> {
+/// A mode a hosted server offers, and on which sides (13 §1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ModeOffer {
+    pub scenario: Scenario,
+    pub versus: bool,
+    pub coop: bool,
+}
+
+impl ModeOffer {
+    /// Versus and Co-op.
+    pub fn both(scenario: Scenario) -> Self {
+        Self { scenario, versus: true, coop: true }
+    }
+
+    /// `aram` (both sides), `aram-versus` or `aram-coop`; full matches only.
+    pub fn parse(name: &str) -> Result<Self, String> {
+        let name = name.trim();
+        let (mode, versus, coop) = match (name.strip_suffix("-versus"), name.strip_suffix("-coop")) {
+            (Some(m), _) => (m, true, false),
+            (_, Some(m)) => (m, false, true),
+            _ => (name, true, true),
+        };
+        let scenario = Scenario::by_name(mode).ok_or(format!("unknown mode {name}"))?;
+        if !HOSTED_MODES.contains(&scenario) {
+            return Err(format!("{mode} isn't a full match: run it alone with --scenario {mode}"));
+        }
+        Ok(Self { scenario, versus, coop })
+    }
+
+    /// `offers`, a mode's sides merged into one entry, in order of first mention.
+    pub fn merge(offers: &[ModeOffer]) -> Vec<ModeOffer> {
+        let mut out: Vec<ModeOffer> = Vec::new();
+        for o in offers {
+            match out.iter_mut().find(|m| m.scenario == o.scenario) {
+                Some(m) => {
+                    m.versus |= o.versus;
+                    m.coop |= o.coop;
+                }
+                None => out.push(*o),
+            }
+        }
+        out
+    }
+}
+
+/// A hosted server's queues: each mode on its sides (Versus, Co-op), Classic on Crossroads and
+/// on each of `maps` (name, text).
+pub fn hosted_queues(modes: &[ModeOffer], maps: &[(String, Arc<str>)]) -> Vec<QueueSpec> {
     let mut queues = Vec::new();
-    for &scenario in modes {
+    for offer in ModeOffer::merge(modes) {
+        let scenario = offer.scenario;
         let mut boards = vec![(map_name(scenario).to_string(), None)];
         if scenario == Scenario::Classic {
             boards.extend(maps.iter().map(|(name, text)| (name.clone(), Some(text.clone()))));
         }
         for (map_name, map) in boards {
             for coop in [false, true] {
-                queues.push(QueueSpec { scenario, coop, map_name: map_name.clone(), map: map.clone() });
+                if (coop && offer.coop) || (!coop && offer.versus) {
+                    queues.push(QueueSpec { scenario, coop, map_name: map_name.clone(), map: map.clone() });
+                }
             }
         }
     }
@@ -417,7 +465,7 @@ mod tests {
 
     fn hub_with(max_matches: usize, workers: usize) -> Hub {
         Hub::new(HubConfig {
-            queues: hosted_queues(&HOSTED_MODES, &[]),
+            queues: hosted_queues(&HOSTED_MODES.map(ModeOffer::both), &[]),
             base: ServerConfig { max_players: 10, bots: 10, lobby: true, ..Default::default() },
             max_matches,
             workers,
@@ -530,6 +578,30 @@ mod tests {
         let one = run(1);
         assert!(one.iter().all(|(tick, _)| tick.0 > 60), "{one:?}");
         assert_eq!(one, run(4));
+    }
+
+    /// `--modes`: a mode alone offers both sides; `-versus` or `-coop` one of them.
+    #[test]
+    fn modes_choose_their_sides() {
+        let offers: Vec<ModeOffer> = ["aram-coop", "classic", "aram-versus", "mayhem-coop"]
+            .iter()
+            .map(|n| ModeOffer::parse(n).unwrap())
+            .collect();
+        let queues = hosted_queues(&offers, &[]);
+        let names: Vec<String> = queues.iter().map(|q| q.slug()).collect();
+        assert_eq!(
+            names,
+            [
+                "aram-versus-the-bridge",
+                "aram-coop-the-bridge",
+                "classic-versus-crossroads",
+                "classic-coop-crossroads",
+                "mayhem-coop-the-bridge"
+            ]
+        );
+        assert!(ModeOffer::parse("duel").is_err());
+        assert!(ModeOffer::parse("duel-coop").is_err());
+        assert!(ModeOffer::parse("nonsense").is_err());
     }
 
     /// 13 §2: in co-op, five humans fill blue and the sixth opens another instance; in
