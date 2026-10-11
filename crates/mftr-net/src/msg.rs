@@ -30,6 +30,10 @@ pub const MAX_EVENTS_PER_SNAPSHOT: usize = 32;
 pub const MAX_UNITS_PER_SNAPSHOT: usize = 1024;
 /// A custom map's text travels in pieces of at most this many bytes (12 §4).
 pub const MAP_CHUNK_BYTES: usize = 900;
+/// Bound on the queues a server offers (13 §1).
+pub const MAX_QUEUES: usize = 64;
+/// Bound on a queue's map name, in bytes.
+pub const MAX_QUEUE_NAME: usize = 48;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClientMessage {
@@ -43,6 +47,9 @@ pub enum ClientMessage {
         resume: u64,
         /// Watch instead of play: full vision, no unit.
         spectate: bool,
+        /// The queue to play (13 §2), an index into the server's `Queues`; `None` asks for
+        /// them (a server with a single queue places the player in it).
+        queue: Option<u8>,
     },
     /// The `player` field of each command is ignored by the server (taken from the connection).
     Input {
@@ -275,6 +282,21 @@ pub enum ServerMessage {
         offset: u32,
         bytes: Vec<u8>,
     },
+    /// What the server offers (13 §1), answering a Hello without a queue.
+    Queues(Vec<QueueInfo>),
+}
+
+/// One queue a server offers: a mode on a map, Versus or Co-op vs bots, and how busy it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueueInfo {
+    pub mode: GameMode,
+    /// Humans on blue against bots on red (else Versus: humans on both teams).
+    pub coop: bool,
+    /// The map's name (at most `MAX_QUEUE_NAME` bytes).
+    pub map: String,
+    /// Humans playing it, and the matches they're in.
+    pub humans: u16,
+    pub matches: u16,
 }
 
 /// The kind of game a server runs (its scenario).
@@ -326,6 +348,10 @@ impl GameMode {
 pub enum RejectReason {
     ProtocolMismatch = 0,
     ServerFull = 1,
+    /// Every match of the queue is full and the server runs as many as it may (13 §2).
+    ServerBusy = 2,
+    /// A spectator asked to watch a queue nobody is playing.
+    NothingToWatch = 3,
 }
 
 // ---- encoding helpers -------------------------------------------------------------------
@@ -1442,6 +1468,15 @@ fn read_echo(r: &mut BitReader) -> Result<TimeEcho, DecodeError> {
     Ok(TimeEcho { client_time_us: r.read_u32()?, hold_us: r.read_u32()? })
 }
 
+/// The longest prefix of `s` of at most `max` bytes that ends on a character boundary.
+fn truncate_utf8(s: &str, max: usize) -> &str {
+    let mut end = s.len().min(max);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 fn begin(header: &PacketHeader, kind: u64) -> BitWriter {
     let mut w = BitWriter::new();
     w.write_u8(MAGIC);
@@ -1464,13 +1499,17 @@ fn open(bytes: &[u8]) -> Result<(BitReader<'_>, PacketHeader, u64), DecodeError>
 
 pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
     match msg {
-        ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate } => {
+        ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate, queue } => {
             let mut w = begin(header, 0);
             w.write_u16(*protocol);
             w.write_u32(*client_time_us);
             write_champion(&mut w, *champion);
             w.write_u64(*resume);
             w.write_bool(*spectate);
+            w.write_bool(queue.is_some());
+            if let Some(q) = queue {
+                w.write_u8(*q);
+            }
             w.finish()
         }
         ClientMessage::Input { client_time_us, event_ack, snapshot_ack, commands } => {
@@ -1521,7 +1560,8 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
             let champion = if current { read_champion(&mut r)? } else { None };
             let resume = if current { r.read_u64()? } else { 0 };
             let spectate = current && r.read_bool()?;
-            ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate }
+            let queue = if current && r.read_bool()? { Some(r.read_u8()?) } else { None };
+            ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate, queue }
         }
         1 => {
             let client_time_us = r.read_u32()?;
@@ -1677,6 +1717,23 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             }
             w.finish()
         }
+        ServerMessage::Queues(queues) => {
+            let mut w = begin(header, 5);
+            let n = queues.len().min(MAX_QUEUES);
+            w.write_u8(n as u8);
+            for q in &queues[..n] {
+                w.write(q.mode as u64, 3);
+                w.write_bool(q.coop);
+                let name = truncate_utf8(&q.map, MAX_QUEUE_NAME);
+                w.write_u8(name.len() as u8);
+                for b in name.bytes() {
+                    w.write_u8(b);
+                }
+                w.write_u16(q.humans);
+                w.write_u16(q.matches);
+            }
+            w.finish()
+        }
         ServerMessage::Snapshot(s) => {
             let mut w = begin(header, 1);
             w.write_u32(s.tick.0);
@@ -1811,6 +1868,25 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             let bytes = (0..n).map(|_| r.read_u8()).collect::<Result<Vec<u8>, _>>()?;
             ServerMessage::MapChunk { hash, total, offset, bytes }
         }
+        5 => {
+            let n = r.read_u8()? as usize;
+            if n > MAX_QUEUES {
+                return Err(DecodeError::Invalid("queue count"));
+            }
+            let mut queues = Vec::with_capacity(n);
+            for _ in 0..n {
+                let mode = GameMode::from_u8(r.read(3)? as u8).ok_or(DecodeError::Invalid("game mode"))?;
+                let coop = r.read_bool()?;
+                let len = r.read_u8()? as usize;
+                if len > MAX_QUEUE_NAME {
+                    return Err(DecodeError::Invalid("queue name"));
+                }
+                let bytes = (0..len).map(|_| r.read_u8()).collect::<Result<Vec<u8>, _>>()?;
+                let map = String::from_utf8(bytes).map_err(|_| DecodeError::Invalid("queue name"))?;
+                queues.push(QueueInfo { mode, coop, map, humans: r.read_u16()?, matches: r.read_u16()? });
+            }
+            ServerMessage::Queues(queues)
+        }
         1 => {
             let tick = Tick(r.read_u32()?);
             let since_tick_us = r.read_u32()?;
@@ -1888,6 +1964,8 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             reason: match r.read_u8()? {
                 0 => RejectReason::ProtocolMismatch,
                 1 => RejectReason::ServerFull,
+                2 => RejectReason::ServerBusy,
+                3 => RejectReason::NothingToWatch,
                 _ => return Err(DecodeError::Invalid("reject reason")),
             },
         },
@@ -1953,6 +2031,16 @@ mod tests {
             champion: Some(ChampionId::Vesper),
             resume: 0xdead_beef_0123_4567,
             spectate: true,
+            queue: Some(7),
+        };
+        assert_eq!(decode_client(&encode_client(&hdr(), &hello)).unwrap().1, hello);
+        let hello = ClientMessage::Hello {
+            protocol: crate::PROTOCOL_VERSION,
+            client_time_us: 5,
+            champion: None,
+            resume: 0,
+            spectate: false,
+            queue: None,
         };
         assert_eq!(decode_client(&encode_client(&hdr(), &hello)).unwrap().1, hello);
         for a in [LobbyAction::Reroll, LobbyAction::Take(ChampionId::Shade), LobbyAction::Ready(true)] {
@@ -2399,6 +2487,26 @@ mod tests {
         assert_eq!(decode_server(&encode_server(&hdr(), &chunk)).unwrap().1, chunk);
         let req = ClientMessage::MapRequest { hash: 99, have: 1800 };
         assert_eq!(decode_client(&encode_client(&hdr(), &req)).unwrap().1, req);
+    }
+
+    /// 13 §1: the queues a server offers.
+    #[test]
+    fn queues_round_trip() {
+        let msg = ServerMessage::Queues(vec![
+            QueueInfo { mode: GameMode::Aram, coop: false, map: "The Bridge".into(), humans: 12, matches: 2 },
+            QueueInfo {
+                mode: GameMode::Classic,
+                coop: true,
+                map: "Twin Rivers \u{26f0}".into(),
+                humans: 0,
+                matches: 0,
+            },
+        ]);
+        assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
+        for reason in [RejectReason::ServerBusy, RejectReason::NothingToWatch] {
+            let msg = ServerMessage::Reject { reason };
+            assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
+        }
     }
 
     #[test]

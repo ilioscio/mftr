@@ -2,7 +2,7 @@
 //!
 //!   mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--warmup S] [--seed N] [--fps F]
 //!                     [--scenario empty|minions|dodge|duel] [--no-proxies] [--reaction S]
-//!   mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]
+//!   mftr-tools bot --server HOST:PORT [--queue MODE[-coop]] [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]
 //!
 //!   mftr-tools blind-report FILE.tsv...
 //!   mftr-tools pack validate FILE.glb|DIR...
@@ -173,6 +173,7 @@ fn main() {
                 duel: args.iter().any(|a| a == "--duel"),
                 champion: get("--champion")
                     .map(|c| mftr_sim::ChampionId::by_name(&c).unwrap_or_else(|| panic!("unknown champion {c}"))),
+                queue: get("--queue"),
             };
             match bot::run(&cfg) {
                 Ok(s) => {
@@ -271,7 +272,7 @@ fn main() {
         _ => {
             eprintln!("usage: mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--seed N]");
             eprintln!(
-                "       mftr-tools bot --server HOST:PORT [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]"
+                "       mftr-tools bot --server HOST:PORT [--queue MODE[-coop]] [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]"
             );
             eprintln!("       mftr-tools blind-report FILE.tsv...");
             eprintln!("       mftr-tools pack validate FILE.glb|DIR...");

@@ -1,10 +1,13 @@
 # Hosting an MFTR server
 
-An MFTR server is one small program (under 1 MB) that runs one game. It talks UDP, keeps the whole
-match authoritative, and needs no database, accounts or other services. This guide gets a match
-running on a fresh Linux machine (a VPS or a spare PC).
+An MFTR server is one small program (under 1 MB) on one UDP port. Players connect, pick what to
+play (ARAM, ARAM: Mayhem, ARAM: Hyper or Classic 5v5, each Versus or Co-op vs bots), and the
+server puts them in a match of it, starting a new match whenever the others are full and
+stopping one when its players leave ([13](design/13-server-instances.md)). It keeps every match
+authoritative and needs no database, accounts or other services. This guide gets it running on
+a fresh Linux machine (a VPS or a spare PC).
 
-> **Status:** M3 (ARAM and ARAM: Mayhem on The Bridge, ten champions, bots). Every packet is encrypted and
+> **Status:** M4 in progress (ARAM, ARAM: Mayhem and Hyper on The Bridge; Classic 5v5 on Crossroads; ten champions, bots). Every packet is encrypted and
 > authenticated (D40), and the server has a key that players' clients pin (see [The server key](#the-server-key)).
 
 ## Quick start with Docker
@@ -14,21 +17,15 @@ git clone https://github.com/ilioscio/mftr.git && cd mftr
 docker compose -f deploy/compose.yaml up -d
 ```
 
-This builds the server image and starts two games:
-
-| Service | Port | What it runs |
-|---|---|---|
-| `aram` | UDP 7777 | ARAM on The Bridge with champion select; bots fill empty slots, so you can start with friends or alone. Records a replay of the session. |
-| `duel` | UDP 7778 | The Duel Sandbox for up to 4 players: practice skillshots. |
-
-Players type `your.server.address:7777` into the client's start menu (it remembers the servers
-they joined), or start it with the address: `./mftr.x86_64 -- your.server.address:7777`
-(`mftr.exe` on Windows; `godot --path client -- your.server.address:7777` from the source). Open the ports in your firewall, e.g.
-`ufw allow 7777:7778/udp`.
+This builds the server image and starts it on UDP 7777, recording every match. Players type
+`your.server.address:7777` into the client's start menu (it remembers the servers they joined),
+or start it with the address: `./mftr.x86_64 -- your.server.address:7777` (`mftr.exe` on
+Windows; `godot --path client -- your.server.address:7777` from the source), then pick what to
+play. Open the port in your firewall, e.g. `ufw allow 7777/udp`.
 
 Without compose: `docker build -t mftr-server . && docker run -d -p 7777:7777/udp mftr-server`.
 Anything after the image name replaces the default options (see below), for example
-`docker run -d -p 7777:7777/udp mftr-server --scenario aram --bots 4`.
+`docker run -d -p 7777:7777/udp mftr-server --modes aram,classic --max-matches 8`.
 
 ## Without Docker
 
@@ -37,7 +34,7 @@ builds are there too), or build it yourself with Rust 1.88 or newer:
 
 ```sh
 cargo build --profile dist -p mftr-server -p mftr-tools   # → target/dist/
-./target/dist/mftr-server --scenario aram --bots 10 --lobby
+./target/dist/mftr-server
 ```
 
 To keep it running, a systemd unit (`/etc/systemd/system/mftr.service`):
@@ -48,7 +45,7 @@ Description=MFTR game server
 After=network-online.target
 
 [Service]
-ExecStart=/opt/mftr/mftr-server --bind 0.0.0.0:7777 --scenario aram --bots 10 --lobby --replay /var/lib/mftr/session.replay
+ExecStart=/opt/mftr/mftr-server --bind 0.0.0.0:7777 --replay /var/lib/mftr/replays
 DynamicUser=yes
 StateDirectory=mftr
 Restart=on-failure
@@ -81,7 +78,7 @@ configuration:
         ./configuration.nix
         mftr.nixosModules.default
         {
-          services.mftr.enable = true;        # an ARAM server on UDP 7777, as in Docker
+          services.mftr.enable = true;        # every mode on UDP 7777, as in Docker
           services.mftr.openFirewall = true;
         }
       ];
@@ -90,8 +87,8 @@ configuration:
 }
 ```
 
-`nixos-rebuild switch` builds the server from source and starts `mftr-aram.service`. To deploy
-the newest version, update the input and rebuild; the services restart on the new build:
+`nixos-rebuild switch` builds the server from source and starts `mftr.service`. To deploy
+the newest version, update the input and rebuild; the service restarts on the new build:
 
 ```sh
 nix flake update mftr && sudo nixos-rebuild switch --flake .#myserver
@@ -100,46 +97,44 @@ nix flake update mftr && sudo nixos-rebuild switch --flake .#myserver
 To test a branch, point the input at it (`url = "github:ilioscio/mftr/my-branch";`), or at a
 local checkout with `--override-input mftr path:/home/me/mftr`.
 
-Several servers, one service each (`mftr-<name>`). The name is only the service's name: every
-server is an ARAM unless its `scenario` says otherwise, so a server named `mayhem` still needs
-`scenario = "mayhem";`.
-
 ```nix
 services.mftr = {
   enable = true;
   openFirewall = true;
-  servers = {
-    aram = { port = 7777; replay = true; };
-    mayhem = { port = 7778; scenario = "mayhem"; replay = true; };   # ARAM with augment drafts
-    duel = { port = 7779; scenario = "duel"; maxPlayers = 4; };
-    dodge = { port = 7780; scenario = "dodge"; };   # the blind playtest's dodge rig
-  };
+  maps = [ ./maps/twin-rivers.mftrmap ];   # Classic on a map from the map editor, too
+  replay = true;
 };
 ```
 
-| Option (per server) | Default | Meaning |
+| Option | Default | Meaning |
 |---|---|---|
-| `enable` | `true` | Run this server. |
 | `address`, `port` | `0.0.0.0`, `7777` | Where to listen (`::` for IPv6 as well). |
-| `scenario` | `aram` | As `--scenario` (`aram`, `mayhem`, `hyper`, `classic`, `duel`, …). Not taken from the server's name. |
-| `bots`, `lobby` | `10` and `true` for `aram`, `mayhem`, `hyper` and `classic`, else `0` and `false` | As the options below. |
-| `maxPlayers`, `seed` | `10`, `1` | As the options below. |
-| `map` | `null` | A map file from the map editor (`*.mftrmap`), played instead of the scenario's map; use with `scenario = "classic"`. |
-| `replay` | `false` | Record to `/var/lib/mftr/<name>/session.replay`. |
-| `openFirewall` | `services.mftr.openFirewall` | Open this server's UDP port. |
+| `openFirewall` | `false` | Open the UDP port. |
+| `modes` | `[ "aram" "mayhem" "hyper" "classic" ]` | As `--modes`. |
+| `maps` | `[ ]` | Map files from the map editor (`*.mftrmap`): each adds Classic on that map. |
+| `maxMatches` | `32` | As `--max-matches`. |
+| `seed` | `1` | As `--seed`. |
+| `keyFile` | `/var/lib/mftr/server.key` | The server's key (see [The server key](#the-server-key)). |
+| `replay` | `false` | Record every match into `/var/lib/mftr/replays`. |
 | `extraArgs` | `[ ]` | More `mftr-server` options. |
 
-Each server runs as its own unprivileged, sandboxed user and keeps its key (and replay) in
-`/var/lib/mftr/<name>`, which survives rebuilds and upgrades. The fingerprint to give players:
+The server runs as an unprivileged, sandboxed user and keeps its key (and replays) in
+`/var/lib/mftr`, which survives rebuilds and upgrades. The fingerprint to give players:
 
 ```sh
-journalctl -u mftr-aram | grep fingerprint
-# or: sudo mftr-server --key /var/lib/mftr/aram/server.key --fingerprint
+journalctl -u mftr | grep fingerprint
+# or: sudo mftr-server --key /var/lib/mftr/server.key --fingerprint
 ```
 
-`mftr-tools` is installed too, e.g. `sudo mftr-tools replay /var/lib/mftr/aram/session.replay`, or
-a bot to check a server from the machine: `mftr-tools bot --server '127.0.0.1:7777#<fingerprint>'`.
+`mftr-tools` is installed too, e.g. `sudo mftr-tools replay /var/lib/mftr/replays/<file>`, or a
+bot to check the server from the machine:
+`mftr-tools bot --server '127.0.0.1:7777#<fingerprint>' --queue classic-coop`.
 Without NixOS, `nix build github:ilioscio/mftr` gives `result/bin/mftr-server`.
+
+**From `services.mftr.servers` (one service per mode, before 0.11):** that option is gone, and
+evaluating a configuration that sets it says so. Remove it; one server now offers every mode.
+Players pinned the old servers' keys, so keep the one on the port they know with
+`keyFile = "/var/lib/mftr/aram/server.key";` (if that server was named `aram`).
 
 ## Options
 
@@ -148,23 +143,25 @@ Without NixOS, `nix build github:ilioscio/mftr` gives `result/bin/mftr-server`.
 | `--bind ADDR` | `0.0.0.0:7777` | Address and UDP port to listen on. |
 | `--key FILE` | `server.key` | The server's key, created on first start (see below). |
 | `--fingerprint` | | Print the key's fingerprint and exit. |
-| `--scenario NAME` | `duel` (`aram` in Docker) | `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM: Mayhem, ARAM with augment drafts. `hyper`: Mayhem under Hyper rules (+300 ability haste on Q, W and E, +50% attack speed). `classic`: Classic 5v5 on Crossroads, three lanes and a jungle (M4, in progress). `duel`: the Duel Sandbox. `minions`, `dodge`, `empty`: test grounds. |
-| `--map FILE` | none | Play a map from the map editor (`*.mftrmap`) instead of the scenario's map, usually with `--scenario classic`. The server checks it at start (and refuses a map that breaks a rule, listing what's wrong); players download it as they join (a few hundred milliseconds), and replays carry it. |
-| `--bots N` | `0` (`10` in Docker) | Server bots. They count toward the player limit, and with `--lobby` a joining human takes a bot's place. |
-| `--lobby` | off (on in Docker) | Champion select before each match: ARAM all-random, 2 rerolls each, a team bench. Starts 3 s after everyone is ready, or after 60 s. |
-| `--max-players N` | `10` | Players (humans and bots) per game. Up to 8 spectators come on top. |
-| `--seed N` | `1` | Seeds everything random in the match (bots, champion select, spawns). |
-| `--replay FILE` | off | Record the session. The file is rewritten every minute and at each match end. |
+| `--modes LIST` | `aram,mayhem,hyper,classic` | What players can pick, each Versus or Co-op vs bots. `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM: Mayhem, ARAM with augment drafts. `hyper`: Mayhem under Hyper rules (+300 ability haste on Q, W and E, +50% attack speed). `classic`: Classic 5v5 on Crossroads, three lanes and a jungle (M4, in progress). |
+| `--map FILE` | none | Add Classic on a map from the map editor (`*.mftrmap`); repeat for more maps. The server checks each at start (and refuses a map that breaks a rule, listing what's wrong); players download it as they join (a few hundred milliseconds), and replays carry it. |
+| `--max-matches N` | `32` | Matches running at once, at most. Past it, a player who'd need a new match is told the server is busy, and their client keeps asking. |
+| `--seed N` | `1` | Seeds everything random (each match draws its own seed from it). |
+| `--replay DIR` | off | Record every match into DIR, as `<started>-<queue>-<match>.replay`. A file is rewritten every minute, when its match ends and when it stops. |
+| `--scenario NAME` | | For development: offer this one scenario instead, any of the above or `duel` (the Duel Sandbox), `minions`, `dodge`, `empty` (test grounds). With it, `--bots N` adds server bots (they count toward `--max-players N`, default 10) and `--lobby` holds champion select first. |
 
-10 s after a Base falls, a server with `--lobby` holds champion select again for everyone still
-connected (new random champions, fresh rerolls); without it, the next match starts with the same
-champions. Players who lose their connection keep their champion
-for 60 s and get it back when their client reconnects, even from a new address.
+**How matches fill.** A player who picks a queue joins the match of it with the most players
+that still has a seat in champion select, or starts a new match. Versus puts them on the team
+with fewer humans; Co-op puts every human on blue, against bots. Bots take every seat no human
+has. When a match ends, its players go to champion select together for the next one. A match
+with no players left stops. Players who lose their connection keep their champion for 60 s and
+get it back when their client reconnects, even from a new address.
 
 ## The server key
 
 On first start the server creates its key (`--key`, default `server.key` in the working
-directory; `/data/server.key` in Docker) and prints its fingerprint:
+directory; `/data/server.key` in Docker, `/var/lib/mftr/server.key` on NixOS) and prints its
+fingerprint:
 
 ```text
 key fingerprint 8a0bb4a2aa55a37cf673e459749c6705: players can pin it with HOST:7777#8a0bb4a2aa55a37cf673e459749c6705
@@ -179,11 +176,11 @@ delete the server's line in `known_servers.txt` in the client's user folder).
 
 ## Replays
 
-A replay holds every command of the session plus a state hash every 10 seconds, about 5 MB
-per hour for a busy 5v5. `mftr-tools replay FILE` re-simulates it and checks every hash.
-Re-simulating is deterministic and exact across Linux, Windows and macOS, so a replay is also a
-good bug report. In Docker, copy it out with
-`docker compose -f deploy/compose.yaml cp aram:/data/session.replay .`.
+With `--replay DIR`, every match is recorded in its own file. A replay holds every command of
+the match plus a state hash every 10 seconds, about 5 MB per hour for a busy 5v5.
+`mftr-tools replay FILE` re-simulates it and checks every hash. Re-simulating is deterministic
+and exact across Linux, Windows and macOS, so a replay is also a good bug report. In Docker,
+copy them out with `docker compose -f deploy/compose.yaml cp mftr:/data/replays .`.
 
 ## What it costs
 
@@ -195,8 +192,8 @@ Measured in the Netcode Lab (one ARAM match, 10 players at 80 ms):
 | Upload | about 105 KB/s (10.5 KB/s per player) | about 8.5 Mbit/s |
 | Memory | a few MB (more with `--replay`, about 5 MB per hour) | |
 
-A 1-vCPU VPS holds several matches; a 4-core one holds ten with plenty of room. Each match is
-its own process and port, so run more with more ports (`--bind 0.0.0.0:7779` and so on).
+A 1-vCPU VPS holds several matches; a 4-core one holds ten with plenty of room. They all share
+the one process and port; `--max-matches` caps them.
 
 ## Troubleshooting
 
@@ -204,7 +201,10 @@ its own process and port, so run more with more ports (`--bind 0.0.0.0:7779` and
   your provider's security group. A client that reaches the server but can't connect says why on
   its connection line: another protocol version (the server log prints its protocol number), or a
   server key that differs from the pinned one.
+- **"Every match of this kind is full":** the server runs `--max-matches` matches already. The
+  client keeps asking and joins once a match stops; raise the limit if the machine has room
+  (the log's `busy` figure is the share of one core the matches use).
 - **Bots don't move in champion select:** they wait for the match to start. Someone has to join
   and ready up, or wait out the 60 s countdown once a human has joined.
-- **The replay file is empty or missing:** the server writes it once a minute; in Docker, the
-  path must be inside the `/data` volume.
+- **No replay files:** a match's file is written once a minute; in Docker, the directory must
+  be inside the `/data` volume.

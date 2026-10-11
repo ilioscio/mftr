@@ -1,144 +1,148 @@
-# NixOS module: MFTR game servers as systemd services (docs/hosting.md, "NixOS").
+# NixOS module: the MFTR game server as a systemd service (docs/hosting.md, "NixOS").
 #
-#   services.mftr.enable = true;          # one ARAM server on UDP 7777, like the Docker image
+#   services.mftr.enable = true;          # every mode on UDP 7777, like the Docker image
 #   services.mftr.openFirewall = true;
 #
-# or several, one service each (`mftr-<name>.service`). The name is only the service's name;
-# the game is `scenario` (default "aram"), so a `mayhem` server needs `scenario = "mayhem"`:
+# One server plays whatever its players pick (docs/design/13-server-instances.md): ARAM,
+# ARAM: Mayhem, ARAM: Hyper and Classic, each Versus or Co-op vs bots, as many matches at once
+# as players fill (up to `maxMatches`). Each map file in `maps` adds Classic on that map:
 #
-#   services.mftr.servers = {
-#     aram = { port = 7777; replay = true; };
-#     mayhem = { port = 7778; scenario = "mayhem"; };
-#     duel = { port = 7779; scenario = "duel"; maxPlayers = 4; };
+#   services.mftr = {
+#     enable = true;
+#     openFirewall = true;
+#     maps = [ ./maps/twin-rivers.mftrmap ];
+#     replay = true;
 #   };
 #
-# Each server keeps its key and replay in /var/lib/mftr/<name>. Clients pin the key, so it
-# survives upgrades and rebuilds; back that directory up with the machine.
+# The server keeps its key and replays in /var/lib/mftr. Clients pin the key, so it survives
+# upgrades and rebuilds; back that directory up with the machine.
 { config, lib, pkgs, ... }:
 
 let
   inherit (lib) mkOption mkEnableOption types;
   cfg = config.services.mftr;
-  # Full matches (ARAM, its variants, Classic): champion select and bots by default.
-  aram = s: lib.elem s.scenario [ "aram" "mayhem" "hyper" "classic" ];
-  enabled = lib.filterAttrs (_: s: s.enable) cfg.servers;
+  dir = "/var/lib/mftr";
+  bind = if lib.hasInfix ":" cfg.address then "[${cfg.address}]:${toString cfg.port}" else "${cfg.address}:${toString cfg.port}";
+  args = [
+    (lib.getExe' cfg.package "mftr-server")
+    "--bind" bind
+    "--key" cfg.keyFile
+    "--seed" (toString cfg.seed)
+    "--modes" (lib.concatStringsSep "," cfg.modes)
+    "--max-matches" (toString cfg.maxMatches)
+  ]
+  ++ lib.concatMap (m: [ "--map" "${m}" ]) cfg.maps
+  ++ lib.optionals cfg.replay [ "--replay" "${dir}/replays" ]
+  ++ cfg.extraArgs;
+in
+{
+  imports = [
+    (lib.mkRemovedOptionModule [ "services" "mftr" "servers" ] ''
+      One MFTR server now plays every mode on one port (players pick what to play; see
+      docs/hosting.md). Use services.mftr.{port,modes,maps,replay}. To keep the key players
+      pinned, point services.mftr.keyFile at the old server's key, for example
+      "/var/lib/mftr/aram/server.key".
+    '')
+  ];
 
-  server = { name, config, ... }: {
-    options = {
-      enable = mkEnableOption "this MFTR server" // { default = true; };
+  options.services.mftr = {
+    enable = mkEnableOption "the MFTR game server";
 
-      address = mkOption {
-        type = types.str;
-        default = "0.0.0.0";
-        example = "::";
-        description = ''
-          Address to listen on. `::` listens on IPv6 and, on Linux's default settings, IPv4 too.
-        '';
-      };
+    package = mkOption {
+      type = types.package;
+      default = pkgs.callPackage ./package.nix { };
+      defaultText = lib.literalExpression "the mftr flake's mftr-server package";
+      description = "The package with `mftr-server` and `mftr-tools`.";
+    };
 
-      port = mkOption {
-        type = types.port;
-        default = 7777;
-        description = "UDP port.";
-      };
+    address = mkOption {
+      type = types.str;
+      default = "0.0.0.0";
+      example = "::";
+      description = ''
+        Address to listen on. `::` listens on IPv6 and, on Linux's default settings, IPv4 too.
+      '';
+    };
 
-      scenario = mkOption {
-        type = types.enum [ "aram" "mayhem" "hyper" "classic" "duel" "minions" "dodge" "empty" ];
-        default = "aram";
-        description = ''
-          The game this server runs (not taken from the server's name).
-          `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM with augment drafts. `hyper`: Mayhem under Hyper rules.
-          `classic`: Classic 5v5 on Crossroads (M4, in progress).
-          `duel`: the Duel Sandbox. `minions`,
-          `dodge`, `empty`: test grounds (`dodge` is the blind playtest's dodge rig).
-        '';
-      };
+    port = mkOption {
+      type = types.port;
+      default = 7777;
+      description = "UDP port.";
+    };
 
-      bots = mkOption {
-        type = types.ints.u8;
-        default = if aram config then 10 else 0;
-        defaultText = lib.literalExpression ''if scenario is "aram", "mayhem", "hyper" or "classic" then 10 else 0'';
-        description = ''
-          Server bots. They count toward `maxPlayers`, and with `lobby` a joining human takes a
-          bot's place.
-        '';
-      };
+    openFirewall = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Open the UDP port in the firewall.";
+    };
 
-      lobby = mkOption {
-        type = types.bool;
-        default = aram config;
-        defaultText = lib.literalExpression ''scenario is "aram", "mayhem", "hyper" or "classic"'';
-        description = "Champion select before each match (ARAM all-random with rerolls).";
-      };
+    modes = mkOption {
+      type = types.nonEmptyListOf (types.enum [ "aram" "mayhem" "hyper" "classic" ]);
+      default = [ "aram" "mayhem" "hyper" "classic" ];
+      description = ''
+        What players can pick, each Versus or Co-op vs bots. `aram`: The Bridge, a full match
+        with a winner. `mayhem`: ARAM with augment drafts. `hyper`: Mayhem under Hyper rules.
+        `classic`: Classic 5v5 on Crossroads (and on each of `maps`).
+      '';
+    };
 
-      maxPlayers = mkOption {
-        type = types.ints.between 1 255;
-        default = 10;
-        description = "Players (humans and bots) per game. Up to 8 spectators come on top.";
-      };
+    maps = mkOption {
+      type = types.listOf types.path;
+      default = [ ];
+      example = lib.literalExpression "[ ./maps/twin-rivers.mftrmap ]";
+      description = ''
+        Map files exported from the map editor: each adds Classic on that map. Players download
+        a map as they join. The server refuses to start if a map breaks a rule.
+      '';
+    };
 
-      seed = mkOption {
-        type = types.ints.unsigned;
-        default = 1;
-        description = "Seeds everything random in the match.";
-      };
+    maxMatches = mkOption {
+      type = types.ints.positive;
+      default = 32;
+      description = ''
+        Matches running at once, at most. Past it, players who'd need a new match are told the
+        server is busy (their client keeps asking).
+      '';
+    };
 
-      map = mkOption {
-        type = types.nullOr types.path;
-        default = null;
-        example = lib.literalExpression "./maps/my-map.mftrmap";
-        description = ''
-          A map file exported from the map editor, played instead of the scenario's map (with
-          `scenario = "classic"`). Players download it as they join. The server refuses to start
-          if the map breaks a rule.
-        '';
-      };
+    seed = mkOption {
+      type = types.ints.unsigned;
+      default = 1;
+      description = "Seeds everything random in the matches (each match draws its own from it).";
+    };
 
-      replay = mkOption {
-        type = types.bool;
-        default = false;
-        description = ''
-          Record the session to /var/lib/mftr/${name}/session.replay (rewritten every minute and
-          at each match end; check it with `mftr-tools replay`).
-        '';
-      };
+    keyFile = mkOption {
+      type = types.str;
+      default = "${dir}/server.key";
+      example = "/var/lib/mftr/aram/server.key";
+      description = ''
+        The server's key, created on first start. Clients pin it: to keep an older server's key,
+        point this at it.
+      '';
+    };
 
-      openFirewall = mkOption {
-        type = types.bool;
-        default = cfg.openFirewall;
-        defaultText = lib.literalExpression "config.services.mftr.openFirewall";
-        description = "Open this server's UDP port in the firewall.";
-      };
+    replay = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Record every match into ${dir}/replays (rewritten every minute and when a match ends;
+        check one with `mftr-tools replay`).
+      '';
+    };
 
-      extraArgs = mkOption {
-        type = types.listOf types.str;
-        default = [ ];
-        description = "More `mftr-server` options.";
-      };
+    extraArgs = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      description = "More `mftr-server` options.";
     };
   };
 
-  bind = s: if lib.hasInfix ":" s.address then "[${s.address}]:${toString s.port}" else "${s.address}:${toString s.port}";
+  config = lib.mkIf cfg.enable {
+    # `mftr-tools replay`, `mftr-server --fingerprint` and the bot client on the command line.
+    environment.systemPackages = [ cfg.package ];
 
-  service = name: s:
-    let
-      dir = "/var/lib/mftr/${name}";
-      args = [
-        (lib.getExe' cfg.package "mftr-server")
-        "--bind" (bind s)
-        "--key" "${dir}/server.key"
-        "--scenario" s.scenario
-        "--bots" (toString s.bots)
-        "--max-players" (toString s.maxPlayers)
-        "--seed" (toString s.seed)
-      ]
-      ++ lib.optional s.lobby "--lobby"
-      ++ lib.optionals (s.map != null) [ "--map" "${s.map}" ]
-      ++ lib.optionals s.replay [ "--replay" "${dir}/session.replay" ]
-      ++ s.extraArgs;
-    in
-    lib.nameValuePair "mftr-${name}" {
-      description = "MFTR game server (${name})";
+    systemd.services.mftr = {
+      description = "MFTR game server";
       wantedBy = [ "multi-user.target" ];
       wants = [ "network-online.target" ];
       after = [ "network-online.target" ];
@@ -150,7 +154,7 @@ let
         RestartSec = 2;
 
         DynamicUser = true;
-        StateDirectory = "mftr/${name}";
+        StateDirectory = "mftr";
         WorkingDirectory = dir;
         UMask = "0077";
 
@@ -178,58 +182,7 @@ let
         SystemCallFilter = [ "@system-service" "~@privileged" "~@resources" ];
       };
     };
-in
-{
-  options.services.mftr = {
-    enable = mkEnableOption "MFTR game servers";
 
-    package = mkOption {
-      type = types.package;
-      default = pkgs.callPackage ./package.nix { };
-      defaultText = lib.literalExpression "the mftr flake's mftr-server package";
-      description = "The package with `mftr-server` and `mftr-tools`.";
-    };
-
-    openFirewall = mkOption {
-      type = types.bool;
-      default = false;
-      description = "Open every server's UDP port in the firewall (each server can override it).";
-    };
-
-    servers = mkOption {
-      type = types.attrsOf (types.submodule server);
-      default = { aram = { }; };
-      defaultText = lib.literalExpression "{ aram = { }; }";
-      example = lib.literalExpression ''
-        {
-          aram = { port = 7777; replay = true; };
-          duel = { port = 7778; scenario = "duel"; maxPlayers = 4; };
-        }
-      '';
-      description = ''
-        The servers to run, one systemd service `mftr-<name>` each. The default is one ARAM
-        server with champion select and 10 bots on UDP 7777.
-      '';
-    };
-  };
-
-  config = lib.mkIf cfg.enable {
-    assertions =
-      let
-        ports = lib.mapAttrsToList (_: s: s.port) enabled;
-      in
-      [
-        {
-          assertion = lib.length ports == lib.length (lib.unique ports);
-          message = "services.mftr.servers: every enabled server needs its own port.";
-        }
-      ];
-
-    # `mftr-tools replay`, `mftr-server --fingerprint` and the bot client on the command line.
-    environment.systemPackages = [ cfg.package ];
-
-    systemd.services = lib.mapAttrs' service enabled;
-
-    networking.firewall.allowedUDPPorts = lib.mapAttrsToList (_: s: s.port) (lib.filterAttrs (_: s: s.openFirewall) enabled);
+    networking.firewall.allowedUDPPorts = lib.optional cfg.openFirewall cfg.port;
   };
 }

@@ -1,8 +1,9 @@
 //! `mftr-server`: the authoritative match server core.
 //!
 //! Transport- and clock-agnostic: feed it packets with timestamps, call [`ServerCore::step`]
-//! when [`ServerCore::next_tick_due`] has passed, and send the packets it returns. The UDP
-//! binary (`main.rs`) and the virtual-time Netcode Lab both drive this same core.
+//! when [`ServerCore::next_tick_due`] has passed, and send the packets it returns. The
+//! virtual-time Netcode Lab drives one core; the UDP binary (`main.rs`) drives a [`Hub`] of
+//! them, one per match instance (13).
 
 use mftr_net::PROTOCOL_VERSION;
 use mftr_net::delta::{self, UnitUpdate};
@@ -19,9 +20,11 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub mod bots;
 pub mod game;
+pub mod hub;
 pub mod lobby;
 pub use bots::Bot;
 pub use game::{Fog, Match, Replay, ReplayCheck, ReplayEntry};
+pub use hub::{Hub, HubConfig, QueueSpec};
 use lobby::Lobby;
 
 /// Opaque per-connection address key, assigned by the transport.
@@ -143,6 +146,9 @@ pub struct ServerConfig {
     /// A custom map's text (`*.mftrmap`, 12 §4) to play instead of the scenario's map; sent to
     /// each player as they join.
     pub map: Option<std::sync::Arc<str>>,
+    /// Co-op vs bots (13 §1): humans play blue only. Teams follow player ids, so replays
+    /// don't need it.
+    pub coop: bool,
 }
 
 impl Default for ServerConfig {
@@ -157,6 +163,7 @@ impl Default for ServerConfig {
             arena_max: 3500.0,
             scenario: Scenario::Empty,
             map: None,
+            coop: false,
         }
     }
 }
@@ -170,6 +177,18 @@ pub struct ServerStats {
     pub bytes_in: u64,
     pub bytes_out: u64,
     pub decode_errors: u64,
+}
+
+impl ServerStats {
+    pub fn add(&mut self, o: &ServerStats) {
+        self.ticks += o.ticks;
+        self.commands += o.commands;
+        self.commands_late += o.commands_late;
+        self.commands_dropped += o.commands_dropped;
+        self.bytes_in += o.bytes_in;
+        self.bytes_out += o.bytes_out;
+        self.decode_errors += o.decode_errors;
+    }
 }
 
 struct Conn {
@@ -307,6 +326,50 @@ impl ServerCore {
         self.bots.len()
     }
 
+    /// Humans with a stake in this match (13 §5): playing, in champion select, or holding a
+    /// dropped seat. Spectators don't count.
+    pub fn humans(&self) -> usize {
+        self.conns.values().filter(|c| !c.spectator).count() + self.pending.len() + self.dropped.len()
+    }
+
+    /// Humans connected and playing or in champion select.
+    pub fn connected_humans(&self) -> usize {
+        self.conns.values().filter(|c| !c.spectator).count() + self.pending.len()
+    }
+
+    pub fn spectators(&self) -> usize {
+        self.conns.values().filter(|c| c.spectator).count()
+    }
+
+    /// Whether connection `key` is here (playing, watching or in champion select).
+    pub fn knows(&self, key: ClientKey) -> bool {
+        self.conns.contains_key(&key) || self.pending.contains_key(&key)
+    }
+
+    /// Whether a player with session token `token` is here or holds a dropped seat.
+    pub fn holds_token(&self, token: u64) -> bool {
+        token != 0 && (self.conns.values().any(|c| c.token == token) || self.dropped.iter().any(|d| d.token == token))
+    }
+
+    /// Still in champion select (no match playing yet).
+    pub fn in_champion_select(&self) -> bool {
+        self.lobby.is_some()
+    }
+
+    /// Whether a new human can join now (13 §2): a seat in champion select, or a free slot
+    /// on a server without one.
+    pub fn has_room(&self) -> bool {
+        match &self.lobby {
+            Some(lobby) => lobby.team_for_human(self.cfg.coop).is_some(),
+            None if self.cfg.lobby => false,
+            None => self.game.player_count() < self.cfg.max_players as usize,
+        }
+    }
+
+    pub fn cfg(&self) -> &ServerConfig {
+        &self.cfg
+    }
+
     /// The match driver (replay recording, joins).
     pub fn game(&self) -> &Match {
         &self.game
@@ -377,7 +440,7 @@ impl ServerCore {
         };
         let mut out = Vec::new();
         match message {
-            ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate } => {
+            ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate, .. } => {
                 if protocol != PROTOCOL_VERSION {
                     out.push((from, self.reject(RejectReason::ProtocolMismatch)));
                     return out;
@@ -407,7 +470,7 @@ impl ServerCore {
                         let c = self.conns.remove(&old).unwrap();
                         self.conns.insert(from, Conn::new(c.player, c.unit, c.team, c.token, false, now));
                     } else if let Some(lobby) = &mut self.lobby {
-                        let Some(player) = lobby.add_human(now) else {
+                        let Some(player) = lobby.add_human(now, self.cfg.coop) else {
                             out.push((from, self.reject(RejectReason::ServerFull)));
                             return out;
                         };
@@ -624,7 +687,7 @@ impl ServerCore {
         let players: Vec<ClientKey> = self.conns.iter().filter(|(_, c)| !c.spectator).map(|(k, _)| *k).collect();
         for key in players {
             let c = self.conns.remove(&key).expect("listed");
-            if let Some(player) = lobby.add_human(now) {
+            if let Some(player) = lobby.add_human(now, self.cfg.coop) {
                 // The packet sequence carries over, so the client accepts what follows.
                 self.pending.insert(key, Pending { player, last_heard: c.last_heard, send: c.send });
             }
@@ -1107,6 +1170,7 @@ mod tests {
                 champion: None,
                 resume: 0,
                 spectate: false,
+                queue: None,
             },
         );
         core.handle_packet(key, &bytes, 0.0);
@@ -1134,7 +1198,14 @@ mod tests {
     }
 
     fn hello_msg(resume: u64, spectate: bool) -> ClientMessage {
-        ClientMessage::Hello { protocol: PROTOCOL_VERSION, client_time_us: 0, champion: None, resume, spectate }
+        ClientMessage::Hello {
+            protocol: PROTOCOL_VERSION,
+            client_time_us: 0,
+            champion: None,
+            resume,
+            spectate,
+            queue: None,
+        }
     }
 
     fn welcome_of(msgs: &[ServerMessage]) -> Option<(UnitId, u64, bool)> {
@@ -1306,6 +1377,7 @@ mod tests {
                 champion: Some(champion),
                 resume: 0,
                 spectate: false,
+                queue: None,
             },
         );
         core.handle_packet(key, &bytes, 0.0);

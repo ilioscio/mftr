@@ -225,6 +225,8 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-menu":
 			_shot_menu = true
+		elif args[i] == "--shot-queues":
+			_shot_queues = true
 		elif args[i] == "--keep-points":
 			_shot_keep_points = true
 		elif args[i] == "--hover-slot" and i + 1 < args.size():
@@ -236,6 +238,9 @@ func _ready() -> void:
 			_shot_loading = true
 		elif args[i] == "--menu-join":
 			_menu_auto_join = true
+		elif args[i] == "--queue" and i + 1 < args.size():
+			_auto_queue = int(args[i + 1])
+			i += 1
 		elif args[i] == "--spectate":
 			_menu_mode = 1
 			client.set_spectate(true)
@@ -356,12 +361,21 @@ var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's re
 var _shot_ward := false                  # `--shot-ward`: place a stealth ward ahead at 2.5 s
 var _shot_goto = null                     # `--shot-goto X,Y`: walk there (game units) from 2 s on
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
+var _shot_queues := false                 # `--shot-queues`: capture the server's queue list
 var _shot_keep_points := false            # `--keep-points`: don't spend the starting points
 
 
 func _update_shot(delta: float) -> void:
 	if _shot_path != "" and _shot_menu:
 		_shot_timer += delta
+		if _shot_timer > 1.2:
+			get_viewport().get_texture().get_image().save_png(_shot_path)
+			print("MFTR: saved screenshot to ", _shot_path)
+			get_tree().quit()
+		return
+	if _shot_path != "" and _shot_queues:
+		if client.phase() == "queues":
+			_shot_timer += delta
 		if _shot_timer > 1.2:
 			get_viewport().get_texture().get_image().save_png(_shot_path)
 			print("MFTR: saved screenshot to ", _shot_path)
@@ -1237,6 +1251,7 @@ func _process(delta: float) -> void:
 	if phase in ["lobby", "joining", "playing"]:
 		_remember_server()
 	_update_connecting(phase)
+	_update_queues(phase)
 	_update_backdrop(phase)
 	if playing and not _map_built:
 		_build_map()
@@ -4343,7 +4358,7 @@ func _remember_server() -> void:
 		return
 	_remembered = true
 	var list := _load_servers().filter(func(e): return e.get("address", "") != _server_address)
-	list.push_front({"address": _server_address, "game": game, "at": Time.get_unix_time_from_system()})
+	list.push_front({"address": _server_address, "game": game, "queue": _picked_queue, "at": Time.get_unix_time_from_system()})
 	_save_servers(list)
 
 
@@ -4491,6 +4506,7 @@ func _show_menu(error: String) -> void:
 		menu_address.grab_focus()
 		if _menu_auto_join and servers.size() > 0:
 			_menu_auto_join = false
+			_auto_queue_key = servers[0].get("queue", "")
 			await get_tree().create_timer(1.0).timeout
 			_menu_join(servers[0].get("address", ""))
 
@@ -4544,6 +4560,120 @@ func _update_connecting(phase: String) -> void:
 	var err: String = client.last_error()
 	connecting_label.text = "Connecting to %s…%s" % [_server_address, ("\n\n" + err) if err != "" else ""]
 	_center(connecting_panel)
+
+
+## ---- Queues (13 §1): what to play on this server ---------------------------------------------
+## A server offers modes on maps, each Versus (humans on both teams, bots in the empty seats) or
+## Co-op vs bots (humans on blue). Picking one puts the player in a match of it (champion select,
+## or a new match). The list refreshes every few seconds with how many play each.
+
+var queues_panel: PanelContainer
+var _queues_sig := ""
+var _auto_queue := -1                    # `--queue N`: pick queue N as soon as the list arrives
+var _auto_queue_key := ""                # `--menu-join`: the queue picked last time on that server
+var _picked_queue := ""                  # "mode|map|side" of the queue picked, remembered with the server
+
+
+func _queue_key(q: Dictionary) -> String:
+	return "%s|%s|%s" % [q.get("mode", ""), q.get("map", ""), "coop" if q.get("coop", false) else "versus"]
+
+
+func _choose_queue(i: int, q: Dictionary) -> void:
+	_picked_queue = _queue_key(q)
+	print("MFTR: queue %s" % _picked_queue)
+	client.choose_queue(i)
+
+
+## The server's last pick on this address (from the remembered servers).
+func _last_queue_here() -> String:
+	for e in _load_servers():
+		if e.get("address", "") == _server_address:
+			return e.get("queue", "")
+	return ""
+
+
+func _update_queues(phase: String) -> void:
+	if phase != "queues":
+		if queues_panel != null:
+			queues_panel.queue_free()
+			queues_panel = null
+			_queues_sig = ""
+		return
+	var queues: Array = client.queues()
+	if _auto_queue >= 0 and _auto_queue < queues.size():
+		var i := _auto_queue
+		_auto_queue = -1
+		_choose_queue(i, queues[i])
+		return
+	if _auto_queue_key != "":
+		var key := _auto_queue_key
+		_auto_queue_key = ""
+		for i in queues.size():
+			if _queue_key(queues[i]) == key:
+				_choose_queue(i, queues[i])
+				return
+	var sig := JSON.stringify(queues)
+	if sig == _queues_sig and queues_panel != null:
+		return
+	_queues_sig = sig
+	if queues_panel != null:
+		queues_panel.queue_free()
+	var made := _panel(640)
+	queues_panel = made[0]
+	var v: VBoxContainer = made[1]
+	var title := Label.new()
+	title.text = ("Watch on %s" if _menu_mode == 1 else "Play on %s") % _server_address.get_slice("#", 0)
+	title.theme_type_variation = "TitleLabel"
+	v.add_child(title)
+	# One row per mode and map: Versus and Co-op side by side.
+	var rows := {}
+	var order: Array = []
+	for i in queues.size():
+		var q: Dictionary = queues[i]
+		var row_key := "%s|%s" % [q.get("mode", ""), q.get("map", "")]
+		if not rows.has(row_key):
+			rows[row_key] = {}
+			order.append(row_key)
+		rows[row_key]["coop" if q.get("coop", false) else "versus"] = i
+	var last := _last_queue_here()
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 8)
+	for row_key in order:
+		var parts: PackedStringArray = row_key.split("|")
+		var name := Label.new()
+		name.text = "%s   ·   %s" % [parts[0], parts[1]]
+		name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(name)
+		for side in ["versus", "coop"]:
+			if not rows[row_key].has(side):
+				grid.add_child(Control.new())
+				continue
+			var i: int = rows[row_key][side]
+			var q: Dictionary = queues[i]
+			var b := Button.new()
+			var humans := int(q.get("humans", 0))
+			b.text = ("Versus" if side == "versus" else "Co-op vs bots") + ("   ·   %d playing" % humans if humans > 0 else "")
+			b.custom_minimum_size = Vector2(170, 0)
+			b.tooltip_text = "Humans on both teams; bots fill the empty seats." if side == "versus" else "Humans together on blue, against bots."
+			if _queue_key(q) == last:
+				b.theme_type_variation = "PrimaryButton"
+			b.pressed.connect(func(): _choose_queue(i, q))
+			grid.add_child(b)
+	v.add_child(grid)
+	var hint := Label.new()
+	hint.text = "You join a match of it in champion select, or a new one when they're all full."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.theme_type_variation = "HintLabel"
+	v.add_child(hint)
+	var back := Button.new()
+	back.text = "Back to the server list"
+	back.pressed.connect(_leave)
+	v.add_child(back)
+	await get_tree().process_frame
+	if queues_panel != null:
+		_center(queues_panel)
 
 
 func _toggle_pause_menu() -> void:

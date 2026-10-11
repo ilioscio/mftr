@@ -1,4 +1,5 @@
-//! UDP bot client: connects to a real `mftr-server`, clicks around (or, with `--duel`, fights
+//! UDP bot client: connects to a real `mftr-server`, picks a queue (13 §1: `--queue aram`,
+//! `--queue classic-coop`, or the first one), clicks around (or, with `--duel`, fights
 //! like the Netcode Lab's duel bot: a sparring partner for the Duel Sandbox), and reports
 //! netcode stats. A local link conditioner can add latency, jitter and loss on top of the real
 //! network. Each run connects with a fresh identity key; `--server HOST:PORT#FINGERPRINT` pins
@@ -21,6 +22,18 @@ pub struct BotConfig {
     /// Fight with the whole kit instead of wandering.
     pub duel: bool,
     pub champion: Option<mftr_sim::ChampionId>,
+    /// The queue to play: a mode, `-coop` for Co-op vs bots (else Versus); `None` = the first.
+    pub queue: Option<String>,
+}
+
+/// The queue named `name` ("aram", "classic-coop", "classic-versus"; case doesn't matter).
+fn find_queue(queues: &[mftr_net::msg::QueueInfo], name: &str) -> Option<u8> {
+    let name = name.to_ascii_lowercase();
+    let (mode, coop) = match name.strip_suffix("-coop") {
+        Some(m) => (m, true),
+        None => (name.strip_suffix("-versus").unwrap_or(&name), false),
+    };
+    queues.iter().position(|q| format!("{:?}", q.mode).eq_ignore_ascii_case(mode) && q.coop == coop).map(|i| i as u8)
 }
 
 pub fn run(cfg: &BotConfig) -> std::io::Result<Summary> {
@@ -100,6 +113,21 @@ pub fn run(cfg: &BotConfig) -> std::io::Result<Summary> {
                         up.send(p, t);
                     }
                     next_hello = t + 0.033;
+                }
+                Phase::Queues => {
+                    let q = match &cfg.queue {
+                        Some(name) => find_queue(session.queues(), name).ok_or_else(|| {
+                            let offered: Vec<String> = session
+                                .queues()
+                                .iter()
+                                .map(|q| format!("{:?}{}", q.mode, if q.coop { "-coop" } else { "" }).to_lowercase())
+                                .collect();
+                            invalid(format!("no queue {name}; the server offers {}", offered.join(", ")))
+                        })?,
+                        None => 0,
+                    };
+                    session.choose_queue(q);
+                    next_hello = t;
                 }
                 Phase::Connecting if t >= next_hello => {
                     up.send(session.hello_packet(t), t);

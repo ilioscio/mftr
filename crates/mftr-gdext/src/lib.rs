@@ -218,7 +218,7 @@ impl MatchClient {
         }
         let mode = self.session.game_mode();
         GString::from(match self.session.phase() {
-            Phase::Connecting => "",
+            Phase::Connecting | Phase::Queues => "",
             Phase::Lobby if mode == mftr_net::msg::GameMode::Empty => mftr_net::msg::GameMode::Aram.label(),
             _ => mode.label(),
         })
@@ -237,7 +237,8 @@ impl MatchClient {
         fp.map_or_else(GString::new, |f| GString::from(&f.to_string()))
     }
 
-    /// "connecting", "joining" or "playing" (empty when disconnected).
+    /// "connecting", "queues" (pick one: `queues`, `choose_queue`), "lobby", "joining" or
+    /// "playing" (empty when disconnected).
     #[func]
     fn phase(&self) -> GString {
         if self.socket.is_none() {
@@ -245,6 +246,7 @@ impl MatchClient {
         }
         GString::from(match self.session.phase() {
             Phase::Connecting => "connecting",
+            Phase::Queues => "queues",
             Phase::Lobby => "lobby",
             Phase::Map | Phase::Joining => "joining",
             Phase::Playing => "playing",
@@ -323,9 +325,47 @@ impl MatchClient {
         ok
     }
 
+    /// What went wrong connecting: the transport's error, or why the server turned us away.
     #[func]
     fn last_error(&self) -> GString {
-        self.last_error.clone()
+        use mftr_net::msg::RejectReason;
+        match self.session.rejected() {
+            Some(RejectReason::ProtocolMismatch) => {
+                "This server runs a different version of the game: update the game (or the server).".into()
+            }
+            Some(RejectReason::ServerFull) => "The server is full.".into(),
+            Some(RejectReason::ServerBusy) => {
+                "Every match of this kind is full and the server runs as many as it can. Waiting for room…".into()
+            }
+            Some(RejectReason::NothingToWatch) => "Nobody is playing this yet. Waiting for a match to watch…".into(),
+            None => self.last_error.clone(),
+        }
+    }
+
+    /// The server's queues (13 §1): `[{ mode, coop, map, humans, matches }]`, `mode` being
+    /// its label ("ARAM", "Classic 5v5", ...). Empty until the server sends them.
+    #[func]
+    fn queues(&self) -> VarArray {
+        let mut list = VarArray::new();
+        for q in self.session.queues() {
+            let mut d = VarDictionary::new();
+            d.set("mode", q.mode.label());
+            d.set("coop", q.coop);
+            d.set("map", q.map.as_str());
+            d.set("humans", q.humans as i64);
+            d.set("matches", q.matches as i64);
+            list.push(&d.to_variant());
+        }
+        list
+    }
+
+    /// Play queue `index` (from `queues`); before connecting, it picks the queue directly.
+    #[func]
+    fn choose_queue(&mut self, index: i64) {
+        if (0..=u8::MAX as i64).contains(&index) {
+            self.session.choose_queue(index as u8);
+            self.next_hello = 0.0;
+        }
     }
 
     /// Right-click move to a ground point, in game units. Predicted immediately.
@@ -1750,7 +1790,14 @@ impl MatchClient {
             Phase::Connecting | Phase::Lobby if now >= self.next_hello => {
                 let hello = self.session.hello_packet(now);
                 self.transmit(hello, now);
-                self.next_hello = now + 0.25;
+                // Turned away (a busy server): ask again now and then.
+                self.next_hello = now + if self.session.rejected().is_some() { 2.0 } else { 0.25 };
+            }
+            // The queue list: refreshed every few seconds (how many play each).
+            Phase::Queues if now >= self.next_hello => {
+                let hello = self.session.hello_packet(now);
+                self.transmit(hello, now);
+                self.next_hello = now + 3.0;
             }
             // A custom map: about 30 requests a second, each answered with the next piece.
             Phase::Map if now >= self.next_hello => {

@@ -64,25 +64,59 @@ impl Lobby {
         &self.slots
     }
 
-    /// Add a player (a human replaces a bot when the lobby is full). Returns its id.
-    pub fn add_human(&mut self, now: f64) -> Option<PlayerId> {
-        if self.slots.len() >= self.max_players as usize {
+    /// Add a human (13 §2) on `team_for_human`'s team, taking a bot's place when the team is
+    /// full. Returns its id.
+    pub fn add_human(&mut self, now: f64, coop: bool) -> Option<PlayerId> {
+        let team = self.team_for_human(coop)?;
+        if self.on_team(team) >= self.team_size(team) {
             // Humans take bots' places (the bot's champion goes back to the pool, not the
             // bench: nobody rolled it).
-            let bot = self.slots.iter().rposition(|s| s.bot)?;
+            let bot = self.slots.iter().rposition(|s| s.bot && s.team() == team)?;
             self.slots.remove(bot);
         }
-        let player = self.add(false)?;
+        let player = self.add_to(team, false)?;
         self.starts_at.get_or_insert(now + LOBBY_SECONDS);
         Some(player)
     }
 
+    /// The team a new human would join, if either has room (a free slot or a bot to
+    /// replace): the one with fewer humans; on a tie, one with a free slot, then blue. In
+    /// co-op, humans play blue only.
+    pub fn team_for_human(&self, coop: bool) -> Option<Team> {
+        let humans = |t: Team| self.slots.iter().filter(|s| !s.bot && s.team() == t).count();
+        let free = |t: Team| self.on_team(t) < self.team_size(t);
+        let room = |t: Team| free(t) || self.slots.iter().any(|s| s.bot && s.team() == t);
+        let mut teams = if coop { vec![Team::Blue] } else { vec![Team::Blue, Team::Red] };
+        teams.sort_by_key(|t| (humans(*t), !free(*t)));
+        teams.into_iter().find(|t| room(*t))
+    }
+
+    /// Humans in champion select.
+    pub fn humans(&self) -> usize {
+        self.slots.iter().filter(|s| !s.bot).count()
+    }
+
+    fn on_team(&self, team: Team) -> usize {
+        self.slots.iter().filter(|s| s.team() == team).count()
+    }
+
+    /// Slots per team: blue gets the odd one out.
+    fn team_size(&self, team: Team) -> usize {
+        let n = self.max_players as usize;
+        if team == Team::Blue { n.div_ceil(2) } else { n / 2 }
+    }
+
     fn add(&mut self, bot: bool) -> Option<PlayerId> {
-        let used: Vec<u8> = self.slots.iter().map(|s| s.player.0).collect();
-        // Fill the smaller team first: the lowest free id of that parity.
-        let blue = self.slots.iter().filter(|s| s.team() == Team::Blue).count();
+        // Fill the smaller team first.
+        let blue = self.on_team(Team::Blue);
         let red = self.slots.len() - blue;
-        let parity = if blue <= red { 0 } else { 1 };
+        self.add_to(if blue <= red { Team::Blue } else { Team::Red }, bot)
+    }
+
+    /// A new slot on `team`: the lowest free id of its parity.
+    fn add_to(&mut self, team: Team, bot: bool) -> Option<PlayerId> {
+        let used: Vec<u8> = self.slots.iter().map(|s| s.player.0).collect();
+        let parity = if team == Team::Blue { 0 } else { 1 };
         let player = (0..=u8::MAX).filter(|p| p % 2 == parity).find(|p| !used.contains(p)).map(PlayerId)?;
         let champion = self.draw(team_of(player))?;
         self.slots.push(Slot { player, champion, rerolls: if bot { 0 } else { REROLLS }, ready: bot, bot });
@@ -108,10 +142,15 @@ impl Lobby {
         Some(bench.remove(0))
     }
 
+    /// A human left champion select: their champion goes to the bench and a bot takes the
+    /// slot.
     pub fn remove(&mut self, player: PlayerId) {
         if let Some(i) = self.slots.iter().position(|s| s.player == player) {
             let s = self.slots.remove(i);
             self.bench[s.team() as usize].push(s.champion);
+            if !s.bot {
+                self.add_to(s.team(), true);
+            }
         }
     }
 
@@ -190,9 +229,9 @@ mod tests {
     fn all_random_with_rerolls_and_a_bench() {
         let mut l = Lobby::new(5, 10, 4);
         assert_eq!(l.slots().len(), 4);
-        let me = l.add_human(0.0).unwrap();
-        let other = l.add_human(0.0).unwrap();
-        let mate = l.add_human(0.0).unwrap();
+        let me = l.add_human(0.0, false).unwrap();
+        let other = l.add_human(0.0, false).unwrap();
+        let mate = l.add_human(0.0, false).unwrap();
         assert_ne!(team_of(me), team_of(other), "teams are kept even");
         assert_eq!(team_of(me), team_of(mate));
         // No two teammates share a champion.
@@ -229,11 +268,36 @@ mod tests {
     fn countdown_and_ready() {
         let mut l = Lobby::new(1, 10, 9);
         assert_eq!(l.starts_in(0.0), None, "nothing starts without a human");
-        let me = l.add_human(10.0).unwrap();
+        let me = l.add_human(10.0, false).unwrap();
         assert_eq!(l.slots().len(), 10, "the human took a bot's place");
         assert_eq!(l.starts_in(20.0), Some(50.0));
         l.act(me, LobbyAction::Ready(true));
         assert_eq!(l.starts_in(20.0), Some(3.0));
         assert_eq!(l.starts_in(23.5), Some(0.0));
+    }
+
+    /// 13 §2: humans go to the team with fewer humans (blue on a tie), taking bots' places;
+    /// in co-op they all play blue, and a full blue has no room. A human who leaves leaves a
+    /// bot behind.
+    #[test]
+    fn humans_balance_or_play_together() {
+        let mut l = Lobby::new(2, 10, 10);
+        let teams: Vec<Team> = (0..4).map(|_| team_of(l.add_human(0.0, false).unwrap())).collect();
+        assert_eq!(teams, [Team::Blue, Team::Red, Team::Blue, Team::Red]);
+        assert_eq!(l.slots().len(), 10);
+        assert_eq!(l.humans(), 4);
+
+        let mut l = Lobby::new(3, 10, 10);
+        for _ in 0..5 {
+            assert_eq!(team_of(l.add_human(0.0, true).unwrap()), Team::Blue);
+        }
+        assert_eq!(l.team_for_human(true), None, "blue is all human");
+        assert_eq!(l.add_human(0.0, true), None);
+        assert_eq!(l.team_for_human(false), Some(Team::Red), "versus would still fit on red");
+        let gone = l.slots().iter().find(|s| !s.bot).unwrap().player;
+        l.remove(gone);
+        assert_eq!(l.slots().len(), 10, "a bot took the slot");
+        assert_eq!(l.humans(), 4);
+        assert_eq!(l.team_for_human(true), Some(Team::Blue));
     }
 }

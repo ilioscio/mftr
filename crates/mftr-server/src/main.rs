@@ -1,26 +1,39 @@
-//! `mftr-server`: dedicated UDP match server, encrypted with the secure transport (D40).
+//! `mftr-server`: dedicated UDP match server, encrypted with the secure transport (D40). One
+//! process on one port plays whatever its players ask for (13): they pick a queue, and the
+//! server runs match instances of it, creating and stopping them as players come and go.
 //!
-//! Usage: mftr-server [--bind 0.0.0.0:7777] [--key FILE] [--seed N] [--max-players N] [--bots N]
-//!                    [--lobby] [--replay FILE] [--scenario duel|aram|mayhem|hyper|classic|minions|dodge|empty]
-//!                    [--map FILE.mftrmap]
+//! Usage: mftr-server [--bind 0.0.0.0:7777] [--key FILE] [--seed N] [--modes aram,mayhem,hyper,classic]
+//!                    [--map FILE.mftrmap]... [--max-matches N] [--replay DIR]
+//!        mftr-server --scenario NAME [--bots N] [--lobby] [--max-players N] [--map FILE.mftrmap] [...]
 //!        mftr-server [--key FILE] --fingerprint
 //!
 //! `--key FILE` (default `server.key`) holds the server's key; it is created on first start.
 //! Clients pin it, so keep the file: a new key makes every client that met the server refuse
 //! it. `--fingerprint` prints the key's fingerprint (creating the key if needed) and exits.
-//! `--bots N` adds N server bots at start (they count toward the player limit). `--lobby` starts
-//! with champion select (ARAM all-random with rerolls and a bench; humans replace bots). `--replay FILE`
-//! records the session and rewrites FILE every minute and whenever a match ends; check it with
+//!
+//! By default the server offers every full-match mode (ARAM, Mayhem, Hyper, Classic), each
+//! Versus and Co-op vs bots, with champion select and bots in every seat a human doesn't take;
+//! `--modes` narrows the list. Each `--map FILE` (from the map editor) adds Classic on that
+//! map. `--max-matches N` caps the instances running at once. `--replay DIR` records every
+//! match into DIR (rewritten every minute and when a match ends); check one with
 //! `mftr-tools replay FILE`.
+//!
+//! `--scenario NAME` (duel, aram, mayhem, hyper, classic, minions, dodge, empty) offers that
+//! scenario alone, for development: `--bots N` adds server bots (they count toward
+//! `--max-players`), `--lobby` holds champion select first.
 
 use mftr_net::secure::{Fingerprint, Identity, Received, SecureServer};
-use mftr_server::{ClientKey, Scenario, ServerConfig, ServerCore};
+use mftr_server::hub::{self, HOSTED_MODES};
+use mftr_server::{ClientKey, Hub, HubConfig, QueueSpec, Scenario, ServerConfig};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--max-players N] [--bots N] [--lobby] [--replay FILE] [--scenario duel|aram|mayhem|hyper|classic|minions|dodge|empty] [--map FILE.mftrmap]";
+const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem,hyper,classic] [--map FILE.mftrmap]... [--max-matches N] [--replay DIR]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]";
+/// Instances running at once, by default.
+const MAX_MATCHES: usize = 32;
 
 /// Client sessions: which core connection each address is, and back.
 #[derive(Default)]
@@ -57,54 +70,110 @@ fn send_all(socket: &UdpSocket, secure: &mut SecureServer, peers: &Peers, packet
     }
 }
 
+/// A map file from the map editor: checked now (the server refuses one that breaks a rule).
+fn read_map(path: &str) -> (String, Arc<str>) {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    if text.len() > mftr_sim::mapspec::MAX_TEXT_BYTES {
+        panic!("{path}: a map file holds at most {} bytes", mftr_sim::mapspec::MAX_TEXT_BYTES);
+    }
+    let spec = mftr_sim::mapspec::MapSpec::parse(&text).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let problems = mftr_sim::mapspec::problems(&spec);
+    if !problems.is_empty() {
+        panic!("{path} can't be played yet:\n  {}", problems.join("\n  "));
+    }
+    println!("map: {} ({path})", spec.name);
+    (spec.name.clone(), Arc::from(text.as_str()))
+}
+
+/// Where an instance's replay goes: `DIR/<started>-<queue>-<instance>.replay`.
+fn replay_file(dir: &str, inst: &hub::Instance, queue: &QueueSpec) -> PathBuf {
+    PathBuf::from(dir).join(format!("{}-{}-{}.replay", inst.created_unix, queue.slug(), inst.id))
+}
+
 fn main() -> std::io::Result<()> {
     let mut bind = "0.0.0.0:7777".to_string();
-    let mut replay_path: Option<String> = None;
+    let mut replay_dir: Option<String> = None;
     let mut key_path = PathBuf::from("server.key");
     let mut fingerprint_only = false;
-    // The M1 Duel Sandbox is the default playground.
-    let mut cfg = ServerConfig { scenario: Scenario::Duel, ..Default::default() };
+    let mut base = ServerConfig::default();
+    let mut scenario: Option<Scenario> = None;
+    let mut modes: Option<Vec<Scenario>> = None;
+    let mut maps: Vec<(String, Arc<str>)> = Vec::new();
+    let mut max_matches = MAX_MATCHES;
+    let (mut bots, mut lobby, mut max_players) = (None, false, None);
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--bind" => bind = args.next().expect("--bind needs an address"),
-            "--seed" => cfg.seed = args.next().and_then(|v| v.parse().ok()).expect("--seed needs a number"),
+            "--seed" => base.seed = args.next().and_then(|v| v.parse().ok()).expect("--seed needs a number"),
             "--max-players" => {
-                cfg.max_players = args.next().and_then(|v| v.parse().ok()).expect("--max-players needs a number")
+                max_players = Some(args.next().and_then(|v| v.parse().ok()).expect("--max-players needs a number"))
             }
-            "--bots" => cfg.bots = args.next().and_then(|v| v.parse().ok()).expect("--bots needs a number"),
-            "--lobby" => cfg.lobby = true,
+            "--bots" => bots = Some(args.next().and_then(|v| v.parse().ok()).expect("--bots needs a number")),
+            "--lobby" => lobby = true,
             "--key" => key_path = args.next().expect("--key needs a file").into(),
             "--fingerprint" => fingerprint_only = true,
             "--replay" => {
-                replay_path = Some(args.next().expect("--replay needs a file"));
-                cfg.record = true;
+                replay_dir = Some(args.next().expect("--replay needs a directory"));
+                base.record = true;
+            }
+            "--max-matches" => {
+                max_matches = args.next().and_then(|v| v.parse().ok()).expect("--max-matches needs a number")
             }
             "--scenario" => {
                 let name = args.next().expect("--scenario needs a name");
-                cfg.scenario = Scenario::by_name(&name).unwrap_or_else(|| panic!("unknown scenario {name}\n{USAGE}"));
+                scenario = Some(Scenario::by_name(&name).unwrap_or_else(|| panic!("unknown scenario {name}\n{USAGE}")));
             }
-            "--map" => {
-                // A map from the map editor (12 §4): checked now, sent to players as they join.
-                let path = args.next().expect("--map needs a file");
-                let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
-                if text.len() > mftr_sim::mapspec::MAX_TEXT_BYTES {
-                    panic!("{path}: a map file holds at most {} bytes", mftr_sim::mapspec::MAX_TEXT_BYTES);
-                }
-                let spec = mftr_sim::mapspec::MapSpec::parse(&text).unwrap_or_else(|e| panic!("{path}: {e}"));
-                let problems = mftr_sim::mapspec::problems(&spec);
-                if !problems.is_empty() {
-                    panic!("{path} can't be played yet:\n  {}", problems.join("\n  "));
-                }
-                println!("map: {} ({path})", spec.name);
-                cfg.map = Some(std::sync::Arc::from(text.as_str()));
+            "--modes" => {
+                let list = args.next().expect("--modes needs a list, like aram,classic");
+                modes = Some(
+                    list.split(',')
+                        .map(|name| {
+                            let s = Scenario::by_name(name.trim())
+                                .unwrap_or_else(|| panic!("unknown mode {name}\n{USAGE}"));
+                            if !HOSTED_MODES.contains(&s) {
+                                panic!("{name} isn't a full match: run it alone with --scenario {name}");
+                            }
+                            s
+                        })
+                        .collect(),
+                );
             }
+            "--map" => maps.push(read_map(&args.next().expect("--map needs a file"))),
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return Ok(());
             }
-            other => panic!("unknown argument {other}"),
+            other => panic!("unknown argument {other}\n{USAGE}"),
         }
+    }
+
+    let queues = match scenario {
+        // One scenario, for development: as configured.
+        Some(scenario) => {
+            if modes.is_some() || maps.len() > 1 {
+                panic!("--scenario offers one scenario: no --modes, and at most one --map\n{USAGE}");
+            }
+            base.bots = bots.unwrap_or(0);
+            base.lobby = lobby;
+            base.max_players = max_players.unwrap_or(base.max_players);
+            let map = maps.pop();
+            let name = map.as_ref().map_or(hub::map_name(scenario).to_string(), |(n, _)| n.clone());
+            vec![QueueSpec { scenario, coop: false, map_name: name, map: map.map(|(_, t)| t) }]
+        }
+        // Hosted: every full-match queue, with champion select and bots in every free seat.
+        None => {
+            if bots.is_some() || lobby || max_players.is_some() {
+                panic!("--bots, --lobby and --max-players go with --scenario\n{USAGE}");
+            }
+            base.max_players = 10;
+            base.bots = 10;
+            base.lobby = true;
+            hub::hosted_queues(modes.as_deref().unwrap_or(&HOSTED_MODES), &maps)
+        }
+    };
+    if let Some(dir) = &replay_dir {
+        std::fs::create_dir_all(dir)?;
     }
 
     let (identity, created) = Identity::load_or_create(&key_path, "server key")?;
@@ -126,19 +195,24 @@ fn main() -> std::io::Result<()> {
         local.port(),
         identity.fingerprint()
     );
+    println!("{} queues, up to {max_matches} matches at once:", queues.len());
+    for q in &queues {
+        println!("  {}", q.slug());
+    }
 
     let clock = Instant::now();
     let now = || clock.elapsed().as_secs_f64();
-    let mut core = ServerCore::new(cfg, now());
+    let mut hub = Hub::new(HubConfig { queues, base, max_matches });
     let mut secure = SecureServer::new(identity);
     let mut peers = Peers::default();
     let mut buf = [0u8; 2048];
     let mut last_expire = now();
     let mut last_report = now();
-    let mut tick_cost = 0.0f64;
-    let mut tick_cost_max = 0.0f64;
-    let mut last_save = now();
-    let mut had_winner = false;
+    let mut busy = 0.0f64;
+    let mut step_max = 0.0f64;
+    // Per instance: when its replay was last written, and whether its match had a winner.
+    let mut saves: HashMap<u32, (f64, bool)> = HashMap::new();
+    let mut seen: HashMap<u32, f64> = HashMap::new();
 
     loop {
         loop {
@@ -153,7 +227,7 @@ fn main() -> std::io::Result<()> {
                     }
                     Received::Data(packet) => {
                         if let Some(&key) = peers.keys.get(&from) {
-                            let out = core.handle_packet(key, &packet, now());
+                            let out = hub.handle_packet(key, &packet, now());
                             send_all(&socket, &mut secure, &peers, out);
                         }
                     }
@@ -166,23 +240,44 @@ fn main() -> std::io::Result<()> {
         }
 
         let t = now();
-        if t >= core.next_tick_due() {
+        if hub.next_tick_due().is_some_and(|due| t >= due) {
             let started = Instant::now();
-            let out = core.step(t);
+            let out = hub.step(t);
             send_all(&socket, &mut secure, &peers, out);
             let cost = started.elapsed().as_secs_f64();
-            tick_cost += cost;
-            tick_cost_max = tick_cost_max.max(cost);
-            let winner = core.world().game().winner.is_some();
-            if let Some(path) = &replay_path
-                && ((winner && !had_winner) || t - last_save >= 60.0)
-            {
-                if let Err(e) = std::fs::write(path, core.game().replay().to_text()) {
-                    eprintln!("could not write replay {path}: {e}");
-                }
-                last_save = t;
+            busy += cost;
+            step_max = step_max.max(cost);
+        }
+
+        // Matches that started and stopped; replays.
+        for inst in hub.instances() {
+            if let std::collections::hash_map::Entry::Vacant(e) = seen.entry(inst.id) {
+                e.insert(t);
+                println!("match {} started: {}", inst.id, hub.queues()[inst.queue].slug());
             }
-            had_winner = winner;
+            if let Some(dir) = &replay_dir {
+                let winner = inst.core.world().game().winner.is_some();
+                let (last, had) = saves.entry(inst.id).or_insert((t, false));
+                if (winner && !*had) || t - *last >= 60.0 {
+                    let path = replay_file(dir, inst, &hub.queues()[inst.queue]);
+                    if let Err(e) = std::fs::write(&path, inst.core.game().replay().to_text()) {
+                        eprintln!("could not write replay {}: {e}", path.display());
+                    }
+                    *last = t;
+                }
+                *had = winner;
+            }
+        }
+        for inst in hub.take_stopped() {
+            let ran = t - seen.remove(&inst.id).unwrap_or(t);
+            println!("match {} stopped after {}:{:02}: nobody left", inst.id, ran as u32 / 60, ran as u32 % 60);
+            saves.remove(&inst.id);
+            if let Some(dir) = &replay_dir {
+                let path = replay_file(dir, &inst, &hub.queues()[inst.queue]);
+                if let Err(e) = std::fs::write(&path, inst.core.game().replay().to_text()) {
+                    eprintln!("could not write replay {}: {e}", path.display());
+                }
+            }
         }
 
         if t - last_expire >= 1.0 {
@@ -193,28 +288,29 @@ fn main() -> std::io::Result<()> {
         }
 
         if t - last_report >= 5.0 {
-            let s = &core.stats;
-            println!(
-                "tick {:>6}  players {} (+{} bots)  cmds {} (late {}, dropped {})  in {:.1} KB/s  out {:.1} KB/s  tick avg {:.3} ms max {:.3} ms",
-                core.world().tick().0,
-                core.player_count(),
-                core.bot_count(),
-                s.commands,
-                s.commands_late,
-                s.commands_dropped,
-                s.bytes_in as f64 / 1024.0 / (t - last_report),
-                s.bytes_out as f64 / 1024.0 / (t - last_report),
-                tick_cost * 1e3 / (5.0 * 30.0),
-                tick_cost_max * 1e3,
-            );
-            core.stats.bytes_in = 0;
-            core.stats.bytes_out = 0;
-            tick_cost = 0.0;
-            tick_cost_max = 0.0;
+            let span = t - last_report;
+            if !hub.instances().is_empty() || busy > 0.0 {
+                let humans: usize = hub.instances().iter().map(|i| i.core.connected_humans()).sum();
+                let bots: usize = hub.instances().iter().map(|i| i.core.bot_count()).sum();
+                let s = hub.stats(true);
+                println!(
+                    "matches {}  players {humans} (+{bots} bots)  cmds {} (late {}, dropped {})  in {:.1} KB/s  out {:.1} KB/s  busy {:.1}% of a core (step max {:.2} ms)",
+                    hub.instances().len(),
+                    s.commands,
+                    s.commands_late,
+                    s.commands_dropped,
+                    s.bytes_in as f64 / 1024.0 / span,
+                    s.bytes_out as f64 / 1024.0 / span,
+                    busy / span * 100.0,
+                    step_max * 1e3,
+                );
+            }
+            busy = 0.0;
+            step_max = 0.0;
             last_report = t;
         }
 
-        let wait = (core.next_tick_due() - now()).clamp(0.0, 0.001);
+        let wait = hub.next_tick_due().map_or(0.001, |due| (due - now()).clamp(0.0, 0.001));
         std::thread::sleep(Duration::from_secs_f64(wait));
     }
 }

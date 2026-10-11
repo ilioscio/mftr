@@ -779,6 +779,44 @@ objective pits.
 - **Replays** carry their custom map, so they still re-simulate.
 - A netlab test hosts a custom map for 4 clients over the MID link: every client builds the server's walls, nobody hard-resets, and the replay re-simulates exactly. A real client joined a hosted map file.
 
+## S — One server, many matches (between E and M4 slice 5)
+The server plays whatever its players ask for ([13](13-server-instances.md), D57): one process
+on one port runs match instances of every full-match queue, created and stopped with their
+players.
+
+### S slices (in order of dependency)
+1. Instances and queues: the hub routes connections to instances, players pick a queue
+   (mode, map, Versus or Co-op), placement fills instances and creates new ones, empty ones
+   stop; `--modes`, several `--map`s, `--max-matches`, `--replay DIR`. The client's queue
+   picker.
+2. Drops: a bot takes over a dropped player's champion and hands it back on reconnect.
+3. Joining mid-match: a short champion select (Classic picks, ARAM deals), then taking over a
+   bot with its experience and its gold plus a refund of its items. Classic's champion select
+   becomes a pick.
+4. Scale: instances step on worker threads; a load test of many matches with headless
+   clients; NixOS hosts one server; measurements in 13 §8.
+
+### S slice 1 status (2026-10-10): ✅ done
+- **The hub** (`mftr-server/src/hub.rs`): one process, one port. A hello without a queue gets
+  the server's queues (protocol 21); a hello with one is placed in the queue's match with the
+  most humans that has a seat in champion select, or in a new match (or told the server is
+  busy at `--max-matches`). Returning players go back to the match holding their seat.
+  Matches with no humans stop. Each match is a `ServerCore`, unchanged apart from Co-op seating
+  (champion select puts every human on blue) and Versus seating (the team with fewer humans).
+- **Hosting:** `mftr-server` with no options offers ARAM, Mayhem, Hyper and Classic, each
+  Versus and Co-op; `--modes` narrows it, each `--map FILE` adds Classic on that map,
+  `--replay DIR` records every match in its own file. `--scenario NAME` still runs one scenario
+  (the sandboxes are development-only now). NixOS: one `services.mftr` service
+  (`services.mftr.servers` is gone, with a message saying what replaces it); Docker and compose
+  run one server.
+- **Client:** a queue list after connecting (mode and map, Versus or Co-op, how many play
+  each, the last pick highlighted), refreshed every 3 s; why the server turned you away (busy,
+  nothing to watch, another version) on the connecting screen; `--queue N` picks one for
+  scripted runs. `mftr-tools bot --queue classic-coop` for headless clients.
+- **Checked:** hub tests (placement, filling, co-op, busy, stopping), a real server with six
+  headless clients on two queues (each queue in its own match, both stopped when they left,
+  both replays re-simulate exactly), and the real client picking a queue into champion select.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

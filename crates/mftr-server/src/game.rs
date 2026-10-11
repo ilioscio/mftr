@@ -349,6 +349,7 @@ impl Replay {
             arena_max: num(f[6])? as f32,
             scenario: Scenario::by_name(f[7]).ok_or(format!("scenario {}", f[7]))?,
             map: None,
+            coop: false,
         };
         let mut cfg = cfg;
         let mut entries: Vec<ReplayEntry> = Vec::new();
