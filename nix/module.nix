@@ -83,6 +83,17 @@ let
         description = "Seeds everything random in the match.";
       };
 
+      map = mkOption {
+        type = types.nullOr types.path;
+        default = null;
+        example = lib.literalExpression "./maps/my-map.mftrmap";
+        description = ''
+          A map file exported from the map editor, played instead of the scenario's map (with
+          `scenario = "classic"`). Players download it as they join. The server refuses to start
+          if the map breaks a rule.
+        '';
+      };
+
       replay = mkOption {
         type = types.bool;
         default = false;
@@ -122,6 +133,7 @@ let
         "--seed" (toString s.seed)
       ]
       ++ lib.optional s.lobby "--lobby"
+      ++ lib.optionals (s.map != null) [ "--map" "${s.map}" ]
       ++ lib.optionals s.replay [ "--replay" "${dir}/session.replay" ]
       ++ s.extraArgs;
     in

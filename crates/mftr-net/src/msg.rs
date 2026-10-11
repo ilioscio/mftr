@@ -28,6 +28,8 @@ pub const MAX_REPORTS_PER_SNAPSHOT: usize = 8;
 pub const MAX_EVENTS_PER_SNAPSHOT: usize = 32;
 /// Bound on units (updates or removals) per snapshot (strict decoding, 03b §11).
 pub const MAX_UNITS_PER_SNAPSHOT: usize = 1024;
+/// A custom map's text travels in pieces of at most this many bytes (12 §4).
+pub const MAP_CHUNK_BYTES: usize = 900;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClientMessage {
@@ -55,6 +57,11 @@ pub enum ClientMessage {
     Bye,
     /// Champion select (M2 slice 5).
     Lobby(LobbyAction),
+    /// A custom map's text, from byte `have` on (the client has the bytes before it).
+    MapRequest {
+        hash: u64,
+        have: u32,
+    },
 }
 
 /// What a player can do in champion select (ARAM all-random, 06 §2).
@@ -251,6 +258,9 @@ pub enum ServerMessage {
         spectator: bool,
         /// What the server runs (shown in the client's server list).
         mode: GameMode,
+        /// A custom map (`map` is `MapId::Custom`): its text's hash and length, to download
+        /// with `MapRequest` (12 §4).
+        map_spec: Option<(u64, u32)>,
     },
     Snapshot(Box<Snapshot>),
     Reject {
@@ -258,6 +268,13 @@ pub enum ServerMessage {
     },
     /// Champion select, sent a few times a second until the match starts.
     Lobby(Box<LobbyState>),
+    /// A piece of a custom map's text (`total` bytes in all), answering a `MapRequest`.
+    MapChunk {
+        hash: u64,
+        total: u32,
+        offset: u32,
+        bytes: Vec<u8>,
+    },
 }
 
 /// The kind of game a server runs (its scenario).
@@ -1429,7 +1446,7 @@ fn begin(header: &PacketHeader, kind: u64) -> BitWriter {
     let mut w = BitWriter::new();
     w.write_u8(MAGIC);
     header.write(&mut w);
-    w.write(kind, 2);
+    w.write(kind, 3);
     w
 }
 
@@ -1439,7 +1456,7 @@ fn open(bytes: &[u8]) -> Result<(BitReader<'_>, PacketHeader, u64), DecodeError>
         return Err(DecodeError::Invalid("magic"));
     }
     let header = PacketHeader::read(&mut r)?;
-    let kind = r.read(2)?;
+    let kind = r.read(3)?;
     Ok((r, header, kind))
 }
 
@@ -1484,6 +1501,12 @@ pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
             }
             w.finish()
         }
+        ClientMessage::MapRequest { hash, have } => {
+            let mut w = begin(header, 4);
+            w.write_u64(*hash);
+            w.write_u32(*have);
+            w.finish()
+        }
     }
 }
 
@@ -1518,7 +1541,8 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
             2 => LobbyAction::Ready(r.read_bool()?),
             _ => return Err(DecodeError::Invalid("lobby action")),
         }),
-        _ => unreachable!("two-bit message kind"),
+        4 => ClientMessage::MapRequest { hash: r.read_u64()?, have: r.read_u32()? },
+        _ => return Err(DecodeError::Invalid("message kind")),
     };
     Ok((header, msg))
 }
@@ -1612,6 +1636,7 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             token,
             spectator,
             mode,
+            map_spec,
         } => {
             let mut w = begin(header, 0);
             w.write_u8(player.0);
@@ -1633,6 +1658,23 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             w.write_u64(*token);
             w.write_bool(*spectator);
             w.write(*mode as u64, 3);
+            w.write_bool(map_spec.is_some());
+            if let Some((hash, len)) = map_spec {
+                w.write_u64(*hash);
+                w.write_u32(*len);
+            }
+            w.finish()
+        }
+        ServerMessage::MapChunk { hash, total, offset, bytes } => {
+            let mut w = begin(header, 4);
+            w.write_u64(*hash);
+            w.write_u32(*total);
+            w.write_u32(*offset);
+            let n = bytes.len().min(MAP_CHUNK_BYTES);
+            w.write_u16(n as u16);
+            for b in &bytes[..n] {
+                w.write_u8(*b);
+            }
             w.finish()
         }
         ServerMessage::Snapshot(s) => {
@@ -1758,7 +1800,17 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             token: r.read_u64()?,
             spectator: r.read_bool()?,
             mode: GameMode::from_u8(r.read(3)? as u8).ok_or(DecodeError::Invalid("game mode"))?,
+            map_spec: if r.read_bool()? { Some((r.read_u64()?, r.read_u32()?)) } else { None },
         },
+        4 => {
+            let (hash, total, offset) = (r.read_u64()?, r.read_u32()?, r.read_u32()?);
+            let n = r.read_u16()? as usize;
+            if n > MAP_CHUNK_BYTES || total as usize > mftr_sim::mapspec::MAX_TEXT_BYTES {
+                return Err(DecodeError::Invalid("map chunk"));
+            }
+            let bytes = (0..n).map(|_| r.read_u8()).collect::<Result<Vec<u8>, _>>()?;
+            ServerMessage::MapChunk { hash, total, offset, bytes }
+        }
         1 => {
             let tick = Tick(r.read_u32()?);
             let since_tick_us = r.read_u32()?;
@@ -1859,7 +1911,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 .collect::<Result<_, _>>()?;
             ServerMessage::Lobby(Box::new(LobbyState { you, slots, bench, starts_in_ms: r.read_u32()? }))
         }
-        _ => unreachable!("two-bit message kind"),
+        _ => return Err(DecodeError::Invalid("message kind")),
     };
     Ok((header, msg))
 }
@@ -2328,8 +2380,25 @@ mod tests {
             token: u64::MAX - 5,
             spectator: false,
             mode: GameMode::Aram,
+            map_spec: Some((0x1234_5678_9abc_def0, 4321)),
         };
         assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
+    }
+
+    /// 12 §4: a custom map's pieces and the requests for them.
+    #[test]
+    fn map_transfer_round_trips() {
+        let chunk = ServerMessage::MapChunk {
+            hash: 99,
+            total: 2000,
+            offset: 900,
+            bytes: b"lane 1000 1,2 3,4
+"
+            .to_vec(),
+        };
+        assert_eq!(decode_server(&encode_server(&hdr(), &chunk)).unwrap().1, chunk);
+        let req = ClientMessage::MapRequest { hash: 99, have: 1800 };
+        assert_eq!(decode_client(&encode_client(&hdr(), &req)).unwrap().1, req);
     }
 
     #[test]

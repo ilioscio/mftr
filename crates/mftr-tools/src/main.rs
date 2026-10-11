@@ -54,6 +54,7 @@ fn main() {
                         }
                         held
                     }),
+                    map: None,
                 };
                 let r = netlab::run(&cfg);
                 println!(

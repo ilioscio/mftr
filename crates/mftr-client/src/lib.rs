@@ -253,6 +253,8 @@ pub enum Phase {
     Connecting,
     /// In champion select (keep sending Hello as a keepalive until the Welcome).
     Lobby,
+    /// Welcomed onto a custom map: downloading its text (12 §4) before joining.
+    Map,
     /// Welcomed, waiting for the first snapshot that carries our own unit.
     Joining,
     Playing,
@@ -286,6 +288,8 @@ pub struct ClientSession {
     since_welcome: u32,
     /// The map from the welcome: prediction runs with the same walls and pathing as the server.
     map: std::sync::Arc<mftr_sim::map::Map>,
+    /// A custom map being downloaded: its hash, its length, the bytes so far.
+    map_download: Option<(u64, u32, Vec<u8>)>,
     /// Predicted world containing only our own unit.
     world: World,
     /// Predicted own state at the end of each tick.
@@ -366,6 +370,7 @@ impl ClientSession {
             welcome_seq: 0,
             since_welcome: 0,
             map: mftr_sim::map::MapId::Open.shared(),
+            map_download: None,
             world: World::from_units(Tick(0), Vec::new()),
             history: VecDeque::new(),
             commands: VecDeque::new(),
@@ -841,6 +846,7 @@ impl ClientSession {
                 token,
                 spectator,
                 mode,
+                map_spec,
                 ..
             } => {
                 if matches!(self.phase, Phase::Connecting | Phase::Lobby) {
@@ -856,13 +862,24 @@ impl ClientSession {
                     self.team = team;
                     self.champion = champion;
                     self.home = home;
-                    self.map = map.shared();
-                    self.phase = Phase::Joining;
+                    match map_spec {
+                        // A custom map: download it first (`map_request_packet`).
+                        Some((hash, len)) if map == mftr_sim::map::MapId::Custom => {
+                            self.map_download = Some((hash, len, Vec::new()));
+                            self.phase = Phase::Map;
+                        }
+                        _ => {
+                            self.map = map.shared();
+                            self.phase = Phase::Joining;
+                        }
+                    }
                     let rtt = rtt_from_echo(now, time_echo.client_time_us, time_echo.hold_us);
                     self.clock.add_sample(now, rtt, tick.end_seconds() + since_tick_us as f64 * 1e-6);
                 }
             }
-            ServerMessage::Snapshot(s) => self.on_snapshot(*s, now),
+            ServerMessage::Snapshot(s) if self.phase != Phase::Map => self.on_snapshot(*s, now),
+            ServerMessage::Snapshot(_) => {}
+            ServerMessage::MapChunk { hash, total, offset, bytes } => self.on_map_chunk(hash, total, offset, &bytes),
             ServerMessage::Reject { .. } => {}
             ServerMessage::Lobby(l) => {
                 // The match ended and the server holds champion select again (packets from the
@@ -906,6 +923,45 @@ impl ClientSession {
     /// What the server runs (known once welcomed).
     pub fn game_mode(&self) -> msg::GameMode {
         self.mode
+    }
+
+    /// A piece of the custom map: taken in order; once it's all here and its hash checks out,
+    /// the map is built (the server's own way) and joining goes on.
+    fn on_map_chunk(&mut self, hash: u64, total: u32, offset: u32, bytes: &[u8]) {
+        let Some((want, len, have)) = &mut self.map_download else { return };
+        if hash != *want || total != *len || offset as usize != have.len() {
+            return;
+        }
+        have.extend_from_slice(bytes);
+        if have.len() < *len as usize {
+            return;
+        }
+        let text = String::from_utf8_lossy(have).into_owned();
+        if mftr_sim::mapspec::text_hash(&text) != *want {
+            have.clear(); // corrupt: start over
+            return;
+        }
+        match mftr_sim::mapspec::MapSpec::parse(&text) {
+            Ok(spec) => {
+                self.map = std::sync::Arc::new(mftr_sim::mapspec::build(&spec, mftr_sim::map::MapId::Custom));
+                self.map_download = None;
+                self.phase = Phase::Joining;
+            }
+            Err(_) => have.clear(),
+        }
+    }
+
+    /// While downloading a custom map: ask for its next piece.
+    pub fn map_request_packet(&mut self) -> Option<Vec<u8>> {
+        let (hash, _, have) = self.map_download.as_ref()?;
+        let msg = ClientMessage::MapRequest { hash: *hash, have: have.len() as u32 };
+        let h = self.header();
+        Some(msg::encode_client(&h, &msg))
+    }
+
+    /// How much of a custom map has arrived (0 to 1; 1 when there's none to fetch).
+    pub fn map_progress(&self) -> f32 {
+        self.map_download.as_ref().map_or(1.0, |(_, len, have)| have.len() as f32 / (*len).max(1) as f32)
     }
 
     fn on_snapshot(&mut self, s: Snapshot, now: f64) {
@@ -1106,7 +1162,7 @@ impl ClientSession {
         }
         self.own_cc = cc;
         match self.phase {
-            Phase::Connecting | Phase::Lobby => {}
+            Phase::Connecting | Phase::Lobby | Phase::Map => {}
             Phase::Joining => {
                 self.start_playing(s.tick, server_state);
                 self.update(now);

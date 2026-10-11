@@ -94,6 +94,13 @@ pub fn run(cfg: &BotConfig) -> std::io::Result<Summary> {
                     up.send(session.hello_packet(t), t);
                     next_hello = t + 0.5;
                 }
+                // A custom map: fetch it piece by piece.
+                Phase::Map if t >= next_hello => {
+                    if let Some(p) = session.map_request_packet() {
+                        up.send(p, t);
+                    }
+                    next_hello = t + 0.033;
+                }
                 Phase::Connecting if t >= next_hello => {
                     up.send(session.hello_packet(t), t);
                     next_hello = t + 0.25;

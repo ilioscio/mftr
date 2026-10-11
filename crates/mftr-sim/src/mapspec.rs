@@ -262,6 +262,14 @@ impl MapSpec {
     }
 }
 
+/// A map text's fingerprint (FNV-1a, 64 bits): a client checks a downloaded map against it.
+pub fn text_hash(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
+}
+
+/// The largest map text a server sends.
+pub const MAX_TEXT_BYTES: usize = 64 * 1024;
+
 pub fn camp_key(k: CampKind) -> &'static str {
     match k {
         CampKind::Warden => "warden",

@@ -771,6 +771,14 @@ objective pits.
   - Structures and camps stand on it.
 - **Scenery** indexes its walls (bounding boxes, edges facing open ground in buckets, seams inside rock ignored): Crossroads' dressing builds in 180 ms instead of 2.3 s.
 
+### E slice 4 status (2026-10-11): ✅ done
+- **Hosting maps:** `mftr-server --scenario classic --map FILE` plays a map file from the editor. The server checks it at start and refuses one that breaks a rule, listing the problems. NixOS: `services.mftr.servers.<name>.map`.
+- **Downloading** (protocol 20; message kinds are 3 bits now):
+  - The welcome names a custom map by hash and length. The client asks for it piece by piece (`MapRequest` from byte N; the server answers each with a `MapChunk` of up to 900 bytes, about 30 requests a second).
+  - It checks the hash and builds the map with the server's own code before joining. Snapshots wait meanwhile; nothing on the server tracks a download.
+- **Replays** carry their custom map, so they still re-simulate.
+- A netlab test hosts a custom map for 4 clients over the MID link: every client builds the server's walls, nobody hard-resets, and the replay re-simulates exactly. A real client joined a hosted map file.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

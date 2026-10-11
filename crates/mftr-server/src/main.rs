@@ -2,6 +2,7 @@
 //!
 //! Usage: mftr-server [--bind 0.0.0.0:7777] [--key FILE] [--seed N] [--max-players N] [--bots N]
 //!                    [--lobby] [--replay FILE] [--scenario duel|aram|mayhem|hyper|classic|minions|dodge|empty]
+//!                    [--map FILE.mftrmap]
 //!        mftr-server [--key FILE] --fingerprint
 //!
 //! `--key FILE` (default `server.key`) holds the server's key; it is created on first start.
@@ -19,7 +20,7 @@ use std::net::{SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--max-players N] [--bots N] [--lobby] [--replay FILE] [--scenario duel|aram|mayhem|hyper|classic|minions|dodge|empty]";
+const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--max-players N] [--bots N] [--lobby] [--replay FILE] [--scenario duel|aram|mayhem|hyper|classic|minions|dodge|empty] [--map FILE.mftrmap]";
 
 /// Client sessions: which core connection each address is, and back.
 #[derive(Default)]
@@ -82,6 +83,21 @@ fn main() -> std::io::Result<()> {
             "--scenario" => {
                 let name = args.next().expect("--scenario needs a name");
                 cfg.scenario = Scenario::by_name(&name).unwrap_or_else(|| panic!("unknown scenario {name}\n{USAGE}"));
+            }
+            "--map" => {
+                // A map from the map editor (12 §4): checked now, sent to players as they join.
+                let path = args.next().expect("--map needs a file");
+                let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+                if text.len() > mftr_sim::mapspec::MAX_TEXT_BYTES {
+                    panic!("{path}: a map file holds at most {} bytes", mftr_sim::mapspec::MAX_TEXT_BYTES);
+                }
+                let spec = mftr_sim::mapspec::MapSpec::parse(&text).unwrap_or_else(|e| panic!("{path}: {e}"));
+                let problems = mftr_sim::mapspec::problems(&spec);
+                if !problems.is_empty() {
+                    panic!("{path} can't be played yet:\n  {}", problems.join("\n  "));
+                }
+                println!("map: {} ({path})", spec.name);
+                cfg.map = Some(std::sync::Arc::from(text.as_str()));
             }
             "-h" | "--help" => {
                 println!("{USAGE}");

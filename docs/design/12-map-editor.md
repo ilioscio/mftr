@@ -56,6 +56,8 @@ The editor shows every broken rule; a map that breaks one can be saved but not e
 
 ## 4. Playing a map
 
-`mftr-server --scenario classic --map FILE` plays a map file. The server sends the spec to each
-player as they join, and their client builds the same map. The official Classic map is one of
-these, built in.
+`mftr-server --scenario classic --map FILE` plays a map file (the server refuses one that breaks a
+rule). The welcome names it by its text's hash and length; the client asks for the text piece by
+piece (each request answered with the next 900 bytes, so a lost packet just gets asked for
+again), checks the hash, builds the map with the server's own code and joins. Replays carry the
+map. The official Classic map is one of these, built in.

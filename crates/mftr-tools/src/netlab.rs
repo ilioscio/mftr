@@ -29,6 +29,8 @@ pub struct LabConfig {
     /// Stress tests: every champion holds these augments (granted on the server, so the
     /// recording no longer re-simulates).
     pub augments: Option<[u8; mftr_sim::augments::SLOTS]>,
+    /// A custom map's text for the server to host (12 §4): clients download it.
+    pub map: Option<std::sync::Arc<str>>,
 }
 
 enum Bot {
@@ -62,12 +64,22 @@ pub struct LabResult {
     pub tick_ms_max: f64,
     /// The server's recording of the session (M2 slice 5).
     pub replay: mftr_server::Replay,
+    /// Wall polygons of each client's map and of the server's (a custom map downloaded and
+    /// built the same).
+    pub client_walls: Vec<usize>,
+    pub server_walls: usize,
 }
 
 pub fn run(cfg: &LabConfig) -> LabResult {
     const STEP: f64 = 0.0005;
     let mut server = ServerCore::new(
-        ServerConfig { seed: cfg.seed, scenario: cfg.scenario, record: true, ..Default::default() },
+        ServerConfig {
+            seed: cfg.seed,
+            scenario: cfg.scenario,
+            record: true,
+            map: cfg.map.clone(),
+            ..Default::default()
+        },
         0.0,
     );
     let mut clients: Vec<LabClient> = (0..cfg.clients)
@@ -173,6 +185,14 @@ pub fn run(cfg: &LabConfig) -> LabResult {
                         c.next_hello = t + 0.25;
                     }
                 }
+                Phase::Map => {
+                    if t >= c.next_hello
+                        && let Some(p) = c.session.map_request_packet()
+                    {
+                        c.up.send(p, t);
+                        c.next_hello = t + 0.033;
+                    }
+                }
                 Phase::Joining => {}
                 Phase::Playing => {
                     match &mut c.bot {
@@ -208,6 +228,8 @@ pub fn run(cfg: &LabConfig) -> LabResult {
         tick_ms_mean: tick_cost / ticks_timed.max(1) as f64,
         tick_ms_max: tick_max,
         replay: server.game().replay(),
+        client_walls: clients.iter().map(|c| c.session.map().walls.len()).collect(),
+        server_walls: server.world().map().walls.len(),
     }
 }
 
@@ -232,6 +254,7 @@ mod tests {
             reaction: 0.25,
             margin_override: None,
             augments: None,
+            map: None,
         })
     }
 
@@ -254,6 +277,7 @@ mod tests {
                 reaction: 0.25,
                 margin_override: None,
                 augments: None,
+                map: None,
             })
             .summary
         };
@@ -302,6 +326,7 @@ mod tests {
             reaction: 0.25,
             margin_override: None,
             augments: None,
+            map: None,
         })
     }
 
@@ -332,6 +357,7 @@ mod tests {
             reaction,
             margin_override,
             augments: None,
+            map: None,
         })
         .summary
     }
@@ -366,6 +392,7 @@ mod tests {
             reaction: 0.25,
             margin_override: None,
             augments: None,
+            map: None,
         });
         assert_eq!(r.fog_violations, 0);
         assert!(r.fog_hidden > 10_000, "fog should be hiding things: {}", r.fog_hidden);
@@ -397,6 +424,7 @@ mod tests {
             reaction: 0.25,
             margin_override: None,
             augments: None,
+            map: None,
         });
         let s = &r.summary;
         assert_eq!(s.hard_resets, 0, "{}", s.row());
@@ -426,6 +454,7 @@ mod tests {
             reaction: 0.25,
             margin_override: None,
             augments: None,
+            map: None,
         });
         let s = &r.summary;
         assert_eq!(s.hard_resets, 0, "{}", s.row());
@@ -465,6 +494,7 @@ mod tests {
             reaction: 0.25,
             margin_override: None,
             augments: Some([24, 25, 26, 0]),
+            map: None,
         });
         let s = &r.summary;
         assert_eq!(s.hard_resets, 0, "{}", s.row());
@@ -480,6 +510,36 @@ mod tests {
 
     /// M2 slice 1: ARAM on The Bridge with 3v3 bots (waves, turrets, relics, fountains): stable
     /// prediction, nothing leaked through fog, and every bot both kills and dies.
+    /// 12 §4: a server hosting a custom map: every client downloads its text over a lossy link,
+    /// builds the same walls, and plays (no hard resets); the replay carries the map and
+    /// re-simulates.
+    #[test]
+    fn a_custom_map_downloads_and_plays() {
+        let text = mftr_sim::map::CROSSROADS_SPEC.replace("name Crossroads", "name Downloaded");
+        let r = run(&LabConfig {
+            profile: LinkProfile::MID,
+            clients: 4,
+            seconds: 20.0,
+            seed: 4,
+            fps: 60.0,
+            warmup: 3.0,
+            scenario: Scenario::Classic,
+            proxies: true,
+            reaction: 0.25,
+            margin_override: None,
+            augments: None,
+            map: Some(std::sync::Arc::from(text.as_str())),
+        });
+        assert!(r.server_walls > 100, "a traced map");
+        assert_eq!(r.client_walls, vec![r.server_walls; 4], "every client built the server's map");
+        assert_eq!(r.summary.hard_resets, 0, "{}", r.summary.row());
+        let replay = mftr_server::Replay::from_text(&r.replay.to_text()).expect("the replay reads");
+        assert!(replay.cfg.map.is_some(), "the map travels with the replay");
+        let check = replay.verify();
+        assert_eq!(check.mismatch, None);
+        assert_eq!(check.final_hash, r.server_hash);
+    }
+
     #[test]
     fn aram_bridge_runs_cleanly() {
         let r = run(&LabConfig {
@@ -494,6 +554,7 @@ mod tests {
             reaction: 0.25,
             margin_override: None,
             augments: None,
+            map: None,
         });
         let s = &r.summary;
         assert_eq!(s.hard_resets, 0, "{}", s.row());

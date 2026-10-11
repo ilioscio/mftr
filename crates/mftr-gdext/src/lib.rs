@@ -246,7 +246,7 @@ impl MatchClient {
         GString::from(match self.session.phase() {
             Phase::Connecting => "connecting",
             Phase::Lobby => "lobby",
-            Phase::Joining => "joining",
+            Phase::Map | Phase::Joining => "joining",
             Phase::Playing => "playing",
         })
     }
@@ -1751,6 +1751,13 @@ impl MatchClient {
                 let hello = self.session.hello_packet(now);
                 self.transmit(hello, now);
                 self.next_hello = now + 0.25;
+            }
+            // A custom map: about 30 requests a second, each answered with the next piece.
+            Phase::Map if now >= self.next_hello => {
+                if let Some(p) = self.session.map_request_packet() {
+                    self.transmit(p, now);
+                }
+                self.next_hello = now + 0.033;
             }
             Phase::Playing if self.session.should_send(now) => self.send_input(now),
             _ => {}
