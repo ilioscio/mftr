@@ -2,6 +2,7 @@
 //!
 //!   mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--warmup S] [--seed N] [--fps F]
 //!                     [--scenario empty|minions|dodge|duel] [--no-proxies] [--reaction S]
+//!   mftr-tools loadtest [--mode aram|mayhem|hyper|classic] [--matches N,N...] [--humans N] [--workers N,N...] [--seconds S]
 //!   mftr-tools bot --server HOST:PORT [--queue MODE[-coop]] [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]
 //!
 //!   mftr-tools blind-report FILE.tsv...
@@ -138,6 +139,30 @@ fn main() {
                 }
             );
         }
+        Some("loadtest") => {
+            // 13 §8: many matches in one hub, in process; what a server spends per match.
+            let scenario = match get("--mode").as_deref() {
+                None | Some("aram") => Scenario::Aram,
+                Some(name) => Scenario::by_name(name).unwrap_or_else(|| panic!("unknown mode {name}")),
+            };
+            let list = |name: &str, default: Vec<usize>| -> Vec<usize> {
+                get(name).map_or(default, |w| w.split(',').map(|n| n.parse().expect("N[,N...]")).collect())
+            };
+            println!("{}", mftr_tools::loadtest::LoadResult::header());
+            for m in list("--matches", vec![1, 4, 16]) {
+                for w in list("--workers", vec![1]) {
+                    let r = mftr_tools::loadtest::run(&mftr_tools::loadtest::LoadConfig {
+                        matches: m,
+                        humans: num("--humans", 10.0) as usize,
+                        scenario,
+                        seconds: num("--seconds", 30.0),
+                        workers: w,
+                        seed: num("--seed", 1.0) as u64,
+                    });
+                    println!("{}", r.row(w));
+                }
+            }
+        }
         Some("size-report") => {
             // M2 slice 6: sizes of what we ship against their budgets (exit 1 when over).
             let package = get("--client-package").map(std::path::PathBuf::from);
@@ -272,7 +297,8 @@ fn main() {
         _ => {
             eprintln!("usage: mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--seed N]");
             eprintln!(
-                "       mftr-tools bot --server HOST:PORT [--queue MODE[-coop]] [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]"
+                "       mftr-tools loadtest [--mode aram|mayhem|hyper|classic] [--matches N,N...] [--humans N] [--workers N,N...] [--seconds S]
+       mftr-tools bot --server HOST:PORT [--queue MODE[-coop]] [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]"
             );
             eprintln!("       mftr-tools blind-report FILE.tsv...");
             eprintln!("       mftr-tools pack validate FILE.glb|DIR...");

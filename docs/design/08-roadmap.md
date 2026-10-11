@@ -845,6 +845,21 @@ players.
   mid-match champion select, and playing after the takeover (level 3, 3 points to spend,
   1,897 gold, respawning on the bot's timer).
 
+### S slice 4 status (2026-10-11): ✅ done
+- **Worker threads:** matches tick on one shared grid (so they're due together) and step on
+  a pool of threads that live as long as the server (`--workers N`, default one per core). A
+  hub test checks four matches stepped on threads end exactly as stepped in turn. Threads
+  spawned per tick were barely faster: each new thread rebuilt pathfinding's scratch grid
+  (megabytes) before its first search.
+- **`mftr-tools loadtest`** runs many full matches in one hub with simulated players; 13 §8
+  has the numbers. 32 ARAM matches (320 players) take 8.6 ms of each 33 ms tick on one thread,
+  3.7 ms on eight; a match costs 0.8% of a core (ARAM) or 3.2% (Classic), about twice that
+  with sockets and encryption on a real server, and 8.5 KB/s per player.
+- **Found:** pathfinding is what a match costs, and Classic's (1.7 ms a path on Crossroads)
+  makes the start of a test match hitch when ten clicks land in one tick. Next for scale.
+- The server log reports tick time against the 33 ms budget instead of a share of a core.
+- NixOS hosts one server (slice 1).
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

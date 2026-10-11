@@ -6,8 +6,10 @@ use crate::{ClientKey, Scenario, ServerConfig, ServerCore, ServerStats};
 use mftr_net::PROTOCOL_VERSION;
 use mftr_net::msg::{self, ClientMessage, QueueInfo, RejectReason, ServerMessage};
 use mftr_net::packet::{PacketHeader, SendTracker};
+use mftr_sim::TICK_DT_F64;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 /// The modes a hosted server offers (13 §1): full matches only.
 pub const HOSTED_MODES: [Scenario; 4] = [Scenario::Aram, Scenario::Mayhem, Scenario::Hyper, Scenario::Classic];
@@ -74,6 +76,8 @@ pub struct HubConfig {
     /// Instances running at once, at most (13 §2: past it, players are told the server is
     /// busy).
     pub max_matches: usize,
+    /// Threads that step instances (13 §5); 1 steps them in turn.
+    pub workers: usize,
 }
 
 /// One match instance.
@@ -85,6 +89,60 @@ pub struct Instance {
     /// When it was created: server clock, and Unix seconds (replay file names).
     pub created: f64,
     pub created_unix: u64,
+}
+
+type Packets = Vec<(ClientKey, Vec<u8>)>;
+
+/// Threads that step matches (13 §5). They live as long as the hub, so what a thread keeps
+/// between ticks (pathfinding's scratch grid, megabytes) is built once, not every tick. Each
+/// tick the due matches are handed over and come back stepped.
+struct Pool {
+    jobs: Vec<Sender<(Vec<Instance>, f64)>>,
+    done: Receiver<(Vec<Instance>, Packets)>,
+}
+
+impl Pool {
+    fn new(workers: usize) -> Self {
+        let (done_tx, done) = channel();
+        let jobs = (0..workers)
+            .map(|n| {
+                let (tx, rx) = channel::<(Vec<Instance>, f64)>();
+                let done_tx = done_tx.clone();
+                std::thread::Builder::new()
+                    .name(format!("mftr-matches-{n}"))
+                    .spawn(move || {
+                        for (mut batch, now) in rx {
+                            let out: Packets = batch.iter_mut().flat_map(|i| i.core.step(now)).collect();
+                            if done_tx.send((batch, out)).is_err() {
+                                break;
+                            }
+                        }
+                    })
+                    .expect("a worker thread");
+                tx
+            })
+            .collect();
+        Self { jobs, done }
+    }
+
+    /// Step `due` (all at `now`), spread over the workers; returns them and their packets.
+    fn step(&self, due: Vec<Instance>, now: f64) -> (Vec<Instance>, Packets) {
+        let n = self.jobs.len().min(due.len());
+        let mut batches: Vec<Vec<Instance>> = (0..n).map(|_| Vec::new()).collect();
+        for (i, inst) in due.into_iter().enumerate() {
+            batches[i % n].push(inst);
+        }
+        for (job, batch) in self.jobs.iter().zip(batches) {
+            job.send((batch, now)).expect("a worker stopped");
+        }
+        let (mut back, mut out) = (Vec::new(), Vec::new());
+        for _ in 0..n {
+            let (batch, packets) = self.done.recv().expect("a match's step panicked");
+            back.extend(batch);
+            out.extend(packets);
+        }
+        (back, out)
+    }
 }
 
 /// A connection that hasn't picked a queue yet.
@@ -102,6 +160,8 @@ pub struct Hub {
     next_id: u32,
     /// Instances that stopped since `take_stopped` (their replays).
     stopped: Vec<Instance>,
+    /// With more than one worker.
+    pool: Option<Pool>,
     /// Packets handled before a connection was placed.
     pub stats: ServerStats,
 }
@@ -111,13 +171,14 @@ impl Hub {
         assert!(!cfg.queues.is_empty(), "a server offers at least one queue");
         assert!(cfg.queues.len() <= msg::MAX_QUEUES, "at most {} queues", msg::MAX_QUEUES);
         Self {
-            cfg,
             instances: Vec::new(),
             routes: BTreeMap::new(),
             front: BTreeMap::new(),
             next_id: 1,
             stopped: Vec::new(),
+            pool: (cfg.workers > 1).then(|| Pool::new(cfg.workers)),
             stats: ServerStats::default(),
+            cfg,
         }
     }
 
@@ -228,7 +289,9 @@ impl Hub {
         };
         let created_unix =
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        self.instances.push(Instance { id, queue, core: ServerCore::new(cfg, now), created: now, created_unix });
+        // Every instance ticks on the same grid, so they're due together and step in parallel.
+        let start = (now / TICK_DT_F64).ceil() * TICK_DT_F64;
+        self.instances.push(Instance { id, queue, core: ServerCore::new(cfg, start), created: now, created_unix });
         id
     }
 
@@ -269,15 +332,29 @@ impl Hub {
         self.instances.iter().map(|i| i.core.next_tick_due()).min_by(f64::total_cmp)
     }
 
-    /// Step every instance whose tick is due, then stop those nobody plays for any more
-    /// (13 §5).
+    /// Step every instance whose tick is due (spread over the workers), then stop those
+    /// nobody plays for any more (13 §5).
     pub fn step(&mut self, now: f64) -> Vec<(ClientKey, Vec<u8>)> {
         let mut out = Vec::new();
-        for inst in &mut self.instances {
-            if now >= inst.core.next_tick_due() {
-                out.extend(inst.core.step(now));
+        let (due, waiting): (Vec<Instance>, Vec<Instance>) =
+            std::mem::take(&mut self.instances).into_iter().partition(|i| now >= i.core.next_tick_due());
+        self.instances = waiting;
+        match &self.pool {
+            // Handing a match over costs a few microseconds: worth it from two on.
+            Some(pool) if due.len() >= 2 => {
+                let (back, packets) = pool.step(due, now);
+                self.instances.extend(back);
+                out = packets;
+            }
+            _ => {
+                for mut inst in due {
+                    out.extend(inst.core.step(now));
+                    self.instances.push(inst);
+                }
             }
         }
+        // Oldest first, whichever thread stepped them.
+        self.instances.sort_by_key(|i| i.id);
         let (gone, kept): (Vec<Instance>, Vec<Instance>) =
             std::mem::take(&mut self.instances).into_iter().partition(|i| i.core.abandoned(now));
         self.instances = kept;
@@ -313,10 +390,15 @@ mod tests {
     use mftr_net::msg::{decode_server, encode_client};
 
     fn hub(max_matches: usize) -> Hub {
+        hub_with(max_matches, 2)
+    }
+
+    fn hub_with(max_matches: usize, workers: usize) -> Hub {
         Hub::new(HubConfig {
             queues: hosted_queues(&HOSTED_MODES, &[]),
             base: ServerConfig { max_players: 10, bots: 10, lobby: true, ..Default::default() },
             max_matches,
+            workers,
         })
     }
 
@@ -390,6 +472,41 @@ mod tests {
         let Some(ServerMessage::Lobby(l)) = msgs.first() else { panic!("{msgs:?}") };
         assert!(l.midgame);
         assert_eq!(hub.instances().len(), 1);
+    }
+
+    /// 13 §5: matches share one tick grid and step on worker threads, with exactly the same
+    /// results as stepping them in turn.
+    #[test]
+    fn workers_step_matches_identically() {
+        let run = |workers: usize| {
+            let mut hub = hub_with(8, workers);
+            assert_eq!(hub.pool.is_some(), workers > 1);
+            let aram = queue_index(&hub, Scenario::Aram, false);
+            let ready = encode_client(&PacketHeader::default(), &ClientMessage::Lobby(msg::LobbyAction::Ready(true)));
+            for key in 1..=40 {
+                hub.handle_packet(key, &hello(Some(aram), 0, false), key as f64 * 0.013);
+                hub.handle_packet(key, &ready, key as f64 * 0.013);
+            }
+            assert_eq!(hub.instances().len(), 4);
+            let mut t = 0.6;
+            let mut fanned_out = false;
+            while t < 8.0 {
+                t += 1.0 / 30.0;
+                let due = hub.instances().iter().filter(|i| t >= i.core.next_tick_due()).count();
+                fanned_out |= due == 4;
+                hub.step(t);
+                for key in 1..=40 {
+                    if (t * 30.0) as u32 % 30 == key as u32 % 30 {
+                        hub.handle_packet(key, &hello(Some(aram), 0, false), t);
+                    }
+                }
+            }
+            assert!(fanned_out, "the matches tick together");
+            hub.instances().iter().map(|i| (i.core.world().tick(), i.core.world().state_hash())).collect::<Vec<_>>()
+        };
+        let one = run(1);
+        assert!(one.iter().all(|(tick, _)| tick.0 > 60), "{one:?}");
+        assert_eq!(one, run(4));
     }
 
     /// 13 §2: in co-op, five humans fill blue and the sixth opens another instance; in

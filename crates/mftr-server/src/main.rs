@@ -3,7 +3,7 @@
 //! server runs match instances of it, creating and stopping them as players come and go.
 //!
 //! Usage: mftr-server [--bind 0.0.0.0:7777] [--key FILE] [--seed N] [--modes aram,mayhem,hyper,classic]
-//!                    [--map FILE.mftrmap]... [--max-matches N] [--replay DIR]
+//!                    [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR]
 //!        mftr-server --scenario NAME [--bots N] [--lobby] [--max-players N] [--map FILE.mftrmap] [...]
 //!        mftr-server [--key FILE] --fingerprint
 //!
@@ -14,7 +14,8 @@
 //! By default the server offers every full-match mode (ARAM, Mayhem, Hyper, Classic), each
 //! Versus and Co-op vs bots, with champion select and bots in every seat a human doesn't take;
 //! `--modes` narrows the list. Each `--map FILE` (from the map editor) adds Classic on that
-//! map. `--max-matches N` caps the instances running at once. `--replay DIR` records every
+//! map. `--max-matches N` caps the instances running at once; `--workers N` threads step them
+//! (default: one per core). `--replay DIR` records every
 //! match into DIR (rewritten every minute and when a match ends); check one with
 //! `mftr-tools replay FILE`.
 //!
@@ -31,7 +32,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem,hyper,classic] [--map FILE.mftrmap]... [--max-matches N] [--replay DIR]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]";
+const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem,hyper,classic] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]";
 /// Instances running at once, by default.
 const MAX_MATCHES: usize = 32;
 
@@ -100,6 +101,7 @@ fn main() -> std::io::Result<()> {
     let mut modes: Option<Vec<Scenario>> = None;
     let mut maps: Vec<(String, Arc<str>)> = Vec::new();
     let mut max_matches = MAX_MATCHES;
+    let mut workers: Option<usize> = None;
     let (mut bots, mut lobby, mut max_players) = (None, false, None);
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -120,6 +122,7 @@ fn main() -> std::io::Result<()> {
             "--max-matches" => {
                 max_matches = args.next().and_then(|v| v.parse().ok()).expect("--max-matches needs a number")
             }
+            "--workers" => workers = Some(args.next().and_then(|v| v.parse().ok()).expect("--workers needs a number")),
             "--scenario" => {
                 let name = args.next().expect("--scenario needs a name");
                 scenario = Some(Scenario::by_name(&name).unwrap_or_else(|| panic!("unknown scenario {name}\n{USAGE}")));
@@ -202,14 +205,16 @@ fn main() -> std::io::Result<()> {
 
     let clock = Instant::now();
     let now = || clock.elapsed().as_secs_f64();
-    let mut hub = Hub::new(HubConfig { queues, base, max_matches });
+    let workers = workers.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
+    let mut hub = Hub::new(HubConfig { queues, base, max_matches, workers });
     let mut secure = SecureServer::new(identity);
     let mut peers = Peers::default();
     let mut buf = [0u8; 2048];
     let mut last_expire = now();
     let mut last_report = now();
-    let mut busy = 0.0f64;
-    let mut step_max = 0.0f64;
+    // Time spent stepping the matches each tick (all of them, on every worker), against the
+    // tick's 33 ms.
+    let (mut busy, mut steps, mut step_max) = (0.0f64, 0u32, 0.0f64);
     // Per instance: when its replay was last written, and whether its match had a winner.
     let mut saves: HashMap<u32, (f64, bool)> = HashMap::new();
     let mut seen: HashMap<u32, f64> = HashMap::new();
@@ -246,6 +251,7 @@ fn main() -> std::io::Result<()> {
             send_all(&socket, &mut secure, &peers, out);
             let cost = started.elapsed().as_secs_f64();
             busy += cost;
+            steps += 1;
             step_max = step_max.max(cost);
         }
 
@@ -294,19 +300,19 @@ fn main() -> std::io::Result<()> {
                 let bots: usize = hub.instances().iter().map(|i| i.core.bot_count()).sum();
                 let s = hub.stats(true);
                 println!(
-                    "matches {}  players {humans} (+{bots} bots)  cmds {} (late {}, dropped {})  in {:.1} KB/s  out {:.1} KB/s  busy {:.1}% of a core (step max {:.2} ms)",
+                    "matches {}  players {humans} (+{bots} bots)  cmds {} (late {}, dropped {})  in {:.1} KB/s  out {:.1} KB/s  tick {:.2} ms (max {:.2}) of {:.0}",
                     hub.instances().len(),
                     s.commands,
                     s.commands_late,
                     s.commands_dropped,
                     s.bytes_in as f64 / 1024.0 / span,
                     s.bytes_out as f64 / 1024.0 / span,
-                    busy / span * 100.0,
+                    busy * 1e3 / steps.max(1) as f64,
                     step_max * 1e3,
+                    mftr_sim::TICK_DT_F64 * 1e3,
                 );
             }
-            busy = 0.0;
-            step_max = 0.0;
+            (busy, steps, step_max) = (0.0, 0, 0.0);
             last_report = t;
         }
 

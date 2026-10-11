@@ -65,7 +65,10 @@ A spectator picks a queue too and watches its busiest instance.
   a dropped seat) stops. One whose humans have all dropped stops 60 s after the last one did,
   so a solo player with a flaky connection can still come back.
 - When a match ends, its players go back to champion select together, as today.
-- Instances step in parallel on worker threads (one per core).
+- Instances tick on one shared grid, so they're due together, and step in parallel on a pool
+  of worker threads (one per core by default, `--workers N`). The threads live as long as the
+  server: what a thread keeps between ticks (pathfinding's scratch grid, megabytes) is built
+  once. The results are exactly those of stepping the matches in turn.
 - Each one's replay is written to the replay directory as
   `<started>-<queue>-<instance>.replay`.
 
@@ -90,4 +93,36 @@ NixOS: one `services.mftr` server (§ hosting.md) replaces `services.mftr.server
 
 ## 8. Measurements
 
-To be filled in by slice 4.
+`mftr-tools loadtest` runs many full matches in one hub, in process: ten simulated players per
+match click around the whole map (moves and stops, 3–8 clicks a second in bursts) while server
+bots fight in the other seats. It times only the server's work (no sockets or encryption).
+Measured on a 16-thread desktop (release build, Windows), 20 s per run:
+
+| Mode | Matches | Workers | Time per tick (avg / worst) | Share of one core | Per match | Down per player |
+|---|---|---|---|---|---|---|
+| ARAM | 1 | 1 | 0.25 / 13 ms | 0.8% | 0.8% | 8.1 KB/s |
+| ARAM | 8 | 1 | 2.1 / 30 ms | 6.2% | 0.8% | 8.2 KB/s |
+| ARAM | 8 | 8 | 1.5 / 27 ms | (wall) 4.4% | | 8.2 KB/s |
+| ARAM | 32 | 1 | 8.6 / 37 ms | 26% | 0.8% | 8.3 KB/s |
+| ARAM | 32 | 8 | 3.7 / 30 ms | (wall) 11% | | 8.3 KB/s |
+| Classic | 1 | 1 | 1.1 / 80 ms | 3.2% | 3.2% | 8.5 KB/s |
+| Classic | 8 | 1 | 9.1 / 130 ms | 28% | 3.4% | 8.6 KB/s |
+
+A real server (encrypted UDP on loopback) with two full ARAM matches of headless clients used
+3.1% of one core in all, about 1.6% per match: sockets and encryption double the in-process
+cost. It sent 172 KB/s (8.6 KB/s per player) and its ticks took 0.7 ms (worst 2.5 ms).
+
+What it means:
+- **The simulation is cheap; players cost.** Ten bots alone simulate an ARAM tick in 0.015 ms
+  and a Classic one in 0.034 ms. A match's cost is its players' snapshots (vision, deltas,
+  encoding) and above all **pathfinding** for their clicks: a path to a random point averages
+  0.4 ms on The Bridge and 1.7 ms on Crossroads (worst 10 ms), on grids of 425² and 580² cells.
+- **Spikes come from clicks landing together.** Each test match has one big tick, when all ten
+  players' first clicks arrive at once and ten long paths are searched out of the fountain
+  (13 ms on The Bridge; 80 ms on Crossroads). Afterwards an ARAM match stays under 4 ms. Real
+  players don't click in lockstep, but Classic's pathfinding is the first thing to speed up
+  (a coarser or hierarchical grid, or jump-point search) before a server hosts many Classic
+  matches; it changes the paths, so it's a simulation change.
+- **Capacity:** per core, about 60 ARAM matches or 25 Classic ones (with networking, against
+  the 33 ms tick). Bandwidth: 85 KB/s per match (0.7 Mbit/s), so a 100 Mbit/s uplink carries
+  about 140 matches. On a small VPS, bandwidth or the default `--max-matches 32` comes first.

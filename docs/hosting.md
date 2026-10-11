@@ -146,6 +146,7 @@ Players pinned the old servers' keys, so keep the one on the port they know with
 | `--modes LIST` | `aram,mayhem,hyper,classic` | What players can pick, each Versus or Co-op vs bots. `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM: Mayhem, ARAM with augment drafts. `hyper`: Mayhem under Hyper rules (+300 ability haste on Q, W and E, +50% attack speed). `classic`: Classic 5v5 on Crossroads, three lanes and a jungle (M4, in progress). |
 | `--map FILE` | none | Add Classic on a map from the map editor (`*.mftrmap`); repeat for more maps. The server checks each at start (and refuses a map that breaks a rule, listing what's wrong); players download it as they join (a few hundred milliseconds), and replays carry it. |
 | `--max-matches N` | `32` | Matches running at once, at most. Past it, a player who'd need a new match is told the server is busy, and their client keeps asking. |
+| `--workers N` | one per core | Threads that step the matches. |
 | `--seed N` | `1` | Seeds everything random (each match draws its own seed from it). |
 | `--replay DIR` | off | Record every match into DIR, as `<started>-<queue>-<match>.replay`. A file is rewritten every minute, when its match ends and when it stops. |
 | `--scenario NAME` | | For development: offer this one scenario instead, any of the above or `duel` (the Duel Sandbox), `minions`, `dodge`, `empty` (test grounds). With it, `--bots N` adds server bots (they count toward `--max-players N`, default 10) and `--lobby` holds champion select first. |
@@ -188,16 +189,17 @@ copy them out with `docker compose -f deploy/compose.yaml cp mftr:/data/replays 
 
 ## What it costs
 
-Measured in the Netcode Lab (one ARAM match, 10 players at 80 ms):
+Measured with `mftr-tools loadtest` and a real server ([13 §8](design/13-server-instances.md#8-measurements)):
 
-| | Per match | 10 matches on one machine |
+| | Per match (10 players) | 32 matches on one machine |
 |---|---|---|
-| CPU | 0.18 ms per 33 ms tick (about 0.5% of one core) | about 5% of one core |
-| Upload | about 105 KB/s (10.5 KB/s per player) | about 8.5 Mbit/s |
+| CPU | about 1.6% of one core for ARAM, about 4% for Classic (with sockets and encryption) | ARAM: about half a core; spread over every core (`--workers`) |
+| Upload | about 85 KB/s (8.5 KB/s per player) | about 22 Mbit/s |
 | Memory | a few MB (more with `--replay`, about 5 MB per hour) | |
 
-A 1-vCPU VPS holds several matches; a 4-core one holds ten with plenty of room. They all share
-the one process and port; `--max-matches` caps them.
+A 1-vCPU VPS holds a few dozen ARAM matches, or about 20 Classic ones; bandwidth usually runs
+out first. They all share the one process and port; `--max-matches` caps them, and
+`--workers N` sets how many threads step them (default: one per core).
 
 ## Troubleshooting
 
@@ -207,7 +209,8 @@ the one process and port; `--max-matches` caps them.
   server key that differs from the pinned one.
 - **"Every match of this kind is full":** the server runs `--max-matches` matches already. The
   client keeps asking and joins once a match stops; raise the limit if the machine has room
-  (the log's `busy` figure is the share of one core the matches use).
+  (the log's `tick` figure is the time all matches take per tick, against the 33 ms a tick
+  has: keep the max well under it).
 - **Bots don't move in champion select:** they wait for the match to start. Someone has to join
   and ready up, or wait out the 60 s countdown once a human has joined.
 - **No replay files:** a match's file is written once a minute; in Docker, the directory must
