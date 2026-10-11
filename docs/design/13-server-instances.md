@@ -64,6 +64,10 @@ A spectator picks a queue too and watches its busiest instance.
 - An instance with no humans (connected, in champion select, choosing a champion, or holding
   a dropped seat) stops. One whose humans have all dropped stops 60 s after the last one did,
   so a solo player with a flaky connection can still come back.
+- On a `--scenario` server (development) a spectator can watch bots alone: a match starts for
+  them if none runs, and it keeps running while anyone watches. When its bots take every seat
+  (`--bots` counts toward `--max-players`), a player is told the server is full; no match is
+  started for them.
 - When a match ends, its players go back to champion select together, as today.
 - Instances tick on one shared grid, so they're due together, and step in parallel on a pool
   of worker threads (one per core by default, `--workers N`). The threads live as long as the

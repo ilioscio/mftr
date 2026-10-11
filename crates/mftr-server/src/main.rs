@@ -21,7 +21,8 @@
 //!
 //! `--scenario NAME` (duel, aram, mayhem, hyper, classic, minions, dodge, empty) offers that
 //! scenario alone, for development: `--bots N` adds server bots (they count toward
-//! `--max-players`), `--lobby` holds champion select first.
+//! `--max-players`), `--lobby` holds champion select first. Spectators can watch bots alone
+//! there: a match starts for them, and runs while anyone watches.
 
 use mftr_net::secure::{Fingerprint, Identity, Received, SecureServer};
 use mftr_server::hub::{self, HOSTED_MODES};
@@ -206,7 +207,8 @@ fn main() -> std::io::Result<()> {
     let clock = Instant::now();
     let now = || clock.elapsed().as_secs_f64();
     let workers = workers.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
-    let mut hub = Hub::new(HubConfig { queues, base, max_matches, workers });
+    let development = scenario.is_some();
+    let mut hub = Hub::new(HubConfig { queues, base, max_matches, workers, development });
     let mut secure = SecureServer::new(identity);
     let mut peers = Peers::default();
     let mut buf = [0u8; 2048];
