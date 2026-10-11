@@ -15,6 +15,7 @@ pub mod items;
 pub mod jungle;
 pub mod lane;
 pub mod map;
+pub mod mapspec;
 pub mod math;
 pub mod projectile;
 pub mod rng;

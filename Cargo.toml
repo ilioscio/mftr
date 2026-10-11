@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.10.0"
+version = "0.10.1"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 rust-version = "1.88"
@@ -25,6 +25,11 @@ mftr-pack = { path = "crates/mftr-pack" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# The simulation optimized in dev builds too: debug clients build maps (map editor) and step the
+# sim at playable speed.
+[profile.dev.package.mftr-sim]
+opt-level = 2
 
 [profile.release]
 debug = "line-tables-only"

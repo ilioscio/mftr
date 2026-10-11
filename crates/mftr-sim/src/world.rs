@@ -755,7 +755,8 @@ impl UnitState {
             arrives = false;
             used = tau;
         }
-        let new_pos = constrained_move(self.pos, delta, radius, obstacles, map.edges());
+        let near = map.edges_within(self.pos, delta.length() + radius + 2.0);
+        let new_pos = constrained_move(self.pos, delta, radius, obstacles, &near);
         let achieved = (new_pos - self.pos).length();
         self.pos = new_pos;
         if arrives && new_pos == target {
@@ -788,7 +789,8 @@ impl UnitState {
         let len = rest.length();
         let step = d.speed * dt;
         let delta = if step >= len { rest } else { d.dir * step };
-        self.pos = constrained_move(self.pos, delta, radius, &[], map.edges());
+        let near = map.edges_within(self.pos, delta.length() + radius + 2.0);
+        self.pos = constrained_move(self.pos, delta, radius, &[], &near);
     }
 
     /// Bit-exact equality: what prediction reconciliation compares.
@@ -3817,7 +3819,8 @@ fn update_stuck(state: &mut UnitState, desired: f32, achieved: f32, radius: f32,
         return;
     }
     let reach = 2.0 * (radius + 35.0);
-    state.detour = choose_detour(state.pos, goal, radius, reach, obstacles, map.edges());
+    let near = map.edges_within(state.pos, reach + radius + 2.0);
+    state.detour = choose_detour(state.pos, goal, radius, reach, obstacles, &near);
 }
 
 #[cfg(test)]

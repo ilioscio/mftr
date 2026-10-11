@@ -730,6 +730,55 @@ With A14 every champion in the roster has a model, clips, effects and sounds.
 - **Not yet:** sweep and reveal visuals, ward timers on the minimap, and the support item's wards (slice 7).
  Red wins 4 of 5 seeds, on The Bridge as well as Crossroads: the bots' fixed champion split (blue gets the even-numbered champions) is the likely cause, not the map.
 
+## E — Map editor (before M4 slice 5)
+The map editor of [12](12-map-editor.md) (D56): the official 5v5 map is drawn with it, and
+servers can host community maps. It comes before the epic objectives, which need the map's
+objective pits.
+
+### E slices (in order of dependency)
+1. Map specs: the text format, building walls from lines (traced, smoothed, turned), validation, a spec for today's Crossroads, `mftr-tools map svg FILE`.
+2. The editor: the canvas, every tool, validation shown live, files, the dev overlay.
+3. Actual view: the built map with its scenery, in the editor.
+4. Hosting maps: `--map FILE`, the spec sent to players as they join.
+5. The official Classic map: the owner's exported map, built in.
+
+### E slice 1 status (2026-10-10): ✅ done
+- `mapspec.rs`: the text format, the builder and validation.
+  - The builder turns lines into wavy-edged capsules on a 25 u grid and turns them onto red's half; ground cut off from the base becomes wall. Walls are traced per tile into simple polygons, then smoothed and simplified.
+  - Validation checks lanes, connectivity, jungle size, camps, objective pairs and that nothing stands in a wall.
+- Crossroads is now built from `maps/crossroads.mftrmap`, a starter layout after the reference 5v5 map's structure. `mftr-tools map svg FILE` renders any map file and prints its problems.
+- Speed:
+  - Collision sweeps and detours look only at nearby wall edges, walls keep bounding boxes, and A* reuses its bookkeeping (identical results).
+  - A 30-minute Classic bot match simulates in 6.5 s.
+  - Dev builds compile the sim optimized.
+
+### E slice 2 status (2026-10-10): ✅ done
+- **The editor** (main menu → Map editor, or `--map-editor`):
+  - A canvas of blue's half with red's turned and shaded. Zoom, pan and fit.
+  - Tools: lane, river, jungle path, tall grass, clearing, camp (each kind) and great objective (with its twin).
+  - Select and move: line points, camps, clearings, objectives, and turrets along their lane. Width and radius sliders; Delete and Ctrl+Z.
+  - Every change is rebuilt and checked by the game's own code (`MftrMaps`), so the canvas shows the walls the game will build, and the problems panel lists what still breaks the rules.
+  - Files: new, open, save, save as, export (only without problems), and the built-in Crossroads as a starting point.
+- **Reference image:** load any image to trace over, with opacity and corner handles to align it. `--dev-overlay FILE` opens the editor on it. The reference 5v5 render starts pre-aligned to the map square.
+- `client/tests/map_editor_test.gd` runs the editor headless: drawing, placing, dragging, deleting, undo and the saved text.
+
+### E slice 3 status (2026-10-10): ✅ done
+- **Half-turn maps:** red's half is blue's turned half a turn about the center, not mirrored across the river. As in the reference 5v5 map, blue's top-side camps are red's bottom side.
+  - Lanes pair down the river line: top with bottom, a middle lane with itself. Each runs on into its partner's turned half; the editor snaps paired ends together and a middle lane's end to the center, and validation checks they meet.
+  - Each objective's pit now has its twin objective in the matching pit, instead of an empty mirror.
+- **Actual view** (and `--editor-actual`, `--editor-angle` for captures): the editor shows the map as the game draws it, from straight above or from the game's camera angle, following the canvas's zoom and pan.
+  - `map_view.gd` builds a map's world (ground, roads, river, cliffs, brush, scenery, fountains) for both a match and the editor, so they can't drift apart; prop loading moved there too.
+  - Structures and camps stand on it.
+- **Scenery** indexes its walls (bounding boxes, edges facing open ground in buckets, seams inside rock ignored): Crossroads' dressing builds in 180 ms instead of 2.3 s.
+
+### E slice 4 status (2026-10-11): ✅ done
+- **Hosting maps:** `mftr-server --scenario classic --map FILE` plays a map file from the editor. The server checks it at start and refuses one that breaks a rule, listing the problems. NixOS: `services.mftr.servers.<name>.map`.
+- **Downloading** (protocol 20; message kinds are 3 bits now):
+  - The welcome names a custom map by hash and length. The client asks for it piece by piece (`MapRequest` from byte N; the server answers each with a `MapChunk` of up to 900 bytes, about 30 requests a second).
+  - It checks the hash and builds the map with the server's own code before joining. Snapshots wait meanwhile; nothing on the server tracks a download.
+- **Replays** carry their custom map, so they still re-simulate.
+- A netlab test hosts a custom map for 4 clients over the MID link: every client builds the server's walls, nobody hard-resets, and the replay re-simulates exactly. A real client joined a hosted map file.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

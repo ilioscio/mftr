@@ -85,6 +85,7 @@ var minion_models := {}                  # A5: minion kind -> its MftrModel (or 
 var corpses := []
 const MINION_LIFT := -0.45               # minion bodies sit at y 0.45 (the capsule's center)
 const MINION_SLOTS := ["skin", "cloth", "metal", "emissive", "accent", "accent_glow"]
+const MapView := preload("res://scripts/map_view.gd")
 var use_models := true
 var hovered_body: Node3D = null
 const TURN_RATE := deg_to_rad(4500.0)    # 10 §3: a 180° turn in ~40 ms
@@ -113,6 +114,7 @@ func _ready() -> void:
 	# The UI theme goes into the engine's default theme: our panels live under CanvasLayers,
 	# which a theme set on the window wouldn't reach.
 	ThemeDB.get_default_theme().merge_with(preload("res://scripts/ui_theme.gd").build())
+	MapView.art_root = _art_root()
 	_build_world()
 	_build_backdrop()
 	_load_champion_model()
@@ -205,6 +207,16 @@ func _ready() -> void:
 			_shot_recall = true
 		elif args[i] == "--shot-claim":
 			_shot_claim = true
+		elif args[i] == "--map-editor":
+			_start_editor = true
+		elif args[i] == "--editor-actual":
+			_editor_actual = true
+		elif args[i] == "--editor-angle":
+			_editor_actual = true
+			_editor_angle = true
+		elif args[i] == "--dev-overlay" and i + 1 < args.size():
+			_dev_overlay = args[i + 1]
+			i += 1
 		elif args[i] == "--shot-ward":
 			_shot_ward = true
 		elif args[i] == "--shot-goto" and i + 1 < args.size():
@@ -239,7 +251,9 @@ func _ready() -> void:
 		i += 1
 	if blind_enabled:
 		_menu_mode = 2
-	if address == "" or _back_to_menu:
+	if _start_editor:
+		_open_map_editor.call_deferred()
+	elif address == "" or _back_to_menu:
 		_back_to_menu = false
 		_show_menu("")
 	else:
@@ -335,6 +349,10 @@ var _shot_numbers := false                # `--shot-numbers`: sample damage numb
 var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
 var _shot_recall := false                 # `--shot-recall`: walk out, then recall 3 s before the shot
 var _shot_claim := false                 # `--shot-claim`: take Claim in F at the start
+var _start_editor := false               # `--map-editor`: open the map editor at start
+var _editor_actual := false              # `--editor-actual`: …in its Actual view (captures)
+var _editor_angle := false               # `--editor-angle`: …from the game's camera angle
+var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's reference image
 var _shot_ward := false                  # `--shot-ward`: place a stealth ward ahead at 2.5 s
 var _shot_goto = null                     # `--shot-goto X,Y`: walk there (game units) from 2 s on
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
@@ -1618,131 +1636,38 @@ func _build_map() -> void:
 	_map_built = true
 	var geo: Dictionary = client.map_geometry()
 	var size: Vector2 = geo.size
-	_size_ground(size, 2600.0)
-	ground.layers = MAP_LAYERS
 	_build_minimap(geo)
 	atmosphere = preload("res://scripts/atmosphere.gd").new()
 	add_child(atmosphere)
 	atmosphere.setup(size / 2.0 * UNITS_TO_METERS)
-	# The dressing: forest, rocks, tall grass (art/props), where the packs are present.
-	var dressing := preload("res://scripts/scenery.gd").new()
-	dressing.name = "Scenery"
-	add_child(dressing)
-	dressing.build(geo, func(id: String):
-		var model := _prop_model(id)
-		if model == null:
-			return null
-		var mats := _prop_materials(model, Color.WHITE, true)
-		for m in mats:
-			m.set_shader_parameter("sway", 0.05 if id.begins_with("grass") else (0.012 if id.begins_with("pine") else 0.0))
-		return [model.static_mesh(), mats])
-	for c in dressing.get_children():
-		c.layers = MAP_LAYERS
+	# The world: ground, roads, river, cliffs, brush, scenery, fountains (shared with the map
+	# editor's Actual view).
+	var view: Node3D = MapView.new()
+	view.name = "MapView"
+	add_child(view)
+	view.build(geo, ground, ALLY_COLOR, ENEMY_COLOR)
+	_road_segments = view.road_segments
 	if geo.fountains.size() == 2:
-		# A lane map: roads down its lanes (one from fountain to fountain on The Bridge), and
-		# the river if it has one.
 		var a: Vector2 = geo.fountains[0].center
 		var b: Vector2 = geo.fountains[1].center
-		var gm: ShaderMaterial = ground.material_override
-		gm.set_shader_parameter("lane_mode", 1.0)
-		var roads: Array = geo.get("roads", [])
-		_road_segments = _segments(roads)
-		gm.set_shader_parameter("roads", _road_segments)
-		gm.set_shader_parameter("road_count", _road_segments.size())
-		gm.set_shader_parameter("lane_width", 13.0 if roads.size() <= 1 else 9.5)
-		var river := _segments([geo.get("river", PackedVector2Array())])
-		gm.set_shader_parameter("river", river)
-		gm.set_shader_parameter("river_count", river.size())
 		_lane_axis = [a, (b - a).normalized()]
-	for f in geo.fountains:
-		# The spawn platform (a prop the size of the fountain's circle), else a tinted disk.
-		var platform := _prop_node("fountain", ALLY_COLOR if f.ally else ENEMY_COLOR)
-		if platform != null:
-			platform.position = Vector3(f.center.x * UNITS_TO_METERS, 0.0, f.center.y * UNITS_TO_METERS)
-			platform.scale = Vector3.ONE * (f.radius / 600.0)
-			platform.layers = MAP_LAYERS
-			add_child(platform)
-			continue
-		var disk := MeshInstance3D.new()
-		var cyl := CylinderMesh.new()
-		cyl.top_radius = f.radius * UNITS_TO_METERS
-		cyl.bottom_radius = cyl.top_radius
-		cyl.height = 0.04
-		disk.mesh = cyl
-		disk.material_override = _unshaded(ALLY_COLOR if f.ally else ENEMY_COLOR, 0.18)
-		disk.position = Vector3(f.center.x * UNITS_TO_METERS, 0.02, f.center.y * UNITS_TO_METERS)
-		add_child(disk)
-	var wall_mat := ShaderMaterial.new()
-	wall_mat.shader = load("res://shaders/wall.gdshader")
-	var brush_mat := ShaderMaterial.new()
-	brush_mat.shader = load("res://shaders/brush.gdshader")
-	for poly in geo.walls:
-		if _prop_model("rock_1") != null and preload("res://scripts/scenery.gd").is_outcrop(poly):
-			continue  # drawn as a rock cluster by the scenery
-		var wall := _extrude(poly, 1.4, wall_mat)
-		wall.layers = MAP_LAYERS
-		add_child(wall)
-	# Tall grass props fill the brush when they're present; else a swaying block of brush.
-	if _prop_model("grass_1") == null:
-		for poly in geo.brush:
-			var b := _extrude(poly, 0.55, brush_mat)
-			b.layers = MAP_LAYERS
-			add_child(b)
 	_render_minimap_terrain()
-
-
-## CSGPolygon3D extrudes along local -Z; rotating +90° about X lays the polygon on the ground
-## (x, y) -> world (x, 0, y) and extrudes upward.
-func _extrude(poly: PackedVector2Array, height: float, mat: Material) -> CSGPolygon3D:
-	var pts := PackedVector2Array()
-	for p in poly:
-		pts.append(p * UNITS_TO_METERS)
-	var csg := CSGPolygon3D.new()
-	csg.polygon = pts
-	csg.mode = CSGPolygon3D.MODE_DEPTH
-	csg.depth = height
-	csg.rotation_degrees = Vector3(90, 0, 0)
-	csg.material = mat
-	return csg
 
 
 ## ---- Map props (art/props: structures, trees, rocks) ------------------------------------------
 ## Static models from packs, validated like the champions (11 §4), drawn with the prop shader.
 
-var _prop_models := {}                    # id -> MftrModel (or null without a pack)
-
-
 func _prop_model(id: String) -> MftrModel:
-	if not _prop_models.has(id):
-		var path := _art_path("props/%s/export/%s.glb" % [id, id])
-		_prop_models[id] = MftrModel.load(path) if FileAccess.file_exists(path) else null
-	return _prop_models[id]
+	return MapView.prop_model(id)
 
 
 func _prop_materials(model: MftrModel, team: Color, tinted := false) -> Array:
-	var mats := []
-	for slot in model.surface_slots():
-		var m := ShaderMaterial.new()
-		m.shader = load("res://shaders/prop.gdshader")
-		m.set_shader_parameter("slot", MINION_SLOTS.find(slot))
-		m.set_shader_parameter("team_accent", team)
-		m.set_shader_parameter("instance_tint", tinted)
-		mats.append(m)
-	return mats
+	return MapView.prop_materials(model, team, tinted)
 
 
 ## One prop as a node (null without its pack).
 func _prop_node(id: String, team: Color) -> MeshInstance3D:
-	var model := _prop_model(id)
-	if model == null:
-		return null
-	var n := MeshInstance3D.new()
-	n.mesh = model.static_mesh()
-	var mats := _prop_materials(model, team)
-	for i in mats.size():
-		n.set_surface_override_material(i, mats[i])
-	n.set_meta("prop_mats", mats)
-	return n
+	return MapView.prop_node(id, team)
 
 
 ## A structure from its prop (turned to face down the lane when placed); null without one.
@@ -4549,6 +4474,11 @@ func _show_menu(error: String) -> void:
 		err.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4))
 		v.add_child(err)
 	v.add_child(HSeparator.new())
+	var editor := Button.new()
+	editor.text = "Map editor"
+	editor.tooltip_text = "Draw lane maps: lanes, river, jungle and camps; export one for a server to host."
+	editor.pressed.connect(_open_map_editor)
+	v.add_child(editor)
 	var quit := Button.new()
 	quit.text = "Quit"
 	quit.pressed.connect(func(): get_tree().quit())
@@ -4563,6 +4493,20 @@ func _show_menu(error: String) -> void:
 			_menu_auto_join = false
 			await get_tree().create_timer(1.0).timeout
 			_menu_join(servers[0].get("address", ""))
+
+
+## The map editor (12), over everything; closing it brings the menu back.
+func _open_map_editor() -> void:
+	if menu_panel != null:
+		menu_panel.queue_free()
+		menu_panel = null
+	var editor: Control = preload("res://scripts/map_editor.gd").new()
+	overlay.get_parent().add_child(editor)
+	if _dev_overlay != "":
+		editor.call_deferred("set_overlay_file", _dev_overlay)
+	if _editor_actual:
+		editor.call_deferred("show_actual_view", _editor_angle)
+	editor.closed.connect(func(): _show_menu(""))
 
 
 func _menu_join(address: String) -> void:
@@ -4663,19 +4607,6 @@ var _icon_refresh := 0.0
 const MAP_LAYERS := 3
 var _terrain_pending := false
 var _dump_terrain := ""                   # --dump-terrain FILE: save the minimap's render
-
-
-## Polylines (game units) as the ground shader's segments (meters), at most 48.
-func _segments(polylines: Array) -> PackedVector4Array:
-	var out := PackedVector4Array()
-	for line in polylines:
-		var pts: PackedVector2Array = line
-		for i in range(1, pts.size()):
-			if out.size() < 48:
-				var a := pts[i - 1] * UNITS_TO_METERS
-				var b := pts[i] * UNITS_TO_METERS
-				out.append(Vector4(a.x, a.y, b.x, b.y))
-	return out
 
 
 ## The direction (blue to red) of the road segment nearest `p` (game units).

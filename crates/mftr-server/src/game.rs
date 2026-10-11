@@ -69,7 +69,14 @@ pub struct Match {
 impl Match {
     pub fn new(cfg: ServerConfig) -> Self {
         let mut world = World::new(cfg.seed);
-        world.set_map(cfg.scenario.map().shared());
+        match &cfg.map {
+            // A custom map (checked when the server started).
+            Some(text) => {
+                let spec = mftr_sim::mapspec::MapSpec::parse(text).expect("the map file reads");
+                world.set_map(std::sync::Arc::new(mftr_sim::mapspec::build(&spec, mftr_sim::map::MapId::Custom)));
+            }
+            None => world.set_map(cfg.scenario.map().shared()),
+        }
         match cfg.scenario {
             Scenario::Aram => world.set_rules(mftr_sim::world::Rules::ARAM),
             Scenario::Mayhem => world.set_rules(mftr_sim::world::Rules::MAYHEM),
@@ -281,6 +288,12 @@ impl Replay {
             c.arena_max,
             c.scenario.name()
         );
+        // A custom map travels with its replay.
+        if let Some(text) = &c.map {
+            let _ = writeln!(s, "map-begin");
+            s += text.trim_end();
+            let _ = writeln!(s, "\nmap-end");
+        }
         for e in &self.entries {
             match e {
                 ReplayEntry::Join { tick, player, champion } => {
@@ -335,9 +348,27 @@ impl Replay {
             arena_min: num(f[5])? as f32,
             arena_max: num(f[6])? as f32,
             scenario: Scenario::by_name(f[7]).ok_or(format!("scenario {}", f[7]))?,
+            map: None,
         };
+        let mut cfg = cfg;
         let mut entries: Vec<ReplayEntry> = Vec::new();
+        let mut map_text: Option<String> = None;
         for (n, line) in lines.enumerate() {
+            // The custom map's lines, between map-begin and map-end.
+            if let Some(text) = &mut map_text {
+                if line == "map-end" {
+                    cfg.map = Some(std::sync::Arc::from(std::mem::take(text).as_str()));
+                    map_text = None;
+                } else {
+                    text.push_str(line);
+                    text.push('\n');
+                }
+                continue;
+            }
+            if line == "map-begin" {
+                map_text = Some(String::new());
+                continue;
+            }
             let bad = || format!("line {}: {line}", n + 3);
             let f: Vec<&str> = line.split_whitespace().collect();
             let int = |i: usize| f.get(i).and_then(|v| v.parse::<u64>().ok()).ok_or_else(bad);

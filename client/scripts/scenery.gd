@@ -15,6 +15,11 @@ const OUTSIDE_U := 1700.0                 # how far the forest reaches past the 
 const CLIFF_M := 1.4
 
 var _walls: Array = []
+var _boxes: Array = []                    # each wall's bounding box
+## Wall edges that face open ground (not seams inside rock), bucketed by EDGE_CELL.
+const EDGE_CELL := 600.0
+const NEAR := 900.0                       # how far edge searches look (scenery cares about less)
+var _edge_cells := {}                     # Vector2i -> Array of [a, b]
 var _size := Vector2.ZERO
 # A lane map's axis (from blue's fountain to red's), and the unit vector across it pointing
 # toward the camera (screen down, +y).
@@ -32,6 +37,7 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 	var size: Vector2 = geo.size
 	var walls: Array = geo.walls
 	_walls = walls
+	_index_walls(walls, size)
 	_size = size
 	var brush: Array = geo.brush
 	var fountains: Array = geo.get("fountains", [])
@@ -150,27 +156,62 @@ static func is_outcrop(poly: PackedVector2Array) -> bool:
 	return r.size.x < 500.0 and r.size.y < 500.0
 
 
-## How far `p` is inside unwalkable ground (in a wall, or off the map), or 0 if it's walkable.
-func _edge_distance(p: Vector2, walls: Array, size: Vector2) -> float:
-	var outside := p.x < 0 or p.y < 0 or p.x > size.x or p.y > size.y
-	var inside_wall := false
+## Index the walls: bounding boxes, and their edges that face open ground (both sides of a seam
+## between two traced pieces are rock) in buckets, so queries look only nearby.
+func _index_walls(walls: Array, size: Vector2) -> void:
+	_boxes.clear()
+	_edge_cells.clear()
 	for poly in walls:
-		if Geometry2D.is_point_in_polygon(p, poly):
-			inside_wall = true
-			break
-	if not outside and not inside_wall:
-		return 0.0
-	# The distance to the nearest wall edge or map edge that borders walkable ground.
-	var best := INF
+		_boxes.append(_bounds(poly).grow(1.0))
 	for poly in walls:
 		var n: int = poly.size()
 		for i in n:
-			var c := Geometry2D.get_closest_point_to_segment(p, poly[i], poly[(i + 1) % n])
-			if c.x > 1.0 and c.y > 1.0 and c.x < size.x - 1.0 and c.y < size.y - 1.0:
+			var a: Vector2 = poly[i]
+			var b: Vector2 = poly[(i + 1) % n]
+			var mid := (a + b) / 2.0
+			if mid.x <= 1.0 or mid.y <= 1.0 or mid.x >= size.x - 1.0 or mid.y >= size.y - 1.0:
+				continue  # along the map's edge
+			var normal := (b - a).orthogonal().normalized() * 20.0
+			if _inside_wall(mid + normal) and _inside_wall(mid - normal):
+				continue  # a seam inside rock
+			var lo := Vector2i(floori(minf(a.x, b.x) / EDGE_CELL), floori(minf(a.y, b.y) / EDGE_CELL))
+			var hi := Vector2i(floori(maxf(a.x, b.x) / EDGE_CELL), floori(maxf(a.y, b.y) / EDGE_CELL))
+			for cy in range(lo.y, hi.y + 1):
+				for cx in range(lo.x, hi.x + 1):
+					var key := Vector2i(cx, cy)
+					if not _edge_cells.has(key):
+						_edge_cells[key] = []
+					_edge_cells[key].append([a, b])
+
+
+func _inside_wall(p: Vector2) -> bool:
+	for i in _walls.size():
+		var box: Rect2 = _boxes[i]
+		if box.has_point(p) and Geometry2D.is_point_in_polygon(p, _walls[i]):
+			return true
+	return false
+
+
+## How far `p` is inside unwalkable ground (in a wall, or off the map), or 0 if it's walkable.
+## Looks for open ground within NEAR; farther counts as deep inside (9999).
+func _edge_distance(p: Vector2, _walls_unused: Array, size: Vector2) -> float:
+	var outside := p.x < 0 or p.y < 0 or p.x > size.x or p.y > size.y
+	if not outside and not _inside_wall(p):
+		return 0.0
+	var best := INF
+	var lo := Vector2i(floori((p.x - NEAR) / EDGE_CELL), floori((p.y - NEAR) / EDGE_CELL))
+	var hi := Vector2i(floori((p.x + NEAR) / EDGE_CELL), floori((p.y + NEAR) / EDGE_CELL))
+	for cy in range(lo.y, hi.y + 1):
+		for cx in range(lo.x, hi.x + 1):
+			for e in _edge_cells.get(Vector2i(cx, cy), []):
+				var c := Geometry2D.get_closest_point_to_segment(p, e[0], e[1])
 				best = minf(best, p.distance_to(c))
-	if best == INF and outside:
-		best = _out_distance(p, size)  # no walls (open maps): the distance past the map's edge
-	return best if best < INF else 9999.0
+	if outside:
+		# Past the map's edge: open ground just inside it counts too.
+		var q := p.clamp(Vector2.ONE, size - Vector2.ONE)
+		if not _inside_wall(q):
+			best = minf(best, _out_distance(p, size))
+	return best if best <= NEAR else 9999.0
 
 
 func _out_distance(p: Vector2, size: Vector2) -> float:
@@ -182,8 +223,9 @@ func _out_distance(p: Vector2, size: Vector2) -> float:
 ## The ground's height under `p`: cliff tops (inside a wall, not an outcrop) stand CLIFF_M high.
 ## A lane map's walls reach well past its edges, so the land beyond is cliff too.
 func _height_at(p: Vector2) -> float:
-	for poly in _walls:
-		if not is_outcrop(poly) and Geometry2D.is_point_in_polygon(p, poly):
+	for i in _walls.size():
+		var box: Rect2 = _boxes[i]
+		if box.has_point(p) and not is_outcrop(_walls[i]) and Geometry2D.is_point_in_polygon(p, _walls[i]):
 			return CLIFF_M
 	return 0.0
 

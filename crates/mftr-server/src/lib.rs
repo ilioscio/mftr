@@ -140,6 +140,9 @@ pub struct ServerConfig {
     pub arena_min: f32,
     pub arena_max: f32,
     pub scenario: Scenario,
+    /// A custom map's text (`*.mftrmap`, 12 §4) to play instead of the scenario's map; sent to
+    /// each player as they join.
+    pub map: Option<std::sync::Arc<str>>,
 }
 
 impl Default for ServerConfig {
@@ -153,6 +156,7 @@ impl Default for ServerConfig {
             arena_min: 500.0,
             arena_max: 3500.0,
             scenario: Scenario::Empty,
+            map: None,
         }
     }
 }
@@ -479,6 +483,33 @@ impl ServerCore {
                     self.queue.push(c);
                 }
             }
+            ClientMessage::MapRequest { hash, have } => {
+                // A piece of the custom map, to players and those in champion select only.
+                let Some(text) = self.cfg.map.clone() else { return out };
+                if mftr_sim::mapspec::text_hash(&text) != hash || have as usize > text.len() {
+                    return out;
+                }
+                let header = if let Some(conn) = self.conns.get_mut(&from) {
+                    conn.last_heard = now;
+                    Self::header(conn)
+                } else if let Some(p) = self.pending.get_mut(&from) {
+                    p.last_heard = now;
+                    PacketHeader::default()
+                } else {
+                    return out;
+                };
+                let start = have as usize;
+                let end = (start + msg::MAP_CHUNK_BYTES).min(text.len());
+                let chunk = ServerMessage::MapChunk {
+                    hash,
+                    total: text.len() as u32,
+                    offset: have,
+                    bytes: text.as_bytes()[start..end].to_vec(),
+                };
+                let bytes = msg::encode_server(&header, &chunk);
+                self.stats.bytes_out += bytes.len() as u64;
+                out.push((from, bytes));
+            }
             ClientMessage::Bye => {
                 if let Some(p) = self.pending.remove(&from)
                     && let Some(lobby) = &mut self.lobby
@@ -538,6 +569,7 @@ impl ServerCore {
             token: conn.token,
             spectator: conn.spectator,
             mode: self.cfg.scenario.mode(),
+            map_spec: self.cfg.map.as_ref().map(|t| (mftr_sim::mapspec::text_hash(t), t.len() as u32)),
         };
         let conn = self.conns.get_mut(&key)?;
         let h = Self::header(conn);
