@@ -730,6 +730,18 @@ With A14 every champion in the roster has a model, clips, effects and sounds.
 - **Not yet:** sweep and reveal visuals, ward timers on the minimap, and the support item's wards (slice 7).
  Red wins 4 of 5 seeds, on The Bridge as well as Crossroads: the bots' fixed champion split (blue gets the even-numbered champions) is the likely cause, not the map.
 
+## E — Map editor (before M4 slice 5)
+The map editor of [12](12-map-editor.md) (D56): the official 5v5 map is drawn with it, and
+servers can host community maps. It comes before the epic objectives, which need the map's
+objective pits.
+
+### E slices (in order of dependency)
+1. Map specs: the text format, building walls from lines (traced, smoothed, mirrored), validation, a spec for today's Crossroads, `mftr-tools map svg FILE`.
+2. The editor: the canvas, every tool, validation shown live, files, the dev overlay.
+3. Actual view: the built map with its scenery, in the editor.
+4. Hosting maps: `--map FILE`, the spec sent to players as they join.
+5. The official Classic map: the owner's exported map, built in.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

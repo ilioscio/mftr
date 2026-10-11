@@ -7,7 +7,7 @@
 //!   mftr-tools blind-report FILE.tsv...
 //!   mftr-tools pack validate FILE.glb|DIR...
 //!   mftr-tools sfx build [sounds.ron|DIR...]   (default: art)
-//!   mftr-tools map svg open|arena|bridge|crossroads   (an SVG of the layout, on stdout)
+//!   mftr-tools map svg open|arena|bridge|crossroads|FILE.mftrmap   (an SVG of the layout, on stdout)
 //!
 //! Profiles: perfect, lan, good, typical, mid, rough, awful.
 
@@ -252,9 +252,20 @@ fn main() {
         }
         Some("map") if args.get(1).map(String::as_str) == Some("svg") => {
             // A map's layout, for design review: `mftr-tools map svg crossroads > crossroads.svg`.
+            // A built-in map by name, or a map file (`*.mftrmap`), its problems on stderr.
             let name = args.get(2).map(String::as_str).unwrap_or("crossroads");
-            let id = mftr_tools::mapsvg::by_name(name).unwrap_or_else(|| panic!("unknown map {name}"));
-            print!("{}", mftr_tools::mapsvg::render(&id.build()));
+            let map = match mftr_tools::mapsvg::by_name(name) {
+                Some(id) => id.build(),
+                None => {
+                    let text = std::fs::read_to_string(name).unwrap_or_else(|e| panic!("{name}: {e}"));
+                    let spec = mftr_sim::mapspec::MapSpec::parse(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
+                    for p in mftr_sim::mapspec::problems(&spec) {
+                        eprintln!("problem: {p}");
+                    }
+                    mftr_sim::mapspec::build(&spec, mftr_sim::map::MapId::Custom)
+                }
+            };
+            print!("{}", mftr_tools::mapsvg::render(&map));
         }
         _ => {
             eprintln!("usage: mftr-tools netlab [--profile NAME|all] [--clients N] [--seconds S] [--seed N]");

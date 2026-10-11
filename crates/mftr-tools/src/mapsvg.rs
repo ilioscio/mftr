@@ -60,6 +60,13 @@ pub fn render(map: &Map) -> String {
             );
         }
     }
+    for c in &map.layout.camps {
+        let _ = writeln!(
+            s,
+            r##"<circle cx="{}" cy="{}" r="140" fill="#e8b84a" stroke="#000" stroke-width="15"/>"##,
+            c.pos.x, c.pos.y
+        );
+    }
     for p in &map.layout.placements {
         let (r, label) = match p.kind {
             UnitKind::Turret => (110.0, format!("{}{}", ["T", "M", "B"].get(p.lane as usize).unwrap_or(&"?"), p.tier)),
