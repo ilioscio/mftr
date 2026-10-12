@@ -634,6 +634,11 @@ impl ClientSession {
         self.issue(CommandKind::Sell(slot), now)
     }
 
+    /// Swap inventory slots `a` and `b` (dragging an item on the bar). Predicted.
+    pub fn swap_items(&mut self, a: u8, b: u8, now: f64) -> Option<Command> {
+        self.issue(CommandKind::SwapItems { a, b }, now)
+    }
+
     /// Undo the last buy or sell (while the shop is still open).
     pub fn undo_trade(&mut self, now: f64) -> Option<Command> {
         self.issue(CommandKind::Undo, now)

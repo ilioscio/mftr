@@ -528,6 +528,7 @@ fn kind_text(k: CommandKind) -> String {
         CommandKind::UseTrinket(q) => format!("trinket {} {}", q.x, q.y),
         CommandKind::UseItemAt { slot, target } => format!("useat {slot} {} {}", target.x, target.y),
         CommandKind::ChooseTrinket(k) => format!("pick-trinket {k}"),
+        CommandKind::SwapItems { a, b } => format!("swap {a} {b}"),
     }
 }
 
@@ -554,6 +555,7 @@ fn parse_kind(f: &[&str]) -> Option<CommandKind> {
         "trinket" => CommandKind::UseTrinket(q(1)?),
         "useat" => CommandKind::UseItemAt { slot: n(1)? as u8, target: q(2)? },
         "pick-trinket" => CommandKind::ChooseTrinket(n(1)? as u8),
+        "swap" => CommandKind::SwapItems { a: n(1)? as u8, b: n(2)? as u8 },
         _ => return None,
     })
 }

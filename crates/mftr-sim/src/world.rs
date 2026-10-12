@@ -387,6 +387,20 @@ impl Progress {
         (self.level, self.items, self.augments, growth)
     }
 
+    /// Swap two inventory slots and their charges. The undo history swaps them too, so undoing
+    /// a trade afterwards keeps the new arrangement.
+    pub fn swap_items(&mut self, a: usize, b: usize) {
+        if a >= INVENTORY || b >= INVENTORY || a == b {
+            return;
+        }
+        self.items.swap(a, b);
+        self.charges.swap(a, b);
+        for t in &mut self.undo[..self.undo_len as usize] {
+            t.items.swap(a, b);
+            t.charges.swap(a, b);
+        }
+    }
+
     fn push_trade(&mut self, t: Trade) {
         if self.undo_len as usize == UNDO {
             self.undo.copy_within(1.., 0);
@@ -1139,6 +1153,12 @@ pub enum CommandKind {
     },
     /// Take trinket `wards::TRINKET_*` (while shopping).
     ChooseTrinket(u8),
+    /// Swap inventory slots `a` and `b` (0–5), charges with them: rearranging the item bar,
+    /// anywhere and any time.
+    SwapItems {
+        a: u8,
+        b: u8,
+    },
 }
 
 /// Swapping the F spell puts it on at least this cooldown.
@@ -2727,6 +2747,7 @@ fn apply_command(
             }
         }
         CommandKind::Buy(_) | CommandKind::Sell(_) | CommandKind::Undo => shop(unit, c.kind, map, rules),
+        CommandKind::SwapItems { a, b } => st.progress.swap_items(a as usize, b as usize),
         CommandKind::UseItem(slot) => use_item(unit, slot, t),
         CommandKind::BuyAnvil if rules.augments && may_shop => {
             let p = &mut st.progress;
@@ -5597,6 +5618,32 @@ mod tests {
         sandbox.unit_mut(me).unwrap().state.progress.gold = 5000.0;
         sandbox.step(&[shop(0, 1, 1, CommandKind::Buy(LONG_KNIFE))]);
         assert_eq!(sandbox.unit(me).unwrap().state.progress.items, [0; INVENTORY]);
+    }
+
+    /// Items rearrange anywhere (out of the fountain too), charges with them, and a later undo
+    /// keeps the new arrangement.
+    #[test]
+    fn items_swap_slots_and_undo_keeps_the_order() {
+        use crate::items::*;
+        let mut w = ranked_world();
+        w.set_map(MapId::Bridge.shared());
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, bridge_point(Vec2::new(400.0, 1500.0)));
+        w.step(&[shop(0, 1, 1, CommandKind::Buy(LONG_KNIFE)), shop(0, 2, 1, CommandKind::Buy(HEALTH_POTION))]);
+        let p = w.unit(me).unwrap().state.progress;
+        assert_eq!((p.items, p.charges), ([LONG_KNIFE, HEALTH_POTION, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0]));
+        w.step(&[shop(0, 3, 2, CommandKind::SwapItems { a: 1, b: 4 })]);
+        let p = w.unit(me).unwrap().state.progress;
+        assert_eq!((p.items, p.charges), ([LONG_KNIFE, 0, 0, 0, HEALTH_POTION, 0], [0, 0, 0, 0, 1, 0]));
+        // Undoing the potion takes it from its new slot; the knife stays put.
+        w.step(&[shop(0, 4, 3, CommandKind::Undo)]);
+        assert_eq!(w.unit(me).unwrap().state.progress.items, [LONG_KNIFE, 0, 0, 0, 0, 0]);
+        // Out of the fountain too; bad slots do nothing.
+        w.unit_mut(me).unwrap().state.pos = bridge_point(Vec2::new(3000.0, 1500.0));
+        w.step(&[
+            shop(0, 5, 4, CommandKind::SwapItems { a: 0, b: 5 }),
+            shop(0, 6, 4, CommandKind::SwapItems { a: 5, b: 9 }),
+        ]);
+        assert_eq!(w.unit(me).unwrap().state.progress.items, [0, 0, 0, 0, 0, LONG_KNIFE]);
     }
 
     /// Item stats and passives change combat numbers exactly (02 §5, §7, §8, §10): flat AD,

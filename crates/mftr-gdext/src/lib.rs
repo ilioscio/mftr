@@ -603,6 +603,20 @@ impl MatchClient {
         }
     }
 
+    /// Swap inventory slots `a` and `b` (0–5): an item dragged on the bar.
+    #[func]
+    fn swap_items(&mut self, a: i64, b: i64) {
+        let now = self.now();
+        let slots = 0..INVENTORY as i64;
+        if slots.contains(&a)
+            && slots.contains(&b)
+            && a != b
+            && self.session.swap_items(a as u8, b as u8, now).is_some()
+        {
+            self.send_input(now);
+        }
+    }
+
     /// Every item: `{ id, name, cost, price (with owned components), tier, stats (text),
     /// recipe (ids), affordable, owned }`, in catalog order.
     #[func]
