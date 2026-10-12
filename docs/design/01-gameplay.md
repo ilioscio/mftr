@@ -228,10 +228,10 @@ edges, at a speed the player sets; Esc closes settings, then the shop, then open
 |---|---|
 | Move | Right-click ground (hold to keep moving toward the cursor) |
 | Attack | Right-click enemy |
-| Attack-move | A + left click, or "attack-move on right-click" option |
+| Attack-move | A + left click, or Shift + right click (its own binding) |
 | Abilities | Q W E R |
 | Utility spells | D F |
-| Items / trinket | 1–6 / T (as built: 1–6 use an item's active, a potion or a control ward at the cursor; T uses the trinket at the cursor) |
+| Items / trinket | 1–6 / T (as built: 1–6 use an item's active, a potion or a control ward at the cursor; T uses the trinket at the cursor; drag an item on the bar to another slot to rearrange them, any time) |
 | Match breakdown | Tab (hold): laid out like the reference game's, teams side by side and mirrored, kills and turrets on top; every champion's augments, spells, level, respawn timer, minions killed, K/D/A and items, all with tooltips |
 | Spectators: next champion | N |
 | Stop | S |

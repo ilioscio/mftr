@@ -67,6 +67,7 @@ const Windows := preload("res://scripts/windows.gd")
 const GameCursor := preload("res://scripts/cursor.gd")
 const AugmentIcons := preload("res://scripts/augment_icons.gd")
 var _item_boxes: Array[Rect2] = []        # the HUD's inventory slots this frame
+var _item_drag := -1                      # the inventory slot being dragged (-1: none)
 var _augment_rows := []                   # [Rect2, augment] above the HUD, for hover
 var show_net_graph := false             # F1: the full network graph (the HUD shows fps and ping)
 var proxies_enabled := true
@@ -1130,6 +1131,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif menu_panel == null:
 			_toggle_pause_menu()
 		return
+	if _item_drag >= 0 and event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT and not event.is_pressed():
+		# An item dropped: on another slot, the two trade places (an empty one takes it).
+		var to := _item_slot_at(overlay.get_local_mouse_position())
+		if to >= 0 and to != _item_drag:
+			client.swap_items(_item_drag, to)
+		_item_drag = -1
+		return
 	if menu_panel != null or (pause_panel != null and pause_panel.visible):
 		return
 	if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_MIDDLE:
@@ -1138,12 +1146,26 @@ func _unhandled_input(event: InputEvent) -> void:
 	if blind_panel != null and blind_panel.visible:
 		return  # rating between rounds: the game ignores input
 	if event is InputEventMouseButton and event.is_pressed() and _bar_rect.has_point(overlay.get_local_mouse_position()):
-		# Clicks on the ability bar are the bar's: a "+" levels its ability, the rest do nothing
-		# (they mustn't walk the champion under the HUD).
+		# Clicks on the ability bar are the bar's: a "+" levels its ability, an item can be
+		# dragged to another slot, the rest do nothing (they mustn't walk the champion under the HUD).
 		if (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+			var m := overlay.get_local_mouse_position()
 			for slot in _level_buttons:
-				if _level_buttons[slot].has_point(overlay.get_local_mouse_position()):
+				if _level_buttons[slot].has_point(m):
 					client.level_up(slot)
+			var from := _item_slot_at(m)
+			var inv: Array = own_status.get("items", [])
+			if from >= 0 and from < inv.size() and inv[from] != 0 and not client.is_spectator():
+				_item_drag = from
+		return
+	# Shift + right click (by default): attack-move at the cursor. Matched exactly and before
+	# "move", which a right click with Shift held matches too.
+	if event.is_action_pressed("attack_move_click", false, true):
+		attack_move_armed = false
+		var p = _cursor_ground()
+		if p != null:
+			client.attack_move(p)
+			_show_click_marker(_to_world(p), ENEMY_COLOR)
 		return
 	if event.is_action_pressed("move"):
 		attack_move_armed = false
@@ -2685,7 +2707,7 @@ func _update_ability_tip() -> void:
 			else:
 				ability_tip.show_custom("tab:aug:%s" % data.name, func(t: RichTextLabel): _augment_tooltip(t, data), rect, overlay.size)
 			return
-	if slot < 0 and not own_status.is_empty() and overlay.visible:
+	if slot < 0 and not own_status.is_empty() and overlay.visible and _item_drag < 0:
 		var m := overlay.get_local_mouse_position()
 		for i in _item_boxes.size():
 			var id: int = own_status.items[i] if i < own_status.items.size() else 0
@@ -3804,6 +3826,14 @@ func _draw_shop_tree() -> void:
 			_shop_tree.draw_colored_polygon(PackedVector2Array([tip + Vector2(-14, 0), tip, tip + Vector2(0, 14)]), Color(0.45, 0.85, 0.5))
 
 
+## The inventory slot (0–5) under `at` on the HUD, or -1.
+func _item_slot_at(at: Vector2) -> int:
+	for i in _item_boxes.size():
+		if _item_boxes[i].has_point(at):
+			return i
+	return -1
+
+
 func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 	if item_names.is_empty():
 		ItemIcons.art_root = _art_root()
@@ -3814,6 +3844,9 @@ func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 	var charges: Array = own_status.get("charges", [])
 	var I := Vector2(43.0, 43.0) * k
 	var gap := 5.0 * k
+	var mouse := overlay.get_local_mouse_position()
+	if _item_drag >= 0 and (not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or inv[_item_drag] == 0):
+		_item_drag = -1  # released where the game never heard it (over a window), or the item is gone
 	_item_boxes.clear()
 	for slot in 6:
 		var p := origin + Vector2((slot % 3) * (I.x + gap), (slot / 3) * (I.y + gap))
@@ -3821,12 +3854,15 @@ func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 		var id: int = inv[slot]
 		overlay.draw_rect(box, Color(0.075, 0.085, 0.105))
 		if id != 0 and _catalog.has(id):
-			# The item's icon, square, centered in the slot.
+			# The item's icon, square, centered in the slot (faded while it's being dragged).
 			var side := minf(box.size.x, box.size.y)
-			overlay.draw_texture_rect(ItemIcons.icon(_catalog[id]), Rect2(box.get_center() - Vector2(side, side) / 2.0, Vector2(side, side)), false)
+			var fade := Color(1, 1, 1, 0.3) if slot == _item_drag else Color.WHITE
+			overlay.draw_texture_rect(ItemIcons.icon(_catalog[id]), Rect2(box.get_center() - Vector2(side, side) / 2.0, Vector2(side, side)), false, fade)
 		elif id != 0:
 			overlay.draw_multiline_string(font, p + Vector2(4.0 * k, 15.0 * k), item_names.get(id, "?"), HORIZONTAL_ALIGNMENT_CENTER, I.x - 8.0 * k, roundi(11.0 * k), 2, Hud.TEXT)
 		overlay.draw_rect(box, Hud.GOLD if id != 0 else Color(0.25, 0.27, 0.31), false, 1.0 * k)
+		if _item_drag >= 0 and slot != _item_drag and box.has_point(mouse):
+			overlay.draw_rect(box.grow(1.0 * k), Color(1.0, 0.92, 0.65), false, 2.0 * k)  # the drop target
 		_item_boxes.append(box)
 		# Its key in the corner, and a stack's or a flask's charges.
 		var key: String = settings.primary_binding("item_%d" % (slot + 1))
@@ -3867,6 +3903,9 @@ func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 		if a.has("progress"):
 			Hud.text(overlay, font, Vector2(r.position.x, r.end.y - 2.0 * k), a.progress, roundi(10.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x - 2.0 * k)
 		_augment_rows.append([r, a])
+	# The dragged item, under the cursor, over everything else.
+	if _item_drag >= 0 and _catalog.has(inv[_item_drag]):
+		overlay.draw_texture_rect(ItemIcons.icon(_catalog[inv[_item_drag]]), Rect2(mouse - I / 2.0, I), false, Color(1, 1, 1, 0.85))
 
 
 ## ---- Session, champion select and spectating (M2 slice 5) --------------------------------------

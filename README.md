@@ -37,12 +37,13 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The start menu 
 | Input | Action |
 |---|---|
 | Right-click ground / enemy | Move / attack |
-| A, then left-click | Attack-move |
+| A, then left-click, or Shift + right-click | Attack-move |
 | Q W E R | Abilities, cast at the cursor (skillshot, delayed area, dash or blink, hard-CC skillshot) |
 | D / F | Blink / Barrier |
 | Ctrl + Q / W / E / R | Spend an ability point (ARAM) |
 | P | Shop (ARAM: buy while dead or in your fountain) |
 | S | Stop |
+| Drag an item on the bar | Rearrange your items (any time) |
 | F1 / F2 | Net graph / client collision proxies (to feel the difference) |
 | F3 | Champion models / placeholder shapes |
 

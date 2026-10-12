@@ -24,7 +24,7 @@ var mute_in_background := true           # silence while the window isn't focuse
 var window_positions := {}               # window name -> [x, y] as fractions of the screen
 
 ## Rebindable actions, in the order the settings list them: [action, label, default].
-## A default is a key name with modifiers (`Alt+Q`) or a mouse button (`Mouse Right`); an action
+## A default is a key or mouse button with modifiers (`Alt+Q`, `Shift+Mouse Right`); an action
 ## may have several, separated by " / ". Level-ups take Ctrl too: Alt+R is also the NVIDIA and
 ## AMD overlays' hotkey, which some players' drivers swallow before the game sees it.
 const BINDINGS := [
@@ -40,6 +40,7 @@ const BINDINGS := [
 	["level_r", "Level up R", "Alt+R / Ctrl+R"],
 	["move", "Move / attack", "Mouse Right"],
 	["attack_move", "Attack-move (then click)", "A"],
+	["attack_move_click", "Attack-move at the cursor", "Shift+Mouse Right"],
 	["stop", "Stop", "S"],
 	["recall", "Recall (8 s home)", "B"],
 	["trinket", "Trinket: ward at the cursor / sweep", "T"],
@@ -154,13 +155,16 @@ func apply_bindings() -> void:
 				InputMap.action_add_event(action, ev)
 
 
-## `Alt+Q`, `Ctrl+Shift+F5`, `Space`, `Mouse Right`, `None` → an input event (null for None).
+## `Alt+Q`, `Ctrl+Shift+F5`, `Space`, `Shift+Mouse Right`, `None` → an input event (null for None).
 static func event_from_text(text: String) -> InputEvent:
 	if text == "" or text == "None":
 		return null
-	if text.begins_with("Mouse "):
+	var parts := text.split("+")
+	var last := parts[parts.size() - 1]
+	var ev: InputEventWithModifiers
+	if last.begins_with("Mouse "):
 		var mb := InputEventMouseButton.new()
-		match text.substr(6):
+		match last.substr(6):
 			"Left":
 				mb.button_index = MOUSE_BUTTON_LEFT
 			"Right":
@@ -173,50 +177,56 @@ static func event_from_text(text: String) -> InputEvent:
 				mb.button_index = MOUSE_BUTTON_XBUTTON2
 			_:
 				return null
-		return mb
-	var k := InputEventKey.new()
-	var parts := text.split("+")
+		ev = mb
+	else:
+		var code := OS.find_keycode_from_string(last)
+		if code == KEY_NONE:
+			return null
+		var k := InputEventKey.new()
+		k.physical_keycode = code
+		ev = k
 	for i in parts.size() - 1:
 		match parts[i]:
 			"Alt":
-				k.alt_pressed = true
+				ev.alt_pressed = true
 			"Ctrl":
-				k.ctrl_pressed = true
+				ev.ctrl_pressed = true
 			"Shift":
-				k.shift_pressed = true
-	var code := OS.find_keycode_from_string(parts[parts.size() - 1])
-	if code == KEY_NONE:
-		return null
-	k.physical_keycode = code
-	return k
+				ev.shift_pressed = true
+	return ev
 
 
 ## The text for a captured event (modifiers first), or "" for one that can't be a binding.
 static func text_from_event(ev: InputEvent) -> String:
+	var name := ""
 	if ev is InputEventMouseButton:
 		match (ev as InputEventMouseButton).button_index:
 			MOUSE_BUTTON_LEFT:
-				return "Mouse Left"
+				name = "Mouse Left"
 			MOUSE_BUTTON_RIGHT:
-				return "Mouse Right"
+				name = "Mouse Right"
 			MOUSE_BUTTON_MIDDLE:
-				return "Mouse Middle"
+				name = "Mouse Middle"
 			MOUSE_BUTTON_XBUTTON1:
-				return "Mouse Back"
+				name = "Mouse Back"
 			MOUSE_BUTTON_XBUTTON2:
-				return "Mouse Forward"
-		return ""
-	if ev is InputEventKey:
+				name = "Mouse Forward"
+			_:
+				return ""
+	elif ev is InputEventKey:
 		var k := ev as InputEventKey
 		var code := k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode
 		if code in [KEY_ALT, KEY_CTRL, KEY_SHIFT, KEY_META, KEY_NONE]:
 			return ""
-		var mods := ""
-		if k.ctrl_pressed:
-			mods += "Ctrl+"
-		if k.alt_pressed:
-			mods += "Alt+"
-		if k.shift_pressed:
-			mods += "Shift+"
-		return mods + OS.get_keycode_string(code)
-	return ""
+		name = OS.get_keycode_string(code)
+	else:
+		return ""
+	var m := ev as InputEventWithModifiers
+	var mods := ""
+	if m.ctrl_pressed:
+		mods += "Ctrl+"
+	if m.alt_pressed:
+		mods += "Alt+"
+	if m.shift_pressed:
+		mods += "Shift+"
+	return mods + name

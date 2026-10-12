@@ -450,6 +450,12 @@ fn write_command(w: &mut BitWriter, c: &Command) {
             w.write(3, 4);
             w.write(k as u64, 2);
         }
+        CommandKind::SwapItems { a, b } => {
+            w.write(15, 4);
+            w.write(4, 4);
+            w.write(a as u64, 3);
+            w.write(b as u64, 3);
+        }
     }
 }
 
@@ -484,6 +490,7 @@ fn read_command(r: &mut BitReader) -> Result<Command, DecodeError> {
             1 => CommandKind::UseTrinket(read_qpoint(r)?),
             2 => CommandKind::UseItemAt { slot: r.read(3)? as u8, target: read_qpoint(r)? },
             3 => CommandKind::ChooseTrinket(r.read(2)? as u8),
+            4 => CommandKind::SwapItems { a: r.read(3)? as u8, b: r.read(3)? as u8 },
             _ => return Err(DecodeError::Invalid("command kind")),
         },
         _ => return Err(DecodeError::Invalid("command kind")),
@@ -2044,6 +2051,7 @@ mod tests {
             c(49, CommandKind::Undo),
             c(50, CommandKind::PickAugment(2)),
             c(51, CommandKind::RerollAugment(2)),
+            c(52, CommandKind::SwapItems { a: 5, b: 0 }),
         ];
         // At most 8 commands per packet: two packets cover every kind.
         for commands in [commands[..8].to_vec(), commands[8..].to_vec()] {
