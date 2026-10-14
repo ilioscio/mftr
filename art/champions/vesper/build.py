@@ -441,7 +441,7 @@ def _extras(armature):
 def build(only=None):
     if only is not None and "attack_1" not in only:
         only = list(only) + ["attack_1"]
-    return champion.build("vesper", SHAPE, parts, OWN, 1.85, extras=_extras, only=only, shared=champion.SHARED + ["attack_melee_alt"])
+    return champion.build("vesper", SHAPE, parts, OWN, 1.85, extras=_extras, only=only, shared=champion.SHARED + ["attack_melee_alt"], cloth={"cape": dict(stiffness=0.26, inertia=0.86)})
 
 
 if __name__ == "__main__":

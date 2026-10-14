@@ -332,7 +332,7 @@ def _run_upper(swing):
 
 
 def run(arm):
-    # A heavy run (14 §3.5): long contact, a deep bob, wide feet, the maul braced on the shoulder.
+    # A heavy run (14 §3.6): long contact, a deep bob, wide feet, the maul braced on the shoulder.
     keys = gait(20, 0.95, contact=0.42, lift=0.20, bob=0.065, lean=13, twist=10, width=0.21, crouch=0.04,
                 upper=_run_upper(1.0))
     return _clip(arm, "run", 20, keys, loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=340.0)

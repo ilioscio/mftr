@@ -199,7 +199,7 @@ def _run_upper(trail):
 
 
 def run(armature):
-    # A hunched, stalking stride (14 §3.5).
+    # A hunched, stalking stride (14 §3.6).
     keys = gait(20, 0.96, contact=0.45, lift=0.16, bob=0.04, lean=22, twist=8, width=0.13, crouch=0.07, upper=_run_upper(30))
     return _clip(armature, "run", 20, keys, loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=330.0)
 
@@ -364,7 +364,7 @@ def _extras(armature):
 
 
 def build(only=None):
-    return champion.build("marrow", SHAPE, parts, OWN, 1.85, extras=_extras, only=only, shared=champion.SHARED + ["attack_melee_alt"])
+    return champion.build("marrow", SHAPE, parts, OWN, 1.85, extras=_extras, only=only, shared=champion.SHARED + ["attack_melee_alt"], cloth={"cloak": dict(stiffness=0.3, inertia=0.84)})
 
 
 if __name__ == "__main__":

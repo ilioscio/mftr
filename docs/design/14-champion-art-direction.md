@@ -96,7 +96,15 @@ Bézier), `snap` (linear: strikes and impacts), `whip` (slow out of the key, acc
 next: swings), `settle` (fast out of the key, settling into the next: recoveries), `hold`
 (constant: a frame-perfect freeze, rare).
 
-### 3.5 Locomotion has a body type
+### 3.5 Cloth follows through
+
+Capes, scarves, coat tails and shawls (`extra_<chain>` bones) aren't keyed by hand: after the
+clips are built, `champion.secondary` simulates each chain as a rope of points that lags behind
+the authored pose and springs back to it, and bakes it as a key on every frame. Spins flare the
+cloth, stops overshoot, slams whip it through. Each chain has a `stiffness` and `inertia` (a
+loose scarf, a heavy cloak); loops are simulated for three cycles so they stay seamless.
+
+### 3.6 Locomotion has a body type
 
 Runs are built per **gait**: *heavy* (long contact, low bob, wide stance, the weapon braced),
 *athletic* (the default), *light* (on the toes, long airborne phase), *sneaky* (low, forward,

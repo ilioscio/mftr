@@ -13,7 +13,7 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
 - **Shape (14 §2):** *a tall pointed hat and a long coat*. Gangly proportions on the `biped` bones (`SHAPE` in `build.py`: long legs, ×0.97 wide, arms ×1.08, hands ×1.3), about 1.85 m, 2.35 m to the star on her hat's tip. A wide-brimmed astronomer's hat bending back to a point, brass goggles with glowing lenses on its band; a long navy coat flaring to her shins, its hem flecked with stars and its tails on an `extra_coat` chain; indigo lapels and shoulder capes; two rows of brass buttons; tall buckled boots; a scroll case and a brass spyglass at her hips.
 - **Weapon:** a tall staff topped by an orrery: three crossing brass rings and two little planets around a glowing star. Skinned to her right hand and held by IK (`staff()` in `build.py`); her big casts take it in both hands.
 - **Head:** the shared sculpted head, feminine, a short dark bob, indigo eyes.
-- **Gait (14 §3.5):** athletic, the staff carried at a slant.
+- **Gait (14 §3.6):** athletic, the staff carried at a slant.
 
 ## Palette (14 §4)
 

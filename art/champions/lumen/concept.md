@@ -12,7 +12,7 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
 - **Personality in three words:** serene, warm, unshakable.
 - **Shape (14 §2):** *a bell*. Serene proportions on the `biped` bones (`SHAPE` in `build.py`: ×0.96, hands ×1.3), about 1.8 m. A long white robe flaring from her waist to the ground in two gold-hemmed tiers, a sky-edged ivory front panel and sash tails; a gold-edged mantle and a sun brooch; wide sleeves; a great sun-gold halo ring standing behind her head; a gold circlet; a tall lantern-staff in her left hand, its sun-bright core in a gold cage crowned by a crescent.
 - **Weapon:** the lantern-staff, skinned to her left hand and held upright by IK (`staff()` in `build.py`).
-- **Gait (14 §3.5):** floating: she hovers 10 cm up and glides, no footfalls, a slow bob, the staff and her free arm trailing.
+- **Gait (14 §3.6):** floating: she hovers 10 cm up and glides, no footfalls, a slow bob, the staff and her free arm trailing.
 
 ## Palette (14 §4)
 

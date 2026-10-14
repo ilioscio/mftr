@@ -818,8 +818,9 @@ Measured against the reference's Wukong (R05), the rules are [14](14-champion-ar
   emerald), Marrow (a crone with a bone fan, magenta), Wren (crest and feathers, lime).
 - **Checked:** a lineup in color and black silhouettes (every outline nameable), review sheets,
   and every champion in game at the gameplay camera; `pack validate` clean.
-- **Next:** the owner's notes per champion; secondary motion for capes and scarves (a spring
-  pass over the chains); polish passes in Blender.
+- **Cloth:** capes, scarves, coat tails and shawls follow through on their own: a rope
+  simulation over each chain, baked into every clip (14 §3.5).
+- **Next:** the owner's notes per champion; polish passes in Blender.
 
 ## S — One server, many matches (between E and M4 slice 5)
 The server plays whatever its players ask for ([13](13-server-instances.md), D57): one process

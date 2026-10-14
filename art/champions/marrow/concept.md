@@ -13,7 +13,7 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
 - **Shape (14 §2):** *a hooded crone*. Bent proportions on the `biped` bones (`SHAPE` in `build.py`: ×0.95 wide, arms ×1.15, hands ×1.4), about 1.8 m, always hunched. A round, heavy plum hood whose peak droops forward over her face; a high collar of nine curved bone spikes fanning up behind it; a ribcage corset (a bone sternum and five pairs of ribs) over her robe; ragged sleeves with bone bangles over thin bare wrists; long bone claws on her fingertips; a robe to the shins with tattered strips hanging below; a grave-grey shawl on an `extra_cloak` chain (3 bones); a skull lantern with magenta eyes at her hip.
 - **Weapon:** her claws.
 - **Head:** the shared sculpted head, aged, grey-haired, magenta-eyed, mostly hidden by the hood.
-- **Gait (14 §3.5):** unhurried: a hunched, stalking stride, claws forward.
+- **Gait (14 §3.6):** unhurried: a hunched, stalking stride, claws forward.
 
 ## Palette (14 §4)
 

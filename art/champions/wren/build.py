@@ -235,7 +235,7 @@ def _run_upper(swing, trail):
 
 
 def run(armature):
-    # Light (14 §3.5): short contact, long airborne strides.
+    # Light (14 §3.6): short contact, long airborne strides.
     keys = gait(20, 0.75, contact=0.34, lift=0.26, bob=0.06, lean=12, twist=10, width=0.11, upper=_run_upper(1.0, 30))
     return _clip(armature, "run", 20, keys, loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=330.0)
 
@@ -411,7 +411,7 @@ def _extras(armature):
 
 
 def build(only=None):
-    return champion.build("wren", SHAPE, parts, OWN, 1.7, extras=_extras, only=only, shared=champion.SHARED + ["attack_melee_alt"])
+    return champion.build("wren", SHAPE, parts, OWN, 1.7, extras=_extras, only=only, shared=champion.SHARED + ["attack_melee_alt"], cloth={"cape": dict(stiffness=0.36, inertia=0.82)})
 
 
 if __name__ == "__main__":

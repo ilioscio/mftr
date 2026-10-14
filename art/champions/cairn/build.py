@@ -388,7 +388,7 @@ def _extras(armature):
 
 
 def build(only=None):
-    return champion.build("cairn", SHAPE, parts, OWN, 2.1, extras=_extras, only=only)
+    return champion.build("cairn", SHAPE, parts, OWN, 2.1, extras=_extras, only=only, cloth={"cloak": dict(stiffness=0.32, inertia=0.84)})
 
 
 if __name__ == "__main__":

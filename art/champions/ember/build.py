@@ -379,7 +379,7 @@ def _extras(armature):
 
 
 def build(only=None):
-    return champion.build("ember", SHAPE, parts, OWN, 1.85, extras=_extras, only=only, shared=champion.SHARED + ["attack_melee_alt"])
+    return champion.build("ember", SHAPE, parts, OWN, 1.85, extras=_extras, only=only, shared=champion.SHARED + ["attack_melee_alt"], cloth={"coat": dict(stiffness=0.24, inertia=0.86)})
 
 
 if __name__ == "__main__":

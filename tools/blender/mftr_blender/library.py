@@ -75,7 +75,7 @@ def _clip(arm, name, frames, keys, loop=False, layer="full", bones=None, markers
 
 def gait(frames, stride, contact=0.45, lift=0.22, bob=0.04, lean=8.0, twist=8.0, width=None, step=2,
          upper=None, crouch=0.0, toe_off=20.0):
-    """Keys for an in-place locomotion loop with planted feet (14 §3.5): each foot is an IK
+    """Keys for an in-place locomotion loop with planted feet (14 §3.6): each foot is an IK
     target that slides back `stride` meters while in contact (the first `contact` fraction of
     its cycle, the left foot's starting at 0 and the right's at 0.5), then swings forward,
     `lift` meters high at its peak.

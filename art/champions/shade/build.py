@@ -226,7 +226,7 @@ def idle_ready(armature):
 
 
 def _run_upper(trail):
-    # The sneak (14 §3.5): arms swept back, blades trailing, the scarf streaming.
+    # The sneak (14 §3.6): arms swept back, blades trailing, the scarf streaming.
     def upper(p):
         c = math.cos(2 * math.pi * p)
         return merge(arm("l", 0.35, -0.75 - 0.1 * c, -0.45, 0.30, -0.55, 0.1), arm("r", 0.35, -0.75 + 0.1 * c, -0.45, 0.30, -0.55, 0.1),
@@ -414,7 +414,7 @@ def _extras(armature):
 
 
 def build(only=None):
-    return champion.build("shade", SHAPE, parts, OWN, 1.8, extras=_extras, only=only)
+    return champion.build("shade", SHAPE, parts, OWN, 1.8, extras=_extras, only=only, cloth={"scarf": dict(stiffness=0.16, inertia=0.9)})
 
 
 if __name__ == "__main__":

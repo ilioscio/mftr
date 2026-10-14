@@ -13,7 +13,7 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
 - **Shape (14 §2):** *a block on legs*. Heroic brute proportions on the `biped` bones (`SHAPE` in `build.py`: low hips, a short neck, ×1.26 wide, ×1.22 deep, shoulders pushed out 8 cm, long arms, hands ×1.5), about 2.0 m. Crimson-lacquered dome pauldrons stand above a head sunk into an iron gorget; a barrel breastplate wider at the top; short thick legs in heavy boots; a long crimson tabard.
 - **Weapon:** a two-handed maul, 1.4 m from the fist to the head, the head a 64 × 36 × 36 cm stone block banded in iron and capped in brass, cut with crimson runes on all four faces. Skinned to the right hand and laid along it; the left hand is solved onto the haft (14 §3.3).
 - **Head:** the shared sculpted head, weathered: a square jaw, a heavy chin, small hard eyes, shaved bald, a braided beard, a scar over the left brow.
-- **Gait (14 §3.5):** heavy: long contact, a deep bob, wide feet, the maul braced on his shoulder.
+- **Gait (14 §3.6):** heavy: long contact, a deep bob, wide feet, the maul braced on his shoulder.
 
 ## Palette (14 §4)
 

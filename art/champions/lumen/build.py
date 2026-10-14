@@ -210,7 +210,7 @@ def idle_ready(armature):
 
 
 def _glide(frames, lean, trail):
-    # The glide (14 §3.5): no footfalls, a slow hover bob, leaning into it, the free arm and
+    # The glide (14 §3.6): no footfalls, a slow hover bob, leaning into it, the free arm and
     # the staff trailing.
     keys = []
     for f in range(0, frames, 2):

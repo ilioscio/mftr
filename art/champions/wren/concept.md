@@ -13,7 +13,7 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
 - **Shape (14 §2):** *a feather crest and a short cape of feathers*. Small and springy proportions on the `biped` bones (`SHAPE` in `build.py`: ×0.88, a big heroic head, hands ×1.35), about 1.65 m, 1.95 m to the crest's tips. A tall crest of russet feathers tipped in lime swept back from her brow; a capelet of layered feathers over her shoulders and down her back on an `extra_cape` chain (2 bones); a fan of tail feathers at the back of her belt; a russet tunic with a lime hem under a leather jerkin; feathered bracers and boot cuffs; a quiver of lime-fletched bolts at her thigh.
 - **Weapon:** a hand crossbow in her right hand (skinned to it and laid along it, so her fist aims it): a wooden stock, a swept iron prod with lime tips, a crank, a lime bolt.
 - **Head:** the shared sculpted head, feminine and young, heroic-sized (×1.2), auburn hair, green eyes.
-- **Gait (14 §3.5):** light: a short contact and long airborne strides.
+- **Gait (14 §3.6):** light: a short contact and long airborne strides.
 
 ## Palette (14 §4)
 

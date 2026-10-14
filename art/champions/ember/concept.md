@@ -12,7 +12,7 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
 - **Personality in three words:** quick, cocky, volatile.
 - **Shape (14 §2):** *a flame*. Slim, top-heavy proportions on the `biped` bones (`SHAPE` in `build.py`: ×0.97, shoulders out 4 cm, arms ×1.04, hands ×1.3), about 1.8 m, 2.2 m to the tips of his hair. Burning hair sweeping up and back from his crown; a tall flared collar of soot-black petals lined with ember red behind his head; a charcoal coat with lapels over an ember-red lining, its tails on an `extra_coat` chain (3 bones); bell sleeves flaring wide at the wrists; fire burning in both palms; slim legs in pointed boots.
 - **Weapon:** his hands.
-- **Gait (14 §3.5):** light: a short contact, a long airborne phase, the coat tails streaming.
+- **Gait (14 §3.6):** light: a short contact, a long airborne phase, the coat tails streaming.
 
 ## Palette (14 §4)
 

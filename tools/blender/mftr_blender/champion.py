@@ -80,6 +80,79 @@ def bake_shared(armature, names=None):
     return [a.name for a in dst.actions]
 
 
+def secondary(armature, chain, stiffness=0.28, inertia=0.86, sag=0.0, actions=None):
+    """Secondary motion (14 §3): the `extra_<chain>_*` bones simulated as a rope of points that
+    lags behind the authored pose and springs back to it, baked as a key on every frame of each
+    action. `stiffness` (0-1) is how hard each point is pulled toward its authored place per
+    frame, `inertia` (0-1) how much velocity it keeps, `sag` meters per frame² of droop. Loops
+    are simulated for three cycles and the last is kept, its last frame set to its first."""
+    names = sorted((b.name for b in armature.data.bones if b.name.startswith(f"extra_{chain}_")), key=lambda n: int(n.rsplit("_", 1)[1]))
+    if not names:
+        return
+    pbs = [armature.pose.bones[n] for n in names]
+    root_parent = pbs[0].parent
+    rels = [(pb.bone.parent.matrix_local.inverted() @ pb.bone.matrix_local).to_quaternion() for pb in pbs]
+    ad = armature.animation_data_create()
+    sc = bpy.context.scene
+    saved = ad.action
+    for act in actions or [a for a in bpy.data.actions if any(tr.name == a.name for tr in ad.nla_tracks)]:
+        ad.action = act
+        if getattr(ad, "action_slot", None) is None and act.slots:
+            ad.action_slot = act.slots[0]
+        end = int(act.frame_range[1])
+        frames = list(range(0, end + 1))
+        # The authored pose, every frame: the chain's points and its root parent's rotation.
+        authored = []
+        for f in frames:
+            sc.frame_set(f)
+            pts = [pb.head.copy() for pb in pbs] + [pbs[-1].tail.copy()]
+            authored.append((pts, root_parent.matrix.to_quaternion(), [pb.matrix.to_quaternion() for pb in pbs]))
+        lengths = [(authored[0][0][i + 1] - authored[0][0][i]).length for i in range(len(pbs))]
+        loop = bool(act.get("mftr_loop", False))
+        cycles = 3 if loop else 1
+        cur = [p.copy() for p in authored[0][0]]
+        prev = [p.copy() for p in cur]
+        result = {}
+        for c in range(cycles):
+            for f in frames:
+                target = authored[f][0]
+                for i in range(1, len(cur)):
+                    v = (cur[i] - prev[i]) * inertia
+                    prev[i] = cur[i].copy()
+                    cur[i] = cur[i] + v + Vector((0, 0, -sag))
+                    cur[i] = cur[i] + (target[i] - cur[i]) * stiffness
+                cur[0] = target[0].copy()
+                prev[0] = cur[0].copy()
+                for i in range(1, len(cur)):
+                    d = cur[i] - cur[i - 1]
+                    cur[i] = cur[i - 1] + (d.normalized() if d.length > 1e-6 else (target[i] - target[i - 1]).normalized()) * lengths[i - 1]
+                if c == cycles - 1:
+                    result[f] = [p.copy() for p in cur]
+        if loop:
+            result[frames[-1]] = result[frames[0]]
+        # Back to bone rotations: each bone turned from its authored direction to the
+        # simulated one, expressed in its (simulated) parent's space.
+        last = [None] * len(pbs)
+        for f in frames:
+            pts_a, parent_q, auth_q = authored[f]
+            pts_s = result[f]
+            up_q = parent_q
+            for k, pb in enumerate(pbs):
+                da = (pts_a[k + 1] - pts_a[k]).normalized()
+                ds = (pts_s[k + 1] - pts_s[k]).normalized()
+                want = da.rotation_difference(ds) @ auth_q[k]
+                basis = (up_q @ rels[k]).inverted() @ want
+                if last[k] is not None and last[k].dot(basis) < 0:
+                    basis.negate()
+                last[k] = basis.copy()
+                pb.rotation_quaternion = basis
+                pb.keyframe_insert("rotation_quaternion", frame=f, group=pb.name)
+                up_q = want
+    ad.action = saved
+    clips.reset_pose(armature)
+    sc.frame_set(0)
+
+
 def detailed(parts):
     """The detail pass (D59, 14 §2.3): round lofts (8+ sides) get four more sides and smoothed
     in-between rings, so round masses read round; blocky parts and hand-made paths are left
@@ -122,9 +195,10 @@ def hand_parts(side, color, slot="skin", scale=1.0, knuckles=None):
     return out
 
 
-def build(name, shape, parts, own, height, extras=None, only=None, shared=None, detail=2):
-    """Build the champion: armature in `shape`, `extras(armature)` (chains), clips, mesh (with
-    the detail pass and fine heads at `detail` 2), the shared clips. Returns (armature, body)."""
+def build(name, shape, parts, own, height, extras=None, only=None, shared=None, detail=2, cloth=None):
+    """Build the champion: armature in `shape`, `extras(armature)` (chains), clips, the
+    secondary-motion pass over `cloth` ({chain: dict(stiffness, inertia, sag)}), mesh (with the
+    detail pass and fine heads at `detail` 2), the shared clips. Returns (armature, body)."""
     bpy.ops.wm.read_homefile(use_empty=True)
     bpy.context.scene.render.fps = 30
     rig.use_shape(shape)
@@ -133,6 +207,8 @@ def build(name, shape, parts, own, height, extras=None, only=None, shared=None, 
     if extras:
         extras(armature)
     made = [f(armature).name for f in own if only is None or f.__name__ in only]
+    for chain, params in (cloth or {}).items():
+        secondary(armature, chain, **params)
     head.DEFAULT_DETAIL = detail
     try:
         part_list = parts()
