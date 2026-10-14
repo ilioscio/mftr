@@ -72,8 +72,17 @@ def _center():
         # Shoulder caps with gold trim.
         path_part("clavicle_l", [("clavicle_l", 0.55, (0, 0, 0.05)), ("clavicle_l", 1.0, (0.03, 0, 0.08)), ("clavicle_l", 1.0, (0.12, 0, 0.03)),
                                  ("clavicle_l", 1.0, (0.14, 0, -0.05))], 6, [(.10, .04), (.12, .055), (.12, .055), (.10, .03)], "cloth", CHARCOAL, ref=(0, 1, 0)),
+        path_part("clavicle_l", [("clavicle_l", 1.0, (0.13, 0, -0.03)), ("clavicle_l", 1.0, (0.145, 0, -0.065))], 8, [(.105, .035), (.10, .03)], "metal", GOLD, ref=(0, 1, 0)),
+        path_part("clavicle_r", [("clavicle_r", 1.0, (-0.13, 0, -0.03)), ("clavicle_r", 1.0, (-0.145, 0, -0.065))], 8, [(.105, .035), (.10, .03)], "metal", GOLD, ref=(0, 1, 0)),
         path_part("clavicle_r", [("clavicle_r", 0.55, (0, 0, 0.05)), ("clavicle_r", 1.0, (-0.03, 0, 0.08)), ("clavicle_r", 1.0, (-0.12, 0, 0.03)),
                                  ("clavicle_r", 1.0, (-0.14, 0, -0.05))], 6, [(.10, .04), (.12, .055), (.12, .055), (.10, .03)], "cloth", CHARCOAL, ref=(0, 1, 0)),
+        # The coat's front skirts, split over his legs, ember-lined edges.
+        box_part("pelvis", sp((0.09, -0.11, 0.82)), (0.13, 0.03, 0.40), "cloth", CHARCOAL, rot=(-8, 0, -6), taper=1.25, bevel=0.2),
+        box_part("pelvis", sp((-0.09, -0.11, 0.82)), (0.13, 0.03, 0.40), "cloth", CHARCOAL, rot=(-8, 0, 6), taper=1.25, bevel=0.2),
+        box_part("pelvis", sp((0.03, -0.125, 0.82)), (0.02, 0.03, 0.40), "cloth", EMBER_RED, rot=(-8, 0, -6)),
+        box_part("pelvis", sp((-0.03, -0.125, 0.82)), (0.02, 0.03, 0.40), "cloth", EMBER_RED, rot=(-8, 0, 6)),
+        box_part("pelvis", sp((0.15, -0.06, 1.0)), (0.07, 0.06, 0.09), "cloth", SOOT, rot=(0, 0, 25), bevel=0.25),
+        box_part("pelvis", sp((0.15, -0.095, 1.0)), (0.035, 0.02, 0.035), "metal", GOLD),
         # Coat tails on the chain, ember-red lined, a gold hem.
         ("extra_coat_1", COAT[0], COAT[1], 6, [(0, .16, .026), (1, .19, .026)], "cloth", CHARCOAL),
         ("extra_coat_2", COAT[1], COAT[2], 6, [(0, .19, .026), (1, .21, .026)], "cloth", CHARCOAL),
@@ -99,7 +108,11 @@ def _hair():
               ((-0.04, 0.06, 1.82), (-0.06, 0.18, 1.98), (-0.07, 0.30, 2.04), .05),
               ((0.10, 0.02, 1.80), (0.17, 0.12, 1.92), (0.21, 0.24, 1.96), .04),
               ((-0.10, 0.02, 1.80), (-0.17, 0.12, 1.92), (-0.21, 0.24, 1.96), .04),
-              ((0.0, 0.08, 1.80), (0.0, 0.22, 1.90), (0.0, 0.36, 1.92), .05)]
+              ((0.0, 0.08, 1.80), (0.0, 0.22, 1.90), (0.0, 0.36, 1.92), .05),
+              ((0.05, -0.08, 1.80), (0.09, -0.12, 1.94), (0.11, -0.12, 2.02), .035),
+              ((-0.05, -0.08, 1.80), (-0.09, -0.12, 1.94), (-0.11, -0.12, 2.02), .035),
+              ((0.12, 0.08, 1.74), (0.20, 0.20, 1.80), (0.24, 0.30, 1.80), .035),
+              ((-0.12, 0.08, 1.74), (-0.20, 0.20, 1.80), (-0.24, 0.30, 1.80), .035)]
     out = []
     for a, b, c, r in flames:
         out.append(path_part(hb, [sp(a), sp(b), sp(c)], 5, [(r, r), (r * 0.6, r * 0.6), (0, 0)], "emissive", FLAME,
@@ -114,10 +127,10 @@ def _left():
         # Bell sleeves, flaring wide at the wrist, lined ember red, gold-hemmed.
         (fa, (fa, 0), (fa, 1.0), 10, [(0, .058, .058), (.5, .08, .076), (1, .12, .105)], "cloth", CHARCOAL),
         (fa, (fa, 0.96), (fa, 1.02), 10, [(0, .124, .109), (1, .124, .109)], "cloth", EMBER_RED),
+        (fa, (fa, 0.84), (fa, 0.87), 12, [(0, .105, .095), (1, .108, .097)], "metal", GOLD),
+        (ua, (ua, 0.80), (ua, 0.86), 12, [(0, .054, .054), (1, .053, .053)], "metal", GOLD),
         (fa, (fa, 0.75), (fa, 1.0), 10, [(0, .066, .064), (1, .10, .09)], "cloth", EMBER_RED),
-        box_part("hand_l", ("hand_l", 0.45), (0.08, 0.06, 0.09), "skin", SKIN, bevel=0.3),
-        box_part("fingers_l", ("fingers_l", 0.4), (0.075, 0.05, 0.06), "skin", SKIN, bevel=0.3),
-        ("thumb_l", ("thumb_l", 0), ("thumb_l", 1), 5, [(0, .02, .02), (1, .015, .015)], "skin", SKIN),
+        *champion.hand_parts("l", SKIN, "skin", scale=1.3),
         # Fire in the palm.
         path_part("hand_l", [("hand_l", 0.6, (0, -0.06, 0)), ("hand_l", 0.6, (0, -0.10, 0.08)), ("hand_l", 0.6, (0, -0.12, 0.18))], 5,
                   [(.055, .055), (.035, .035), (0, 0)], "emissive", FLAME, colors=[FLAME_HOT, FLAME, FLAME]),

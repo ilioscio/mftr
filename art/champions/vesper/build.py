@@ -88,6 +88,14 @@ def _center():
         ("extra_cape_3", CAPE[2], CAPE[3], 6, [(0, .23, .024), (.75, .22, .022), (1, .17, .02)], "cloth", FOREST),
         ("extra_cape_3", (CAPE[3][0], CAPE[3][1] + 0.005, CAPE[3][2] + 0.06), (CAPE[3][0], CAPE[3][1] + 0.006, CAPE[3][2] - 0.01), 6,
          [(0, .20, .028), (1, .17, .026)], "cloth", TEAL_CLOTH),
+        # Quiver straps across her chest, a cloak clasp, more fletching.
+        box_part("chest", sp((0, -0.11, 1.40)), (0.035, 0.02, 0.44), "cloth", LEATHER_DARK, rot=(0, -38, 0)),
+        box_part("chest", sp((0.06, -0.125, 1.47)), (0.04, 0.02, 0.04), "metal", SILVER, rot=(0, 45, 0)),
+        box_part("chest", sp((0.13, -0.06, 1.55)), (0.05, 0.025, 0.05), "emissive", TEAL, rot=(0, 45, 0)),
+        path_part("spine_02", [sp((-0.02, 0.21, 1.64)), sp((-0.04, 0.23, 1.80)), sp((-0.045, 0.235, 1.85))], 4,
+                  [(.05, .012), (.04, .01), (0, 0)], "emissive", TEAL),
+        path_part("spine_02", [sp((-0.18, 0.19, 1.62)), sp((-0.25, 0.20, 1.74)), sp((-0.27, 0.20, 1.79))], 4,
+                  [(.045, .012), (.035, .01), (0, 0)], "emissive", TEAL),
         # A leather pauldron on the bow shoulder.
         path_part("clavicle_l", [("clavicle_l", 0.5, (0, 0, 0.06)), ("clavicle_l", 1.0, (0.03, 0, 0.09)),
                                  ("clavicle_l", 1.0, (0.12, 0, 0.04)), ("clavicle_l", 1.0, (0.15, 0, -0.06))],
@@ -111,9 +119,11 @@ def _left():
         # Teal-banded leather bracers.
         (fa, (fa, .30), (fa, .98), 8, [(0, .06, .06), (1, .054, .054)], "cloth", LEATHER),
         (fa, (fa, .55), (fa, .62), 8, [(0, .064, .064), (1, .062, .062)], "cloth", TEAL_CLOTH),
-        box_part("hand_l", ("hand_l", 0.45), (0.08, 0.07, 0.09), "cloth", LEATHER_DARK, bevel=0.3),
-        box_part("fingers_l", ("fingers_l", 0.4), (0.075, 0.06, 0.06), "cloth", LEATHER_DARK, bevel=0.3),
-        ("thumb_l", ("thumb_l", 0), ("thumb_l", 1), 5, [(0, .022, .022), (1, .016, .016)], "cloth", LEATHER_DARK),
+        (fa, (fa, .38), (fa, .42), 8, [(0, .063, .063), (1, .063, .063)], "metal", SILVER),
+        box_part(ca, (ca, 0.55, (0.0, -0.075, 0)), (0.05, 0.02, 0.04), "metal", SILVER),
+        box_part(ca, (ca, 0.03, (0.0, -0.06, 0)), (0.08, 0.04, 0.09), "cloth", LEATHER, bevel=0.3),
+        box_part(th, (th, 0.3, (0.07, -0.02, 0)), (0.06, 0.07, 0.10), "cloth", LEATHER_DARK, rot=(0, 0, 10), bevel=0.3),
+        *champion.hand_parts("l", LEATHER_DARK, "cloth", scale=1.35),
         (th, sp((0.10, 0, 1.02)), (th, 1), 10, [(0, .10, .095), (.5, .085, .085), (1, .064, .064)], "cloth", FOREST_DARK),
         (ca, (ca, 0), (ca, .45), 10, [(0, .064, .064), (1, .058, .058)], "cloth", FOREST_DARK),
         # Tall boots with a turned cuff.

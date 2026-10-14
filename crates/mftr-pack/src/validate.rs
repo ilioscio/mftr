@@ -157,6 +157,8 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
     let target = match kind {
         "minion" => rules::MINION_TRIANGLES_TARGET,
         "prop" => rules::PROP_TRIANGLES_TARGET,
+        // The shared library's and the rig's mannequins only preview clips: no lower bound.
+        "library" | "rig" => (0, rules::TRIANGLES_TARGET.1),
         _ => rules::TRIANGLES_TARGET,
     };
     let max = if prop { rules::PROP_TRIANGLES_MAX } else { rules::TRIANGLES_MAX };

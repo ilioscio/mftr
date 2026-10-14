@@ -54,6 +54,26 @@ def sp(p):
 
 # --- Mesh -----------------------------------------------------------------------------------
 
+def cluster(bone, base, out, length, width, colors=(None, None, None), seed=0):
+    """Three faceted crystal shards growing from `base` (a point or bone point) along `out`
+    (armature space), the middle one longest, fanned apart."""
+    o = Vector(out).normalized()
+    side = o.cross(Vector((0, 0, 1)))
+    side = side.normalized() if side.length > 1e-3 else Vector((1, 0, 0))
+    up = side.cross(o).normalized()
+    parts = []
+    for k, (spread, lf, wf) in enumerate(((-0.45, 0.62, 0.7), (0.0, 1.0, 1.0), (0.5, 0.74, 0.78))):
+        d = (o + side * spread * 0.6 + up * (0.15 * ((k + seed) % 2) - 0.05)).normalized()
+        L, W = length * lf, width * wf
+        if isinstance(base[0], str):
+            pts = [(base[0], base[1], tuple(Vector(base[2] if len(base) > 2 else (0, 0, 0)) + d * f * L)) for f in (0.0, 0.45, 0.85, 1.0)]
+        else:
+            pts = [tuple(Vector(base) + d * f * L) for f in (0.0, 0.45, 0.85, 1.0)]
+        col = ICE if (k + seed) % 2 == 0 else ICE_DEEP
+        parts.append(path_part(bone, pts, 6, [(W, W * 0.85), (W * 0.95, W * 0.8), (W * 0.55, W * 0.5), (0, 0)], "emissive", col))
+    return parts
+
+
 def _center():
     return [
         # Boulder hips, belly and the great chest, broader at the top.
@@ -68,6 +88,8 @@ def _center():
         path_part("chest", [sp((0, -0.25, 1.44)), sp((0, -0.30, 1.44))], 8, [(.19, .22), (.19, .22)], "metal", IRON, ref=(1, 0, 0)),
         # Rock lumps across the back and belly.
         box_part("spine_02", sp((0.22, 0.25, 1.30)), (0.20, 0.14, 0.18), "cloth", STONE_DARK, rot=(10, 20, 15), bevel=0.3),
+        box_part("spine_01", sp((0.18, 0.20, 1.12)), (0.16, 0.12, 0.14), "cloth", STONE, rot=(-10, 10, 25), bevel=0.3),
+        box_part("spine_01", sp((-0.18, 0.21, 1.14)), (0.15, 0.12, 0.14), "cloth", STONE_LIGHT, rot=(8, -12, -20), bevel=0.3),
         box_part("spine_02", sp((-0.20, 0.27, 1.36)), (0.18, 0.14, 0.20), "cloth", STONE_LIGHT, rot=(-12, -10, 25), bevel=0.3),
         box_part("spine_01", sp((0.10, -0.22, 1.14)), (0.20, 0.12, 0.14), "cloth", STONE_LIGHT, rot=(5, 15, -10), bevel=0.3),
         # Crystals growing from his back: the silhouette's spikes.
@@ -85,6 +107,14 @@ def _center():
                   [(.05, .045), (.03, .025), (0, 0)], "emissive", ICE),
         box_part("pelvis", sp((0.18, -0.20, 0.92)), (0.16, 0.10, 0.14), "cloth", STONE_LIGHT, rot=(0, 10, 20), bevel=0.3),
         box_part("pelvis", sp((-0.16, -0.21, 0.94)), (0.15, 0.10, 0.13), "cloth", STONE, rot=(0, -12, -15), bevel=0.3),
+        # Crystal clusters across his back.
+        *cluster("chest", sp((0.0, 0.26, 1.62)), (0.0, 0.5, 0.9), 0.36, 0.06, seed=0),
+        *cluster("spine_02", sp((0.20, 0.27, 1.40)), (0.4, 0.8, 0.5), 0.28, 0.05, seed=1),
+        *cluster("spine_02", sp((-0.20, 0.27, 1.38)), (-0.4, 0.8, 0.5), 0.26, 0.05, seed=2),
+        # Rock plates over his chest and belly.
+        *[box_part("spine_02", sp((x, -0.29, z)), (0.16, 0.06, 0.13), "cloth", c, rot=(r, 0, x * 40), bevel=0.3)
+          for x, z, r, c in ((0.16, 1.50, -8, STONE_LIGHT), (-0.16, 1.50, -8, STONE_LIGHT), (0.20, 1.33, 4, STONE), (-0.20, 1.33, 4, STONE))],
+        *[box_part("spine_01", sp((x, -0.24, 1.15)), (0.14, 0.05, 0.11), "cloth", STONE_DARK, rot=(0, 0, x * 30), bevel=0.3) for x in (0.11, -0.11)],
         # Moss on the top of his back.
         box_part("chest", sp((0, 0.12, 1.69)), (0.60, 0.34, 0.05), "cloth", MOSS, bevel=0.4),
     ]
@@ -105,10 +135,13 @@ def _left():
                                  ("clavicle_l", 1.0, (0.46, 0.12, 0.47))], 5, [(.06, .05), (.035, .03), (0, 0)], "emissive", ICE_DEEP),
         path_part("clavicle_l", [("clavicle_l", 1.0, (0.02, 0.16, 0.24)), ("clavicle_l", 1.0, (0.04, 0.34, 0.42)),
                                  ("clavicle_l", 1.0, (0.05, 0.40, 0.48))], 5, [(.05, .045), (.03, .025), (0, 0)], "emissive", ICE),
+        *cluster("clavicle_l", ("clavicle_l", 1.0, (0.30, 0.0, 0.06)), (1.0, 0.1, 0.5), 0.24, 0.05, seed=1),
+        box_part("clavicle_l", ("clavicle_l", 1.0, (0.24, -0.16, 0.16)), (0.16, 0.06, 0.16), "cloth", MOSS, rot=(30, 0, 10), bevel=0.4),
         # Arms: stacked stone, iron bands, the forearms swelling toward the fists.
         (ua, (ua, 0), (ua, 1), 10, [(0, .17, .16), (.5, .18, .17), (1, .15, .15)], "cloth", STONE),
         (fa, (fa, 0), (fa, 1), 10, [(0, .15, .15), (.6, .19, .18), (1, .2, .19)], "cloth", STONE_LIGHT),
         (fa, (fa, .30), (fa, .40), 8, [(0, .175, .17), (1, .18, .175)], "metal", IRON),
+        box_part(fa, (fa, 0.2, (0.0, 0.12, 0.08)), (0.16, 0.10, 0.04), "cloth", MOSS, rot=(40, 0, 0), bevel=0.4),
         (fa, (fa, .70), (fa, .78), 8, [(0, .205, .195), (1, .205, .195)], "metal", IRON),
         (fa, (fa, .55), (fa, .62), 4, [(0, .03, .2), (1, .03, .2)], "emissive", ICE),
         # Boulder fists.
@@ -122,14 +155,15 @@ def _left():
         # Rock lumps on the arms and a crystal on each forearm's back.
         box_part(ua, (ua, 0.45, (0.10, 0.05, 0.02)), (0.12, 0.14, 0.14), "cloth", STONE_LIGHT, rot=(20, 10, 30), bevel=0.3),
         box_part(fa, (fa, 0.35, (0.08, 0.10, 0.04)), (0.12, 0.12, 0.14), "cloth", STONE_DARK, rot=(-15, 25, 10), bevel=0.3),
-        path_part(fa, [(fa, 0.5, (0.04, 0.14, 0.02)), (fa, 0.5, (0.10, 0.34, 0.12)), (fa, 0.5, (0.12, 0.42, 0.16))], 5,
-                  [(.05, .04), (.03, .025), (0, 0)], "emissive", ICE),
+        *cluster(fa, (fa, 0.5, (0.04, 0.12, 0.02)), (0.3, 1.0, 0.4), 0.26, 0.045, seed=0),
         # Short stumpy legs and boulder feet.
         (th, sp((0.10, 0, 1.00)), (th, 1), 10, [(0, .20, .19), (.5, .19, .18), (1, .16, .16)], "cloth", STONE_DARK),
         box_part(ca, (ca, 0.02, (0, -0.07, 0)), (0.24, 0.12, 0.20), "cloth", STONE_LIGHT, bevel=0.35),
         box_part(th, (th, 0.4, (0.08, -0.04, 0)), (0.14, 0.14, 0.18), "cloth", STONE_LIGHT, rot=(10, 15, 25), bevel=0.3),
         box_part(ca, (ca, 0.55, (0.06, 0.06, 0)), (0.12, 0.12, 0.14), "cloth", STONE_DARK, rot=(-10, 20, 10), bevel=0.3),
         box_part(th, (th, 0.75, (-0.06, -0.08, 0)), (0.12, 0.12, 0.14), "cloth", STONE, rot=(15, -10, 20), bevel=0.3),
+        *cluster(ca, (ca, 0.05, (0.06, -0.06, 0.02)), (0.6, -0.6, 0.6), 0.16, 0.035, seed=0),
+        *cluster(th, (th, 0.1, (0.12, 0.02, 0.0)), (1.0, 0.2, 0.3), 0.18, 0.04, seed=1),
         box_part("foot_l", ("foot_l", 0.2, (0.10, 0.04, 0.06)), (0.12, 0.14, 0.12), "cloth", STONE_LIGHT, rot=(0, 15, 20), bevel=0.3),
         box_part("pelvis", sp((0.22, 0.06, 1.02)), (0.12, 0.18, 0.16), "cloth", STONE, rot=(0, 20, 0), bevel=0.3),
         (ca, (ca, 0), (ca, 1), 10, [(0, .16, .16), (.6, .17, .17), (1, .19, .18)], "cloth", STONE),
@@ -144,9 +178,12 @@ def _head():
         # A rough block head under a heavy brow, a glowing visor slit, moss on the crown.
         box_part(hb, sp((0, -0.06, 1.73)), (0.30, 0.30, 0.28), "cloth", STONE_LIGHT, taper=0.85, bevel=0.3),
         box_part(hb, sp((0, -0.18, 1.81)), (0.34, 0.11, 0.08), "cloth", STONE_DARK, bevel=0.3),
+        box_part(hb, sp((0.10, -0.16, 1.86)), (0.10, 0.08, 0.03), "cloth", MOSS, rot=(10, 0, 15), bevel=0.4),
         box_part(hb, sp((0, -0.215, 1.755)), (0.26, 0.03, 0.05), "emissive", ICE),
         box_part(hb, sp((0, -0.05, 1.885)), (0.22, 0.24, 0.05), "cloth", MOSS, bevel=0.4),
         box_part("neck", sp((0, 0, 1.60)), (0.24, 0.24, 0.12), "cloth", STONE_DARK, bevel=0.3),
+        # A crown of crystal breaking through the back of his skull.
+        *cluster(hb, sp((0.0, 0.04, 1.86)), (0.0, 0.35, 1.0), 0.22, 0.04, seed=1),
     ]
 
 
@@ -156,6 +193,10 @@ def _chain():
     return [
         path_part(hb, [("hand_r", 0.15), ("hand_r", 0.32)], 8, [(.175, .17), (.175, .17)], "metal", IRON),
         path_part("forearm_r", [("forearm_r", 0.9), ("forearm_r", 1.0)], 8, [(.215, .205), (.215, .205)], "metal", IRON),
+        # Chain links wound up the forearm.
+        *[box_part("forearm_r", ("forearm_r", 0.62 + 0.035 * k, (0.21 * math.cos(a), 0.21 * math.sin(a), 0.0)), (0.05, 0.05, 0.03), "metal", IRON,
+                   rot=(0, 0, math.degrees(a)), bevel=0.3)
+          for k, a in enumerate([2 * math.pi * i / 8 for i in range(8)])],
         path_part(hb, [("fingers_r", 0.9, (0, -0.05, -0.05)), ("fingers_r", 0.9, (0.0, -0.10, -0.20)),
                        ("fingers_r", 0.9, (-0.06, -0.16, -0.24)), ("fingers_r", 0.9, (-0.08, -0.20, -0.17))], 5,
                   [(.025, .025), (.03, .03), (.03, .03), (0, 0)], "metal", IRON),

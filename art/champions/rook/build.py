@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools", "blender"))
 import bpy  # noqa: E402
 from mathutils import Quaternion, Vector  # noqa: E402
 
-from mftr_blender import clips, head, mesh, rig  # noqa: E402
+from mftr_blender import champion, clips, head, mesh, rig  # noqa: E402
 from mftr_blender.clips import at, grip, ik, merge, sym  # noqa: E402
 from mftr_blender.library import _clip, gait  # noqa: E402
 from mftr_blender.mesh import box_pair, box_part, path_pair, path_part  # noqa: E402
@@ -86,6 +86,10 @@ def _torso():
         ("pelvis", sp((0, 0, 1.03)), sp((0, 0, 1.14)), 8, [(0, .245, .185), (1, .245, .185)], "cloth", LEATHER),
         ("pelvis", sp((0, 0, 1.055)), sp((0, 0, 1.08)), 8, [(0, .25, .19), (1, .25, .19)], "accent", ACCENT),
         box_part("pelvis", sp((0, -0.19, 1.085)), (0.12, 0.05, 0.10), "metal", BRASS, bevel=0.3),
+        *[box_part("pelvis", sp((x, -0.17 + 0.1 * abs(x), 1.085)), (0.035, 0.03, 0.035), "metal", BRASS, rot=(0, 45, x * 120)) for x in (-0.20, -0.13, 0.13, 0.20)],
+        # An iron emblem on the tabard: a hammer in a ring.
+        box_part("pelvis", sp((0, -0.19, 0.80)), (0.12, 0.02, 0.12), "metal", IRON_DARK, rot=(-6, 45, 0), bevel=0.3),
+        box_part("pelvis", sp((0, -0.20, 0.80)), (0.03, 0.02, 0.10), "metal", BRASS, rot=(-6, 0, 0)),
         # The tabard: long crimson panels front and back, dark hems, a team-colored band.
         box_part("pelvis", sp((0, -0.17, 0.80)), (0.36, 0.035, 0.52), "cloth", CRIMSON, rot=(-6, 0, 0), taper=1.25),
         box_part("pelvis", sp((0, 0.17, 0.80)), (0.36, 0.035, 0.52), "cloth", CRIMSON, rot=(6, 0, 0), taper=1.25),
@@ -131,10 +135,17 @@ def _left():
         box_part("hand_l", ("hand_l", 0.5), (0.15, 0.13, 0.17), "metal", IRON_DARK, bevel=0.3),
         box_part("fingers_l", ("fingers_l", 0.4), (0.14, 0.12, 0.10), "metal", IRON_DARK, bevel=0.3),
         box_part("thumb_l", ("thumb_l", 0.5), (0.06, 0.06, 0.07), "metal", IRON_DARK),
+        # Plated fingers on the gauntlet.
+        *[box_part("fingers_l", ("fingers_l", 0.75, (0.0, y, 0.0)), (0.05, 0.035, 0.07), "metal", IRON, bevel=0.3) for y in (-0.04, 0.0, 0.04)],
+        # Lower lames under the pauldron.
+        path_part(ua, [(ua, 0.30, (0.13, 0, -0.06)), (ua, 0.38, (0.15, 0, -0.12)), (ua, 0.46, (0.15, 0, -0.18))],
+                  6, [(.16, .03), (.15, .03), (.13, .025)], "metal", IRON_DARK, ref=(0, 1, 0)),
+        box_part(ua, (ua, 0.12, (0.20, -0.10, 0.02)), (0.04, 0.04, 0.04), "metal", BRASS, rot=(0, 45, 0)),
         # Legs: short and thick; armored thighs, big knee cops, heavy boots.
         (th, sp((0.10, 0, 1.00)), (th, 1), 10, [(0, .15, .15), (.5, .14, .14), (1, .115, .115)], "cloth", DARK),
         (th, (th, .2), (th, .85), 6, [(0, .135, .15), (1, .12, .13)], "metal", IRON_DARK),
         box_part(ca, (ca, 0.02, (0, -0.06, 0)), (0.17, 0.10, 0.16), "metal", IRON, bevel=0.3),
+        *[(ca, (ca, t), (ca, t + 0.05), 10, [(0, .118, .118), (1, .116, .116)], "metal", IRON_DARK) for t in (0.18, 0.34)],
         (ca, (ca, 0), (ca, .6), 10, [(0, .11, .11), (1, .10, .10)], "cloth", DARK),
         (ca, (ca, .45), (ca, 1), 10, [(0, .13, .13), (.2, .125, .125), (1, .115, .12)], "cloth", LEATHER),
         box_part("foot_l", ("foot_l", 0.45), (0.17, 0.24, 0.12), "cloth", LEATHER, bevel=0.25),
@@ -180,6 +191,10 @@ def _maul():
         path_part(hb, [p(c + across * (w * 0.48)), p(c + across * (w * 0.62))], 4, [(a * 1.5, b * 1.5)] * 2, "metal", IRON_DARK, ref=axis),
         path_part(hb, [p(c - across * (w + 0.03)), p(c - across * w)], 4, [(a * 1.2, b * 1.2)] * 2, "metal", BRASS, ref=axis),
         path_part(hb, [p(c + across * w), p(c + across * (w + 0.03))], 4, [(a * 1.2, b * 1.2)] * 2, "metal", BRASS, ref=axis),
+        # Studs on the brass caps.
+        *[path_part(hb, [p(c + across * (sgn * (w + 0.03)) + axis * da + side * db), p(c + across * (sgn * (w + 0.07)) + axis * da + side * db)], 6,
+                    [(.03, .03), (0, 0)], "metal", IRON_DARK, ref=axis)
+          for sgn in (1, -1) for da, db in ((0.08, 0.08), (-0.08, 0.08), (0.08, -0.08), (-0.08, -0.08))],
         # Runes on the four long faces, so the glow shows from any side and from above.
         path_part(hb, [p(c - across * 0.14 + axis * (a + 0.005)), p(c + across * 0.14 + axis * (a + 0.005))], 4, [(.012, .035)] * 2, "emissive", RUNE, ref=axis),
         path_part(hb, [p(c - across * 0.14 - axis * (a + 0.005)), p(c + across * 0.14 - axis * (a + 0.005))], 4, [(.012, .035)] * 2, "emissive", RUNE, ref=axis),
@@ -535,39 +550,11 @@ def emote_dance(arm):
 
 OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, run, run_fast, attack_1, attack_2, q, w, e_start, e_travel, e_land, r,
        recall, death, respawn, select, emote_taunt, emote_joke, emote_laugh, emote_dance]
-SHARED = ["walk", "cast_utility", "cc_stunned", "cc_rooted", "cc_airborne", "cc_knockback", "cc_suppressed", "cc_sleep", "cc_forced_move"]
-
-
-def bake_shared(arm):
-    """Copy the shared library's clips in (10 §7.3): the same bones, so a direct copy."""
-    path = os.path.join(ROOT, "art", "library", "biped", "biped_library.blend")
-    with bpy.data.libraries.load(path, link=False) as (src, dst):
-        dst.actions = [n for n in src.actions if n in SHARED]
-    for act in dst.actions:
-        act.use_fake_user = True
-        clips.stash(arm, act)
-    return [a.name for a in dst.actions]
 
 
 def build(only=None):
-    bpy.ops.wm.read_homefile(use_empty=True)
-    bpy.context.scene.render.fps = 30
-    rig.use_shape(SHAPE)
-    mesh.AO_HEIGHT = 2.0
-    arm = rig.build_armature(name="rook")
-    own = [f(arm).name for f in OWN if only is None or f.__name__ in only]
-    body = mesh.build_mannequin(arm, name="rook", part_list=parts())
-    shared = bake_shared(arm) if only is None else []
-    print(f"rook: {len(arm.data.bones)} bones, {mesh.triangle_count(body)} triangles, {len(own)} own clips, shared {shared}")
-    return arm, body
+    return champion.build("rook", SHAPE, parts, OWN, 2.0, only=only)
 
 
 if __name__ == "__main__":
-    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
-    only = argv[argv.index("--only") + 1].split(",") if "--only" in argv else None
-    build(only)
-    if "--out" in argv:
-        out = os.path.abspath(argv[argv.index("--out") + 1])
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        bpy.ops.wm.save_as_mainfile(filepath=out, compress=True)
-        print(f"saved {out}")
+    champion.main(build)

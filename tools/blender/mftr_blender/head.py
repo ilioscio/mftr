@@ -19,6 +19,8 @@ import bmesh
 from mathutils import Euler, Matrix, Vector
 
 SIDES = 16
+# The resolution heads are built at when a Head doesn't say (champion generators raise it).
+DEFAULT_DETAIL = 1
 # (t, half-width, front depth, back depth): t from under the chin (0) to the crown (1).
 SKULL = [
     (0.00, .036, .040, .040),
@@ -39,7 +41,7 @@ class Head:
     def __init__(self, base=(0, -0.01, 1.63), height=0.25, scale=1.0, jaw=0.35, chin=1.0, eye=1.0,
                  skin=(0.86, 0.64, 0.50), hair=(0.24, 0.16, 0.11), hair_style="short",
                  eye_color=(0.16, 0.11, 0.08), lips=(0.62, 0.36, 0.32), beard=None, scar=False,
-                 metal=(0.34, 0.35, 0.39)):
+                 metal=(0.34, 0.35, 0.39), detail=None):
         self.base = Vector(base)
         self.height = height * scale
         self.scale = scale
@@ -49,6 +51,18 @@ class Head:
         self.skin, self.hair, self.hair_style = skin, hair, hair_style
         self.eye_color, self.lips = eye_color, lips
         self.beard, self.scar, self.metal = beard, scar, metal
+        # 1: the block-out's resolution; 2: 24 sides and twice the rings (14 §2.3, D59 budget).
+        self.detail = DEFAULT_DETAIL if detail is None else detail
+        self.sides = SIDES if self.detail < 2 else 24
+
+    def rows(self, ts):
+        """`ts` refined for the detail level: midpoints between neighbors at detail 2."""
+        if self.detail < 2:
+            return list(ts)
+        out = []
+        for a, b in zip(ts, ts[1:]):
+            out += [a, (a + b) / 2]
+        return out + [ts[-1]]
 
     def _radii(self, t):
         for (t0, w0, f0, b0), (t1, w1, f1, b1) in zip(SKULL, SKULL[1:]):
@@ -123,10 +137,11 @@ def build(bm, layers, groups, mats, head: Head):
     """The skull, face and hair. `mats` maps slot names to material indices."""
     g = groups["head"]
     skin, cloth = mats["skin"], mats["cloth"]
+    SIDES = head.sides  # noqa: N806
     angles = [2 * math.pi * (i + 0.5) / SIDES for i in range(SIDES)]
 
     # Skull.
-    rings = [[bm.verts.new(head.surface(t, a)) for a in angles] for t, *_ in SKULL]
+    rings = [[bm.verts.new(head.surface(t, a)) for a in angles] for t in head.rows([r[0] for r in SKULL])]
     crown = bm.verts.new(head.surface(1.0, 0))
     _rings(bm, rings, close_top=False)
     for i in range(SIDES):
@@ -183,7 +198,7 @@ def build(bm, layers, groups, mats, head: Head):
         d = p - c
         return c + d * push + Vector((0, 0, 0.006))
 
-    steps = [0.0, 0.2, 0.42, 0.62, 0.8, 0.93]
+    steps = head.rows([0.0, 0.2, 0.42, 0.62, 0.8, 0.93])
     hair_rings = []
     for s in steps:
         ring = []
@@ -255,14 +270,15 @@ def _beard(bm, layers, g, mats, head, angles):
         c = head.base + Vector((0, 0.01, (p - head.base).z))
         return c + (p - c) * push(a)
 
-    rows = [0.36, 0.26, 0.15, 0.05]
+    rows = head.rows([0.36, 0.26, 0.15, 0.05])
     rings = [[bm.verts.new(out(t, a)) for a in angles] for t in rows]
     # Below the chin the beard gathers forward into the braid's root.
     chin = head.surface(0.0, -math.pi / 2)
     root = bm.verts.new(chin + Vector((0, -0.05 * k, -0.06 * k)))
     _rings(bm, rings, close_top=False)
-    for i in range(SIDES):
-        bm.faces.new((rings[-1][(i + 1) % SIDES], rings[-1][i], root))
+    n = len(angles)
+    for i in range(n):
+        bm.faces.new((rings[-1][(i + 1) % n], rings[-1][i], root))
     bm.faces.new(rings[0])
     verts = [v for r in rings for v in r] + [root]
     # Built top-down, so let bmesh point the closed shell's faces outward.

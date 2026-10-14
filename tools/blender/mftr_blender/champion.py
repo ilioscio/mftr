@@ -10,7 +10,7 @@ import sys
 import bpy
 from mathutils import Quaternion, Vector
 
-from . import clips, mesh, rig
+from . import clips, head, mesh, rig
 from .clips import at, ik
 
 SHARED = ["walk", "cast_utility", "cc_stunned", "cc_rooted", "cc_airborne", "cc_knockback", "cc_suppressed", "cc_sleep",
@@ -80,9 +80,51 @@ def bake_shared(armature, names=None):
     return [a.name for a in dst.actions]
 
 
-def build(name, shape, parts, own, height, extras=None, only=None, shared=None):
-    """Build the champion: armature in `shape`, `extras(armature)` (chains), clips, mesh, the
-    shared clips. Returns (armature, body)."""
+def detailed(parts):
+    """The detail pass (D59, 14 §2.3): round lofts (8+ sides) get four more sides and smoothed
+    in-between rings, so round masses read round; blocky parts and hand-made paths are left
+    as authored."""
+    out = []
+    for p in parts:
+        if not callable(p) and p[3] >= 8:
+            bone, a, b, sides, prof, slot, color = p
+            out.append((bone, a, b, min(sides + 4, 16), mesh._smooth(prof) if len(prof) >= 3 else prof, slot, color))
+        else:
+            out.append(p)
+    return out
+
+
+def hand_parts(side, color, slot="skin", scale=1.0, knuckles=None):
+    """A sculpted hand (14 §2.2): a palm on `hand_<side>`, four tapered fingers on
+    `fingers_<side>` (they curl together), a thumb; `knuckles` colors a guard across them."""
+    bones = {b[0]: b for b in rig.bone_table()}
+    hh, ht = Vector(bones[f"hand_{side}"][2]), Vector(bones[f"hand_{side}"][3])
+    fh, ft = Vector(bones[f"fingers_{side}"][2]), Vector(bones[f"fingers_{side}"][3])
+    d = (ft - fh).normalized()
+    across = Vector((0, 1, 0))
+    across = (across - d * across.dot(d)).normalized()
+    curl = d.cross(across).normalized() * (1 if side == "l" else -1)
+    s = scale
+    out = [mesh.path_part(f"hand_{side}", [tuple(hh - (ht - hh) * 0.05), tuple(hh + (ht - hh) * 0.5), tuple(ht)], 6,
+                          [(.036 * s, .02 * s), (.044 * s, .024 * s), (.042 * s, .02 * s)], slot, color, ref=tuple(across))]
+    length = (ft - fh).length * 1.05
+    for k, (off, lf) in enumerate(((-1.5, 0.82), (-0.5, 1.0), (0.5, 0.96), (1.5, 0.80))):
+        base = fh + across * (off * 0.0215 * s)
+        mid = base + d * (length * lf * 0.5) - curl * 0.004 * s
+        tip = base + d * (length * lf) - curl * 0.012 * s
+        out.append(mesh.path_part(f"fingers_{side}", [tuple(base), tuple(mid), tuple(tip)], 5,
+                                  [(.0115 * s, .011 * s), (.0105 * s, .010 * s), (.008 * s, .007 * s)], slot, color, ref=tuple(across)))
+    out.append(mesh.path_part(f"thumb_{side}", [(f"thumb_{side}", -0.1), (f"thumb_{side}", 0.5), (f"thumb_{side}", 1.15)], 5,
+                              [(.016 * s, .015 * s), (.014 * s, .013 * s), (.010 * s, .009 * s)], slot, color))
+    if knuckles:
+        out.append(mesh.path_part(f"fingers_{side}", [tuple(fh - across * 0.05 * s), tuple(fh + across * 0.05 * s)], 4,
+                                  [(.016 * s, .02 * s)] * 2, "metal", knuckles, ref=tuple(d)))
+    return out
+
+
+def build(name, shape, parts, own, height, extras=None, only=None, shared=None, detail=2):
+    """Build the champion: armature in `shape`, `extras(armature)` (chains), clips, mesh (with
+    the detail pass and fine heads at `detail` 2), the shared clips. Returns (armature, body)."""
     bpy.ops.wm.read_homefile(use_empty=True)
     bpy.context.scene.render.fps = 30
     rig.use_shape(shape)
@@ -91,7 +133,12 @@ def build(name, shape, parts, own, height, extras=None, only=None, shared=None):
     if extras:
         extras(armature)
     made = [f(armature).name for f in own if only is None or f.__name__ in only]
-    body = mesh.build_mannequin(armature, name=name, part_list=parts())
+    head.DEFAULT_DETAIL = detail
+    try:
+        part_list = parts()
+        body = mesh.build_mannequin(armature, name=name, part_list=detailed(part_list) if detail >= 2 else part_list)
+    finally:
+        head.DEFAULT_DETAIL = 1
     baked = bake_shared(armature, shared) if only is None else []
     print(f"{name}: {len(armature.data.bones)} bones, {mesh.triangle_count(body)} triangles, {len(made)} own clips, shared {baked}")
     return armature, body

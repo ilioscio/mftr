@@ -75,11 +75,26 @@ def _center():
         ("neck", sp((0, 0, 1.55)), sp((0, -0.01, 1.66)), 8, [(0, .055, .055), (1, .05, .05)], "cloth", BLACK),
         # The scarf: wound round his neck, its tail on the chain.
         ("chest", sp((0, 0.0, 1.53)), sp((0, -0.005, 1.62)), 8, [(0, .12, .11), (1, .10, .095)], "cloth", VIOLET_CLOTH),
-        ("extra_scarf_1", SCARF[0], SCARF[1], 6, [(0, .075, .016), (1, .08, .016)], "cloth", VIOLET_CLOTH),
-        ("extra_scarf_2", SCARF[1], SCARF[2], 6, [(0, .08, .016), (1, .08, .015)], "cloth", VIOLET_CLOTH),
-        ("extra_scarf_3", SCARF[2], SCARF[3], 6, [(0, .08, .015), (.8, .075, .014), (1, .03, .012)], "cloth", VIOLET_CLOTH),
+        ("extra_scarf_1", SCARF[0], SCARF[1], 8, [(0, .075, .016), (1, .08, .016)], "cloth", VIOLET_CLOTH),
+        ("extra_scarf_2", SCARF[1], SCARF[2], 8, [(0, .08, .016), (1, .08, .015)], "cloth", VIOLET_CLOTH),
+        ("extra_scarf_3", SCARF[2], SCARF[3], 8, [(0, .08, .015), (.8, .075, .014), (1, .03, .012)], "cloth", VIOLET_CLOTH),
         ("extra_scarf_3", (SCARF[3][0], SCARF[3][1] + 0.004, SCARF[3][2] + 0.05), (SCARF[3][0], SCARF[3][1] + 0.005, SCARF[3][2] - 0.02), 4,
          [(0, .065, .02), (1, .02, .018)], "emissive", VIOLET),
+        # A slung belt of throwing knives across his hips.
+        path_part("pelvis", [sp((0.17, -0.02, 1.04)), sp((0.10, -0.13, 0.98)), sp((0.0, -0.15, 0.95)), sp((-0.10, -0.13, 0.94)),
+                             sp((-0.17, -0.02, 0.96)), sp((-0.12, 0.12, 0.99)), sp((0.0, 0.14, 1.01)), sp((0.12, 0.12, 1.03)),
+                             sp((0.17, -0.02, 1.04))], 6, [(.02, .012)] * 9, "cloth", LEATHER),
+        *[box_part("pelvis", sp((x, -0.155, 0.92 + 0.05 * abs(x))), (0.018, 0.012, 0.12), "metal", STEEL, rot=(0, x * 80, 0)) for x in (-0.09, -0.05, 0.04, 0.08)],
+        # Leather plates over his chest, tattered strips at his back.
+        box_part("chest", sp((0.07, -0.10, 1.47)), (0.11, 0.04, 0.12), "cloth", LEATHER, rot=(0, -8, 0), bevel=0.3),
+        box_part("chest", sp((-0.07, -0.10, 1.47)), (0.11, 0.04, 0.12), "cloth", LEATHER, rot=(0, 8, 0), bevel=0.3),
+        box_part("spine_01", sp((0, -0.10, 1.20)), (0.16, 0.04, 0.08), "cloth", LEATHER, bevel=0.3),
+        *[box_part("pelvis", sp((x, 0.12, 0.70 - abs(x))), (0.06, 0.02, 0.36 - abs(x)), "cloth", VIOLET_CLOTH, rot=(12, 0, x * 60), taper=0.6)
+          for x in (-0.10, -0.03, 0.05, 0.12)],
+        # A wrapped cloth pauldron on his left shoulder.
+        path_part("clavicle_l", [("clavicle_l", 0.5, (0, 0, 0.05)), ("clavicle_l", 1.0, (0.03, 0, 0.08)),
+                                 ("clavicle_l", 1.0, (0.11, 0, 0.03)), ("clavicle_l", 1.0, (0.13, 0, -0.05))],
+                  8, [(.09, .035), (.11, .05), (.11, .05), (.09, .03)], "cloth", WRAP, ref=(0, 1, 0)),
         # A spiked steel guard on his right shoulder only.
         path_part("clavicle_r", [("clavicle_r", 0.5, (0, 0, 0.06)), ("clavicle_r", 1.0, (-0.03, 0, 0.09)),
                                  ("clavicle_r", 1.0, (-0.12, 0, 0.04)), ("clavicle_r", 1.0, (-0.14, 0, -0.05))],
@@ -98,8 +113,12 @@ def _head():
         box_part(hb, sp((-0.04, -0.115, 1.745)), (0.05, 0.02, 0.018), "emissive", VIOLET, rot=(0, 0, -8)),
         box_part(hb, sp((0.04, -0.115, 1.745)), (0.05, 0.02, 0.018), "emissive", VIOLET, rot=(0, 0, 8)),
         path_part(hb, [sp((0, 0.0, 1.60)), sp((0, 0.0, 1.66)), sp((0, 0.0, 1.72)), sp((0, 0.02, 1.79)), sp((0, 0.05, 1.86)),
-                       sp((0, 0.10, 1.92)), sp((0, 0.16, 1.97)), hood_tip], 10,
+                       sp((0, 0.10, 1.92)), sp((0, 0.16, 1.97)), hood_tip], 14,
                   [(.13, .14), (.145, .155), (.15, .16), (.145, .155), (.12, .13), (.085, .095), (.045, .05), (0, 0)], "cloth", INDIGO, ref=(1, 0, 0)),
+        # The hood's rim, framing the mask, and an inner shadow layer.
+        path_part(hb, [sp((0.10, -0.08, 1.64)), sp((0.11, -0.12, 1.76)), sp((0.06, -0.14, 1.86)), sp((0.0, -0.15, 1.89)),
+                       sp((-0.06, -0.14, 1.86)), sp((-0.11, -0.12, 1.76)), sp((-0.10, -0.08, 1.64))], 6,
+                  [(.02, .015)] * 7, "cloth", VIOLET_CLOTH),
         # The hood's face opening, a dark rim.
         box_part(hb, sp((0, -0.13, 1.77)), (0.24, 0.04, 0.05), "cloth", BLACK, rot=(-20, 0, 0)),
     ]
@@ -111,12 +130,14 @@ def _left():
         (ua, (ua, 0), (ua, 1), 12, [(0, .06, .06), (1, .05, .05)], "cloth", INDIGO),
         (fa, (fa, 0), (fa, 1), 12, [(0, .05, .05), (1, .045, .045)], "cloth", WRAP),
         (fa, (fa, .35), (fa, .95), 12, [(0, .058, .058), (1, .052, .052)], "cloth", LEATHER),
-        box_part("hand_l", ("hand_l", 0.45), (0.08, 0.07, 0.09), "cloth", BLACK, bevel=0.3),
-        box_part("fingers_l", ("fingers_l", 0.4), (0.075, 0.06, 0.06), "cloth", BLACK, bevel=0.3),
-        ("thumb_l", ("thumb_l", 0), ("thumb_l", 1), 5, [(0, .02, .02), (1, .015, .015)], "cloth", BLACK),
+        *champion.hand_parts("l", BLACK, "cloth", scale=1.35),
         (th, sp((0.10, 0, 1.02)), (th, 1), 12, [(0, .092, .09), (.5, .08, .08), (1, .06, .06)], "cloth", BLACK),
         (ca, (ca, 0), (ca, 1), 12, [(0, .062, .062), (.5, .056, .056), (1, .05, .05)], "cloth", WRAP),
         (ca, (ca, .55), (ca, .95), 12, [(0, .066, .066), (1, .058, .058)], "cloth", INDIGO),
+        *[(ca, (ca, t), (ca, t + 0.05), 12, [(0, .068, .068), (1, .066, .066)], "cloth", WRAP) for t in (0.6, 0.72, 0.84)],
+        *[(fa, (fa, t), (fa, t + 0.05), 12, [(0, .06, .06), (1, .058, .058)], "cloth", WRAP) for t in (0.08, 0.2)],
+        *[(th, (th, t), (th, t + 0.05), 12, [(0, .088, .088), (1, .084, .084)], "cloth", WRAP) for t in (0.15, 0.8)],
+        (ca, (ca, .93), (ca, 1.0), 12, [(0, .062, .062), (1, .062, .062)], "cloth", LEATHER),
         box_part("foot_l", ("foot_l", 0.45), (0.09, 0.16, 0.08), "cloth", BLACK, bevel=0.25),
         box_part(ca, (ca, 0.03, (0, -0.06, 0)), (0.09, 0.05, 0.10), "metal", STEEL_DARK, bevel=0.3),
         box_part(ca, (ca, 0.5, (0, -0.05, 0)), (0.07, 0.03, 0.22), "metal", STEEL_DARK, bevel=0.3),
@@ -150,8 +171,10 @@ def _knife(side):
              g - axis * 0.60 + out * 0.06]
     return [
         path_part(hb, [p(g + axis * 0.05), p(g - axis * 0.02)], 6, [(.03, .03), (.03, .03)], "cloth", LEATHER),
+        path_part(hb, [p(g + axis * 0.05), p(g + axis * 0.09)], 8, [(.034, .034), (.02, .02)], "metal", STEEL_DARK),
+        path_part(hb, [p(g + axis * 0.09), p(g + axis * 0.12)], 6, [(.012, .012), (0, 0)], "emissive", VIOLET),
         path_part(hb, [p(g - axis * 0.02), p(g - axis * 0.04)], 6, [(.05, .02), (.05, .02)], "metal", STEEL_DARK, ref=tuple(out)),
-        path_part(hb, [p(v) for v in spine], 6, [(.012, .05), (.012, .055), (.01, .045), (.008, .03), (0, 0)], "metal", STEEL, ref=tuple(out)),
+        path_part(hb, [p(v) for v in spine], 8, [(.012, .05), (.012, .055), (.01, .045), (.008, .03), (0, 0)], "metal", STEEL, ref=tuple(out)),
         path_part(hb, [p(v + out * 0.045) for v in spine[1:]], 4, [(.006, .012), (.006, .012), (.005, .01), (0, 0)], "emissive", VIOLET, ref=tuple(out)),
     ]
 

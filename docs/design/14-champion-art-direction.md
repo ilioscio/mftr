@@ -50,6 +50,9 @@ Round lofted limbs everywhere are the "inflatable tube man". Instead:
   the gameplay camera sees them.
 - **Weapons are big and solid**: ≥ 0.06 m across the haft or blade, heads and blades exaggerated.
 - **Detail budget goes to the outline first**, then color blocking, never to small interior bits.
+  The budget is **5,000–8,000 triangles** (D59, double the first block-outs'): spend it on the
+  silhouette's shapes, rounder masses where they're round, sculpted hands and layered armor and
+  cloth, not on interior noise the gameplay camera can't see.
 
 ## 3. Weight and feel
 

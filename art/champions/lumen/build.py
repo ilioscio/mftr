@@ -75,6 +75,12 @@ def _center():
         ("chest", sp((0, 0.0, 1.47)), sp((0, -0.005, 1.60)), 12, [(0, .205, .15), (.6, .17, .125), (1, .10, .088)], "cloth", IVORY),
         ("chest", sp((0, 0.0, 1.455)), sp((0, 0.0, 1.475)), 12, [(0, .21, .155), (1, .21, .155)], "metal", GOLD),
         box_part("chest", sp((0, -0.13, 1.52)), (0.07, 0.03, 0.07), "emissive", SUN, rot=(0, 45, 0)),
+        box_part("chest", sp((0.06, -0.12, 1.36)), (0.03, 0.02, 0.18), "cloth", SKY, rot=(0, -5, 0)),
+        box_part("chest", sp((-0.06, -0.12, 1.36)), (0.03, 0.02, 0.18), "cloth", SKY, rot=(0, 5, 0)),
+        box_part("chest", sp((0.06, -0.125, 1.26)), (0.035, 0.025, 0.035), "metal", GOLD),
+        box_part("chest", sp((-0.06, -0.125, 1.26)), (0.035, 0.025, 0.035), "metal", GOLD),
+        path_part("pelvis", [sp((0, 0.01, 0.80)), sp((0, 0.02, 0.62)), sp((0, 0.025, 0.42))], 12, [(.22, .19), (.28, .25), (.34, .30)], "cloth", WHITE),
+        path_part("pelvis", [sp((0, 0.025, 0.44)), sp((0, 0.025, 0.41))], 12, [(.34, .30), (.345, .305)], "cloth", SKY),
         ("neck", sp((0, 0, 1.55)), sp((0, -0.01, 1.66)), 8, [(0, .048, .048), (1, .044, .044)], "skin", SKIN),
     ]
 
@@ -85,7 +91,9 @@ def _halo():
     r = 0.30
     pts = [tuple(c + Vector((math.cos(a) * r, 0.0, math.sin(a) * r))) for a in [2 * math.pi * k / 16 for k in range(17)]]
     inner = [tuple(c + Vector((math.cos(a) * (r - 0.06), 0.01, math.sin(a) * (r - 0.06)))) for a in [2 * math.pi * k / 16 for k in range(17)]]
+    mid = [tuple(c + Vector((math.cos(a) * (r - 0.11), 0.02, math.sin(a) * (r - 0.11)))) for a in [2 * math.pi * k / 16 for k in range(17)]]
     out = [path_part("chest", pts, 4, [(.04, .022)] * 17, "emissive", SUN, ref=(0, 1, 0)),
+           path_part("chest", mid, 4, [(.016, .012)] * 17, "emissive", SUN_WHITE, ref=(0, 1, 0)),
            path_part("chest", inner, 4, [(.012, .012)] * 17, "metal", GOLD, ref=(0, 1, 0))]
     out.append(path_part("chest", [sp((0, 0.12, 1.62)), sp((0, 0.19, 1.62 + 0.04)), sp((0, 0.20, 1.86 - r))], 6, [(.03, .03), (.025, .025), (.02, .02)], "metal", GOLD))
     return out
@@ -109,11 +117,10 @@ def _left():
         # Wide sleeves hanging from the forearm, gold-hemmed.
         (fa, (fa, 0), (fa, 1.0), 10, [(0, .055, .055), (.5, .075, .075), (1, .11, .10)], "cloth", WHITE),
         (fa, (fa, 0.97), (fa, 1.01), 10, [(0, .113, .103), (1, .113, .103)], "cloth", SKY),
+        (fa, (fa, 0.55), (fa, 0.98), 12, [(0, .07, .068), (.5, .085, .082), (1, .098, .09)], "cloth", IVORY),
         box_part(fa, (fa, 0.35, (0.0, -0.05, 0.0)), (0.05, 0.03, 0.05), "metal", GOLD, rot=(0, 0, 45), bevel=0.3),
         box_part("upperarm_l", ("upperarm_l", 0.15, (0.03, 0, 0.0)), (0.05, 0.05, 0.05), "metal", GOLD, rot=(0, 45, 0), bevel=0.3),
-        box_part("hand_l", ("hand_l", 0.45), (0.07, 0.055, 0.085), "skin", SKIN, bevel=0.3),
-        box_part("fingers_l", ("fingers_l", 0.4), (0.068, 0.05, 0.06), "skin", SKIN, bevel=0.3),
-        ("thumb_l", ("thumb_l", 0), ("thumb_l", 1), 5, [(0, .018, .018), (1, .013, .013)], "skin", SKIN),
+        *champion.hand_parts("l", SKIN, "skin", scale=1.25),
         # Legs under the robe (seen only in a stride), soft slippers.
         ("thigh_l", sp((0.10, 0, 1.02)), ("thigh_l", 1), 8, [(0, .08, .08), (1, .056, .056)], "cloth", IVORY),
         ("calf_l", ("calf_l", 0), ("calf_l", 1), 8, [(0, .055, .055), (1, .045, .045)], "cloth", IVORY),
@@ -140,6 +147,11 @@ def _staff():
         path_part(hb, [p(STAFF_TOP - 0.14), p(STAFF_TOP - 0.10), p(STAFF_TOP + 0.08), p(STAFF_TOP + 0.12)], 6,
                   [(.03, .03), (.075, .075), (.075, .075), (.03, .03)], "metal", GOLD),
         path_part(hb, [p(STAFF_TOP - 0.08), p(STAFF_TOP), p(STAFF_TOP + 0.07)], 6, [(.06, .06), (.085, .085), (.05, .05)], "emissive", SUN_WHITE),
+        # Cage bars around the light, and carved gold rings down the staff.
+        *[path_part(hb, [tuple(h + axis * (STAFF_TOP - 0.10) + v * 0.09), tuple(h + axis * (STAFF_TOP + 0.08) + v * 0.09)], 5,
+                    [(.008, .008), (.008, .008)], "metal", GOLD)
+          for v in (side, -side, side.cross(axis).normalized(), -side.cross(axis).normalized())],
+        *[path_part(hb, [p(d), p(d + 0.03)], 8, [(.036, .036), (.036, .036)], "metal", GOLD) for d in (GRIP + 0.30, GRIP + 0.55, GRIP + 0.80)],
         path_part(hb, [tuple(top + axis * 0.12 + side * 0.10), tuple(top + axis * 0.22 + side * 0.06), tuple(top + axis * 0.26),
                        tuple(top + axis * 0.22 - side * 0.06), tuple(top + axis * 0.12 - side * 0.10)], 4,
                   [(0, 0), (.025, .015), (.03, .015), (.025, .015), (0, 0)], "metal", GOLD),

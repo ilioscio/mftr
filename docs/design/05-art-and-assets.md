@@ -64,7 +64,7 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
 
 Full specification: **[10 — Characters & Animation](10-characters-and-animation.md)**. In short:
 
-- "Faceted PS1" low-poly meshes, **2,500–4,000 triangles** (cap 6,000), with vertex colors and ≤ 4 material slots including the team accent; no texture maps (D48).
+- "Faceted PS1" low-poly meshes, **5,000–8,000 triangles** (cap 12,000; D59), with vertex colors and ≤ 4 material slots including the team accent; no texture maps (D48).
 - Shading: faceted toon ramp + rim light + team-accent region + procedural detail noise in object space.
 - Skeletal animation on a shared rig standard, with the **complete animation set** per champion (~35–45 clips: locomotion, attacks, every ability phase, CC poses, recall, death, emotes), timed by the sim's action contract. Exported as glTF plus a marker sidecar, and shipped inside content packs ([11](11-content-packs-and-mods.md)).
 - Optional **outline** pass (inverted hull or post-process) to strengthen silhouettes. A user setting.
@@ -196,9 +196,9 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 | Engine + `mftr-gdext` + client scripts (custom Godot export template with unused modules stripped) | ≤ 40 MB |
 | ARAM map | ≤ 4 MB |
 | Main map | ≤ 8 MB |
-| Per champion (meshes, anims, VFX, SFX, icons) | ≤ 1.5 MB |
+| Per champion (meshes, anims, VFX, SFX, icons) | ≤ 1.7 MB |
 | UI, fonts (base language) | ≤ 5 MB |
-| **v1.0 total with 40 champions** | **≤ 120 MB** (150 MB hard cap) |
+| **v1.0 total with 40 champions** | **≤ 125 MB** (150 MB hard cap; was 120 MB before D59 doubled the champion meshes) |
 | Optional: music pack, voice packs, HD outlines, etc. | separate downloads |
 
 CI produces a **size report per PR**, and the build fails if a budget is exceeded without an approved exception.
