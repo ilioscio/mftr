@@ -13,7 +13,7 @@ use godot::prelude::*;
 use mftr_client::blind::{BlindPlan, BlindRating, BlindRecord, RoundStats, TSV_HEADER};
 use mftr_client::{ClientSession, Notice, OwnMissileDisplay, Phase, Side};
 use mftr_net::conditioner::{LinkProfile, SimLink};
-use mftr_net::secure::{Identity, KnownServers, SecureClient, SecureError, parse_address};
+use mftr_net::secure::{Fingerprint, Identity, KnownServers, SecureClient, SecureError, parse_address};
 use mftr_sim::ability::{DamageKind, SLOTS};
 use mftr_sim::augments;
 use mftr_sim::items::{self, INVENTORY};
@@ -43,6 +43,8 @@ pub struct MatchClient {
     /// The server's address ("host:port"), and whether its key is saved as trusted.
     server: String,
     trusted: bool,
+    /// The pinned key and the key the server showed instead, when they differ.
+    key_conflict: Option<(Fingerprint, Fingerprint)>,
     clock: Instant,
     next_hello: f64,
     last_error: GString,
@@ -129,6 +131,7 @@ impl INode for MatchClient {
             identity: None,
             server: String::new(),
             trusted: false,
+            key_conflict: None,
             clock: Instant::now(),
             next_hello: 0.0,
             last_error: GString::new(),
@@ -183,6 +186,7 @@ impl MatchClient {
                 self.secure = Some(SecureClient::new(&identity, pin));
                 self.server = host.to_string();
                 self.trusted = false;
+                self.key_conflict = None;
                 self.session = ClientSession::new();
                 self.session.set_champion_request(self.champion_request);
                 self.session.set_resume(self.resume);
@@ -325,6 +329,34 @@ impl MatchClient {
         }
         self.blind_apply();
         ok
+    }
+
+    /// When the server's key differs from the one saved for it: `{ server, saved, now }`
+    /// (fingerprints in hex); empty otherwise.
+    #[func]
+    fn key_conflict(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        if let Some((saved, now)) = self.key_conflict {
+            d.set("server", self.server.as_str());
+            d.set("saved", saved.to_string().as_str());
+            d.set("now", now.to_string().as_str());
+        }
+        d
+    }
+
+    /// Replace the saved key for the server in conflict with the one it showed, so the next
+    /// connection trusts it. Returns false when there's no conflict or the file can't be written.
+    #[func]
+    fn trust_new_key(&mut self) -> bool {
+        let Some((_, now)) = self.key_conflict else { return false };
+        let mut known = known_servers();
+        known.set(&self.server, now);
+        if std::fs::write(user_path(KNOWN_FILE), known.to_text()).is_err() {
+            self.last_error = GString::from(&format!("could not write {}", user_path(KNOWN_FILE)));
+            return false;
+        }
+        self.key_conflict = None;
+        true
     }
 
     /// What went wrong connecting: the transport's error, or why the server turned us away.
@@ -1757,8 +1789,13 @@ impl MatchClient {
         let Some(secure) = &self.secure else { return };
         if let Some(e) = secure.error() {
             let mut text = e.to_string();
-            if matches!(e, SecureError::KeyChanged { .. }) {
-                text += &format!(", or delete its line in {}", user_path(KNOWN_FILE));
+            if let SecureError::KeyChanged { expected, got } = e {
+                self.key_conflict = Some((*expected, *got));
+                text = format!(
+                    "This server's identity key changed since you last played on it (saved {expected}, now {got}). \
+                     That happens when its host replaces the key or reinstalls the server; it can also mean \
+                     something is pretending to be this server. Trust the new key only if you expected the change."
+                );
             }
             self.last_error = GString::from(&text);
         } else if !self.trusted

@@ -139,6 +139,8 @@ func _ready() -> void:
 		if args[i] == "--shot-at" and i + 1 < args.size():
 			_shot_at = float(args[i + 1])
 			i += 1
+		elif args[i] == "--shot-trust":
+			_shot_trust = true
 		elif args[i] == "--shot-seq" and i + 1 < args.size():
 			_shot_seq = int(args[i + 1])
 			i += 1
@@ -352,6 +354,7 @@ var _shot_timer := 0.0
 var _shot_moved := false
 var _shot_at := 1.05                     # `--shot-at <seconds>` after joining
 var _shot_seq := 0                        # `--shot-seq <frames>`: that many frames from --shot-at
+var _shot_trust := false                  # `--shot-trust`: press "Trust the new key" when it shows
 var _shot_seq_i := 0
 var _shot_shop := false                  # `--shot-shop`: buy from the fountain, show the shop
 var _shot_lobby := false                 # `--shot-lobby`: reroll in champion select, capture it
@@ -4472,6 +4475,7 @@ var _last_phase_seen := ""
 var pause_panel: PanelContainer
 var connecting_panel: PanelContainer
 var connecting_label: Label
+var connecting_trust: Button
 
 
 func _load_servers() -> Array:
@@ -4704,6 +4708,14 @@ func _update_connecting(phase: String) -> void:
 		connecting_label = Label.new()
 		connecting_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		v.add_child(connecting_label)
+		# A server whose key changed (07): say so plainly and let the player decide, in game.
+		connecting_trust = Button.new()
+		connecting_trust.text = "Trust the new key and connect"
+		connecting_trust.theme_type_variation = "DangerButton"
+		connecting_trust.tooltip_text = "Saves this server's new key in place of the old one. Do this only if you expected it to change."
+		connecting_trust.visible = false
+		connecting_trust.pressed.connect(_trust_new_key)
+		v.add_child(connecting_trust)
 		var cancel := Button.new()
 		cancel.text = "Back to the server list"
 		connecting_label.theme_type_variation = "HeaderLabel"
@@ -4711,7 +4723,19 @@ func _update_connecting(phase: String) -> void:
 		v.add_child(cancel)
 	var err: String = client.last_error()
 	connecting_label.text = "Connecting to %s…%s" % [_server_address, ("\n\n" + err) if err != "" else ""]
+	connecting_trust.visible = not client.key_conflict().is_empty()
 	_center(connecting_panel)
+	if _shot_trust and connecting_trust.visible:
+		_shot_trust = false
+		print("MFTR: trusting the new key")
+		_trust_new_key()
+
+
+## The player accepted a server's new key: save it, then connect again (without any pin the
+## address carried, which named the old key).
+func _trust_new_key() -> void:
+	if client.trust_new_key():
+		_connect(_server_address.split("#")[0])
 
 
 ## ---- Queues (13 §1): what to play on this server ---------------------------------------------

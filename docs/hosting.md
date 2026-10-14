@@ -223,8 +223,9 @@ A client remembers the key of every server it meets and refuses one whose key ch
 **keep the key file** across restarts and upgrades (back it up with the server). Give players the
 address with the fingerprint, `your.server.address:7777#8a0b…`, and their client only talks to
 the real server, even on the first connection. Without the `#…` part they trust whatever key they
-see first. If you ever replace the key, players connect once with the new `#fingerprint` (or
-delete the server's line in `known_servers.txt` in the client's user folder).
+see first. If you ever replace the key, the client tells players the key changed, shows both
+fingerprints and warns that this can also mean an impostor; they can **trust the new key** with
+a button and connect, or connect once with the new `#fingerprint`. Tell them it's coming.
 
 ## Replays
 
