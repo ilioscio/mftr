@@ -1,6 +1,6 @@
 # Vesper — concept
 
-Status: **draft** (awaiting the owner's approval, 10 §10)
+Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** (awaiting the owner's approval)
 
 ## Identity
 
@@ -10,19 +10,25 @@ Status: **draft** (awaiting the owner's approval, 10 §10)
   - **E Tumble:** a short roll (dash).
   - **R Snare Net:** a wide thrown net that roots (hard CC line, ultimate).
 - **Personality in three words:** patient, precise, wry.
-- **Silhouette class:** *ranger archer*. A long recurve bow taller than her shoulders, a cloak tail that trails her movement, an auburn ponytail. Her hood is **down**, a cowl around her neck and over her upper back (a hood standing up read as confusing). A feminine hourglass build: a shaped bust, a narrow waist, fuller hips. Slim overall.
-- **Head:** the shared sculpted head (`tools/blender/mftr_blender/head.py`) with feminine settings: slimmer, a narrower jaw and smaller chin, larger green eyes; side-swept bangs and a ponytail.
-- **Archetype:** `biped` v1, plus an `extra_cape` chain (3 bones) for the cloak.
+- **Shape (14 §2):** *a huge recurve and a long one-sided cloak*. Athletic heroic proportions on the `biped` bones (`SHAPE` in `build.py`: ×1.05 wide, hands ×1.35), about 1.85 m. A 1.7 m recurve with teal-glowing tips, taller than her shoulders; a quiver across her back whose teal-fletched arrows rise over her right shoulder; a forest-green cloak with a teal hem hanging off her left shoulder on an `extra_cape` chain (3 bones); a leather pauldron on the bow shoulder; the hood down, a cowl. A feminine hourglass build.
+- **Head:** the shared sculpted head, feminine and heroic-sized (×1.1): a narrower jaw, large green eyes, side-swept auburn bangs and a ponytail.
+- **Gait (14 §3.5):** athletic, the bow steady and low in her left hand, the cloak streaming.
 
-## Palette (10 §2)
+## Palette (14 §4)
+
+Signature: **teal** (175°).
 
 | Slot | Colors |
 |---|---|
-| skin | warm pale (0.84, 0.66, 0.54) |
-| cloth | auburn hair (0.50, 0.22, 0.12), dusk teal cloak and hood (0.14, 0.32, 0.30), dark slate trousers (0.16, 0.17, 0.20), sleeves (0.20, 0.24, 0.22), leather jerkin, belt, quiver and boots (0.42, 0.27, 0.16 / 0.30, 0.19, 0.11), gloves (0.25, 0.16, 0.10), bow wood (0.36, 0.21, 0.10) |
-| metal | bow tips and buckle, worn silver (0.74, 0.76, 0.80) |
-| emissive | none (she reads by shape, not glow) |
-| accent | bracers, quiver fletching and the bow grip's band. Bracers and fletching read from above |
+| skin | warm pale (0.80, 0.60, 0.48) |
+| cloth | forest green cloak and cowl (0.10, 0.24, 0.17), dark forest trousers (0.06, 0.14, 0.10), cream shirt (0.70, 0.64, 0.50), leather (0.36, 0.22, 0.12 / 0.20, 0.12, 0.07), bow wood (0.30, 0.17, 0.08), teal cloth for the hem, sash and bracer bands (0.06, 0.42, 0.40), auburn hair |
+| metal | the bow's silver collars and the quiver's bands (0.55, 0.58, 0.62) |
+| emissive | teal (0.20, 0.95, 0.85): the bow's tips and the arrows' fletching |
+| accent | a band at her belt |
+
+## Weight (14 §3)
+
+Every shot is a nock, a draw, a **held full draw** (her string hand at her jaw, an IK target), a one-frame release on `fire`, and a recoil that holds before she settles back to ready. The bow's orientation comes from the full-draw pose, so it stands vertical when she shoots. Feet planted by IK; side-on stance, left foot forward.
 
 ## Clip checklist (10 §5)
 
@@ -35,14 +41,18 @@ Status: **draft** (awaiting the owner's approval, 10 §10)
 | attack_melee_alt | Shared (a bow-bash would replace it later) |
 | q | Longshot: deeper draw, higher aim; `fire` 8 (sim 7.5) |
 | w | Shrapnel Charge: overhand lob with the right hand; `fire` 8 |
-| e_start, e_travel, e_land | Tumble: crouch, forward roll (in place), land in a crouch |
-| r | Snare Net: two-handed spinning throw; `fire` 8; a heavier follow-through |
+| e_start, e_travel, e_land | Tumble: a dip and a dive; a full forward roll in place; out of it onto one knee, bow up, held |
+| r | Snare Net: gathered in both hands and swung back, cocked, flung wide on `fire` 8, arms held open |
 | cast_utility | Shared |
 | recall | Kneels, bow planted, breathes (`loop_in`/`loop_out`) |
 | death, respawn, select | Falls to her knees and sideways; rises from a crouch; showcase: a shot into the sky |
 | cc_* | Shared |
-| emote_taunt, emote_joke, emote_laugh, emote_dance | Beckons; spins the bow; a dry chuckle; a light side-step dance |
+| emote_taunt, emote_joke, emote_laugh, emote_dance | Two fingers at her eyes, then at you; balances an arrow on a fingertip; a dry chuckle; a bouncing two-step, the bow overhead |
 
 ## Definition of done
 
 See [10 §10](../../../docs/design/10-characters-and-animation.md#10-pilots-vesper-and-rook-d50). A4a covers the model and every clip in game; A4b adds VFX, A4c SFX.
+
+## Effects (14 §4)
+
+`export/vesper.vfx.ron`, all teal (white → teal → deep teal): teal flares off the string and bright teal shafts; a white star and teal sparks on hits; Longshot's release adds a whip-crack `slash`; Shrapnel Charge bursts with a star, a `shock` to its edge and smoke; the net flies teal and snaps shut in a ring.
