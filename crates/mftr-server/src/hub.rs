@@ -7,6 +7,7 @@ use mftr_net::PROTOCOL_VERSION;
 use mftr_net::msg::{self, ClientMessage, QueueInfo, RejectReason, ServerMessage};
 use mftr_net::packet::{PacketHeader, SendTracker};
 use mftr_sim::TICK_DT_F64;
+use mftr_sim::mapspec::MapKind;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -95,16 +96,34 @@ impl ModeOffer {
     }
 }
 
-/// A hosted server's queues: each mode on its sides (Versus, Co-op), Classic on Crossroads and
-/// on each of `maps` (name, text).
-pub fn hosted_queues(modes: &[ModeOffer], maps: &[(String, Arc<str>)]) -> Vec<QueueSpec> {
+/// A map file a server hosts (from the map editor, 12 §4).
+#[derive(Clone, Debug)]
+pub struct HostedMap {
+    pub name: String,
+    pub kind: MapKind,
+    pub text: Arc<str>,
+}
+
+/// The kind of map a scenario is played on, if it can be played on a map file: Classic on
+/// Classic maps, the ARAM modes on ARAM maps.
+pub fn map_kind(scenario: Scenario) -> Option<MapKind> {
+    match scenario {
+        Scenario::Classic => Some(MapKind::Classic),
+        Scenario::Aram | Scenario::Mayhem | Scenario::Hyper => Some(MapKind::Aram),
+        _ => None,
+    }
+}
+
+/// A hosted server's queues: each mode on its sides (Versus, Co-op), on its built-in map
+/// (Crossroads, The Bridge) and on each of `maps` of its kind.
+pub fn hosted_queues(modes: &[ModeOffer], maps: &[HostedMap]) -> Vec<QueueSpec> {
     let mut queues = Vec::new();
     for offer in ModeOffer::merge(modes) {
         let scenario = offer.scenario;
         let mut boards = vec![(map_name(scenario).to_string(), None)];
-        if scenario == Scenario::Classic {
-            boards.extend(maps.iter().map(|(name, text)| (name.clone(), Some(text.clone()))));
-        }
+        boards.extend(
+            maps.iter().filter(|m| map_kind(scenario) == Some(m.kind)).map(|m| (m.name.clone(), Some(m.text.clone()))),
+        );
         for (map_name, map) in boards {
             for coop in [false, true] {
                 if (coop && offer.coop) || (!coop && offer.versus) {
@@ -578,6 +597,35 @@ mod tests {
         let one = run(1);
         assert!(one.iter().all(|(tick, _)| tick.0 > 60), "{one:?}");
         assert_eq!(one, run(4));
+    }
+
+    /// 12 §4: a Classic map file adds Classic on it; an ARAM one adds each ARAM mode on it.
+    #[test]
+    fn map_files_add_queues_of_their_kind() {
+        let text = |t: &str| Arc::from(t);
+        let maps = [
+            HostedMap { name: "Twin Rivers".into(), kind: MapKind::Classic, text: text("c") },
+            HostedMap { name: "Long Bridge".into(), kind: MapKind::Aram, text: text("a") },
+        ];
+        let offers = [
+            ModeOffer::both(Scenario::Aram),
+            ModeOffer::parse("hyper-coop").unwrap(),
+            ModeOffer::parse("classic-versus").unwrap(),
+        ];
+        let names: Vec<String> = hosted_queues(&offers, &maps).iter().map(|q| q.slug()).collect();
+        assert_eq!(
+            names,
+            [
+                "aram-versus-the-bridge",
+                "aram-coop-the-bridge",
+                "aram-versus-long-bridge",
+                "aram-coop-long-bridge",
+                "hyper-coop-the-bridge",
+                "hyper-coop-long-bridge",
+                "classic-versus-crossroads",
+                "classic-versus-twin-rivers"
+            ]
+        );
     }
 
     /// `--modes`: a mode alone offers both sides; `-versus` or `-coop` one of them.

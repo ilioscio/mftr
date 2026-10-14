@@ -215,6 +215,9 @@ func _ready() -> void:
 		elif args[i] == "--editor-angle":
 			_editor_actual = true
 			_editor_angle = true
+		elif args[i] == "--editor-map" and i + 1 < args.size():
+			_editor_map = args[i + 1]
+			i += 1
 		elif args[i] == "--dev-overlay" and i + 1 < args.size():
 			_dev_overlay = args[i + 1]
 			i += 1
@@ -360,6 +363,7 @@ var _shot_claim := false                 # `--shot-claim`: take Claim in F at th
 var _start_editor := false               # `--map-editor`: open the map editor at start
 var _editor_actual := false              # `--editor-actual`: …in its Actual view (captures)
 var _editor_angle := false               # `--editor-angle`: …from the game's camera angle
+var _editor_map := ""                    # `--editor-map bridge|crossroads|FILE`: …on that map
 var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's reference image
 var _shot_ward := false                  # `--shot-ward`: place a stealth ward ahead at 2.5 s
 var _shot_goto = null                     # `--shot-goto X,Y`: walk there (game units) from 2 s on
@@ -4588,6 +4592,8 @@ func _open_map_editor() -> void:
 	overlay.get_parent().add_child(editor)
 	if _dev_overlay != "":
 		editor.call_deferred("set_overlay_file", _dev_overlay)
+	if _editor_map != "":
+		editor.call_deferred("open_map", _editor_map)
 	if _editor_actual:
 		editor.call_deferred("show_actual_view", _editor_angle)
 	editor.closed.connect(func(): _show_menu(""))

@@ -1,0 +1,15 @@
+mftr-map 1
+# The Bridge (ARAM, 06 §2, D54): one lane from blue's base (bottom left) to red's (top
+# right), canted across a 10,607 u square. Drawn from the hand-built map's lane coordinates
+# (12,000 u along, 3,000 across), so its fountain, Base, turrets, relics and brush stand
+# where they did.
+name The Bridge
+kind aram
+size 10607
+lane 1560 1061,9546 5304,5304
+clearing 2793,7814 1050
+grass 270 3925,5855 4087,5692
+grass 270 4752,6682 4915,6520
+relic 4632,5197
+relic 5410,5975
+rock 4561,5551 120

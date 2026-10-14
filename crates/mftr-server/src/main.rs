@@ -13,10 +13,11 @@
 //!
 //! By default the server offers every full-match mode (ARAM, Mayhem, Hyper, Classic), each
 //! Versus and Co-op vs bots, with champion select and bots in every seat a human doesn't take;
-//! `--modes` narrows the list (`aram` offers both sides, `aram-versus` or `aram-coop` one). Each `--map FILE` (from the map editor) adds Classic on that
-//! map. `--max-matches N` caps the instances running at once; `--workers N` threads step them
-//! (default: one per core). `--replay DIR` records every
-//! match into DIR (rewritten every minute and when a match ends); check one with
+//! `--modes` narrows the list (`aram` offers both sides, `aram-versus` or `aram-coop` one).
+//! Each `--map FILE` (from the map editor) adds its modes on that map: Classic on a Classic
+//! map, the ARAM modes on an ARAM map. `--max-matches N` caps the instances running at once;
+//! `--workers N` threads step them (default: one per core). `--replay DIR` records every match
+//! into DIR (rewritten every minute and when a match ends); check one with
 //! `mftr-tools replay FILE`.
 //!
 //! `--scenario NAME` (duel, aram, mayhem, hyper, classic, minions, dodge, empty) offers that
@@ -73,7 +74,7 @@ fn send_all(socket: &UdpSocket, secure: &mut SecureServer, peers: &Peers, packet
 }
 
 /// A map file from the map editor: checked now (the server refuses one that breaks a rule).
-fn read_map(path: &str) -> (String, Arc<str>) {
+fn read_map(path: &str) -> hub::HostedMap {
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
     if text.len() > mftr_sim::mapspec::MAX_TEXT_BYTES {
         panic!("{path}: a map file holds at most {} bytes", mftr_sim::mapspec::MAX_TEXT_BYTES);
@@ -83,8 +84,8 @@ fn read_map(path: &str) -> (String, Arc<str>) {
     if !problems.is_empty() {
         panic!("{path} can't be played yet:\n  {}", problems.join("\n  "));
     }
-    println!("map: {} ({path})", spec.name);
-    (spec.name.clone(), Arc::from(text.as_str()))
+    println!("map: {} ({}, {path})", spec.name, spec.kind.key());
+    hub::HostedMap { name: spec.name.clone(), kind: spec.kind, text: Arc::from(text.as_str()) }
 }
 
 /// Where an instance's replay goes: `DIR/<started>-<queue>-<instance>.replay`.
@@ -100,7 +101,7 @@ fn main() -> std::io::Result<()> {
     let mut base = ServerConfig::default();
     let mut scenario: Option<Scenario> = None;
     let mut modes: Option<Vec<ModeOffer>> = None;
-    let mut maps: Vec<(String, Arc<str>)> = Vec::new();
+    let mut maps: Vec<hub::HostedMap> = Vec::new();
     let mut max_matches = MAX_MATCHES;
     let mut workers: Option<usize> = None;
     let (mut bots, mut lobby, mut max_players) = (None, false, None);
@@ -155,8 +156,13 @@ fn main() -> std::io::Result<()> {
             base.lobby = lobby;
             base.max_players = max_players.unwrap_or(base.max_players);
             let map = maps.pop();
-            let name = map.as_ref().map_or(hub::map_name(scenario).to_string(), |(n, _)| n.clone());
-            vec![QueueSpec { scenario, coop: false, map_name: name, map: map.map(|(_, t)| t) }]
+            if let Some(m) = &map
+                && hub::map_kind(scenario) != Some(m.kind)
+            {
+                panic!("{} is a {} map: --scenario {} can't be played on it", m.name, m.kind.key(), scenario.name());
+            }
+            let name = map.as_ref().map_or(hub::map_name(scenario).to_string(), |m| m.name.clone());
+            vec![QueueSpec { scenario, coop: false, map_name: name, map: map.map(|m| m.text) }]
         }
         // Hosted: every full-match queue, with champion select and bots in every free seat.
         None => {

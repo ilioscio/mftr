@@ -6223,7 +6223,9 @@ mod tests {
         assert_eq!(w.state_hash(), GOLDEN_HASH_BRIDGE, "hash = {:#018x}", w.state_hash());
     }
 
-    const GOLDEN_HASH_BRIDGE: u64 = 0xecb9_e15d_c580_0689;
+    /// The Bridge built from its spec (12 §1, E6): its walls are traced, so they differ a little
+    /// from the hand-built polygons it replaced.
+    const GOLDEN_HASH_BRIDGE: u64 = 0x1804_66e0_ba65_f51f;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
