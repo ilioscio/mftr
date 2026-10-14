@@ -73,6 +73,8 @@ pub enum Scenario {
     Hyper,
     /// M4: Classic 5v5 on Crossroads: three lanes, level 1 and 500 gold, fountains that heal.
     Classic,
+    /// Five champions defend against 20 Mayhem horde waves, then endless survival.
+    Horde,
 }
 
 impl Scenario {
@@ -83,6 +85,7 @@ impl Scenario {
             Scenario::MinionSandbox | Scenario::DodgeRig | Scenario::Duel => MapId::Arena,
             Scenario::Aram | Scenario::Mayhem | Scenario::Hyper => MapId::Bridge,
             Scenario::Classic => MapId::Crossroads,
+            Scenario::Horde => MapId::HordeBridge,
         }
     }
 
@@ -96,6 +99,7 @@ impl Scenario {
             "mayhem" => Some(Scenario::Mayhem),
             "hyper" => Some(Scenario::Hyper),
             "classic" => Some(Scenario::Classic),
+            "horde" => Some(Scenario::Horde),
             _ => None,
         }
     }
@@ -111,6 +115,7 @@ impl Scenario {
             Scenario::Mayhem => msg::GameMode::Mayhem,
             Scenario::Hyper => msg::GameMode::Hyper,
             Scenario::Classic => msg::GameMode::Classic,
+            Scenario::Horde => msg::GameMode::Horde,
         }
     }
 
@@ -124,13 +129,14 @@ impl Scenario {
             Scenario::Mayhem => "mayhem",
             Scenario::Hyper => "hyper",
             Scenario::Classic => "classic",
+            Scenario::Horde => "horde",
         }
     }
 
     /// A full match with champion select, structures and a winner: ARAM and its variants on
     /// The Bridge, Classic on Crossroads.
     pub fn is_match(self) -> bool {
-        matches!(self, Scenario::Aram | Scenario::Mayhem | Scenario::Hyper | Scenario::Classic)
+        matches!(self, Scenario::Aram | Scenario::Mayhem | Scenario::Hyper | Scenario::Classic | Scenario::Horde)
     }
 }
 
@@ -303,11 +309,15 @@ pub struct ServerCore {
 
 impl ServerCore {
     /// `start`: the server-clock time (seconds) at which tick 0 ends.
-    pub fn new(cfg: ServerConfig, start: f64) -> Self {
+    pub fn new(mut cfg: ServerConfig, start: f64) -> Self {
+        if cfg.scenario == Scenario::Horde {
+            cfg.max_players = mftr_sim::horde::PLAYERS;
+            cfg.bots = cfg.bots.min(cfg.max_players);
+            cfg.coop = true;
+        }
         let mut game = Match::new(cfg.clone());
         let mut bots = Vec::new();
-        let lobby =
-            cfg.lobby.then(|| Lobby::new(cfg.seed, cfg.max_players, cfg.bots, cfg.scenario == Scenario::Classic));
+        let lobby = cfg.lobby.then(|| Self::make_lobby(&cfg, cfg.seed));
         if !cfg.lobby {
             for _ in 0..cfg.bots.min(cfg.max_players) {
                 let Some(player) = game.free_player() else { break };
@@ -709,7 +719,15 @@ impl ServerCore {
 
     /// Champion select picks (Classic) instead of dealing (ARAM modes).
     fn pick(&self) -> bool {
-        self.cfg.scenario == Scenario::Classic
+        matches!(self.cfg.scenario, Scenario::Classic | Scenario::Horde)
+    }
+
+    fn make_lobby(cfg: &ServerConfig, seed: u64) -> Lobby {
+        if cfg.scenario == Scenario::Horde {
+            Lobby::blue_only(seed, cfg.max_players, cfg.bots, true)
+        } else {
+            Lobby::new(seed, cfg.max_players, cfg.bots, cfg.scenario == Scenario::Classic)
+        }
     }
 
     /// The seat a new human takes in the match being played (13 §2–3): a bot's that isn't
@@ -867,7 +885,7 @@ impl ServerCore {
     fn return_to_lobby(&mut self, now: f64) -> Vec<(ClientKey, Vec<u8>)> {
         self.rounds += 1;
         let seed = self.cfg.seed.wrapping_add(self.rounds);
-        let mut lobby = Lobby::new(seed, self.cfg.max_players, self.cfg.bots, self.pick());
+        let mut lobby = Self::make_lobby(&self.cfg, seed);
         let players: Vec<ClientKey> = self.conns.iter().filter(|(_, c)| !c.spectator).map(|(k, _)| *k).collect();
         // Those who were still choosing a champion to join with come along.
         let joining = std::mem::take(&mut self.pending);
@@ -1079,6 +1097,38 @@ impl ServerCore {
         // The scoreboard, about once a second (the same for everyone: it's what the Tab
         // breakdown shows, items and augments included, as in the reference game).
         let scoreboard = k.0.is_multiple_of(mftr_sim::TICK_HZ).then(|| Box::new(self.scoreboard(SimTime::end_of(k))));
+        let horde = self.game.world.game().horde.as_ref().map(|h| {
+            let enemies = self
+                .game
+                .world
+                .units()
+                .iter()
+                .filter(|u| {
+                    u.team == Team::Red && u.state.alive() && matches!(u.kind, UnitKind::Minion | UnitKind::Monster)
+                })
+                .count() as u16;
+            let boss = h.boss.and_then(|id| self.game.world.unit(id)).filter(|u| u.state.alive()).map(|u| {
+                (u.id, u.state.health.round().clamp(1.0, u16::MAX as f32) as u16, u.stats.max_health.round() as u16)
+            });
+            let base = self
+                .game
+                .world
+                .units()
+                .iter()
+                .find(|u| u.kind == UnitKind::Base && u.team == Team::Blue)
+                .map_or((0, 0), |u| (u.state.health.max(0.0).round() as u16, u.stats.max_health.round() as u16));
+            msg::HordeStatus {
+                wave: h.wave,
+                cleared: h.cleared,
+                enemies,
+                incoming: if h.wave > h.cleared { mftr_sim::horde::Wave::new(h.wave).count() - h.spawned } else { 0 },
+                next_wave_at: self.game.world.game().next_wave_at,
+                boss,
+                base,
+                won: h.won_at.is_some(),
+                ended: self.game.world.game().winner.is_some(),
+            }
+        });
         // Per team: the events it may receive, in order (the per-client parts follow).
         let mut team_events: [Vec<SimEvent>; 3] = [Vec::new(), Vec::new(), Vec::new()];
         for (i, list) in team_events.iter_mut().enumerate() {
@@ -1095,7 +1145,7 @@ impl ServerCore {
                     | SimEvent::Shielded { unit, .. }
                     | SimEvent::Healed { unit, .. }
                     | SimEvent::Blinked { unit, .. } => knows(i, unit),
-                    SimEvent::MatchEnded { .. } => true,
+                    SimEvent::MatchEnded { .. } | SimEvent::HordeWon { .. } => true,
                     _ => false,
                 };
                 if !ok {
@@ -1196,7 +1246,16 @@ impl ServerCore {
                 units.iter().filter(|(id, _, _)| *id != conn.unit && seen_ti.contains(id)).map(|(_, _, r)| r).collect();
             // Most important first (champions, then nearest), so a size cut drops the least useful.
             visible.sort_by(|a, b| {
-                let key = |r: &RemoteUnit| (r.kind != mftr_sim::UnitKind::Champion, r.pos.to_vec2().distance(own_pos));
+                let key = |r: &RemoteUnit| {
+                    let rank = if r.kind == UnitKind::Champion {
+                        0
+                    } else if horde.as_ref().and_then(|h| h.boss).is_some_and(|b| b.0 == r.id) {
+                        1
+                    } else {
+                        2
+                    };
+                    (rank, r.pos.to_vec2().distance(own_pos))
+                };
                 key(a).partial_cmp(&key(b)).unwrap()
             });
             let mut updates: Vec<UnitUpdate> = Vec::new();
@@ -1210,6 +1269,7 @@ impl ServerCore {
             let reports: Vec<CommandReport> =
                 conn.reports.iter().rev().take(msg::MAX_REPORTS_PER_SNAPSHOT).rev().map(|(_, r)| *r).collect();
             let mut snap = Snapshot {
+                horde: horde.clone(),
                 tick: k,
                 since_tick_us: since,
                 time_echo: conn
@@ -1304,15 +1364,37 @@ pub struct BotMatch {
     /// Structures that fell: when, whose, what, tier.
     pub falls: Vec<(Tick, Team, mftr_sim::UnitKind, u8)>,
     pub replay: Replay,
+    /// Horde tuning checkpoints, after each clear (empty for ordinary matches).
+    pub horde_waves: Vec<HordeWaveReport>,
+}
+
+#[derive(Clone, Debug)]
+pub struct HordeWaveReport {
+    pub wave: u32,
+    pub tick: Tick,
+    pub levels: Vec<u8>,
+    /// Wallet + inventory purchase value, per champion (not counting consumed potions).
+    pub build_gold: Vec<f32>,
+    pub base_health: f32,
 }
 
 /// Play a match with server bots only, as fast as possible (no network, no clients), until a
 /// Base falls or `max_ticks` pass.
 pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
+    run_bot_match_with_team(cfg, max_ticks, &[])
+}
+
+/// The same balance/replay check with explicit champions for the first bot seats.
+pub fn run_bot_match_with_team(cfg: ServerConfig, max_ticks: u32, team: &[ChampionId]) -> BotMatch {
     let mut core = ServerCore::new(ServerConfig { record: true, ..cfg }, 0.0);
+    assert!(team.len() <= core.bots.len(), "the selected team needs that many bot seats");
+    for (bot, &champion) in core.bots.iter().zip(team) {
+        core.game.takeover(bot.player, champion).expect("bot seat");
+    }
     let (mut kills, mut structures) = (0, 0);
     let mut monsters = [0u32; 2];
     let mut falls = Vec::new();
+    let mut horde_waves = Vec::new();
     for _ in 0..max_ticks {
         let k = core.game.world.tick().next();
         let mut due = Vec::new();
@@ -1339,6 +1421,37 @@ pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
                 }
             }
         }
+        if let Some(h) = &core.game.world.game().horde
+            && h.cleared > horde_waves.last().map_or(0, |r: &HordeWaveReport| r.wave)
+        {
+            let champions: Vec<_> = core.game.world.units().iter().filter(|u| u.kind == UnitKind::Champion).collect();
+            let base_health = core
+                .game
+                .world
+                .units()
+                .iter()
+                .find(|u| u.kind == UnitKind::Base && u.team == Team::Blue)
+                .map_or(0.0, |u| u.state.health);
+            horde_waves.push(HordeWaveReport {
+                wave: h.cleared,
+                tick: k,
+                levels: champions.iter().map(|u| u.state.progress.level).collect(),
+                build_gold: champions
+                    .iter()
+                    .map(|u| {
+                        u.state.progress.gold
+                            + u.state
+                                .progress
+                                .items
+                                .iter()
+                                .filter_map(|id| mftr_sim::items::item(*id))
+                                .map(|item| item.cost)
+                                .sum::<f32>()
+                    })
+                    .collect(),
+                base_health,
+            });
+        }
         if let Some((team, at)) = core.game.world.game().winner {
             let tick = Tick((at.0 / mftr_sim::SUBTICKS as u64) as u32);
             return BotMatch {
@@ -1349,6 +1462,7 @@ pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
                 monsters_killed: monsters,
                 falls,
                 replay: core.game.replay(),
+                horde_waves,
             };
         }
     }
@@ -1360,6 +1474,7 @@ pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
         monsters_killed: monsters,
         falls,
         replay: core.game.replay(),
+        horde_waves,
     }
 }
 

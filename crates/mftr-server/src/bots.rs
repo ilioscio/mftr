@@ -138,6 +138,17 @@ impl Bot {
         let visible = |u: &&Unit| u.state.alive() && !hidden.contains(&u.id);
         let fountain = world.map().layout.fountains[team as usize].map(|(c, _)| c);
         let heals_home = fountain.is_some() && world.map().layout.fountain_heals;
+        // Horde has no allied wave to push with. Use the break to recall, recover and shop;
+        // during combat the same existing kits target the approaching minions and bosses.
+        if world.rules().horde && world.game().next_wave_at.is_some() {
+            if st.recalling() {
+                return None;
+            }
+            if fountain.is_some_and(|home| st.pos.distance(home) > 500.0) {
+                return Some(CommandKind::Recall);
+            }
+            return None;
+        }
 
         // Low: take a safe health relic, else go home where the fountain heals. ARAM's doesn't
         // (no fountain healing after leaving base): waiting there or behind a turret for health
@@ -210,7 +221,12 @@ impl Bot {
             .units()
             .iter()
             .filter(visible)
-            .filter(|u| u.team != team && u.kind == UnitKind::Champion && u.targetable())
+            .filter(|u| {
+                u.team != team
+                    && u.targetable()
+                    && (u.kind == UnitKind::Champion
+                        || (world.rules().horde && matches!(u.kind, UnitKind::Minion | UnitKind::Monster)))
+            })
             .filter(|u| u.state.pos.distance(st.pos) <= ENGAGE)
             .min_by(|a, b| a.state.pos.distance(st.pos).total_cmp(&b.state.pos.distance(st.pos)));
         if let Some(e) = enemy

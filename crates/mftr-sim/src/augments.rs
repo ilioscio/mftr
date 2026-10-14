@@ -687,8 +687,29 @@ pub fn tier_of(seed: u32, draft: u8) -> Tier {
 /// Three distinct augments of the draft's tier that the champion doesn't hold (and, for a
 /// reroll, that weren't just offered when the tier has enough of them).
 pub fn make_offer(seed: u32, draft: u8, roll: u8, held: &[u8; SLOTS], previous: &[u8; CHOICES]) -> [u8; CHOICES] {
+    make_offer_for(seed, draft, roll, held, previous, false)
+}
+
+/// Champion-hit/takedown augments have no targets in Horde. Keep the existing effects and
+/// descriptions honest rather than silently giving them different PvE behavior.
+fn available_in_horde(a: &Augment) -> bool {
+    !matches!(a.effect, Effect::Spellhunger | Effect::Thorns | Effect::Reset | Effect::ChampionOfChaos)
+}
+
+fn make_offer_for(
+    seed: u32,
+    draft: u8,
+    roll: u8,
+    held: &[u8; SLOTS],
+    previous: &[u8; CHOICES],
+    horde: bool,
+) -> [u8; CHOICES] {
     let tier = tier_of(seed, draft);
-    let mut pool: Vec<u8> = CATALOG.iter().filter(|a| a.tier == tier && !held.contains(&a.id)).map(|a| a.id).collect();
+    let mut pool: Vec<u8> = CATALOG
+        .iter()
+        .filter(|a| a.tier == tier && !held.contains(&a.id) && (!horde || available_in_horde(a)))
+        .map(|a| a.id)
+        .collect();
     let fresh: Vec<u8> = pool.iter().copied().filter(|id| !previous.contains(id)).collect();
     if fresh.len() >= CHOICES {
         pool = fresh;
@@ -718,11 +739,17 @@ pub fn tier_up(t: Tier) -> Tier {
 
 /// Open the next draft once the champion's level reaches it (one at a time).
 pub fn update_draft(p: &mut Progress) {
+    let available = DRAFT_LEVELS.iter().filter(|&&level| level <= p.level).count() as u8;
+    update_draft_at(p, available, false);
+}
+
+/// Open up to `available` drafts, one at a time: levels in Mayhem, waves in Horde.
+pub fn update_draft_at(p: &mut Progress, available: u8, horde: bool) {
     let d = p.drafted as usize;
-    if p.offer[0] != 0 || d >= SLOTS || p.level < DRAFT_LEVELS[d] {
+    if p.offer[0] != 0 || d >= SLOTS || p.drafted >= available {
         return;
     }
-    p.offer = make_offer(p.augment_seed, p.drafted, 0, &p.augments, &[0; CHOICES]);
+    p.offer = make_offer_for(p.augment_seed, p.drafted, 0, &p.augments, &[0; CHOICES], horde);
     // Sometimes a Silver or Gold draft brings a golden reroll on one choice (06 §3, like the
     // reference game's): shown before it's used, so it's a decision, not a surprise.
     let mut rng = Pcg32::new(p.augment_seed as u64, 1000 + p.drafted as u64);
@@ -754,6 +781,10 @@ pub fn pick(p: &mut Progress, choice: u8) {
 /// augment of the same tier that isn't held, offered or the one replaced; the golden reroll
 /// rolls one tier up.
 pub fn reroll(p: &mut Progress, choice: u8) {
+    reroll_for(p, choice, false);
+}
+
+pub fn reroll_for(p: &mut Progress, choice: u8, horde: bool) {
     let c = choice as usize;
     if c >= CHOICES || p.offer[c] == 0 || p.rerolled & (1 << c) != 0 || p.drafted == 0 {
         return;
@@ -765,7 +796,12 @@ pub fn reroll(p: &mut Progress, choice: u8) {
     }
     let pool: Vec<u8> = CATALOG
         .iter()
-        .filter(|a| a.tier == tier && !p.augments.contains(&a.id) && !p.offer.contains(&a.id))
+        .filter(|a| {
+            a.tier == tier
+                && !p.augments.contains(&a.id)
+                && !p.offer.contains(&a.id)
+                && (!horde || available_in_horde(a))
+        })
         .map(|a| a.id)
         .collect();
     if pool.is_empty() {
@@ -779,6 +815,22 @@ pub fn reroll(p: &mut Progress, choice: u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn horde_drafts_and_golden_rerolls_only_offer_usable_augments() {
+        for seed in 0..100 {
+            let mut p = Progress { augment_seed: seed, ..Progress::SANDBOX };
+            for draft in 0..4 {
+                update_draft_at(&mut p, draft + 1, true);
+                for choice in 0..3 {
+                    assert!(p.offer.iter().all(|id| augment(*id).is_some_and(available_in_horde)));
+                    reroll_for(&mut p, choice, true);
+                }
+                assert!(p.offer.iter().all(|id| augment(*id).is_some_and(available_in_horde)));
+                pick(&mut p, 0);
+            }
+        }
+    }
 
     #[test]
     fn catalog_is_consistent() {

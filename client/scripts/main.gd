@@ -76,6 +76,8 @@ var own_status := {}
 var floaters := []                      # damage numbers: { pos: Vector3, text, color, age }
 var match_banner := ""                  # "VICTORY" / "DEFEAT" when a Base falls
 var match_banner_age := 0.0
+var match_banner_subtitle := "A new match starts shortly"
+var horde_status := {}
 var notices := []                       # kill feed: { text, age }
 # A3 (10 §6): champion models from content packs. Until champions ship their own, they all wear
 # the shared template (tinted with their identity color). F3 toggles the placeholder shapes.
@@ -1273,6 +1275,7 @@ func _process(delta: float) -> void:
 		print("MFTR phase: %s -> %s (unit %d, server key %s)" % [_last_phase, phase, client.own_unit_id(), client.server_fingerprint()])
 		_last_phase = phase
 	var playing := phase == "playing"
+	horde_status = client.horde_status() if playing else {}
 	if phase == "lobby" and _last_phase_seen in ["joining", "playing"]:
 		_reset_match_view()  # the match ended; champion select again
 	_last_phase_seen = phase
@@ -2220,8 +2223,22 @@ func _update_combat_text(delta: float) -> void:
 			if n.gold >= 1.0 and own_body != null:
 				floaters.append({ "pos": own_body.position + Vector3(0.6, 0, 0), "text": "+%dg" % roundi(n.gold), "color": Color(1.0, 0.85, 0.3), "age": 0.0 })
 			continue
+		elif n.kind == "horde_won":
+			match_banner = "VICTORY"
+			match_banner_subtitle = "20 waves cleared! Endless survival begins."
+			match_banner_age = 0.0
+			if champion_model != null:
+				sfx.play_flat(_sfx_table("").get("match.victory", []))
+			continue
 		elif n.kind == "match_ended":
 			match_banner = "VICTORY" if n.won else "DEFEAT"
+			match_banner_subtitle = "A new match starts shortly"
+			if not horde_status.is_empty():
+				if horde_status.get("won", false):
+					match_banner = "SURVIVAL ENDED"
+					match_banner_subtitle = "Victory secured · %d waves cleared. A new match starts shortly." % horde_status.get("cleared", 0)
+				else:
+					match_banner_subtitle = "Base destroyed on wave %d. A new match starts shortly." % horde_status.get("wave", 0)
 			match_banner_age = 0.0
 			if champion_model != null:
 				sfx.play_flat(_sfx_table("").get("match.victory" if n.won else "match.defeat", []))
@@ -2293,6 +2310,9 @@ func _draw_overlay() -> void:
 			color = NEUTRAL_COLOR
 			size = Vector2(110, 9) if u.get("big", false) else Vector2(62, 6)
 			lift = float(u.radius) * UNITS_TO_METERS * 1.9 + 0.3
+		if u.get("boss", false):
+			size = Vector2(160, 12)
+			lift = float(u.radius) * UNITS_TO_METERS * 1.9 + 0.3
 		if remote_bodies[id].has_meta("prop"):
 			lift = {"turret": 7.0, "gatehouse": 5.4, "base": 6.2}.get(u.kind, 3.0)
 		_draw_bar(remote_bodies[id].position + Vector3(0, lift, 0), size, u.health, u.max_health, u.shield, color, id, u.level if champ else 0, 100.0 if champ else 0.0)
@@ -2301,6 +2321,8 @@ func _draw_overlay() -> void:
 		if champ:
 			_draw_augment_pips(font, remote_bodies[id].position + Vector3(0, lift, 0), u.get("augments", []))
 			_draw_unit_label(font, remote_bodies[id].position + Vector3(0, lift, 0), size, u.champion, u.ally, u)
+		elif u.get("boss", false):
+			_draw_unit_label(font, remote_bodies[id].position + Vector3(0, lift, 0), size, u.get("monster_name", "Boss"), false, u)
 	var k := _hud_k()
 	for f in floaters:
 		# Pops in large, settles, rises along a slight arc to one side, fades.
@@ -2653,8 +2675,9 @@ func _draw_hud_messages(font: Font) -> void:
 		overlay.draw_rect(band, Color(0.02, 0.03, 0.05, 0.72))
 		overlay.draw_rect(Rect2(band.position, Vector2(band.size.x, 2.0 * k)), c.darkened(0.2))
 		overlay.draw_rect(Rect2(band.position + Vector2(0, band.size.y - 2.0 * k), Vector2(band.size.x, 2.0 * k)), c.darkened(0.2))
-		Hud.text(overlay, bold, band.position + Vector2(0, 80.0 * k), match_banner, roundi(72.0 * k), c, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x)
-		Hud.text(overlay, font, band.position + Vector2(0, 116.0 * k), "A new match starts shortly", roundi(18.0 * k), Hud.TEXT, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x)
+		Hud.text(overlay, bold, band.position + Vector2(0, 80.0 * k), match_banner, roundi((52.0 if match_banner == "SURVIVAL ENDED" else 72.0) * k), c, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x)
+		Hud.text(overlay, font, band.position + Vector2(0, 116.0 * k), match_banner_subtitle, roundi(18.0 * k), Hud.TEXT, HORIZONTAL_ALIGNMENT_CENTER, overlay.size.x)
+	_draw_horde_status(font)
 	if blind_state == "playing":
 		var left := maxf(blind_seconds - client.blind_elapsed(), 0.0)
 		var txt := "Blind round %d / %d   %d:%02d" % [client.blind_round() + 1, client.blind_rounds(), int(left) / 60, int(left) % 60]
@@ -2662,6 +2685,41 @@ func _draw_hud_messages(font: Font) -> void:
 
 
 ## The top-right corner: kills and deaths, the match clock, frame rate and ping.
+func _draw_horde_status(font: Font) -> void:
+	if horde_status.is_empty():
+		return
+	var k := _hud_k()
+	var h := horde_status
+	var boss: bool = h.has("boss_health")
+	var r := Rect2(overlay.size.x / 2.0 - 240.0 * k, 10.0 * k, 480.0 * k, (120.0 if boss else 82.0) * k)
+	Hud.panel(overlay, r, k)
+	var wave: int = h.get("wave", 0)
+	var preparing: bool = h.get("preparing", false)
+	var shown := wave + 1 if preparing else maxi(wave, 1)
+	var title := "Wave %d / 20" % shown if shown <= 20 else "Endless survival · Wave %d" % shown
+	if h.get("ended", false):
+		title = "%d waves cleared" % h.get("cleared", 0)
+	elif h.get("won", false):
+		title += " · Victory secured"
+	Hud.text(overlay, _bold_font(), r.position + Vector2(0, 24.0 * k), title, roundi(18.0 * k), Hud.GOLD, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+	var detail := "%d enemies left · %d incoming" % [h.get("enemies", 0), h.get("incoming", 0)]
+	if preparing:
+		detail = "Starts in %ds · [%s] recall · heal and shop at home" % [ceili(h.get("next_in", 0.0)), settings.primary_binding("recall")]
+		if shown in [1, 6, 11, 16] and not own_status.get("offer", []).is_empty():
+			detail = "Choose an augment · " + detail
+		elif shown % 10 == 0:
+			detail = ("Boss wave · " if shown % 20 == 0 else "Miniboss wave · ") + detail
+	if h.get("ended", false):
+		detail = "Base destroyed · A new match starts shortly"
+	Hud.text(overlay, font, r.position + Vector2(0, 45.0 * k), detail, roundi(13.0 * k), Hud.TEXT, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+	var bar := Rect2(r.position + Vector2(12.0, 58.0) * k, Vector2(r.size.x - 24.0 * k, 14.0 * k))
+	Hud.bar(overlay, bar, h.get("base_health", 0), h.get("base_max_health", 1), OWN_COLOR)
+	Hud.text(overlay, font, bar.position + Vector2(0, 11.0 * k), "Defend your Base · %d / %d" % [h.get("base_health", 0), h.get("base_max_health", 0)], roundi(11.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, bar.size.x)
+	if boss:
+		Hud.text(overlay, font, r.position + Vector2(0, 91.0 * k), "%s · %d / %d" % [h.get("boss_name", "Boss"), h.boss_health, h.boss_max_health], roundi(13.0 * k), Hud.TEXT, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+		Hud.bar(overlay, Rect2(r.position + Vector2(12.0, 99.0) * k, Vector2(r.size.x - 24.0 * k, 10.0 * k)), h.boss_health, h.boss_max_health, ENEMY_COLOR)
+
+
 func _draw_top_right(font: Font) -> void:
 	if client.phase() != "playing":
 		return
@@ -4151,12 +4209,20 @@ func _update_lobby(delta: float, phase: String) -> void:
 	theirs.add_theme_constant_override("separation", 8)
 	var theirs_head := Label.new()
 	theirs_head.text = "ENEMY TEAM"
+	if l.get("mode", "") == "Mayhem: Horde":
+		theirs_head.text = "THE HORDE"
 	theirs_head.theme_type_variation = "HeaderLabel"
 	theirs_head.add_theme_color_override("font_color", ENEMY_COLOR.lightened(0.15))
 	theirs_head.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	theirs.add_child(theirs_head)
 	for i in enemies:
 		theirs.add_child(_lobby_card({}, ENEMY_COLOR))
+	if l.get("mode", "") == "Mayhem: Horde":
+		var horde_hint := Label.new()
+		horde_hint.text = "Defend your Base.\n\n20 waves to win\nWave 10: Azure Warden\nWave 20: Ember Brute\nThen endless survival\n\nAugments before waves\n1, 6, 11 and 16.\nGold and XP are shared."
+		horde_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		horde_hint.theme_type_variation = "HintLabel"
+		theirs.add_child(horde_hint)
 	mid.add_child(theirs)
 
 
@@ -4731,6 +4797,9 @@ func _update_queues(phase: String) -> void:
 			b.text = ("Versus" if side == "versus" else "Co-op vs bots") + ("   ·   %d playing" % humans if humans > 0 else "")
 			b.custom_minimum_size = Vector2(170, 0)
 			b.tooltip_text = "Humans on both teams; bots fill the empty seats." if side == "versus" else "Humans together on blue, against bots."
+			if q.get("mode", "") == "Mayhem: Horde":
+				b.text = "Co-op Horde" + ("   ·   %d playing" % humans if humans > 0 else "")
+				b.tooltip_text = "Five champions defend their Base against 20 minion hordes. Miniboss at wave 10, boss at wave 20, then endless survival. Augments before waves 1, 6, 11 and 16; gold and XP shared. Bots fill empty blue seats."
 			if _queue_key(q) == last:
 				b.theme_type_variation = "PrimaryButton"
 			b.pressed.connect(func(): _choose_queue(i, q))
@@ -4949,6 +5018,8 @@ func _reset_match_view() -> void:
 	if shop_panel != null:
 		shop_panel.visible = false
 	match_banner = ""
+	match_banner_subtitle = "A new match starts shortly"
+	horde_status = {}
 	floaters.clear()
 	notices.clear()
 	_lobby_ready = false
@@ -5129,5 +5200,3 @@ func _augment_card(a: Dictionary, choice: int) -> Control:
 	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(text)
 	return card
-
-

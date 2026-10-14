@@ -11,6 +11,7 @@ pub mod champion;
 pub mod collision;
 pub mod combat;
 pub mod hash;
+pub mod horde;
 pub mod items;
 pub mod jungle;
 pub mod lane;

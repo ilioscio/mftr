@@ -11,8 +11,8 @@
 //! Clients pin it, so keep the file: a new key makes every client that met the server refuse
 //! it. `--fingerprint` prints the key's fingerprint (creating the key if needed) and exits.
 //!
-//! By default the server offers every full-match mode (ARAM, Mayhem, Hyper, Classic), each
-//! Versus and Co-op vs bots, with champion select and bots in every seat a human doesn't take;
+//! By default the server offers ARAM, Mayhem, Hyper and Classic Versus/Co-op, plus five-seat
+//! Mayhem: Horde co-op, with champion select and bots in every seat a human doesn't take;
 //! `--modes` narrows the list (`aram` offers both sides, `aram-versus` or `aram-coop` one).
 //! Each `--map FILE` (from the map editor) adds its modes on that map: Classic on a Classic
 //! map, the ARAM modes on an ARAM map. `--max-matches N` caps the instances running at once;
@@ -20,7 +20,7 @@
 //! into DIR (rewritten every minute and when a match ends); check one with
 //! `mftr-tools replay FILE`.
 //!
-//! `--scenario NAME` (duel, aram, mayhem, hyper, classic, minions, dodge, empty) offers that
+//! `--scenario NAME` (duel, aram, mayhem, hyper, classic, horde, minions, dodge, empty) offers that
 //! scenario alone, for development: `--bots N` adds server bots (they count toward
 //! `--max-players`), `--lobby` holds champion select first. Spectators can watch bots alone
 //! there: a match starts for them, and runs while anyone watches.
@@ -34,7 +34,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,...] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]";
+const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,horde,...] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|horde|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]";
 /// Instances running at once, by default.
 const MAX_MATCHES: usize = 32;
 
@@ -155,6 +155,12 @@ fn main() -> std::io::Result<()> {
             base.bots = bots.unwrap_or(0);
             base.lobby = lobby;
             base.max_players = max_players.unwrap_or(base.max_players);
+            if scenario == Scenario::Horde {
+                base.max_players = mftr_sim::horde::PLAYERS;
+                base.bots = mftr_sim::horde::PLAYERS;
+                base.lobby = true;
+                base.coop = true;
+            }
             let map = maps.pop();
             if let Some(m) = &map
                 && hub::map_kind(scenario) != Some(m.kind)
@@ -162,7 +168,7 @@ fn main() -> std::io::Result<()> {
                 panic!("{} is a {} map: --scenario {} can't be played on it", m.name, m.kind.key(), scenario.name());
             }
             let name = map.as_ref().map_or(hub::map_name(scenario).to_string(), |m| m.name.clone());
-            vec![QueueSpec { scenario, coop: false, map_name: name, map: map.map(|m| m.text) }]
+            vec![QueueSpec { scenario, coop: scenario == Scenario::Horde, map_name: name, map: map.map(|m| m.text) }]
         }
         // Hosted: every full-match queue, with champion select and bots in every free seat.
         None => {

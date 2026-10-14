@@ -1,6 +1,6 @@
 # MFTR on a server: `docker compose -f deploy/compose.yaml up -d` from the repository root.
-# One server on UDP 7777 plays every mode (players pick ARAM, Mayhem, Hyper or Classic, Versus
-# or Co-op vs bots), as many matches at once as players fill. It records every match into the
+# One server on UDP 7777 plays every mode (ARAM, Mayhem, Hyper or Classic Versus/Co-op, plus
+# five-champion Mayhem: Horde co-op), as many matches at once as players fill. It records every match into the
 # `data` volume's `replays` folder (copy one out with
 # `docker compose -f deploy/compose.yaml cp mftr:/data/replays .`, then check it with
 # `mftr-tools replay FILE`). The server keeps its key (`server.key`, created on first start) in

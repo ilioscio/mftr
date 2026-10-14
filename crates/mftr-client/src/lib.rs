@@ -187,6 +187,7 @@ pub enum Notice {
     MatchEnded {
         winner: Team,
     },
+    HordeWon,
     /// Gold and experience the own champion earned.
     Reward {
         gold: f32,
@@ -342,6 +343,7 @@ pub struct ClientSession {
     own_cc: (SimTime, SimTime, SimTime),
     /// The latest scoreboard (the match clock and the Tab breakdown).
     scoreboard: Option<msg::Scoreboard>,
+    horde: Option<msg::HordeStatus>,
     /// Casts with no windup (supports, shields, blinks) since the last take: `(unit, slot)`.
     /// Their animation can only start on the confirmed event (A6).
     instant_casts: Vec<(UnitId, u8)>,
@@ -415,6 +417,7 @@ impl ClientSession {
             last_recap: None,
             own_cc: (SimTime(0), SimTime(0), SimTime(0)),
             scoreboard: None,
+            horde: None,
             instant_casts: Vec::new(),
             notices: Vec::new(),
             last_own_blink: SimTime(0),
@@ -1002,7 +1005,9 @@ impl ClientSession {
         }
         match mftr_sim::mapspec::MapSpec::parse(&text) {
             Ok(spec) => {
-                self.map = std::sync::Arc::new(mftr_sim::mapspec::build(&spec, mftr_sim::map::MapId::Custom));
+                let map = mftr_sim::mapspec::build(&spec, mftr_sim::map::MapId::Custom);
+                let map = if self.rules.horde { mftr_sim::map::for_horde(map) } else { map };
+                self.map = std::sync::Arc::new(map);
                 self.map_download = None;
                 self.phase = Phase::Joining;
             }
@@ -1028,6 +1033,7 @@ impl ClientSession {
             return; // stale or reordered
         }
         self.last_snapshot_tick = Some(s.tick);
+        self.horde = s.horde;
         if let Some(e) = s.time_echo {
             let rtt = rtt_from_echo(now, e.client_time_us, e.hold_us);
             self.clock.add_sample(now, rtt, s.tick.end_seconds() + s.since_tick_us as f64 * 1e-6);
@@ -1108,9 +1114,15 @@ impl ClientSession {
                     self.notices.push(Notice::Reward { gold, xp })
                 }
                 SimEvent::MatchEnded { winner, .. } => {
-                    self.stats.matches_won += (winner == self.team) as u64;
-                    self.stats.matches_lost += (winner != self.team) as u64;
+                    if !self.horde.as_ref().is_some_and(|h| h.won) {
+                        self.stats.matches_won += (winner == self.team) as u64;
+                        self.stats.matches_lost += (winner != self.team) as u64;
+                    }
                     self.notices.push(Notice::MatchEnded { winner });
+                }
+                SimEvent::HordeWon { .. } => {
+                    self.stats.matches_won += 1;
+                    self.notices.push(Notice::HordeWon);
                 }
                 SimEvent::Blinked { unit, from, to, .. } if unit != self.unit => {
                     self.notices.push(Notice::Blinked { unit, from, to })
@@ -1503,6 +1515,10 @@ impl ClientSession {
     /// The latest scoreboard: the match clock and every champion's score.
     pub fn scoreboard(&self) -> Option<&msg::Scoreboard> {
         self.scoreboard.as_ref()
+    }
+
+    pub fn horde(&self) -> Option<&msg::HordeStatus> {
+        self.horde.as_ref()
     }
 
     pub fn take_combat_text(&mut self) -> Vec<CombatText> {
