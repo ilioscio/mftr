@@ -100,7 +100,7 @@ const MODEL_LIFT := -0.85                # bodies sit at y 0.85 (the placeholder
 var vfx: Node3D
 var _vfx_tables := {}                    # champion name -> { event: [effect] }
 var _vfx_recent := {}                    # dedupe key -> time (a prediction and its confirmation)
-const PARTICLE_KITS := ["flare", "burst", "ring", "dust"]
+const PARTICLE_KITS := ["flare", "burst", "ring", "dust", "slash", "flash", "crack", "pillar", "shock"]
 # A4c: the SFX player and each champion's sounds by event, from its pack's `<id>.sfx.ron`,
 # falling back to the shared library's (as the VFX do).
 var sfx: Node3D
@@ -138,6 +138,9 @@ func _ready() -> void:
 	while i < args.size():
 		if args[i] == "--shot-at" and i + 1 < args.size():
 			_shot_at = float(args[i + 1])
+			i += 1
+		elif args[i] == "--shot-seq" and i + 1 < args.size():
+			_shot_seq = int(args[i + 1])
 			i += 1
 		elif args[i] == "--shot" and i + 1 < args.size():
 			_shot_path = args[i + 1]
@@ -348,6 +351,8 @@ var _shot_path := ""
 var _shot_timer := 0.0
 var _shot_moved := false
 var _shot_at := 1.05                     # `--shot-at <seconds>` after joining
+var _shot_seq := 0                        # `--shot-seq <frames>`: that many frames from --shot-at
+var _shot_seq_i := 0
 var _shot_shop := false                  # `--shot-shop`: buy from the fountain, show the shop
 var _shot_lobby := false                 # `--shot-lobby`: reroll in champion select, capture it
 var _shot_loading := false                # `--shot-loading`: ready up, capture the loading screen
@@ -462,6 +467,13 @@ func _update_shot(delta: float) -> void:
 	elif _shot_settings >= 0 and _shot_moved and settings_panel == null:
 		_open_settings()
 		settings_panel.tabs.current_tab = _shot_settings
+	elif _shot_moved and _shot_timer > _shot_at and _shot_seq > 0:
+		# A frame sequence (14 §6 reviews): <path>_000.png, _001, ...
+		get_viewport().get_texture().get_image().save_png(_shot_path.get_basename() + "_%03d.png" % _shot_seq_i)
+		_shot_seq_i += 1
+		if _shot_seq_i >= _shot_seq:
+			print("MFTR: saved %d frames to " % _shot_seq, _shot_path.get_basename(), "_*.png")
+			get_tree().quit()
 	elif _shot_moved and _shot_timer > _shot_at:
 		get_viewport().get_texture().get_image().save_png(_shot_path)
 		print("MFTR: saved screenshot to ", _shot_path)

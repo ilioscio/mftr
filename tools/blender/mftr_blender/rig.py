@@ -80,14 +80,31 @@ SHAPES = {
     },
 }
 _shape = None
+_IDENTITY = {"heights": [(0.0, 0.0), (2.15, 2.15)], "x": 1.0, "y": 1.0, "scale": 1.0}
+# The arm chain (14 §2.2): bones and sockets that `shoulder`, `arm` and `hand` move. Hand parts
+# scale about the wrist.
+_ARM = ("upperarm", "forearm")
+_HAND = ("hand", "fingers", "thumb", "prop")
+_RIGHT_HAND_SOCKETS = ("socket_projectile", "socket_weapon_tip", "socket_cast")
 
 
-def use_shape(name, scale=1.0, x=1.0):
-    """Place every bone (and everything built from `bone_table`) for shape `name`, scaled by
-    `scale`, `x` widening the body further. `use_shape("standard")` restores the biped."""
+def use_shape(name, scale=1.0, x=1.0, **extra):
+    """Place every bone (and everything built from `bone_table`) for shape `name` (a name in
+    `SHAPES` or a dict in the same form), scaled by `scale`, `x` widening the body further.
+    `use_shape("standard")` restores the biped.
+
+    Heroic proportions (14 §2.2) add, as keywords or dict keys:
+      shoulder  m  moves each arm outward (the clavicle's tip and everything below it)
+      arm          scales the upper arm and forearm about the shoulder
+      hand         scales the hand, fingers, thumb and prop about the wrist
+    Parts attached to arms should use (bone, t) points so they follow."""
     global _shape
-    base = SHAPES[name]
-    _shape = None if base is None else dict(base, scale=base["scale"] * scale, x=base["x"] * x)
+    base = SHAPES[name] if isinstance(name, str) else name
+    if base is None and not extra:
+        _shape = None
+        return
+    base = dict(_IDENTITY if base is None else base, **extra)
+    _shape = dict(base, scale=base.get("scale", 1.0) * scale, x=base.get("x", 1.0) * x)
 
 
 def _remap_z(z, table):
@@ -108,7 +125,37 @@ def shaped(p):
 def bone_table():
     """Every bone of the reference skeleton, parents before children (in the current shape)."""
     table = _CENTER + _LEFT + [_mirror(b) for b in _LEFT] + _SOCKETS
-    return [(n, par, shaped(h), shaped(t), d, ax) for n, par, h, t, d, ax in table]
+    out = [(n, par, shaped(h), shaped(t), d, ax) for n, par, h, t, d, ax in table]
+    if _shape is None or not any(k in _shape for k in ("shoulder", "arm", "hand")):
+        return out
+    pos = {n: (Vector(h), Vector(t)) for n, _, h, t, _, _ in out}
+    dx = _shape.get("shoulder", 0.0)
+    arm = _shape.get("arm", 1.0)
+    hand = _shape.get("hand", 1.0)
+
+    def arm_point(p, side, kind):
+        s = pos[f"clavicle_{side}"][1]
+        w = pos[f"hand_{side}"][0]
+        out_dir = Vector((1.0 if side == "l" else -1.0, 0.0, 0.0))
+        s2 = s + out_dir * dx
+        w2 = s2 + (w - s) * arm
+        if kind == "arm":
+            return tuple(s2 + (Vector(p) - s) * arm)
+        return tuple(w2 + (Vector(p) - w) * hand)
+
+    moved = []
+    for n, par, h, t, d, ax in out:
+        part, _, side = n.rpartition("_")
+        if n.startswith("clavicle_"):
+            t = tuple(Vector(t) + Vector((dx if side == "l" else -dx, 0, 0)))
+        elif part in _ARM and side in ("l", "r"):
+            h, t = arm_point(h, side, "arm"), arm_point(t, side, "arm")
+        elif part in _HAND and side in ("l", "r"):
+            h, t = arm_point(h, side, "hand"), arm_point(t, side, "hand")
+        elif n in _RIGHT_HAND_SOCKETS:
+            h, t = arm_point(h, "r", "hand"), arm_point(t, "r", "hand")
+        moved.append((n, par, h, t, d, ax))
+    return moved
 
 
 BONE_NAMES = [b[0] for b in bone_table()]

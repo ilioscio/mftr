@@ -1,29 +1,37 @@
-// Rook's VFX (A6): stone and dust. Each blow of the maul cracks the ground where it lands
-// (`attack.fire`, `r.fire`), Cleave's ring sits on its true radius (the area's data), Second
-// Wind pulses gold motes, and Shockwave rolls out as a dusty wave. Instances of the client's VFX
-// kit (05 §5.1); hand-authored next to the export; validated by `mftr-tools pack validate`.
+// Rook's VFX (A6, 14 §4): crimson. Every blow of the maul comes down under a crimson smear and
+// lands with a white-hot star and cracks in the ground (`attack.fire`, `r.fire`); Cleave sweeps
+// a crimson ring and a shock out to the area's true radius; Second Wind pulses crimson-gold
+// motes; Lunge lands in a column of crimson light; Shockwave rolls out as a crimson wave.
+// Instances of the client's VFX kit (05 §5.1); hand-authored next to the export; validated by
+// `mftr-tools pack validate`.
 (
     effects: [
-        // Basic attack: stone chips and a dust puff where the maul lands.
-        (event: "attack.fire", kit: "burst", ramp: [(0.86, 0.82, 0.74), (0.62, 0.58, 0.52), (0.42, 0.38, 0.34), (0.28, 0.26, 0.24)], count: 14, speed: 3.2, lifetime: 0.35),
-        (event: "attack.fire", kit: "dust", ramp: [(0.58, 0.52, 0.44), (0.46, 0.42, 0.37), (0.34, 0.32, 0.30)], count: 8, speed: 1.0),
+        // Basic attack: the overhead slam's smear, the impact star, cracks, stone chips.
+        (event: "attack.fire", kit: "slash", ramp: [(1.0, 0.92, 0.88), (1.0, 0.42, 0.34), (0.84, 0.10, 0.10), (0.45, 0.04, 0.05)], count: 30, size: 1.3, arc: 110, tilt: 90),
+        (event: "attack.fire", kit: "flash", ramp: [(1.0, 1.0, 0.96), (1.0, 0.55, 0.45), (0.86, 0.12, 0.12)], count: 8),
+        (event: "attack.fire", kit: "crack", ramp: [(1.0, 0.50, 0.40), (0.80, 0.10, 0.10), (0.42, 0.06, 0.06), (0.22, 0.18, 0.16)], count: 5, lifetime: 0.9),
+        (event: "attack.fire", kit: "burst", ramp: [(0.86, 0.82, 0.74), (0.62, 0.58, 0.52), (0.42, 0.38, 0.34), (0.28, 0.26, 0.24)], count: 12, speed: 3.2, lifetime: 0.35),
 
-        // Q Cleave: a whoosh of dust around him and a ring on the area's edge.
-        (event: "q.detonate", kit: "ring", ramp: [(0.92, 0.86, 0.72), (0.66, 0.58, 0.48), (0.40, 0.36, 0.32)], speed: 1.8),
-        (event: "q.detonate", kit: "dust", ramp: [(0.58, 0.52, 0.44), (0.46, 0.42, 0.37), (0.34, 0.32, 0.30)], count: 14, speed: 2.4, size: 1.2),
+        // Q Cleave: a crimson ring smear around him, a shock to the area's edge, dust.
+        (event: "q.fire", kit: "slash", ramp: [(1.0, 0.86, 0.80), (1.0, 0.38, 0.30), (0.80, 0.08, 0.08), (0.42, 0.04, 0.05)], count: 44, size: 1.2),
+        (event: "q.fire", kit: "shock", ramp: [(1.0, 0.80, 0.72), (0.95, 0.30, 0.24), (0.66, 0.07, 0.07)], speed: 0.0),
+        (event: "q.fire", kit: "dust", ramp: [(0.58, 0.52, 0.44), (0.46, 0.42, 0.37), (0.34, 0.32, 0.30)], count: 14, speed: 2.4, size: 1.2),
 
-        // W Second Wind: gold motes rising from his chest.
-        (event: "w.fire", kit: "flare", ramp: [(1.0, 0.96, 0.72), (1.0, 0.82, 0.36), (0.86, 0.6, 0.2)], count: 16, speed: 2.0, lifetime: 0.6),
+        // W Second Wind: crimson-gold motes rising from his chest.
+        (event: "w.fire", kit: "flare", ramp: [(1.0, 0.94, 0.80), (1.0, 0.62, 0.40), (0.92, 0.24, 0.18), (0.6, 0.08, 0.08)], count: 18, speed: 2.0, lifetime: 0.6),
 
-        // E Lunge: dust kicked up at takeoff and landing.
+        // E Lunge: dust at takeoff; on landing a crimson column, the star, cracks and dust.
         (event: "e.start", kit: "dust", ramp: [(0.62, 0.56, 0.46), (0.5, 0.46, 0.4), (0.38, 0.36, 0.33)], count: 12, speed: 1.4),
+        (event: "e.land", kit: "pillar", ramp: [(1.0, 0.86, 0.80), (1.0, 0.36, 0.28), (0.78, 0.08, 0.08), (0.40, 0.04, 0.05)], count: 26),
+        (event: "e.land", kit: "crack", ramp: [(1.0, 0.50, 0.40), (0.80, 0.10, 0.10), (0.42, 0.06, 0.06), (0.22, 0.18, 0.16)], count: 6, size: 1.3, lifetime: 1.0),
         (event: "e.land", kit: "dust", ramp: [(0.62, 0.56, 0.46), (0.5, 0.46, 0.4), (0.38, 0.36, 0.33)], count: 16, speed: 2.0, size: 1.3),
-        (event: "e.land", kit: "burst", ramp: [(0.86, 0.82, 0.74), (0.62, 0.58, 0.52), (0.36, 0.33, 0.30)], count: 10, speed: 3.0),
 
-        // R Shockwave: the slam, then a rolling wave of dust and stone along the line.
-        (event: "r.fire", kit: "burst", ramp: [(0.94, 0.9, 0.8), (0.7, 0.64, 0.56), (0.46, 0.42, 0.38), (0.3, 0.28, 0.26)], count: 26, speed: 4.5, lifetime: 0.5),
-        (event: "r.fire", kit: "dust", ramp: [(0.58, 0.52, 0.44), (0.46, 0.42, 0.37), (0.34, 0.32, 0.30)], count: 16, speed: 2.2, size: 1.4),
-        (event: "r.projectile", kit: "orb", ramp: [(0.72, 0.66, 0.56), (0.52, 0.48, 0.42), (0.34, 0.32, 0.30)]),
-        (event: "r.impact", kit: "burst", ramp: [(0.9, 0.86, 0.76), (0.6, 0.56, 0.5), (0.36, 0.33, 0.30)], count: 16, speed: 3.5),
+        // R Shockwave: the biggest slam: smear, star, wide cracks, a shock; then the wave.
+        (event: "r.fire", kit: "slash", ramp: [(1.0, 0.95, 0.92), (1.0, 0.45, 0.36), (0.88, 0.10, 0.10), (0.48, 0.04, 0.05)], count: 40, size: 1.6, arc: 130, tilt: 90),
+        (event: "r.fire", kit: "flash", ramp: [(1.0, 1.0, 1.0), (1.0, 0.6, 0.5), (0.9, 0.14, 0.12)], count: 12, size: 1.6),
+        (event: "r.fire", kit: "crack", ramp: [(1.0, 0.55, 0.42), (0.86, 0.12, 0.10), (0.46, 0.06, 0.06), (0.24, 0.20, 0.18)], count: 8, size: 2.2, lifetime: 1.3),
+        (event: "r.fire", kit: "shock", ramp: [(1.0, 0.82, 0.74), (0.95, 0.32, 0.26), (0.66, 0.07, 0.07)], size: 1.4),
+        (event: "r.projectile", kit: "orb", ramp: [(1.0, 0.62, 0.52), (0.86, 0.14, 0.12), (0.44, 0.05, 0.05)]),
+        (event: "r.impact", kit: "burst", ramp: [(1.0, 0.86, 0.80), (0.92, 0.26, 0.20), (0.50, 0.06, 0.06)], count: 16, speed: 3.5),
     ],
 )

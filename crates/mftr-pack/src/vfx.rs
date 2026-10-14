@@ -18,7 +18,8 @@ pub const MAX_COUNT: u32 = 48;
 pub const MAX_LIFETIME: f32 = 1.5;
 
 /// Particle kits (any phase but `projectile`).
-pub const PARTICLE_KITS: &[&str] = &["flare", "burst", "ring", "dust", "trail"];
+pub const PARTICLE_KITS: &[&str] =
+    &["flare", "burst", "ring", "dust", "trail", "slash", "flash", "crack", "pillar", "shock"];
 /// Projectile styles (the `projectile` phase): they decorate the gameplay-sized body.
 pub const PROJECTILE_KITS: &[&str] = &["orb", "arrow", "net", "lob"];
 pub const ACTIONS: &[&str] = &["attack", "q", "w", "e", "r", "d", "f", "*"];
@@ -47,6 +48,12 @@ pub struct Effect {
     /// Particle lifetime in seconds (up to 1.5).
     #[nserde(default)]
     pub lifetime: Option<f32>,
+    /// `slash` only: the arc's sweep in degrees (10–360; default 140).
+    #[nserde(default)]
+    pub arc: Option<f32>,
+    /// `slash` only: the arc's plane, 0 = a level sweep, 90 = straight down onto the point (0–90).
+    #[nserde(default)]
+    pub tilt: Option<f32>,
 }
 
 pub fn parse(text: &str) -> Result<VfxFile, String> {
@@ -99,6 +106,15 @@ pub fn check(f: &VfxFile) -> Vec<String> {
         }
         if e.lifetime.is_some_and(|l| !(0.02..=MAX_LIFETIME).contains(&l)) {
             out.push(at(format!("lifetime 0.02–{MAX_LIFETIME} s")));
+        }
+        if (e.arc.is_some() || e.tilt.is_some()) && e.kit != "slash" {
+            out.push(at("`arc` and `tilt` are for `slash`".into()));
+        }
+        if e.arc.is_some_and(|a| !(10.0..=360.0).contains(&a)) {
+            out.push(at("arc 10–360°".into()));
+        }
+        if e.tilt.is_some_and(|t| !(0.0..=90.0).contains(&t)) {
+            out.push(at("tilt 0–90°".into()));
         }
     }
     let mut events: Vec<&str> = f.effects.iter().map(|e| e.event.as_str()).collect();

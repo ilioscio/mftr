@@ -88,6 +88,11 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 | `trail` | `projectile` | Sparks shed behind the projectile |
 | `arrow`, `net`, `orb` | `projectile` | A style *inside* the projectile's gameplay body (a shaft, a spinning frame, nothing) plus a trail behind it |
 | `lob` | `projectile` (areas) | A bomb that arcs from the socket to the area's centre and sizzles until it detonates |
+| `slash` | `fire`, `start`, `land` | A swing's arc smear ([14 §4.3](14-champion-art-direction.md#43-effects-that-sell-the-hit)): a crescent drawn all at once, thick in the middle, fading in 3–4 frames. `arc` sets its sweep, `tilt` its plane (0 a level sweep centered on the point, 90 an overhead blow ending on it). With no direction (novas) it rings the area's radius |
+| `flash` | any | An impact star: a white-hot core and a few short rays, 2–3 frames |
+| `crack` | `fire`, `land`, `detonate` | Jagged lines radiating over the ground that linger (radius from gameplay data, else from `size`) |
+| `pillar` | `land`, `fire`, `detonate` | A column of light rising from the ground |
+| `shock` | `fire`, `detonate`, `land` | A ring expanding from the center to the **gameplay radius** over its lifetime |
 
 - **Pixel style:** all particles share one MultiMesh of camera-facing squares whose corners snap to a grid of screen pixels (2 px at 1080p). They step at **20 Hz** ("on twos") and walk their 2–6 color ramp in whole steps, with no blending.
 - **Honest sizes:** projectile kits can't set a size. Shafts and frames are fitted inside the body's gameplay width, and trails only fall *behind* it (§1.1). Rings take the area's radius from the render state.

@@ -22,6 +22,13 @@ const KITS := {
 	"arrow": { "count": 2, "size": 0.06, "speed": 0.2, "lifetime": 0.22 },
 	"net": { "count": 1, "size": 0.08, "speed": 0.3, "lifetime": 0.25 },
 	"lob": { "count": 1, "size": 0.08, "speed": 0.6, "lifetime": 0.30 },
+	# Hit sellers (14 §4.3): a swing's arc smear, an impact star, ground cracks, a light column
+	# and an expanding shock ring.
+	"slash": { "count": 36, "size": 0.11, "speed": 0.6, "lifetime": 0.14 },
+	"flash": { "count": 10, "size": 0.12, "speed": 5.0, "lifetime": 0.10 },
+	"crack": { "count": 6, "size": 0.08, "speed": 0.0, "lifetime": 0.80 },
+	"pillar": { "count": 24, "size": 0.10, "speed": 2.5, "lifetime": 0.35 },
+	"shock": { "count": 0, "size": 0.12, "speed": 0.0, "lifetime": 0.30 },
 }
 
 var _mm: MultiMesh
@@ -32,6 +39,7 @@ var _life := PackedFloat32Array()
 var _size := PackedFloat32Array()
 var _grow := PackedFloat32Array()
 var _grav := PackedFloat32Array()
+var _drag := PackedFloat32Array()
 var _ramp := []                         # PackedColorArray per particle
 var _acc := 0.0
 var _rng := RandomNumberGenerator.new()
@@ -70,7 +78,7 @@ func _knob(spec: Dictionary, kit: String, key: String) -> float:
 	return d * float(v) if key == "size" else float(v)
 
 
-func _emit(p: Vector3, v: Vector3, life: float, size: float, ramp: PackedColorArray, grav := 0.0, grow := 0.0) -> void:
+func _emit(p: Vector3, v: Vector3, life: float, size: float, ramp: PackedColorArray, grav := 0.0, grow := 0.0, drag := 0.9) -> void:
 	if _pos.size() >= MAX_PARTICLES:
 		return
 	_pos.append(p)
@@ -80,6 +88,7 @@ func _emit(p: Vector3, v: Vector3, life: float, size: float, ramp: PackedColorAr
 	_size.append(size)
 	_grow.append(grow)
 	_grav.append(grav)
+	_drag.append(drag)
 	_ramp.append(ramp)
 
 
@@ -119,10 +128,105 @@ func play(spec: Dictionary, pos: Vector3, dir := Vector3.ZERO, radius := 0.0) ->
 			for i in n:
 				var d := Vector3(_rng.randf_range(-1, 1), _rng.randf_range(0.0, 0.4), _rng.randf_range(-1, 1)).normalized()
 				_emit(Vector3(pos.x, 0.06, pos.z), d * speed, life * _rng.randf_range(0.7, 1.0), size, ramp, -0.4, 0.6)
+		"slash":
+			_slash(spec, pos, dir, radius, n, size, speed, life, ramp)
+		"flash":
+			# A big white-hot core and a star of short rays.
+			_emit(pos, Vector3.ZERO, life, size * 3.2, ramp, 0.0, -0.5)
+			var rays := maxi(n, 4)
+			var up := Vector3.UP
+			for i in rays:
+				var a := TAU * float(i) / float(rays) + _rng.randf_range(-0.2, 0.2)
+				var d := Vector3(cos(a), 0.0, sin(a)) * 0.8 + up * sin(a) * 0.6
+				_emit(pos, d.normalized() * speed, life * 1.4, size, ramp, 0.0, 0.0, 0.6)
+		"crack":
+			# Jagged lines radiating over the ground; they linger and step through the ramp.
+			var r := radius if radius > 0.0 else 1.1 * size / KITS.crack.size
+			var lines := maxi(n, 3)
+			for i in lines:
+				var a := TAU * float(i) / float(lines) + _rng.randf_range(-0.35, 0.35)
+				var d := Vector3(cos(a), 0.0, sin(a))
+				var side := Vector3(-d.z, 0.0, d.x)
+				var steps := clampi(int(r / 0.09), 4, 16)
+				var wob := 0.0
+				for k in steps:
+					var t := float(k + 1) / float(steps)
+					wob = clampf(wob + _rng.randf_range(-0.07, 0.07), -0.18, 0.18)
+					var p := Vector3(pos.x, 0.03, pos.z) + d * r * t + side * wob * r * t
+					_emit(p, Vector3.ZERO, life * (1.0 - 0.4 * t), size * (1.15 - 0.5 * t), ramp, 0.0, 0.0, 1.0)
+		"pillar":
+			# A column of light rising from the ground.
+			var g := Vector3(pos.x, 0.0, pos.z)
+			for i in n:
+				var h := _rng.randf_range(0.0, 2.2)
+				var jitter := Vector3(_rng.randf_range(-0.12, 0.12), 0.0, _rng.randf_range(-0.12, 0.12))
+				_emit(g + jitter + Vector3(0, h, 0), Vector3(0, speed * _rng.randf_range(0.6, 1.2), 0), life * _rng.randf_range(0.6, 1.0), size, ramp, 0.0, -0.3, 1.0)
+		"shock":
+			# A ring that expands from the center to `radius` (the gameplay radius) over its life.
+			var r := radius if radius > 0.0 else 1.2 * size / float(KITS.shock.size)
+			var count := n if n > 0 else clampi(int(r * 10.0), 16, 48)
+			for i in count:
+				var a := TAU * float(i) / float(count)
+				var out := Vector3(cos(a), 0.0, sin(a))
+				_emit(Vector3(pos.x, 0.08, pos.z) + out * r * 0.15, out * (r * 0.85 / life), life, size, ramp, 0.0, 0.0, 1.0)
 		_:
 			# Projectile styles and trails emit along a moving node; see `decorate`.
 			pass
 
+
+## An arc smear (14 §4.3): a crescent of pixels along the swing, all at once, thick in the
+## middle and thin at the ends, drifting outward as it fades. `arc` (degrees) is its sweep and
+## `tilt` its plane. Level swings (`tilt` under 45) sweep across the front, centered on `pos`;
+## overhead swings come down from above the champion's shoulder and end on `pos`. `size` scales
+## the reach. With no direction (novas) it's a full ring of `radius` around `pos`.
+func _slash(spec: Dictionary, pos: Vector3, dir: Vector3, radius: float, n: int, size: float, speed: float, life: float, ramp: PackedColorArray) -> void:
+	var arc := deg_to_rad(float(spec.get("arc", 140.0)))
+	var tilt := deg_to_rad(float(spec.get("tilt", 0.0)))
+	var m := size / float(KITS.slash.size)
+	var fwd := Vector3(dir.x, 0.0, dir.z)
+	var count := maxi(n, 8)
+	var center: Vector3
+	var r: float
+	var a0: float
+	var u: Vector3
+	var b: Vector3
+	var ring := fwd.length() < 0.01
+	if ring:
+		r = maxf(radius * 0.85, 0.8)
+		center = Vector3(pos.x, 0.9, pos.z)
+		u = Vector3.FORWARD
+		b = Vector3.RIGHT
+		arc = TAU
+		a0 = 0.0
+	else:
+		fwd = fwd.normalized()
+		var side := Vector3(-fwd.z, 0.0, fwd.x)
+		if tilt < PI / 4.0:
+			r = m
+			center = Vector3(pos.x, 1.0, pos.z) - fwd * r
+			u = fwd
+			b = side * cos(tilt) + Vector3.UP * sin(tilt)
+			a0 = -arc * 0.5
+		else:
+			var back := 0.9 * m
+			center = Vector3(pos.x, 1.45, pos.z) - fwd * back
+			var to := pos - center
+			r = to.length()
+			u = to.normalized()
+			# Rotate from the impact direction back up over the shoulder.
+			b = (Vector3.UP * sin(tilt) + side * cos(tilt))
+			b = (b - u * b.dot(u)).normalized()
+			a0 = 0.0
+	for i in count:
+		var t := float(i) / float(count - 1) if count > 1 else 0.5
+		var a := a0 + arc * t
+		var thick := 1.0 if ring else sin(PI * t)
+		var o := (u * cos(a) + b * sin(a)).normalized()
+		for layer in 2:
+			var rr := r * (1.0 - 0.12 * float(layer) * thick)
+			var p := center + o * rr
+			p.y = maxf(p.y, 0.05)
+			_emit(p, o * speed, life * (0.7 + 0.3 * thick), size * (0.6 + 0.6 * thick), ramp, 0.0, 0.0, 0.8)
 
 ## A projectile's style (`arrow`, `net`, `orb`): decorations inside its gameplay-sized body,
 ## plus a trail of pixel sparks behind it. `radius` (m) is the projectile's hitbox radius.
@@ -237,7 +341,7 @@ func _step(dt: float) -> void:
 		var v := _vel[i]
 		v.y -= _grav[i] * dt
 		_pos[i] += v * dt
-		_vel[i] = v * 0.9
+		_vel[i] = v * _drag[i]
 		i += 1
 	var n := _pos.size()
 	_mm.visible_instance_count = n
@@ -261,6 +365,7 @@ func _remove(i: int) -> void:
 	_size[i] = _size[last]
 	_grow[i] = _grow[last]
 	_grav[i] = _grav[last]
+	_drag[i] = _drag[last]
 	_ramp[i] = _ramp[last]
 	_pos.resize(last)
 	_vel.resize(last)
@@ -269,4 +374,5 @@ func _remove(i: int) -> void:
 	_size.resize(last)
 	_grow.resize(last)
 	_grav.resize(last)
+	_drag.resize(last)
 	_ramp.resize(last)

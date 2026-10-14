@@ -112,6 +112,8 @@ impl MftrModel {
             d.set("size", e.size.unwrap_or(-1.0));
             d.set("speed", e.speed.unwrap_or(-1.0));
             d.set("lifetime", e.lifetime.unwrap_or(-1.0));
+            d.set("arc", e.arc.unwrap_or(140.0));
+            d.set("tilt", e.tilt.unwrap_or(0.0));
             out.push(&d.to_variant());
         }
         out
