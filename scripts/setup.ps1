@@ -100,6 +100,17 @@ function Find-Godots {
 Write-Host "MFTR setup: $root"
 Write-Host ''
 
+# ---- Checkout path --------------------------------------------------------------------------
+# The build writes paths up to ~135 characters inside the checkout, and the C++ linker can't
+# open a path over Windows' 260 (long path support doesn't reach it): the build fails with
+# LNK1104. Keep the checkout short.
+$pathOk = $root.Length -le 110
+if ($pathOk) {
+    Report 'Checkout path' 'ok' "$($root.Length) characters"
+} else {
+    Report 'Checkout path' 'warning' "$($root.Length) characters: the build will likely fail (LNK1104). Clone to a short path such as C:\dev\mftr"
+}
+
 # ---- Git ------------------------------------------------------------------------------------
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host '  Git is missing (it also brings Git Bash, for the scripts\*.sh tools).'

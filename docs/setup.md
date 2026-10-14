@@ -8,11 +8,13 @@ champion models and animations ([art guide](../art/README.md)).
 
 1. Install Git, if you don't have it: `winget install Git.Git` (or [git-scm.com](https://git-scm.com/download/win)).
    Open a new terminal afterwards.
-2. Get the code:
+2. Get the code, into a short path such as `C:\dev\mftr`:
    ```bash
-   git clone https://github.com/ilioscio/mftr.git
+   git clone https://github.com/ilioscio/mftr.git C:\dev\mftr
    ```
-3. Run the setup from the `mftr` folder:
+   The build writes paths up to ~135 characters inside the checkout and the C++ linker can't
+   use one over Windows' 260, so a deep folder fails to build (`LNK1104: cannot open file`).
+3. Run the setup from that folder:
    ```bash
    scripts\setup.cmd
    ```
