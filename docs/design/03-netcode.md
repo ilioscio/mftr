@@ -187,4 +187,6 @@ Rules for `mftr-sim`:
 - No `HashMap` iteration in sim logic. Use ordered containers or fixed-seed hashers with stable ordering.
 - Seeded RNG (PCG or ChaCha) owned by the sim state.
 - **CI cross-platform check:** replay a recorded match on Linux x86_64, Windows x86_64 and macOS aarch64, and compare per-tick hashes.
+- **Enforced:** `crates/mftr-sim/clippy.toml` disallows the platform's transcendental functions (`sin`, `cos`, `atan2`, `exp`, `powf`, `powi`, …) in the sim, and CI's clippy fails on them. Fixed angles use constants (`mapspec`'s direction tables); an arbitrary angle needs the `libm` crate (pure Rust) behind `crate::math`. `sqrt` is exact and allowed.
+- **Map building is pinned too:** every client rebuilds the map from the server's spec, so `built_maps_are_the_same_everywhere` hashes Crossroads' and The Bridge's built geometry (walls, brush, lanes, structures, relics, camps and their facing) bit for bit on all three CI platforms.
 - Fallback: if float determinism proves leaky, switch positions and timing to fixed-point (an open question, see DECISIONS).

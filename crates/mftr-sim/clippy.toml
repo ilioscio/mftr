@@ -1,0 +1,34 @@
+# Determinism (03 §17): the simulation must compute the same bits on every platform. These
+# call the platform's math library, whose results differ in the last bit between Linux,
+# Windows and macOS. Use constants for fixed angles (as `mapspec`'s direction tables do), or
+# add the `libm` crate (pure Rust, the same everywhere) behind `crate::math` when the sim needs
+# an arbitrary angle. `sqrt` is exact under IEEE 754 and stays allowed.
+disallowed-methods = [
+    { path = "f32::sin", reason = "platform math differs between OSes (03 §17): use a constant or libm" },
+    { path = "f32::cos", reason = "platform math differs between OSes (03 §17): use a constant or libm" },
+    { path = "f32::tan", reason = "platform math differs between OSes (03 §17): use a constant or libm" },
+    { path = "f32::sin_cos", reason = "platform math differs between OSes (03 §17): use a constant or libm" },
+    { path = "f32::asin", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f32::acos", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f32::atan", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f32::atan2", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f32::exp", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f32::exp2", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f32::ln", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f32::log", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f32::log2", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f32::log10", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f32::powf", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f32::powi", reason = "unspecified precision (03 §17): multiply it out" },
+    { path = "f32::cbrt", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f32::hypot", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f64::sin", reason = "platform math differs between OSes (03 §17): use a constant or libm" },
+    { path = "f64::cos", reason = "platform math differs between OSes (03 §17): use a constant or libm" },
+    { path = "f64::tan", reason = "platform math differs between OSes (03 §17): use a constant or libm" },
+    { path = "f64::sin_cos", reason = "platform math differs between OSes (03 §17): use a constant or libm" },
+    { path = "f64::atan2", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f64::exp", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f64::ln", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f64::powf", reason = "platform math differs between OSes (03 §17): use libm" },
+    { path = "f64::powi", reason = "unspecified precision (03 §17): multiply it out" },
+]

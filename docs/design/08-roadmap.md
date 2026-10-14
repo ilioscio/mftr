@@ -789,6 +789,8 @@ objective pits.
   test that places units by them still passes; its walls are traced now, so ARAM's golden hash
   changed (deliberately). ARAM bot matches still finish (14–27 minutes, replays exact).
 - **No platform trigonometry** in map building: rocks and camp facing use constant tables (03 §17).
+  A clippy rule now rejects the platform's transcendental functions in the sim, and a test pins
+  Crossroads' and The Bridge's built geometry bit for bit on every CI platform.
 - **Editor:** Kind beside Size, Rock and Health relic tools, The Bridge to open; ARAM bases,
   relics, rocks and fountain sizes drawn; the Actual view shows relics. `--editor-map` opens a
   map for captures. The headless test covers it (21 checks).

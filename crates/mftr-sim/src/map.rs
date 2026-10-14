@@ -719,6 +719,69 @@ pub fn dist_segment_segment(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> f32 {
 mod tests {
     use super::*;
 
+    /// A built map's geometry, bit for bit: walls, brush, lane paths, spawns, fountains,
+    /// structures, relics and camps (with their facing). FNV-1a over every float's bits.
+    fn geometry_hash(m: &Map) -> u64 {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        let mut eat = |x: u64| {
+            for b in x.to_le_bytes() {
+                h = (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        };
+        let pt = |eat: &mut dyn FnMut(u64), p: Vec2| {
+            eat(p.x.to_bits() as u64);
+            eat(p.y.to_bits() as u64);
+        };
+        for poly in m.walls.iter().chain(&m.brush) {
+            eat(poly.len() as u64);
+            for p in poly {
+                pt(&mut eat, *p);
+            }
+        }
+        let l = &m.layout;
+        for pair in &l.lanes {
+            for path in pair {
+                eat(path.len() as u64);
+                for p in path {
+                    pt(&mut eat, *p);
+                }
+            }
+        }
+        for pair in &l.wave_spawn {
+            pt(&mut eat, pair[0]);
+            pt(&mut eat, pair[1]);
+        }
+        pt(&mut eat, l.champion_spawn[0]);
+        pt(&mut eat, l.champion_spawn[1]);
+        for (c, r) in l.fountains.iter().flatten() {
+            pt(&mut eat, *c);
+            eat(r.to_bits() as u64);
+        }
+        for p in &l.placements {
+            eat(((p.kind as u64) << 24) | ((p.team as u64) << 16) | ((p.tier as u64) << 8) | p.lane as u64);
+            pt(&mut eat, p.pos);
+        }
+        for c in &l.camps {
+            eat(c.kind as u64);
+            pt(&mut eat, c.pos);
+            pt(&mut eat, c.facing);
+        }
+        h
+    }
+
+    /// Cross-platform canary for map building (03 §17): the maps built from specs must come out
+    /// bit for bit the same on every OS (CI runs this on Linux, Windows and macOS), since each
+    /// client rebuilds the map the server plays. A change on one platform means map building
+    /// used platform math; a change everywhere means the build changed (update on purpose).
+    #[test]
+    fn built_maps_are_the_same_everywhere() {
+        let got = [MapId::Crossroads, MapId::Bridge].map(|id| geometry_hash(&id.shared()));
+        assert_eq!(got, [GEOMETRY_CROSSROADS, GEOMETRY_BRIDGE], "{got:#018x?}");
+    }
+
+    const GEOMETRY_CROSSROADS: u64 = 0x6277_b7c8_01c8_6368;
+    const GEOMETRY_BRIDGE: u64 = 0x0428_bc04_0f06_2fdc;
+
     #[test]
     fn geometry_basics() {
         let sq = rect(0.0, 0.0, 10.0, 10.0);
