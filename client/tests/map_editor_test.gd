@@ -59,6 +59,13 @@ func _init() -> void:
 	check(probs.size() > 0, "a half-made map has problems: %s" % " | ".join(probs))
 	ed._open_text(MftrMaps.crossroads(), "")
 	check(MftrMaps.problems(ed.to_text()).is_empty(), "Crossroads opens without problems and writes back the same")
+	# Load default map: every built-in map opens without problems.
+	var opened := 0
+	for m in ed.DEFAULT_MAPS:
+		ed.open_map(m[0])
+		if ed.spec.name == m[1] and MftrMaps.problems(ed.to_text()).is_empty():
+			opened += 1
+	check(opened == ed.DEFAULT_MAPS.size(), "every default map loads from the dropdown (%d of %d)" % [opened, ed.DEFAULT_MAPS.size()])
 	# ARAM maps (12 §1): The Bridge opens as one, relics and rocks round-trip.
 	ed._open_text(MftrMaps.bridge(), "")
 	check(ed.spec.kind == "aram" and ed.spec.relics.size() == 2 and ed.spec.rocks.size() == 1, "The Bridge opens as an ARAM map with its relics and rock")

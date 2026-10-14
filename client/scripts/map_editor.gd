@@ -25,6 +25,9 @@ const TOOLS := [
 	["rock", "Rock", "A small wall in the open, for cover: click to place (radius from the slider)."],
 	["relic", "Health relic", "ARAM: click to place a health relic (red's is its turned copy)."],
 ]
+## The built-in maps the editor opens from "Load default map": id, name. Add a map here and to
+## `_default_map_text`.
+const DEFAULT_MAPS := [["crossroads", "Crossroads"], ["bridge", "The Bridge"]]
 ## Tools a kind of map has no use for.
 const KIND_TOOLS_OFF := {"classic": ["relic"], "aram": ["camp", "objective"]}
 const KINDS := [["classic", "Classic"], ["aram", "ARAM"]]
@@ -113,7 +116,7 @@ func _ready() -> void:
 	for k in WIDTHS:
 		widths[k] = WIDTHS[k][0]
 	_build_ui()
-	_open_text(MftrMaps.crossroads(), "")
+	_open_text(_default_map_text("crossroads"), "")
 	_load_config()
 	await get_tree().process_frame
 	_fit_view()
@@ -121,13 +124,21 @@ func _ready() -> void:
 
 ## Open a built-in map ("bridge", "crossroads") or a map file (`--editor-map`, for captures).
 func open_map(which: String) -> void:
-	match which:
-		"bridge":
-			_open_text(MftrMaps.bridge(), "")
+	var text := _default_map_text(which)
+	if text != "":
+		_open_text(text, "")
+	else:
+		_open_text(FileAccess.get_file_as_string(which), which)
+
+
+## A built-in map's spec text, or "" for an id that isn't one.
+func _default_map_text(id: String) -> String:
+	match id:
 		"crossroads":
-			_open_text(MftrMaps.crossroads(), "")
-		_:
-			_open_text(FileAccess.get_file_as_string(which), which)
+			return MftrMaps.crossroads()
+		"bridge":
+			return MftrMaps.bridge()
+	return ""
 
 
 ## Switch to the Actual view (`--editor-actual`, for captures).
@@ -160,6 +171,14 @@ func _build_ui() -> void:
 	title_label.text = "Map editor"
 	title_label.theme_type_variation = "TitleLabel"
 	lv.add_child(title_label)
+	var defaults := MenuButton.new()
+	defaults.text = "Load default map ▾"
+	defaults.flat = false
+	defaults.tooltip_text = "Open one of the game's built-in maps to edit or start from. Save as… keeps your copy; the built-in map doesn't change."
+	for i in DEFAULT_MAPS.size():
+		defaults.get_popup().add_item(DEFAULT_MAPS[i][1], i)
+	defaults.get_popup().id_pressed.connect(func(i: int): open_map(DEFAULT_MAPS[i][0]))
+	lv.add_child(defaults)
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 8)
@@ -287,7 +306,7 @@ func _build_ui() -> void:
 	lv.add_child(_header("FILE"))
 	var files := GridContainer.new()
 	files.columns = 2
-	for f in [["New", _new_map], ["Open…", _open_dialog], ["Save", _save], ["Save as…", _save_as], ["Export…", _export], ["Crossroads", func(): _open_text(MftrMaps.crossroads(), "")], ["The Bridge", func(): _open_text(MftrMaps.bridge(), "")]]:
+	for f in [["New", _new_map], ["Open…", _open_dialog], ["Save", _save], ["Save as…", _save_as], ["Export…", _export]]:
 		var b := Button.new()
 		b.text = f[0]
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
