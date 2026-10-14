@@ -1,7 +1,7 @@
 # Set the version everywhere it is recorded: the workspace (Cargo.toml), the lock file (CI and
 # release builds use --locked, so it must match) and the macOS export preset. The PowerShell twin
 # of bump-version.sh, for Windows (Windows PowerShell 5.1 or PowerShell 7).
-#   powershell -ExecutionPolicy Bypass -File scripts\bump-version.ps1 0.2.0
+#   scripts\bump-version.cmd 0.2.0
 param([Parameter(Mandatory = $true)][string]$Version)
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')

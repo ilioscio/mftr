@@ -16,7 +16,9 @@ MFTR aims to deliver the thing players love about the best-known lane-based MOBA
 
 ## Build & run
 
-Requirements: Rust (stable, via [rustup](https://rustup.rs); `rust-toolchain.toml` pins the channel) and [Godot 4.5 or newer](https://godotengine.org). On Windows, Rust needs the MSVC C++ build tools.
+**New here? Start with the [setup guide](docs/setup.md).** On Windows, `scripts\setup.cmd` checks and installs everything, then `scripts\play.cmd` runs a server and the client.
+
+Requirements: Rust (stable, via [rustup](https://rustup.rs); `rust-toolchain.toml` pins the channel) and [Godot](https://godotengine.org) 4.7.2 (4.5 or newer runs it). On Windows, Rust needs the MSVC C++ build tools.
 
 **NixOS / Nix:** `nix develop` (flakes enabled) gives you the pinned Rust toolchain, Godot and the runtime libraries Godot needs. The first run creates `flake.lock`; commit it. Inside the shell, `$MFTR_GODOT` points at the Godot binary.
 

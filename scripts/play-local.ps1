@@ -13,6 +13,8 @@
     .\scripts\play-local.ps1 -Join           # skip the menu: connect to the local server at once
     .\scripts\play-local.ps1 -Editor        # open the project in the Godot editor instead
     .\scripts\play-local.ps1 -NoServer      # a server is already running: just the client
+    .\scripts\play-local.ps1 -MapEditor     # the map editor (no server)
+    scripts\play.cmd -MapEditor             # the same, whatever PowerShell's script policy
     .\scripts\play-local.ps1 -ServerArgs '--scenario','duel'
 #>
 param(
@@ -20,6 +22,7 @@ param(
     [switch]$Join,
     [switch]$Editor,
     [switch]$NoServer,
+    [switch]$MapEditor,
     [switch]$NoBuild,
     [switch]$KeepUids,
     [string]$Godot = $env:GODOT,
@@ -31,19 +34,31 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $client = Join-Path $root 'client'
 $address = "127.0.0.1:$Port"
+if ($MapEditor) {
+    $NoServer = $true
+    $ClientArgs = @('--map-editor') + $ClientArgs
+}
 
-# Godot: -Godot, $env:GODOT, `godot` on PATH, or the newest install under Program Files.
+# Godot: -Godot, $env:GODOT (scripts\setup.cmd saves it), `godot` on PATH, or the newest install
+# in the usual folders or winget's.
+if (-not $Godot) {
+    $Godot = [Environment]::GetEnvironmentVariable('GODOT', 'User')
+}
 if (-not $Godot) {
     $Godot = (Get-Command godot, godot4 -ErrorAction SilentlyContinue | Select-Object -First 1).Source
 }
 if (-not $Godot) {
-    $Godot = Get-ChildItem "$env:ProgramFiles\Godot", "${env:ProgramFiles(x86)}\Godot", "$env:LOCALAPPDATA\Godot" `
+    $folders = @("$env:ProgramFiles\Godot", "${env:ProgramFiles(x86)}\Godot", "$env:LOCALAPPDATA\Godot",
+        "$env:LOCALAPPDATA\Programs\Godot", "$env:USERPROFILE\Godot")
+    $folders += @(Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Directory -Filter 'GodotEngine.GodotEngine*' `
+        -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    $Godot = Get-ChildItem $folders `
         -Recurse -Filter 'Godot_v*_win64.exe' -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notlike '*console*' } |
         Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName
 }
 if (-not $Godot -or -not (Test-Path $Godot)) {
-    throw "Godot not found: pass -Godot <path to Godot_v4.x_win64.exe> or set `$env:GODOT."
+    throw "Godot not found: run scripts\setup.cmd, pass -Godot <path to Godot_v4.x_win64.exe> or set `$env:GODOT."
 }
 
 Write-Host "MFTR checkout: $root ($(git -C $root branch --show-current))"
