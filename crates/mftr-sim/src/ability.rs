@@ -123,6 +123,27 @@ pub struct DelayedArea {
     pub delay: SimDuration,
     pub damage: Damage,
     pub cc: Cc,
+    /// After detonating, the area may linger and strike again (damage over time).
+    pub pulses: Pulses,
+}
+
+/// A lingering area's further strikes: `count` more, `every` apart after the detonation, each
+/// dealing `share` of the detonation's damage and applying `cc` to everyone inside then.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pulses {
+    pub count: u8,
+    pub every: SimDuration,
+    pub share: f32,
+    pub cc: Cc,
+}
+
+impl Pulses {
+    pub const NONE: Pulses = Pulses { count: 0, every: SimDuration(0), share: 0.0, cc: Cc::None };
+
+    /// Detonation to the last strike.
+    pub fn span(&self) -> SimDuration {
+        SimDuration(self.every.0 * self.count as u64)
+    }
 }
 
 impl DelayedArea {
@@ -133,6 +154,38 @@ impl DelayedArea {
 
     pub fn reaction_time(&self) -> f32 {
         secs(self.windup) + secs(self.delay)
+    }
+}
+
+/// A channeled beam (Vel'Koz-like, but it stops on the first enemy): windup (rooted, the aim
+/// shown to everyone), then for `duration` the caster holds a beam of half-width `radius` and
+/// length `range` along the aim, striking the first enemy unit on it every `every`, starting at
+/// the fire instant. `damage` is the whole channel's; each strike deals an equal share. Being
+/// stunned, knocked up, pulled or killed ends it (roots don't); the caster can't act meanwhile.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Beam {
+    pub windup: SimDuration,
+    pub range: f32,
+    pub radius: f32,
+    pub duration: SimDuration,
+    pub every: SimDuration,
+    pub damage: Damage,
+    pub cc: Cc,
+}
+
+impl Beam {
+    /// Strikes in a full channel: one at fire, then one every `every` through `duration`.
+    pub fn strikes(&self) -> u32 {
+        (self.duration.0 / self.every.0.max(1)) as u32 + 1
+    }
+
+    pub fn reaction_needed(&self) -> f32 {
+        reaction_needed(self.radius)
+    }
+
+    /// The beam is instant along its length: the windup is all the warning there is.
+    pub fn reaction_time(&self) -> f32 {
+        secs(self.windup)
     }
 }
 
@@ -196,6 +249,8 @@ pub enum Effect {
     Lunge(Lunge),
     /// True damage to the monster or enemy minion nearest the cursor (Claim).
     Claim(Claim),
+    /// A channeled beam along the aim.
+    Beam(Beam),
 }
 
 /// Claim (the jungler's utility spell, Smite-like): true damage to the monster or enemy minion
@@ -283,6 +338,11 @@ impl Ability {
             }
             Effect::Line(_) | Effect::Area(_) => Timing { follow_through: ms(200), ..Timing::NONE },
             Effect::Dash(_) | Effect::Lunge(_) => Timing { follow_through: ms(80), ..Timing::NONE },
+            // The channel is the follow-through, all of it locked; a short recovery after.
+            Effect::Beam(b) => {
+                let channel = SimDuration(b.duration.0 + ms(250).0);
+                Timing { follow_through: channel, hard_lock: b.duration, mobile: false }
+            }
             Effect::Blink(_) | Effect::Shield(_) | Effect::Support(_) | Effect::Claim(_) => {
                 Timing { mobile: true, ..Timing::NONE }
             }

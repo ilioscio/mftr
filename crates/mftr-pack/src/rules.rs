@@ -8,10 +8,11 @@ use mftr_sim::champion::ChampionDef;
 pub const FPS: u32 = 30;
 
 // Caps (10 §2, §7.2, §9).
-pub const TRIANGLES_TARGET: (usize, usize) = (2500, 4000);
+/// Doubled by D59 (14): room for silhouette detail, sculpted hands and heads.
+pub const TRIANGLES_TARGET: (usize, usize) = (5000, 8000);
 /// Lane minions (A5): many on screen at once, so lighter.
 pub const MINION_TRIANGLES_TARGET: (usize, usize) = (600, 2600);
-pub const TRIANGLES_MAX: usize = 6000;
+pub const TRIANGLES_MAX: usize = 12_000;
 /// Map props (structures, trees, rocks): static, one `root` bone, no clips. A structure is the
 /// most detailed thing on screen, so its cap is higher; scenery is drawn many times over.
 pub const PROP_TRIANGLES_TARGET: (usize, usize) = (20, 8000);
@@ -25,8 +26,8 @@ pub const INFLUENCES_TARGET: usize = 2;
 /// orbs). Neither counts toward the four other slots.
 pub const MATERIAL_SLOTS: &[&str] = &["skin", "cloth", "metal", "emissive", "accent", "accent_glow"];
 pub const MAX_NON_ACCENT_SLOTS: usize = 4;
-/// Mesh + animations (200 KB + 600 KB, 10 §9).
-pub const MODEL_BYTES_BUDGET: usize = 800 * 1024;
+/// Mesh + animations (400 KB + 600 KB, 10 §9).
+pub const MODEL_BYTES_BUDGET: usize = 1000 * 1024;
 pub const MAX_CLIP_FRAMES: u32 = 12 * FPS;
 /// Root motion tolerance (10 §8.4): clips play in place, the sim moves the unit.
 pub const ROOT_XZ_TOLERANCE_M: f32 = 0.01;
@@ -187,6 +188,7 @@ pub fn expected_fire_frame(def: &ChampionDef, clip: &str) -> Option<f32> {
     match def.abilities[slot].effect {
         Effect::Line(l) => Some(subticks_to_frames(l.windup.0)),
         Effect::Area(a) => Some(subticks_to_frames(a.windup.0)),
+        Effect::Beam(b) => Some(subticks_to_frames(b.windup.0)),
         _ => None,
     }
 }

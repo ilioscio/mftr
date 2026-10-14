@@ -150,6 +150,8 @@ func _build(info: Dictionary, key: String, level_key: String) -> void:
 		facts.append("Speed %d" % roundi(info.speed))
 	if info.get("windup", 0.0) > 0.0:
 		facts.append("Cast %s s" % _num(info.windup, 2))
+	if info.get("channel", 0.0) > 0.0:
+		facts.append("Channel %s s" % _num(info.channel, 2))
 	if not facts.is_empty():
 		t.append_text("\n[color=#%s]%s[/color]" % [C_DIM, "   ·   ".join(facts)])
 
@@ -208,6 +210,23 @@ func _describe(info: Dictionary, now: int) -> void:
 			t.append_text(" to every enemy inside")
 			_cc(info, "them", true)
 			t.append_text(".")
+			if info.has("pulses"):
+				# A lingering area: it keeps striking whoever stays in it.
+				var p: Dictionary = info.pulses
+				var every: float = p.every
+				t.append_text(" It keeps striking every [color=#%s]%s s[/color] for [color=#%s]%s s[/color] more, dealing [color=#%s]%d%%[/color] of that to everyone still inside" % [C_NUM, _num(every, 2), C_NUM, _num(every * float(p.count), 2), C_NUM, roundi(float(p.share) * 100.0)])
+				_cc(p, "them", true)
+				t.append_text(".")
+		"beam":
+			var strikes: int = info.strikes
+			t.append_text("After aiming, channels a beam for [color=#%s]%s s[/color] that strikes the first enemy in its path [color=#%s]%d[/color] times, dealing " % [C_NUM, _num(info.channel, 2), C_NUM, strikes])
+			_damage(info.damage, now)
+			t.append_text(" in all ([color=#%s]%s[/color] a strike" % [_damage_color(info.damage.kind), _num(float(info.damage.base[now]) / strikes, 0)])
+			if info.damage.ad > 0.0 or info.damage.ap > 0.0:
+				t.append_text(", [color=#%s]%s now[/color]" % [C_DIM, _num(float(info.damage.total) / strikes, 0)])
+			t.append_text(")")
+			_cc(info, "it", true)
+			t.append_text(". You can't move while channeling; being stunned, knocked up or pulled ends it.")
 		"lunge":
 			t.append_text("Dashes onto the enemy nearest the cursor and strikes it for ")
 			_damage(info.damage, now)

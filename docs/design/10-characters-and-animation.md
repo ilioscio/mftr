@@ -20,7 +20,7 @@ Decided with the owner (D48). The reference is a reduced-poly reimagining of the
 
 | Aspect | Rule |
 |---|---|
-| Geometry | **2,500–4,000 triangles** per champion including weapons *(start)*, hard cap 6,000. Large forms are blocky and faceted. Detail comes from silhouette and color blocking, not geometry. |
+| Geometry | **5,000–8,000 triangles** per champion including weapons *(start; doubled by D59)*, hard cap 12,000. Large forms are blocky and faceted. Detail comes from silhouette and color blocking, not geometry. |
 | Shading | **Faceted** (flat per triangle), computed in the shader from screen-space derivatives so meshes stay smooth-indexed (fewer vertices, smaller files). Toon ramp with 2–3 bands, rim light and object-space detail noise ([05 §2](05-art-and-assets.md#2-procedural-materials)). |
 | Color | **Vertex colors**: RGB = albedo, A = baked cavity/AO. No texture maps. A palette of ≤ 12 colors per champion. |
 | Materials | At most 4 material slots from a fixed set: `skin`, `cloth`, `metal`, `emissive`, plus `accent` (the team-accent region, tinted ally/enemy at runtime, [05 §1.3](05-art-and-assets.md#1-readability-rules-non-negotiable)) and `accent_glow` (the team color, glowing: minions' eyes and orbs, A5). Each slot maps to a parameter set of the one champion shader. |
@@ -318,16 +318,16 @@ The add-on renders, headless, a **contact sheet and a looping GIF per clip** fro
 
 ## 9. Budgets
 
-Per champion, within the 1.5 MB of [05 §8](05-art-and-assets.md#8-size-budgets-compressed-per-platform):
+Per champion, within the 1.7 MB of [05 §8](05-art-and-assets.md#8-size-budgets-compressed-per-platform):
 
 | Part | Budget *(start)* |
 |---|---|
-| Mesh, skin, props | ≤ 200 KB |
+| Mesh, skin, props | ≤ 400 KB |
 | Animations (~40 clips) | ≤ 600 KB |
 | VFX parameters | ≤ 50 KB |
 | SFX | ≤ 550 KB |
 | Icons (SVG) | ≤ 50 KB |
-| **Total** | **≤ 1.45 MB** |
+| **Total** | **≤ 1.65 MB** |
 
 Animation estimate: 40 clips × ~1.2 s × 30 fps × ~45 bones ≈ 65k bone keys, ≈ 390 KB at 6 B per quantized rotation key before key reduction, and roughly 150–250 KB after it.
 

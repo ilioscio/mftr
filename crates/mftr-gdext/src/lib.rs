@@ -13,7 +13,7 @@ use godot::prelude::*;
 use mftr_client::blind::{BlindPlan, BlindRating, BlindRecord, RoundStats, TSV_HEADER};
 use mftr_client::{ClientSession, Notice, OwnMissileDisplay, Phase, Side};
 use mftr_net::conditioner::{LinkProfile, SimLink};
-use mftr_net::secure::{Identity, KnownServers, SecureClient, SecureError, parse_address};
+use mftr_net::secure::{Fingerprint, Identity, KnownServers, SecureClient, SecureError, parse_address};
 use mftr_sim::ability::{DamageKind, SLOTS};
 use mftr_sim::augments;
 use mftr_sim::items::{self, INVENTORY};
@@ -43,6 +43,8 @@ pub struct MatchClient {
     /// The server's address ("host:port"), and whether its key is saved as trusted.
     server: String,
     trusted: bool,
+    /// The pinned key and the key the server showed instead, when they differ.
+    key_conflict: Option<(Fingerprint, Fingerprint)>,
     clock: Instant,
     next_hello: f64,
     last_error: GString,
@@ -129,6 +131,7 @@ impl INode for MatchClient {
             identity: None,
             server: String::new(),
             trusted: false,
+            key_conflict: None,
             clock: Instant::now(),
             next_hello: 0.0,
             last_error: GString::new(),
@@ -183,6 +186,7 @@ impl MatchClient {
                 self.secure = Some(SecureClient::new(&identity, pin));
                 self.server = host.to_string();
                 self.trusted = false;
+                self.key_conflict = None;
                 self.session = ClientSession::new();
                 self.session.set_champion_request(self.champion_request);
                 self.session.set_resume(self.resume);
@@ -325,6 +329,34 @@ impl MatchClient {
         }
         self.blind_apply();
         ok
+    }
+
+    /// When the server's key differs from the one saved for it: `{ server, saved, now }`
+    /// (fingerprints in hex); empty otherwise.
+    #[func]
+    fn key_conflict(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        if let Some((saved, now)) = self.key_conflict {
+            d.set("server", self.server.as_str());
+            d.set("saved", saved.to_string().as_str());
+            d.set("now", now.to_string().as_str());
+        }
+        d
+    }
+
+    /// Replace the saved key for the server in conflict with the one it showed, so the next
+    /// connection trusts it. Returns false when there's no conflict or the file can't be written.
+    #[func]
+    fn trust_new_key(&mut self) -> bool {
+        let Some((_, now)) = self.key_conflict else { return false };
+        let mut known = known_servers();
+        known.set(&self.server, now);
+        if std::fs::write(user_path(KNOWN_FILE), known.to_text()).is_err() {
+            self.last_error = GString::from(&format!("could not write {}", user_path(KNOWN_FILE)));
+            return false;
+        }
+        self.key_conflict = None;
+        true
     }
 
     /// What went wrong connecting: the transport's error, or why the server turned us away.
@@ -724,6 +756,29 @@ impl MatchClient {
         out
     }
 
+    /// Channeled beams: `{ key, owner, champion, action, origin, dir, length, radius, side,
+    /// strikes }`, `length` to where the first enemy on it is drawn, `strikes` so far.
+    #[func]
+    fn beams(&self) -> VarArray {
+        let mut out = VarArray::new();
+        let champions = self.champions_by_unit();
+        for b in self.session.beams_render(self.now()) {
+            let mut d = VarDictionary::new();
+            d.set("owner", b.owner.0 as i64);
+            d.set("champion", champions.get(&b.owner).map_or("", |c| c.def().name));
+            d.set("action", ["q", "w", "e", "r", "d", "f"].get(b.slot as usize).copied().unwrap_or(""));
+            d.set("key", b.key as i64);
+            d.set("origin", Vector2::new(b.origin.x, b.origin.y));
+            d.set("dir", Vector2::new(b.dir.x, b.dir.y));
+            d.set("length", b.length);
+            d.set("radius", b.radius);
+            d.set("side", side_name(b.side));
+            d.set("strikes", b.strikes as i64);
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
     /// Basic-attack bolts in flight: `{ key, pos, dir, side }`.
     #[func]
     fn bolts(&self) -> VarArray {
@@ -885,8 +940,9 @@ impl MatchClient {
     /// Everything a tooltip says about our champion's ability in `slot` (0–3 Q W E R, 4–5 D F;
     /// F may be an augment's spell), straight from the sim's data, so tooltips can't drift
     /// from the game: `{ name, kind, rank, max_rank, cooldowns: [s per rank], range, radius,
-    /// speed, windup, delay, damage: { kind, base: [per rank], ad, ap, total }, heal: {…},
-    /// shield: {…}, cc: { kind, seconds, pct } }`, with absent parts left out. `total`s use the
+    /// speed, windup, delay, channel, strikes, pulses: { count, every, share, cc }, damage: {
+    /// kind, base: [per rank], ad, ap, total }, heal: {…}, shield: {…}, cc: { kind, seconds,
+    /// pct } }`, with absent parts left out. `total`s use the
     /// champion's current attack damage and ability power at its current rank (rank 1 if
     /// unlearned).
     #[func]
@@ -981,6 +1037,28 @@ impl MatchClient {
                 d.set("delay", secs(r.delay));
                 d.set("damage", &damage(r.damage));
                 set_cc(&mut d, r.cc);
+                if r.pulses.count > 0 {
+                    // A lingering area: `{ count, every (s), share, cc }` strikes after landing.
+                    let mut p = VarDictionary::new();
+                    p.set("count", r.pulses.count as i64);
+                    p.set("every", secs(r.pulses.every));
+                    p.set("share", r.pulses.share);
+                    if let Some(m) = cc(r.pulses.cc) {
+                        p.set("cc", &m);
+                    }
+                    d.set("pulses", &p);
+                }
+            }
+            Effect::Beam(b) => {
+                // A channel: the tooltip's damage is the whole channel's, `strikes` its hits.
+                d.set("kind", "beam");
+                d.set("range", b.range);
+                d.set("radius", b.radius);
+                d.set("windup", secs(b.windup));
+                d.set("channel", secs(b.duration));
+                d.set("strikes", b.strikes() as i64);
+                d.set("damage", &damage(b.damage));
+                set_cc(&mut d, b.cc);
             }
             Effect::Lunge(l) => {
                 d.set("kind", "lunge");
@@ -1112,8 +1190,8 @@ impl MatchClient {
     /// The action (`q`…`f`) a champion's dash or lunge sits on, or "" (A4b: dash VFX).
     #[func]
     fn action_info(&self, champion: GString, action: GString) -> VarDictionary {
-        // A6: where `<action>.fire` effects play: `shape` (`nova`, `line`, `area`, `dash`,
-        // `support`, `melee`, `ranged`), `radius` and `reach` in meters from the kit.
+        // A6: where `<action>.fire` effects play: `shape` (`nova`, `line`, `beam`, `area`,
+        // `dash`, `support`, `melee`, `ranged`), `radius` and `reach` in meters from the kit.
         use mftr_sim::ability::Effect;
         let mut d = VarDictionary::new();
         let Some(c) = ChampionId::by_name(&champion.to_string()) else { return d };
@@ -1123,6 +1201,7 @@ impl MatchClient {
             "attack" => ("melee", 0.0, def.attack.range),
             a => match ACTIONS.iter().position(|s| *s == a).and_then(|s| c.ability(s as u8)).map(|ab| ab.effect) {
                 Some(Effect::Line(l)) => ("line", l.radius, l.range),
+                Some(Effect::Beam(b)) => ("beam", b.radius, b.range),
                 Some(Effect::Area(r)) if r.range == 0.0 => ("nova", r.radius, 0.0),
                 Some(Effect::Area(r)) => ("area", r.radius, r.range),
                 Some(Effect::Dash(_) | Effect::Lunge(_)) => ("dash", 0.0, 0.0),
@@ -1317,6 +1396,7 @@ impl MatchClient {
             let windup_of = |slot: u8| match champ.ability(slot).map(|a| a.effect) {
                 Some(mftr_sim::ability::Effect::Line(l)) => l.windup,
                 Some(mftr_sim::ability::Effect::Area(a)) => a.windup,
+                Some(mftr_sim::ability::Effect::Beam(b)) => b.windup,
                 _ => mftr_sim::SimDuration(0),
             };
             let progress = |end: mftr_sim::SimTime, len: mftr_sim::SimDuration| {
@@ -1463,6 +1543,7 @@ impl MatchClient {
             if let Some((p, dir)) = u.windup {
                 d.set("windup", p);
                 d.set("windup_dir", Vector2::new(dir.x, dir.y));
+                d.set("windup_slot", u.windup_slot as i64);
             }
             d.set("red", u.team == Team::Red);
             d.set("ally", u.team == self.session.team());
@@ -1757,8 +1838,13 @@ impl MatchClient {
         let Some(secure) = &self.secure else { return };
         if let Some(e) = secure.error() {
             let mut text = e.to_string();
-            if matches!(e, SecureError::KeyChanged { .. }) {
-                text += &format!(", or delete its line in {}", user_path(KNOWN_FILE));
+            if let SecureError::KeyChanged { expected, got } = e {
+                self.key_conflict = Some((*expected, *got));
+                text = format!(
+                    "This server's identity key changed since you last played on it (saved {expected}, now {got}). \
+                     That happens when its host replaces the key or reinstalls the server; it can also mean \
+                     something is pretending to be this server. Trust the new key only if you expected the change."
+                );
             }
             self.last_error = GString::from(&text);
         } else if !self.trusted
@@ -2016,7 +2102,7 @@ fn monster_key(m: mftr_sim::jungle::MonsterKind) -> &'static str {
 fn icon_kind(a: &mftr_sim::ability::Ability) -> &'static str {
     use mftr_sim::ability::Effect;
     match a.effect {
-        Effect::Line(_) => "line",
+        Effect::Line(_) | Effect::Beam(_) => "line",
         Effect::Area(r) if r.range == 0.0 => "nova",
         Effect::Area(_) => "area",
         Effect::Lunge(_) => "lunge",

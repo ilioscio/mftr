@@ -454,6 +454,7 @@ impl DuelBot {
             Some(Effect::Area(a)) if a.range == 0.0 => d <= a.radius * 0.8,
             Some(Effect::Area(a)) => d <= a.range,
             Some(Effect::Lunge(l)) => d <= l.range,
+            Some(Effect::Beam(b)) => d <= b.range * 0.8,
             _ => false,
         };
         let shots: Vec<u8> = (0..4u8).filter(|s| ready(*s) && in_range(*s)).collect();

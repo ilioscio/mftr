@@ -1,6 +1,6 @@
 # Quill — concept
 
-Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an owner brief, from her kit (long-range artillery, a "Starfall Lance") and the placeholder's teal.
+Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** (awaiting the owner's approval). Designed without an owner brief, from her kit (long-range artillery, a "Starfall Lance").
 
 ## Identity
 
@@ -8,25 +8,28 @@ Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an 
   - **Q Arc Shot:** a long-range delayed area.
   - **W Static Field:** a slowing delayed area.
   - **E Recoil:** a hop back (dash).
-  - **R Starfall Lance:** a map-length line (2,500 range, 600 ms windup).
+  - **R Starfall Lance:** a channeled beam (850 ms windup, 1,800 range, 1.5 s channel): seven strikes on the first enemy on it, interrupted by hard CC.
 - **Personality in three words:** curious, meticulous, unflappable.
-- **Silhouette class:** *stargazer scholar*.
-  - A long teal coat with brass buttons, team-colored lapels and coat tails (an `extra_coat` chain).
-  - Tall boots.
-  - A tall staff topped with a brass armillary sphere: three crossing rings around a glowing star. It reads from the gameplay camera.
-  - Brass goggles pushed up on her forehead.
-- **Head:** the shared sculpted head, feminine, with a short dark bob and teal eyes.
-- **Archetype:** `biped` v1, plus `extra_coat`. The staff lies along the right hand bone, so each pose aims it.
+- **Shape (14 §2):** *a tall pointed hat and a long coat*. Gangly proportions on the `biped` bones (`SHAPE` in `build.py`: long legs, ×0.97 wide, arms ×1.08, hands ×1.3), about 1.85 m, 2.35 m to the star on her hat's tip. A wide-brimmed astronomer's hat bending back to a point, brass goggles with glowing lenses on its band; a long navy coat flaring to her shins, its hem flecked with stars and its tails on an `extra_coat` chain; indigo lapels and shoulder capes; two rows of brass buttons; tall buckled boots; a scroll case and a brass spyglass at her hips.
+- **Weapon:** a tall staff topped by an orrery: three crossing brass rings and two little planets around a glowing star. Skinned to her right hand and held by IK (`staff()` in `build.py`); her big casts take it in both hands.
+- **Head:** the shared sculpted head, feminine, a short dark bob, indigo eyes.
+- **Gait (14 §3.6):** athletic, the staff carried at a slant.
 
-## Palette (10 §2)
+## Palette (14 §4)
+
+Signature: **starlight indigo** (235°).
 
 | Slot | Colors |
 |---|---|
-| skin | (0.82, 0.62, 0.5) |
-| cloth | deep teal coat (0.12, 0.34, 0.38 / 0.08, 0.22, 0.25), a pale shirt (0.82, 0.78, 0.68), trousers (0.2, 0.18, 0.2), boots and goggle strap (0.24, 0.16, 0.1), staff wood (0.3, 0.2, 0.12), dark hair |
-| metal | brass buttons, cuffs, goggles and the armillary rings (0.8, 0.62, 0.3) |
-| emissive | the star at the staff's head and the goggle lenses (0.82, 0.97, 1.0) |
-| accent | the lapels and the belt |
+| skin | (0.80, 0.60, 0.48) |
+| cloth | navy coat and hat (0.08, 0.10, 0.22 / 0.04, 0.05, 0.12), indigo lapels, capes, hat band and coat tails (0.18, 0.16, 0.42), a parchment shirt (0.66, 0.60, 0.46), leather boots and case (0.28, 0.18, 0.10), staff wood (0.26, 0.17, 0.10), dark hair |
+| metal | brass: buttons, buckles, hems, goggles, the orrery's rings (0.68, 0.50, 0.22) |
+| emissive | starlight (0.62, 0.66, 1.0) and star white (0.92, 0.94, 1.0): the orrery's star, the hat's star, the hem's stars, the lenses |
+| accent | a band at her belt |
+
+## Weight (14 §3)
+
+The orrery is thrust at her targets (drawn back, cocked, a one-frame thrust, held). Arc Shot swings the staff from low behind her up and over in both hands. Static Field plants the staff's foot. Recoil jabs the staff into the ground and vaults back off it, landing in a held skid. **Starfall Lance** is a long planted charge: the staff raised to the sky in both hands, lowered to aim down the line, trembling for four frames as it builds, released on frame 18, and the recoil throws her back a step and holds through the hard lock.
 
 ## Clip checklist (10 §5)
 
@@ -39,18 +42,13 @@ Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an 
 | q | Arc Shot: the staff swept up and over; `fire` 8 |
 | w | Static Field: the staff's foot struck down; `fire` 8 |
 | e_start, e_travel, e_land | Recoil: a hop backward, the coat flaring |
-| r | Starfall Lance: the staff raised to the sky for a long beat, then levelled; `fire` 18 (sim 18) |
+| r | Starfall Lance: the staff raised to the sky, then levelled and trembling; `fire` 26 (sim 25.5); braced and shaking through the 1.5 s channel, then let go (80 frames) |
 | recall, death, respawn, select | Kneels and studies the sky; falls aside; rises; raises the staff to the stars |
 | emote_taunt, emote_joke, emote_laugh, emote_dance | Beckons; counts the stars on her fingers and loses count; laughs; spins with the staff as a partner |
 
 ## Effects and sounds
 
-- **VFX** (`export/quill.vfx.ron`):
-  - star-white bolts;
-  - Arc Shot's lobbed star and starburst;
-  - Static Field's cyan ring;
-  - Recoil dust;
-  - Starfall Lance's white-hot shaft and blinding burst.
+- **VFX** (`export/quill.vfx.ron`), all starlight (white → indigo → deep indigo): starlight sprays and pale-star bolts; Arc Shot falls as a star and lands in a `flash`, a star-burst, a `shock` and a ring; Static Field crackles in an indigo ring with `crack`s where the staff is planted; Starfall Lance flares white with a `slash` on release, flies as a white-hot shaft and strikes in a `pillar` of starlight.
 - **SFX** (`sounds.ron`), 10 sounds:
   - arcane zaps;
   - Arc Shot's whistle and starburst;

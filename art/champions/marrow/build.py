@@ -1,12 +1,18 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Marrow (A13): the block-out generator for her model and clips.
+"""Marrow (rebuilt for 14): the generator for her model and clips.
 
     blender -b --python art/champions/marrow/build.py -- --out art/champions/marrow/marrow.blend
 
-A bone-witch on `biped` v1: pale, with long black hair under a crown of bone spikes, ash-plum robes
-with a ragged skirt, a corset of bone ribs over the bodice, skull-capped pauldrons, a tattered
-shawl on an `extra_cloak` chain, and grave-green light at her wrists (she casts from bare hands,
-no staff). A team-colored sash and hem. Like the other block-outs this is a starting point.
+A hooded bone-witch (14 §5): a bent crone in a deep plum hood that frames her face, its peak
+drooping down her back and its cowl over her shoulders; a ribcage corset over her robe, a ragged
+skirt of tattered strips, a shawl on an `extra_cloak` chain, a skull lantern swinging at her
+hip; in her right hand a crooked staff of black wood crowned with a horned skull whose eyes burn.
+Her signature is magenta (14 §4). (The first version raised a fan of bone spikes behind the hood
+and held up bone-clawed hands: they read as whiskers and as nails.)
+
+Weight (14 §3): she's in no hurry: she leans on the staff at rest, both hands on it; she stalks
+with it like a walking stick; her spells come out of the skull, jabbed, swept or driven into the
+ground and held; the drain pulls in hard. Feet planted by IK.
 """
 
 import math
@@ -14,396 +20,442 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
-sys.path.insert(0, os.path.join(ROOT, "tools", "blender"))
+sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "blender")))
 
-import bpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
-from mftr_blender import clips, head, mesh, rig  # noqa: E402
-from mftr_blender.clips import merge, sym  # noqa: E402
-from mftr_blender.library import _clip, arms, cycle, run_half  # noqa: E402
+from mftr_blender import champion, clips, head, rig  # noqa: E402
+from mftr_blender.champion import arm, feet, hand  # noqa: E402
+from mftr_blender.clips import at, grip, ik, merge, sym  # noqa: E402
+from mftr_blender.library import _clip, gait  # noqa: E402
+from mftr_blender.mesh import box_part, path_part  # noqa: E402
 
-# Palette (concept.md): ash and plum, bone, a grave-green light.
-SKIN = (0.82, 0.76, 0.74)
-HAIR = (0.08, 0.07, 0.09)
-ROBE = (0.2, 0.09, 0.19)
-ROBE_DARK = (0.11, 0.05, 0.11)
-SOCKET = (0.08, 0.06, 0.06)
-WRAP = (0.3, 0.26, 0.24)
-BONE = (0.86, 0.82, 0.7)
-BONE_DARK = (0.66, 0.62, 0.52)
-GLOW = (0.55, 1.0, 0.5)
+SKIN = (0.56, 0.56, 0.50)
+PLUM = (0.24, 0.08, 0.20)
+PLUM_DARK = (0.12, 0.04, 0.11)
+GRAVE = (0.24, 0.24, 0.26)
+BONE = (0.64, 0.60, 0.50)
+BONE_DARK = (0.42, 0.38, 0.30)
+IRON = (0.18, 0.18, 0.20)
+HAIR = (0.62, 0.62, 0.60)
+MAGENTA = (1.0, 0.24, 0.72)
+MAGENTA_DEEP = (0.66, 0.06, 0.44)
 ACCENT = (0.18, 0.52, 0.95)
 
-SHAWL = [(0, 0.12, 1.52), (0, 0.17, 1.22), (0, 0.2, 0.92)]
+SHAPE = {"heights": [(0.0, 0.0), (2.15, 2.15)], "x": 0.95, "y": 0.95, "scale": 0.96, "shoulder": 0.02, "arm": 1.15, "hand": 1.4}
+rig.use_shape(SHAPE)
+SHAWL = [rig.shaped(p) for p in [(0, 0.13, 1.52), (0, 0.18, 1.22), (0, 0.22, 0.92), (0, 0.24, 0.66)]]
+BONES = {b[0]: b for b in rig.bone_table()}
+HAND_LEN = (Vector(BONES["hand_r"][3]) - Vector(BONES["hand_r"][2])).length
+GRIP = 0.5 * HAND_LEN
+STAFF_TOP = GRIP + 0.95     # the skull, along hand_r from the wrist
+STAFF_FOOT = GRIP - 0.78    # the staff's foot
+WOOD = (0.16, 0.11, 0.10)
+
+
+def sp(p):
+    return rig.shaped(p)
 
 
 # --- Mesh -----------------------------------------------------------------------------------
 
 def _center():
-    c = [
-        # The robe: a fitted bodice, then a ragged skirt to the shins.
-        ("pelvis", (0, 0, 1.12), (0, 0, 0.6), 12, [(0, .15, .11), (.5, .2, .15), (1, .24, .18)], "cloth", ROBE),
-        ("pelvis", (0, 0, 0.62), (0, 0, 0.56), 12, [(0, .242, .182), (1, .245, .185)], "accent", ACCENT),
-        ("pelvis", (0, 0, 1.08), (0, 0, 1.14), 12, [(0, .156, .114), (1, .152, .111)], "accent", ACCENT),
-        ("spine_01", (0, 0, 1.10), (0, 0, 1.28), 12, [(0, .13, .093), (.5, .112, .084), (1, .12, .088)], "cloth", ROBE_DARK),
-        ("spine_02", (0, 0, 1.26), (0, 0, 1.42), 12, [(0, .122, .088), (1, .145, .1)], "cloth", ROBE_DARK),
-        ("chest", (0, 0, 1.40), (0, 0, 1.60), 12, [(0, .145, .1), (.35, .152, .106), (.7, .145, .1), (1, .085, .07)], "cloth", ROBE),
-        ("chest", (0, -0.03, 1.415), (0, -0.035, 1.53), 10, [(0, .105, .052), (.5, .124, .066), (1, .098, .046)], "cloth", ROBE),
-        ("neck", (0, 0, 1.55), (0, -0.01, 1.66), 8, [(0, .046, .046), (1, .042, .042)], "skin", SKIN),
-        # A bone choker with a green bead.
-        ("neck", (0, 0, 1.585), (0, -0.002, 1.61), 8, [(0, .05, .05), (1, .05, .05)], "cloth", BONE),
-        ("neck", (0, -0.05, 1.59), (0, -0.07, 1.59), 4, [(0, .014, .014), (.5, .014, .014), (1, 0, 0)], "emissive", GLOW),
-        # The shawl on its chain, ragged at the end.
-        ("extra_cloak_1", SHAWL[0], SHAWL[1], 6, [(0, .17, .02), (1, .2, .02)], "cloth", ROBE_DARK),
-        ("extra_cloak_2", SHAWL[1], SHAWL[2], 6, [(0, .2, .02), (.8, .19, .018), (1, .12, .014)], "cloth", ROBE_DARK),
-    ]
-    # Ragged strips hanging from the skirt's hem, of uneven length.
-    for i, (a, drop) in enumerate(((-0.45, 0.2), (0.1, 0.14), (0.8, 0.22), (1.6, 0.16), (2.3, 0.2), (3.0, 0.12), (3.8, 0.18), (4.5, 0.15), (5.4, 0.21))):
-        x, y = 0.235 * math.cos(a), 0.175 * math.sin(a)
-        c.append(("pelvis", (x, y, 0.58), (x * 1.06, y * 1.06, 0.58 - drop), 4, [(0, .035, .006), (1, .02, .004)], "cloth", ROBE if i % 2 else ROBE_DARK))
-    # The bone corset: a sternum and three pairs of ribs curving round the bodice.
-    c.append(("chest", (0, -0.112, 1.52), (0, -0.112, 1.33), 4, [(0, .012, .008), (1, .01, .007)], "cloth", BONE))
-    for s in (1, -1):
-        for z, w in ((1.5, 0.11), (1.44, 0.115), (1.38, 0.11)):
-            c.append(("chest" if z > 1.41 else "spine_02", (0.008 * s, -0.112, z), (w * s, -0.06, z - 0.05), 4, [(0, .009, .007), (1, .007, .005)], "cloth", BONE))
-    return c
-
-
-def _left():
-    ua, fa, ca = "upperarm_l", "forearm_l", "calf_l"
+    strips = [(-0.20, -0.10, 0.26), (-0.10, -0.15, 0.20), (0.0, -0.17, 0.30), (0.11, -0.15, 0.18), (0.21, -0.09, 0.28),
+              (0.21, 0.08, 0.22), (0.10, 0.15, 0.30), (-0.02, 0.17, 0.24), (-0.13, 0.14, 0.32), (-0.22, 0.06, 0.20)]
     return [
-        # A skull-capped pauldron: a bone dome on the shoulder.
-        (ua, (0.13, 0.0, 1.5), (0.22, 0.0, 1.58), 8, [(0, .07, .068), (.55, .075, .07), (1, 0, 0)], "cloth", BONE),
-        # Its eye sockets, looking forward.
-        (ua, (0.152, -0.058, 1.556), (0.152, -0.068, 1.556), 4, [(0, .013, .011), (1, .012, .01)], "cloth", SOCKET),
-        (ua, (0.198, -0.058, 1.556), (0.198, -0.068, 1.556), 4, [(0, .013, .011), (1, .012, .01)], "cloth", SOCKET),
-        (ua, (ua, 0), (ua, 1), 8, [(0, .05, .05), (1, .042, .042)], "cloth", ROBE),
-        # Tight sleeves, ragged at the wrist, over grave-green light.
-        (fa, (fa, 0), (fa, .84), 8, [(0, .044, .044), (.7, .05, .05), (1, .056, .056)], "cloth", ROBE_DARK),
-        (fa, (fa, .82), (fa, .96), 8, [(0, .04, .04), (1, .038, .038)], "emissive", GLOW),
-        ("hand_l", ("hand_l", 0), ("hand_l", 1), 6, [(0, .034, .021), (1, .038, .019)], "skin", SKIN),
-        ("fingers_l", ("fingers_l", 0), ("fingers_l", 1), 6, [(0, .038, .019), (1, .025, .012)], "skin", SKIN),
-        ("thumb_l", ("thumb_l", 0), ("thumb_l", 1), 5, [(0, .015, .015), (1, .01, .01)], "skin", SKIN),
-        # Wrapped shins and feet under the skirt.
-        (ca, (ca, .35), (ca, 1), 8, [(0, .052, .052), (1, .042, .042)], "cloth", WRAP),
-        ("foot_l", ("foot_l", 0), ("foot_l", 1), 6, [(0, .046, .04), (1, .04, .028)], "cloth", WRAP),
-        ("toe_l", ("toe_l", 0), ("toe_l", 1), 6, [(0, .04, .024), (1, .026, .014)], "cloth", WRAP),
+        ("pelvis", sp((0, 0, 0.92)), sp((0, 0, 1.12)), 10, [(0, .14, .11), (.5, .155, .12), (1, .145, .11)], "cloth", PLUM_DARK),
+        ("pelvis", sp((0, 0, 1.04)), sp((0, 0, 1.10)), 10, [(0, .158, .122), (1, .152, .116)], "accent", ACCENT),
+        *[box_part("pelvis", sp((x, -0.14, 0.98)), (0.04, 0.03, 0.06), "cloth", BONE, rot=(0, 45, x * 100), bevel=0.3) for x in (-0.10, -0.03, 0.06)],
+        # The skirt: a robe to the shins and tattered strips hanging below it.
+        path_part("pelvis", [sp((0, 0, 1.06)), sp((0, 0.01, 0.78)), sp((0, 0.02, 0.42))], 12, [(.16, .13), (.22, .19), (.27, .23)], "cloth", PLUM),
+        *[box_part("pelvis", sp((x, y, z)), (0.08, 0.02, 0.30), "cloth", PLUM_DARK if k % 2 else GRAVE, rot=(-math.degrees(math.atan2(y, 0.6)), 0, -math.degrees(math.atan2(x, 0.6))),
+                   taper=0.4) for k, (x, y, z) in enumerate(strips)],
+        ("spine_01", sp((0, 0, 1.10)), sp((0, 0, 1.28)), 10, [(0, .12, .09), (1, .125, .092)], "cloth", PLUM),
+        ("spine_02", sp((0, 0, 1.26)), sp((0, 0, 1.42)), 10, [(0, .126, .092), (1, .14, .10)], "cloth", PLUM),
+        ("chest", sp((0, 0, 1.40)), sp((0, 0, 1.60)), 10, [(0, .14, .10), (.5, .145, .104), (1, .085, .072)], "cloth", PLUM),
+        ("neck", sp((0, 0, 1.55)), sp((0, -0.01, 1.66)), 8, [(0, .045, .045), (1, .04, .04)], "skin", SKIN),
+        # A ribcage corset: a bone sternum and five pairs of ribs curving round her front.
+        path_part("chest", [sp((0, -0.115, 1.22)), sp((0, -0.125, 1.52))], 6, [(.018, .014), (.018, .014)], "cloth", BONE),
+        # The shawl.
+        ("extra_cloak_1", SHAWL[0], SHAWL[1], 8, [(0, .18, .022), (1, .21, .022)], "cloth", GRAVE),
+        ("extra_cloak_2", SHAWL[1], SHAWL[2], 8, [(0, .21, .022), (1, .22, .021)], "cloth", GRAVE),
+        ("extra_cloak_3", SHAWL[2], SHAWL[3], 8, [(0, .22, .021), (.7, .20, .02), (1, .10, .016)], "cloth", PLUM_DARK),
+    ] + _ribs() + _lantern()
+
+
+def _ribs():
+    out = []
+    for k, z in enumerate((1.26, 1.32, 1.38, 1.44, 1.50)):
+        w = 0.10 + 0.012 * k
+        for s in (1, -1):
+            pts = [sp((0.01 * s, -0.125, z)), sp((0.06 * s, -0.12, z + 0.005)), sp((w * s, -0.08, z - 0.01)), sp(((w + 0.025) * s, -0.02, z - 0.03))]
+            out.append(path_part("chest" if z > 1.4 else "spine_02", pts, 5, [(.011, .009)] * 3 + [(0, 0)], "cloth", BONE))
+    return out
+
+
+def _lantern():
+    # A skull lantern hung at her left hip on an iron chain, magenta light in its eyes.
+    c = Vector(sp((0.22, -0.06, 0.82)))
+    return [
+        path_part("pelvis", [sp((0.17, -0.05, 1.04)), sp((0.21, -0.06, 0.92))], 4, [(.008, .008), (.008, .008)], "metal", IRON),
+        box_part("pelvis", tuple(c), (0.10, 0.11, 0.10), "cloth", BONE, bevel=0.35),
+        box_part("pelvis", tuple(c + Vector((0, -0.01, -0.06))), (0.07, 0.08, 0.04), "cloth", BONE_DARK, bevel=0.3),
+        box_part("pelvis", tuple(c + Vector((0.022, -0.056, 0.01))), (0.025, 0.01, 0.025), "emissive", MAGENTA),
+        box_part("pelvis", tuple(c + Vector((-0.022, -0.056, 0.01))), (0.025, 0.01, 0.025), "emissive", MAGENTA),
     ]
 
 
-def _prism(bm, a, b, r0):
-    """A small 5-sided spike from `a` to a point at `b` (the crown)."""
-    import bmesh
-    a, b = Vector(a), Vector(b)
-    axis = (b - a).normalized()
-    ref = Vector((1, 0, 0)) if abs(axis.x) < 0.9 else Vector((0, 0, 1))
-    u = (ref - axis * ref.dot(axis)).normalized()
-    v = axis.cross(u)
-    ring = [bm.verts.new(a + (u * math.cos(2 * math.pi * k / 5) + v * math.sin(2 * math.pi * k / 5)) * r0) for k in range(5)]
-    tip = bm.verts.new(b)
-    faces = [bm.faces.new((ring[k], ring[(k + 1) % 5], tip)) for k in range(5)]
-    faces.append(bm.faces.new(list(reversed(ring))))
-    bmesh.ops.recalc_face_normals(bm, faces=faces)
-    return ring + [tip], faces
+def _hood():
+    """The hood: a deep cowl wrapped round the back and sides of her head, set back so her face
+    shows in its opening; a heavy rolled rim framing the face; the peak drooping down her back;
+    a cowl over her shoulders."""
+    hb = "head"
+    out = [
+        # The shell: centered behind the head, its front just behind her face.
+        path_part(hb, [sp((0, 0.07, 1.58)), sp((0, 0.075, 1.66)), sp((0, 0.075, 1.76)), sp((0, 0.065, 1.85)), sp((0, 0.045, 1.92)), sp((0, 0.03, 1.955))], 14,
+                  [(.15, .125), (.165, .135), (.17, .138), (.16, .13), (.12, .10), (0, 0)], "cloth", PLUM, ref=(1, 0, 0)),
+        # The rim round the face opening, from cheek to cheek over the brow, drooping a little.
+        path_part(hb, [sp((0.115, -0.07, 1.60)), sp((0.135, -0.095, 1.72)), sp((0.11, -0.12, 1.85)), sp((0.05, -0.14, 1.92)), sp((0.0, -0.145, 1.93)),
+                       sp((-0.05, -0.14, 1.92)), sp((-0.11, -0.12, 1.85)), sp((-0.135, -0.095, 1.72)), sp((-0.115, -0.07, 1.60))], 6,
+                  [(.03, .024)] * 9, "cloth", PLUM_DARK),
+        # The peak, drooping from the crown down her back.
+        path_part(hb, [sp((0, 0.10, 1.90)), sp((0, 0.19, 1.84)), sp((0, 0.24, 1.72)), sp((0, 0.25, 1.60))], 8, [(.07, .05), (.06, .045), (.04, .03), (0, 0)], "cloth", PLUM),
+    ]
+    # The cowl: the hood's skirt over her shoulders, ragged at the edge.
+    out.append(path_part("chest", [sp((0.0, 0.01, 1.66)), sp((0.0, 0.015, 1.56)), sp((0.0, 0.02, 1.47))], 14, [(.13, .12), (.20, .155), (.25, .17)], "cloth", PLUM))
+    for k in range(10):
+        a = math.radians(-160 + 32 * k + (8 if k % 2 else 0))
+        base = Vector(sp((0.24 * math.cos(a), 0.02 - 0.16 * math.sin(a), 1.48)))
+        out.append(box_part("chest", tuple(base + Vector((0, 0, -0.04))), (0.07, 0.02, 0.10), "cloth", PLUM_DARK if k % 2 else PLUM,
+                            rot=(0, 0, 90 - math.degrees(a)), taper=0.4))
+    return out
+
+
+def _staff():
+    """The crooked staff of black wood, skinned to the right hand: a horned skull with burning
+    eyes on top, bone charms hanging under it."""
+    h, t = Vector(BONES["hand_r"][2]), Vector(BONES["hand_r"][3])
+    axis = (t - h).normalized()
+    side = axis.cross(Vector((0, 1, 0))).normalized()
+    fwd = side.cross(axis).normalized()
+
+    def p(d, off=Vector()):
+        return tuple(h + axis * d + off)
+
+    hb = "hand_r"
+    shaft = [p(STAFF_FOOT), p(STAFF_FOOT + 0.35, side * 0.03), p(GRIP - 0.1, -side * 0.01), p(GRIP + 0.3, fwd * 0.03), p(GRIP + 0.55, -side * 0.035 + fwd * 0.01),
+             p(STAFF_TOP - 0.16, side * 0.01)]
+    c = h + axis * STAFF_TOP
+    out = [path_part(hb, shaft, 6, [(.024, .024), (.028, .028), (.03, .03), (.028, .028), (.032, .032), (.04, .04)], "cloth", WOOD),
+           path_part(hb, [p(STAFF_FOOT - 0.04), p(STAFF_FOOT + 0.02)], 6, [(0, 0), (.03, .03)], "metal", IRON),
+           path_part(hb, [p(GRIP + 0.12), p(GRIP + 0.20)], 6, [(.034, .034), (.034, .034)], "cloth", PLUM_DARK),
+           # The skull: cranium, brow, jaw, eye sockets burning magenta, horns curling out and back.
+           box_part(hb, tuple(c), (0.13, 0.14, 0.12), "cloth", BONE, rot=(0, 0, 0), bevel=0.35),
+           box_part(hb, tuple(c + fwd * -0.06 - axis * 0.05), (0.09, 0.06, 0.06), "cloth", BONE_DARK, bevel=0.3),
+           box_part(hb, tuple(c - fwd * 0.07 + axis * 0.005 + side * 0.03), (0.032, 0.012, 0.03), "emissive", MAGENTA),
+           box_part(hb, tuple(c - fwd * 0.07 + axis * 0.005 - side * 0.03), (0.032, 0.012, 0.03), "emissive", MAGENTA)]
+    for sgn in (1, -1):
+        root = c + side * 0.055 * sgn + axis * 0.04
+        out.append(path_part(hb, [tuple(root), tuple(root + side * 0.08 * sgn + axis * 0.06), tuple(root + side * 0.12 * sgn + axis * 0.02 + fwd * 0.06),
+                                  tuple(root + side * 0.10 * sgn - axis * 0.06 + fwd * 0.08)], 6, [(.026, .026), (.02, .02), (.012, .012), (0, 0)], "cloth", BONE_DARK))
+    # Bone charms on cords under the skull.
+    for k, sgn in enumerate((1, -1, 0)):
+        top = c - axis * 0.10 + side * 0.04 * sgn + fwd * 0.03
+        out.append(path_part(hb, [tuple(top), tuple(top - axis * (0.12 + 0.04 * k))], 4, [(.004, .004), (.004, .004)], "metal", IRON))
+        out.append(box_part(hb, tuple(top - axis * (0.15 + 0.04 * k)), (0.025, 0.02, 0.05), "cloth", BONE, bevel=0.3))
+    out.append(box_part(hb, tuple(c - axis * 0.33 + fwd * 0.04), (0.02, 0.012, 0.02), "emissive", MAGENTA_DEEP, rot=(0, 45, 0)))
+    return out
 
 
 def _head(bm, layers, groups, mats):
-    # The shared sculpted head, feminine and gaunt: long black hair, grave-green eyes, and a crown
-    # of bone spikes, tallest at the front.
-    hd = head.Head(base=(0, -0.008, 1.64), height=0.25, scale=0.92, jaw=0.52, chin=0.84, eye=1.1,
-                   skin=SKIN, hair=HAIR, hair_style="ponytail", eye_color=(0.4, 0.85, 0.4), lips=(0.5, 0.32, 0.4))
-    head.build(bm, layers, groups, mats, hd)
-    deform, col = layers
-    n = 9
-    for i in range(n):
-        a = -math.pi / 2 + (i - (n - 1) / 2) * (math.pi / (n - 1)) * 1.4
-        root = hd.surface(0.8, a)
-        out = (root - (hd.base + Vector((0, 0.01, 0.2)))).normalized()
-        tall = 0.13 - 0.018 * abs(i - (n - 1) / 2)
-        tip = root + out * 0.03 + Vector((0, 0, tall))
-        vs, fs = _prism(bm, root, tip, 0.016)
-        for v in vs:
-            v[deform][groups["head"]] = 1.0
-            v[col] = (*(BONE if i % 2 == 0 else BONE_DARK), 1.0)
-        for f in fs:
-            f.material_index = mats["cloth"]
-            f.smooth = False
-    # The band the spikes stand on.
-    ring = [bm.verts.new(hd.surface(0.78, -math.pi / 2 + (k / 11 - 0.5) * math.pi * 1.5) + Vector((0, 0, 0))) for k in range(12)]
-    top = [bm.verts.new(v.co + Vector((0, 0, 0.022))) for v in ring]
-    faces = [bm.faces.new((ring[k], ring[k + 1], top[k + 1], top[k])) for k in range(11)]
-    import bmesh
-    bmesh.ops.recalc_face_normals(bm, faces=faces)
-    for v in ring + top:
-        v.co = hd.base + (v.co - hd.base) * Vector((1.06, 1.06, 1.0)) + Vector((0, 0, 0))
-        v[deform][groups["head"]] = 1.0
-        v[col] = (*BONE_DARK, 1.0)
-    for f in faces:
-        f.material_index = mats["cloth"]
-        f.smooth = False
+    head.build(bm, layers, groups, mats, head.Head(
+        base=sp((0, -0.01, 1.62)), height=0.25, scale=1.04, jaw=0.55, chin=1.1, eye=1.0,
+        skin=SKIN, hair=HAIR, hair_style="short", eye_color=(0.9, 0.2, 0.6), lips=(0.36, 0.22, 0.26)))
+
+
+def _left():
+    ua, fa, th, ca = "upperarm_l", "forearm_l", "thigh_l", "calf_l"
+    return [
+        (ua, (ua, 0), (ua, 1), 10, [(0, .05, .05), (1, .044, .044)], "cloth", PLUM),
+        # Ragged sleeves to the forearm, bone bangles, bare thin wrists.
+        (fa, (fa, 0), (fa, .55), 10, [(0, .046, .046), (.5, .07, .066), (1, .09, .08)], "cloth", PLUM_DARK),
+        (fa, (fa, .5), (fa, 1), 8, [(0, .036, .036), (1, .03, .03)], "skin", SKIN),
+        *[(fa, (fa, t), (fa, t + 0.04), 8, [(0, .042, .042), (1, .042, .042)], "cloth", BONE) for t in (0.66, 0.78)],
+        *champion.hand_parts("l", SKIN, "skin", scale=1.2),
+        (th, sp((0.10, 0, 1.02)), (th, 1), 10, [(0, .08, .078), (1, .055, .055)], "cloth", PLUM_DARK),
+        (ca, (ca, 0), (ca, 1), 8, [(0, .05, .05), (1, .042, .042)], "skin", SKIN),
+        # Rag-wrapped feet.
+        box_part("foot_l", ("foot_l", 0.45), (0.08, 0.16, 0.07), "cloth", GRAVE, bevel=0.3),
+        (ca, (ca, .82), (ca, 1.0), 8, [(0, .052, .052), (1, .056, .056)], "cloth", GRAVE),
+    ]
 
 
 def parts():
-    left = _left()
-    out = _center() + left + [mesh._mirror_part(p) for p in left]
-    out = [(b, a, e, s + 2 if s >= 8 else s, mesh._smooth(prof) if s >= 8 else prof, slot, col) for b, a, e, s, prof, slot, col in out]
-    return out + [_head]
+    return _center() + champion.mirrored(_left()) + _hood() + _staff() + [_head]
 
 
 # --- Poses ----------------------------------------------------------------------------------
 
 def shawl(back=0.0, sway=0.0):
-    return {"extra_cloak_1": (back * 0.6, sway * 0.5, 0), "extra_cloak_2": (back * 0.4, sway * 0.4, 0)}
+    return {"extra_cloak_1": (back * 0.45, sway * 0.5, 0), "extra_cloak_2": (back * 0.3, sway * 0.3, 0),
+            "extra_cloak_3": (back * 0.25, sway * 0.25, 0)}
 
 
-STAND = merge(sym("thigh", -3, 0, 0), sym("calf", 6, 0, 0), sym("foot", -3, 0, 0), {"spine_01": (4, 0, 0), "head": (4, 0, 0)})
-CROUCH = merge(sym("thigh", -16, 0, 0), sym("calf", 28, 0, 0), sym("foot", -12, 0, 0), {"spine_01": (10, 0, 0), "spine_02": (3, 0, 0)})
-# Hands hang a little forward, fingers curled like claws.
-CLAWS = {"fingers_l": (30, 0, 0), "fingers_r": (30, 0, 0)}
-HANDS = merge(arms((0.3, 0.18, -1), (0.15, 0.45, -1)), CLAWS)
-READY = merge(CROUCH, arms((0.45, 0.45, -0.6), (0.2, 1, 0.0)), CLAWS, shawl(4))
-DOWN = {"pelvis": (0, 0, -0.05)}
+def staff(top, foot=None, left=None, pole=(1.0, -0.3, -0.8)):
+    """The skull at `top`, the foot toward `foot` (default: straight below), the right hand on
+    the staff; `left` puts the left hand on it too, that far toward the skull."""
+    tp = Vector(top)
+    ft = Vector(foot) if foot else tp - Vector((0, 0, 1))
+    axis = (tp - ft).normalized()
+    out = {"ik_hand_r": ik(tuple(tp - axis * STAFF_TOP), aim=tuple(axis), pole=pole)}
+    if left is not None:
+        out["grip_l"] = grip("hand_r", at=GRIP + left, pole=(1.0, -0.2, -0.6))
+    return out
 
 
-def arm_r(out, fwd, up, f_out, f_fwd, f_up):
-    return {"upperarm_r": clips.aim(out, fwd, up, "r"), "forearm_r": clips.aim(f_out, f_fwd, f_up, "r")}
+OPEN_L = {"fingers_l": (-12, 0, 0), "thumb_l": (-10, 0, 0)}
+BENT = {"spine_01": (14, 0, 0), "spine_02": (10, 0, 0), "chest": (6, 0, 0), "head": (-22, 0, 0)}
+STAND = feet((0.13, 0.08), (0.13, -0.08))
+# Leaning on the planted staff, both hands stacked on it under the skull.
+LEAN = staff(at(0.18, 0.40, 1.62, "r"), at(0.20, 0.46, 0.0, "r"), left=0.11)
+IDLE = merge(STAND, BENT, LEAN, shawl(3))
+READY = merge(feet((0.18, 0.16), (0.18, -0.14)), BENT, {"spine_01": (18, 0, 0)}, staff(at(0.18, 0.72, 1.55, "r"), at(0.30, 0.0, 0.42, "r")),
+              arm("l", 0.5, 0.55, -0.35, 0.3, 0.85, 0.05), OPEN_L, shawl(5))
+DOWN = {"pelvis": (0, 0, -0.08)}
 
 
-def arm_l(out, fwd, up, f_out, f_fwd, f_up):
-    return {"upperarm_l": clips.aim(out, fwd, up), "forearm_l": clips.aim(f_out, f_fwd, f_up)}
+def idle(armature):
+    # Leaning on the staff: a slow wheezing breath, the head lifting to peer and settling, the
+    # top hand's fingers drumming once on the bone.
+    peer = merge(IDLE, sym("clavicle", 0, -4, 0), {"head": (-30, 0, 10), "spine_02": (8, 0, 0)}, shawl(4, 2))
+    keys = [(0, IDLE, {"pelvis": (0, 0, -0.05)}), (30, peer, {"pelvis": (0, 0, -0.04)}), (44, peer, {"pelvis": (0, 0, -0.04)})]
+    for i, f in enumerate((50, 53, 56, 59)):
+        keys.append((f, merge(peer, {"fingers_l": (15 if i % 2 else 55, 0, 0)}), {"pelvis": (0, 0, -0.04)}, "snap"))
+    keys += [(66, IDLE, {"pelvis": (0, 0, -0.05)}), (96, IDLE, {"pelvis": (0, 0, -0.05)})]
+    return _clip(armature, "idle", 96, keys, loop=True)
 
 
-# --- Clips ----------------------------------------------------------------------------------
-
-def idle(arm):
-    a = merge(STAND, HANDS, shawl(0), {"head": (2, 0, 0)})
-    b = merge(STAND, HANDS, shawl(1.5, 2), sym("clavicle", 0, -3, 0), {"head": (0, 0, 6), "chest": (-2, 0, 0)})
-    return _clip(arm, "idle", 72, [(0, a, None), (36, b, {"pelvis": (0, 0, 0.005)})], loop=True)
-
-
-def idle_fidget_1(arm):
-    # Rolls a knucklebone across her knuckles and watches it.
-    base = merge(STAND, HANDS)
-    look = merge(STAND, HANDS, arm_r(0.3, 0.4, -0.7, 0.0, 0.9, 0.3), {"head": (14, 0, -10)})
-    keys = [(0, base, None), (10, look, None)]
-    for i in range(4):
-        keys.append((14 + 6 * i, merge(look, {"hand_r": (0, 0, 20 if i % 2 else -20)}), None))
-    keys += [(40, look, None), (52, base, None)]
-    return _clip(arm, "idle_fidget_1", 52, keys)
+def idle_fidget_1(armature):
+    # Lets go with her left hand and taps the skull lantern at her hip, then the staff again.
+    tap = merge(STAND, BENT, staff(at(0.18, 0.40, 1.62, "r"), at(0.20, 0.46, 0.0, "r")), hand("l", at(0.22, 0.02, 0.98, "l"), aim=at(0.1, 0.3, -1, "l")),
+                {"head": (6, 0, 14)}, shawl(3))
+    keys = [(0, IDLE, None), (10, tap, None)]
+    for i, f in enumerate(range(14, 34, 3)):
+        keys.append((f, merge(tap, {"fingers_l": (20 if i % 2 else 55, 0, 0)}), None, "snap"))
+    keys.append((44, IDLE, None))
+    return _clip(armature, "idle_fidget_1", 44, keys)
 
 
-def idle_fidget_2(arm):
-    # Cracks her neck to one side, then the other.
-    base = merge(STAND, HANDS)
-    keys = [(0, base, None), (10, merge(base, {"head": (2, -22, 0)}), None), (14, merge(base, {"head": (2, -26, 0)}), None),
-            (24, merge(base, {"head": (2, 22, 0)}), None), (28, merge(base, {"head": (2, 26, 0)}), None), (40, base, None)]
-    return _clip(arm, "idle_fidget_2", 40, keys)
+def idle_fidget_2(armature):
+    # Cranes her neck out of the hood, sniffing the air, a slow head turn.
+    keys = [(0, IDLE, None), (14, merge(IDLE, {"head": (-36, 0, 30), "neck": (-10, 0, 10)}), None), (30, merge(IDLE, {"head": (-36, 0, -30), "neck": (-10, 0, -10)}), None),
+            (46, IDLE, None)]
+    return _clip(armature, "idle_fidget_2", 46, keys)
 
 
-def idle_ready(arm):
-    keys = [(0, READY, DOWN), (20, merge(READY, {"spine_01": (13, 0, 0)}, shawl(6, 1)), {"pelvis": (0, 0, -0.07)})]
-    return _clip(arm, "idle_ready", 40, keys, loop=True)
+def idle_ready(armature):
+    keys = [(0, READY, DOWN), (20, merge(READY, {"spine_01": (21, 0, 0)}, shawl(7, 2)), {"pelvis": (0, 0, -0.10)})]
+    return _clip(armature, "idle_ready", 40, keys, loop=True)
 
 
-def run(arm):
-    keys = [(f, merge(p, CLAWS, shawl(22 + (4 if f % 10 < 5 else 0))), l) for f, p, l in cycle(run_half(), 20)]
-    return _clip(arm, "run", 20, keys, loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=330.0)
+def _run_upper(trail, swing):
+    # The staff carried like a walking stick, swung forward with the left foot; the left arm
+    # swings against it, the hand open.
+    def upper(p):
+        c = math.cos(2 * math.pi * p)
+        return merge(staff(at(0.30, 0.30 + 0.25 * swing * c, 1.45, "r"), at(0.30, 0.55 + 0.30 * swing * c, 0.20, "r")),
+                     arm("l", 0.35, 0.3 - 0.35 * swing * c, -0.8, 0.2, 0.6 - 0.3 * swing * c, -0.4), OPEN_L,
+                     shawl(trail + 5 * math.sin(4 * math.pi * p), 4 * math.sin(2 * math.pi * p)), {"head": (-26, 0, 0)})
+    return upper
 
 
-def run_fast(arm):
-    def scale(pose):
-        out = dict(pose)
-        for k, v in pose.items():
-            if k.split("_")[0] in ("thigh", "calf", "foot") and isinstance(v, tuple):
-                out[k] = (v[0] * 1.2, v[1], v[2])
-        out["spine_01"] = (16, 0, pose.get("spine_01", (0, 0, 0))[2])
-        return out
-
-    half = [(round(f * 0.8), scale(p), l) for f, p, l in run_half()]
-    keys = [(f, merge(p, CLAWS, shawl(32)), l) for f, p, l in cycle(half, 16)]
-    return _clip(arm, "run_fast", 16, keys, loop=True, markers={"foot_l": 0, "foot_r": 8}, stride_speed=450.0)
+def walk(armature):
+    # A walk (heavy slows, and the moment a run comes to a stop): the run's body type, slower,
+    # the weapon carried as in it, never hanging into the ground (14 §3.6).
+    keys = gait(32, 0.90, contact=0.6, lift=0.10, bob=0.02, lean=16, twist=6, width=0.13, crouch=0.06, upper=_run_upper(12, 0.4))
+    return _clip(armature, "walk", 32, keys, loop=True, markers={"foot_l": 0, "foot_r": 16}, stride_speed=140.0)
 
 
-def _flick(arm, name, frames, fire, wind, release, follow):
-    keys = [(0, READY, DOWN), (fire - 4, merge(CROUCH, wind, CLAWS, shawl(3)), DOWN), (fire, merge(CROUCH, release, shawl(6, -2)), {"pelvis": (0, -0.03, -0.05)}),
-            (fire + 5, merge(CROUCH, follow, CLAWS, shawl(5)), DOWN), (frames, READY, DOWN)]
-    return _clip(arm, name, frames, keys, markers={"fire": fire})
+def run(armature):
+    # A hunched, stalking stride (14 §3.6).
+    keys = gait(20, 0.96, contact=0.45, lift=0.16, bob=0.04, lean=22, twist=8, width=0.13, crouch=0.07, upper=_run_upper(30, 1.0))
+    return _clip(armature, "run", 20, keys, loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=330.0)
 
 
-def attack_1(arm):
-    # A clawed backhand flinging a green bolt (`fire` 10, sim 10.2).
-    wind = merge(arm_r(0.2, 0.4, 0.3, -0.6, 0.4, 0.4), arm_l(0.4, 0.4, -0.6, 0.1, 0.9, 0.0), {"spine_02": (0, 0, 16)})
-    release = merge(arm_r(0.5, 0.8, 0.1, 0.4, 0.9, 0.0), arm_l(0.4, -0.1, -0.8, 0.3, 0.2, -1), {"spine_02": (4, 0, -14)})
-    follow = merge(arm_r(0.7, 0.5, -0.1, 0.6, 0.6, -0.2), HANDS, {"spine_02": (2, 0, -8)})
-    return _flick(arm, "attack_1", 26, 10, wind, release, follow)
+def run_fast(armature):
+    keys = gait(16, 0.96, contact=0.40, lift=0.20, bob=0.045, lean=28, twist=10, width=0.13, crouch=0.08, upper=_run_upper(40, 1.2))
+    return _clip(armature, "run_fast", 16, keys, loop=True, markers={"foot_l": 0, "foot_r": 8}, stride_speed=450.0)
 
 
-def attack_2(arm):
-    # An open palm thrust.
-    wind = merge(arm_r(0.4, -0.4, 0.1, -0.1, 0.4, 0.9), arm_l(0.4, 0.4, -0.6, 0.1, 0.9, 0.0), {"spine_02": (0, 0, -16)})
-    release = merge(arm_r(0.05, 1, 0.1, 0.0, 1, 0.15), arm_l(0.4, -0.2, -0.8, 0.3, 0.1, -1), {"spine_02": (4, 0, 12)})
-    follow = merge(arm_r(0.1, 0.9, -0.2, 0.0, 0.9, -0.3), HANDS, {"spine_02": (2, 0, 6)})
-    return _flick(arm, "attack_2", 26, 10, wind, release, follow)
+def attack_1(armature):
+    # The skull jabbed at the target: drawn back to her shoulder, cocked, a one-frame jab on
+    # `fire` (sim: 10) that spits the bolt from its jaws, held out.
+    st = feet((0.17, 0.22), (0.17, -0.18))
+    back = merge(st, BENT, staff(at(0.32, -0.10, 1.75, "r"), at(0.30, 0.45, 0.55, "r")), arm("l", 0.5, 0.5, -0.4, 0.3, 0.8, 0.0), OPEN_L,
+                 {"spine_01": (10, 0, -18), "head": (-20, 0, 14)}, shawl(4))
+    cock = merge(back, staff(at(0.34, -0.22, 1.72, "r"), at(0.30, 0.40, 0.60, "r")), {"spine_01": (10, 0, -24)})
+    jab = merge(feet((0.17, 0.32), (0.17, -0.18)), BENT, staff(at(0.10, 1.15, 1.45, "r"), at(0.28, 0.05, 1.05, "r"), pole=(1.0, -0.4, -0.6)),
+                arm("l", 0.6, -0.3, -0.5, 0.4, -0.1, -0.4), {"spine_01": (22, 0, 14), "head": (-22, 0, -10)}, shawl(9))
+    keys = [(0, READY, DOWN), (6, back, DOWN), (9, cock, DOWN, "snap"), (10, jab, {"pelvis": (0, -0.04, -0.10)}),
+            (16, merge(jab, {"spine_01": (24, 0, 16)}), {"pelvis": (0, -0.04, -0.11)}, "settle"), (26, READY, DOWN)]
+    return _clip(armature, "attack_1", 26, keys, markers={"fire": 10})
 
 
-def q(arm):
-    # Siphon: claws flung wide, then dragged in to her chest, drawing the life around her
-    # (`fire` 6, sim 6).
-    wide = merge(CROUCH, arms((1, 0.4, 0.2), (0.9, 0.6, 0.2)), CLAWS, {"spine_02": (-8, 0, 0), "head": (-10, 0, 0)}, shawl(8))
-    pull = merge(CROUCH, arms((0.4, 0.5, -0.4), (-0.6, 0.5, 0.4)), CLAWS, {"spine_01": (14, 0, 0), "head": (8, 0, 0)}, shawl(2))
-    keys = [(0, READY, DOWN), (3, wide, {"pelvis": (0, 0, -0.02)}), (6, pull, {"pelvis": (0, 0, -0.09)}), (12, pull, {"pelvis": (0, 0, -0.08)}),
-            (20, READY, DOWN)]
-    return _clip(arm, "q", 20, keys, markers={"fire": 6})
+def attack_2(armature):
+    # The staff swept round flat from her right and stopped dead pointing at the target on
+    # `fire`, the left palm thrown after it.
+    st = feet((0.17, 0.22), (0.17, -0.18))
+    wind = merge(st, BENT, staff(at(0.75, 0.20, 1.35, "r"), at(-0.10, 0.25, 1.05, "r")), arm("l", 0.6, 0.2, -0.3, 0.4, 0.4, -0.2), OPEN_L,
+                 {"spine_01": (12, 0, -28), "head": (-20, 0, 22)}, shawl(4, -4))
+    point = merge(feet((0.17, 0.30), (0.17, -0.18)), BENT, staff(at(-0.05, 1.10, 1.40, "r"), at(0.35, 0.10, 1.10, "r"), pole=(1.0, -0.4, -0.6)),
+                  arm("l", 0.15, 0.9, 0.0, 0.0, 1, 0.05), OPEN_L, {"spine_01": (20, 0, 18), "head": (-22, 0, -12)}, shawl(9, 6))
+    keys = [(0, READY, DOWN), (6, wind, DOWN), (8, merge(wind, {"spine_01": (12, 0, -32)}), DOWN, "whip"), (10, point, {"pelvis": (0, -0.04, -0.10)}),
+            (16, merge(point, {"spine_01": (22, 0, 20)}), {"pelvis": (0, -0.04, -0.11)}, "settle"), (26, READY, DOWN)]
+    return _clip(armature, "attack_2", 26, keys, markers={"fire": 10})
 
 
-def w(arm):
-    # Grasping Bones: she drops to a knee and drives a clawed hand into the ground; bones burst
-    # up along the line (`fire` 9).
-    raise_ = merge(CROUCH, arm_r(0.3, 0.2, 0.8, 0.1, 0.4, 0.9), arm_l(0.4, 0.4, -0.5, 0.1, 0.9, 0.0), CLAWS, {"spine_02": (-6, 0, 0)})
-    slam = merge(sym("thigh", -40, 0, 0), sym("calf", 70, 0, 0), sym("foot", -24, 0, 0), arm_r(0.1, 0.8, -0.6, 0.0, 0.7, -0.8),
-                 arm_l(0.5, 0.2, -0.6, 0.3, 0.4, -0.7), CLAWS, {"spine_01": (26, 0, 0), "spine_02": (8, 0, 0)}, shawl(-12))
-    keys = [(0, READY, DOWN), (5, raise_, {"pelvis": (0, 0, 0.0)}), (9, slam, {"pelvis": (0, -0.04, -0.28)}), (16, slam, {"pelvis": (0, -0.04, -0.28)}),
-            (26, READY, DOWN)]
-    return _clip(arm, "w", 26, keys, markers={"fire": 9})
+def q(armature):
+    # Siphon: the staff flung up and her left arm thrown wide on `fire` 6, the hand open; then
+    # she drags the life in, the hand clenched hard to her chest and the staff hugged close, and
+    # holds.
+    wide = merge(feet((0.20, 0.14), (0.20, -0.12)), {"spine_01": (2, 0, 0), "spine_02": (-8, 0, 0), "head": (-30, 0, 0)},
+                 staff(at(0.55, 0.25, 2.25, "r"), at(0.40, 0.25, 1.0, "r")), arm("l", 1, 0.3, 0.2, 1, 0.3, 0.3), {"fingers_l": (-20, 0, 0)}, shawl(10))
+    pull = merge(feet((0.20, 0.10), (0.20, -0.16)), BENT, {"spine_01": (24, 0, 0)}, staff(at(0.12, 0.30, 1.70, "r"), at(0.18, 0.30, 0.30, "r")),
+                 hand("l", at(0.08, 0.20, 1.40, "l"), aim=at(-0.6, 0.4, 0.4, "l")), {"fingers_l": (85, 0, 0), "thumb_l": (50, 0, 0)}, shawl(2))
+    keys = [(0, READY, DOWN), (4, merge(READY, {"fingers_l": (60, 0, 0)}), {"pelvis": (0, 0, -0.12)}, "snap"), (6, wide, {"pelvis": (0, 0, -0.02)}),
+            (9, merge(wide, {"head": (-34, 0, 0)}), {"pelvis": (0, 0, -0.02)}, "whip"), (12, pull, {"pelvis": (0, 0, -0.12)}),
+            (17, pull, {"pelvis": (0, 0, -0.13)}, "settle"), (22, READY, DOWN)]
+    return _clip(armature, "q", 22, keys, markers={"fire": 6})
 
 
-def e(arm):
-    # Grave Pact: instant, a pulse from `fire` 4 on the upper body: a hand clutched to her chest,
-    # her head thrown back as the green light floods in.
-    pact = merge(arm_l(0.3, 0.5, -0.4, -0.7, 0.5, 0.3), {"spine_02": (-6, 0, 0), "head": (-22, 0, 0)}, CLAWS)
-    keys = [(0, READY, DOWN), (4, merge(READY, pact), DOWN), (14, merge(READY, pact), DOWN), (22, READY, DOWN)]
-    return _clip(arm, "e", 22, keys, layer="upper", markers={"fire": 4})
+def w(armature):
+    # Grasping Bones: a crouch, the staff raised in both hands, then driven foot-first into the
+    # ground ahead on `fire` 9 and held there while the bones erupt down the line.
+    crouch = merge(feet((0.20, 0.22), (0.20, -0.16)), BENT, {"spine_01": (20, 0, 0)}, staff(at(0.15, 0.10, 2.35, "r"), at(0.15, 0.45, 1.10, "r"), left=-0.20), shawl(4))
+    plunge = merge(feet((0.20, 0.28), (0.20, -0.16)), {"spine_01": (36, 0, 0), "spine_02": (12, 0, 0), "head": (-30, 0, 0)},
+                   staff(at(0.12, 0.45, 1.30, "r"), at(0.12, 0.85, 0.0, "r"), left=-0.18, pole=(1.0, -0.2, -0.6)), shawl(10))
+    keys = [(0, READY, DOWN), (6, crouch, {"pelvis": (0, 0, -0.14)}), (8, merge(crouch, {"spine_02": (-6, 0, 0)}), {"pelvis": (0, 0, -0.12)}, "snap"),
+            (9, plunge, {"pelvis": (0, -0.04, -0.32)}), (18, merge(plunge, {"spine_01": (38, 0, 0)}), {"pelvis": (0, -0.04, -0.33)}, "settle"), (28, READY, DOWN)]
+    return _clip(armature, "w", 28, keys, markers={"fire": 9})
 
 
-def r(arm):
-    # Ossuary: both arms raised, then thrust down toward the far ground where the bone-pit opens
-    # (`fire` 8).
-    raise_ = merge(STAND, arms((0.5, 0.3, 0.8), (0.3, 0.4, 0.9)), CLAWS, {"spine_02": (-10, 0, 0), "head": (-16, 0, 0)}, shawl(6))
-    thrust = merge(CROUCH, arms((0.3, 0.9, -0.3), (0.2, 1, -0.3)), {"spine_01": (14, 0, 0), "spine_02": (8, 0, 0)}, shawl(-4))
-    keys = [(0, READY, DOWN), (5, raise_, {"pelvis": (0, 0, 0.03)}), (8, thrust, {"pelvis": (0, -0.05, -0.08)}), (16, thrust, {"pelvis": (0, -0.05, -0.08)}),
-            (28, READY, DOWN)]
-    return _clip(arm, "r", 28, keys, markers={"fire": 8})
+def e(armature):
+    # Grave Pact (upper body, a pulse): the staff thrust high, the skull blazing, her left hand
+    # clawing at her ribs and her head thrown back on `fire` 4; held, a ragged breath.
+    pact = merge({"spine_01": (4, 0, 0), "spine_02": (-12, 0, 0), "head": (-44, 0, 0)}, staff(at(0.30, 0.25, 2.55, "r")),
+                 hand("l", at(0.06, 0.14, 1.40, "l"), aim=at(-0.6, 0.5, 0.2, "l")), {"fingers_l": (70, 0, 0)}, shawl(8))
+    keys = [(0, IDLE, None), (3, merge(pact, {"head": (-20, 0, 0)}, staff(at(0.30, 0.25, 2.20, "r"))), None, "snap"), (4, pact, None),
+            (13, merge(pact, {"head": (-50, 0, 0)}), None, "settle"), (24, IDLE, None)]
+    return _clip(armature, "e", 24, keys, layer="upper", markers={"fire": 4})
 
 
-KNEEL = merge({"thigh_r": (0, 0, 0), "calf_r": (90, 0, 0), "foot_r": (0, 0, 0), "thigh_l": (-80, 0, 0), "calf_l": (80, 0, 0),
-               "foot_l": (0, 0, 0), "spine_01": (10, 0, 0), "head": (20, 0, 0)},
-              arms((0.3, 0.4, -0.8), (0.2, 0.6, -0.7)), CLAWS, shawl(-8))
+def r(armature):
+    # Ossuary: the staff lifted high in both hands, cocked, then slammed foot-first into the
+    # ground on `fire` 8; she hangs on it, low, while the boneyard rises; a cackle.
+    st = feet((0.20, 0.18), (0.20, -0.16))
+    high = merge(st, {"spine_01": (0, 0, 0), "spine_02": (-14, 0, 0), "head": (-34, 0, 0)}, staff(at(0.15, 0.20, 2.75, "r"), left=0.30), shawl(4))
+    slam = merge(feet((0.22, 0.24), (0.22, -0.18)), {"spine_01": (30, 0, 0), "spine_02": (12, 0, 0), "head": (-24, 0, 0)},
+                 staff(at(0.12, 0.42, 1.45, "r"), at(0.12, 0.55, 0.0, "r"), left=0.20, pole=(1.0, -0.2, -0.6)), shawl(10))
+    keys = [(0, READY, DOWN), (5, high, {"pelvis": (0, 0, 0.03)}), (7, merge(high, {"spine_02": (-18, 0, 0)}), {"pelvis": (0, 0, 0.04)}, "snap"),
+            (8, slam, {"pelvis": (0, -0.03, -0.30)}), (16, merge(slam, {"head": (-36, 0, 0)}), {"pelvis": (0, -0.03, -0.30)}),
+            (20, merge(slam, {"head": (-28, 0, 0)}), {"pelvis": (0, -0.03, -0.29)}, "settle"), (30, READY, DOWN)]
+    return _clip(armature, "r", 30, keys, markers={"fire": 8})
 
 
-def recall(arm):
-    # Kneels and lays both palms flat on the ground, drawing herself home through it.
-    breathe = merge(KNEEL, sym("clavicle", 0, -4, 0), {"head": (26, 0, 0)})
-    keys = [(0, merge(STAND, HANDS), None), (15, KNEEL, {"pelvis": (0, 0, -0.45)}), (45, breathe, {"pelvis": (0, 0, -0.44)}),
-            (75, KNEEL, {"pelvis": (0, 0, -0.45)}), (90, merge(STAND, HANDS, shawl(6)), {"pelvis": (0, 0, -0.1)})]
-    return _clip(arm, "recall", 90, keys, markers={"loop_in": 15, "loop_out": 75})
+KNEEL = merge({"ik_foot_l": ik(at(0.14, 0.26, champion.ankle(), "l")), "thigh_r": (8, 0, 0), "calf_r": (110, 0, 0), "foot_r": (40, 0, 0)},
+              BENT, {"spine_01": (24, 0, 0)}, staff(at(0.20, 0.45, 1.20, "r"), at(0.15, 0.65, 0.0, "r")), hand("l", at(0.25, 0.45, 0.15, "l"), aim=at(0, 0.5, -1, "l")),
+              shawl(-4))
 
 
-def death(arm):
-    keys = [
-        (0, merge(STAND, HANDS), None),
-        (6, merge(arms((0.6, -0.2, 0.3), (0.5, 0.1, 0.5)), {"spine_01": (-15, 0, 0), "head": (-24, 0, 0)}, shawl(-10)), {"pelvis": (0, 0.04, 0)}),
-        (14, merge(sym("thigh", 0, 0, 0), sym("calf", 90, 0, 0), arms((0.2, 0.4, -1), (0.15, 0.5, -1)), {"spine_01": (15, 0, 0), "head": (25, 0, 0)}, shawl(5)),
-         {"pelvis": (0, 0, -0.45)}),
-        (24, merge(sym("thigh", -20, 0, 0), sym("calf", 70, 0, 0), arms((0.5, 0.2, -0.6), (0.4, 0.3, -0.7)), {"pelvis": (0, -60, 0), "spine_01": (5, -15, 0)},
-                   shawl(10, -10)), {"pelvis": (-0.25, 0, -0.65)}),
-        (34, merge(sym("thigh", -30, 0, 0), sym("calf", 50, 0, 0), arms((0.7, 0.1, -0.3), (0.6, 0.2, -0.3)), {"pelvis": (0, -85, 0), "head": (0, -10, 0)},
-                   shawl(20, -15)), {"pelvis": (-0.45, 0, -0.82)}),
-    ]
-    return _clip(arm, "death", 34, keys)
+def recall(armature):
+    # Crouches and scratches a circle into the ground with the staff's foot.
+    def at_foot(x, y):
+        return merge(KNEEL, staff(at(0.15, 0.30, 1.20, "r"), at(x, y, 0.0, "r")))
+    keys = [(0, IDLE, None), (15, KNEEL, {"pelvis": (0, 0.04, -0.46)}), (30, at_foot(0.45, 0.60), {"pelvis": (0, 0.04, -0.45)}),
+            (45, at_foot(0.05, 0.75), {"pelvis": (0, 0.04, -0.45)}), (60, at_foot(-0.20, 0.55), {"pelvis": (0, 0.04, -0.45)}),
+            (75, KNEEL, {"pelvis": (0, 0.04, -0.46)}), (90, IDLE, None)]
+    return _clip(armature, "recall", 90, keys, markers={"loop_in": 15, "loop_out": 75})
 
 
-def respawn(arm):
-    # Claws her way up from a crouch.
-    low = merge(sym("thigh", -50, 0, 0), sym("calf", 90, 0, 0), sym("foot", -30, 0, 0), arms((0.3, 0.6, -0.7), (0.2, 0.7, -0.7)), CLAWS,
-                {"spine_01": (30, 0, 0)}, shawl(-5))
-    keys = [(0, low, {"pelvis": (0, 0, -0.32)}), (12, merge(STAND, arms((0.6, 0.4, 0.2), (0.6, 0.5, 0.3)), CLAWS, {"head": (-14, 0, 0)}, shawl(8)), {"pelvis": (0, 0, -0.06)}),
-            (24, merge(STAND, HANDS), None)]
-    return _clip(arm, "respawn", 24, keys)
+def death(armature):
+    knees = merge({"thigh_l": (-6, 0, 0), "thigh_r": (0, 0, 0), "calf_l": (110, 0, 0), "calf_r": (110, 0, 0)}, BENT, staff(at(0.20, 0.40, 1.10, "r"), at(0.20, 0.50, 0.0, "r")),
+                  arm("l", 0.35, 0.45, -0.75, 0.15, 0.85, -0.3), {"spine_01": (30, 0, 0)}, shawl(-6))
+    down = merge({"thigh_l": (-30, 0, 0), "thigh_r": (-14, 0, 0), "calf_l": (70, 0, 0), "calf_r": (40, 0, 0)}, arm("l", 0.8, 0.5, 0.0, 0.7, 0.6, 0.0),
+                 arm("r", 0.6, 0.7, 0.1, 0.5, 0.8, 0.0), {"pelvis": (-70, -18, 0), "head": (20, 0, 16)}, shawl(-20))
+    keys = [(0, IDLE, None), (8, merge(IDLE, {"spine_01": (-6, 0, 0), "head": (-40, 0, 0)}), {"pelvis": (0, 0.05, 0)}, "settle"),
+            (16, knees, {"pelvis": (0, 0, -0.5)}, "snap"), (26, down, {"pelvis": (0, 0.44, -0.84)}, "snap"), (34, down, {"pelvis": (0, 0.45, -0.85)})]
+    return _clip(armature, "death", 34, keys)
 
 
-def select(arm):
-    # Rises from a hunch, one claw lifted to her face, a slow crooked smile.
-    hunch = merge(CROUCH, HANDS, {"spine_01": (20, 0, 0), "head": (20, 0, 0)})
-    claw = merge(STAND, HANDS, arm_r(0.2, 0.5, 0.2, -0.3, 0.6, 0.7), {"head": (-8, 0, 10)})
-    keys = [(0, merge(STAND, HANDS), None), (8, hunch, {"pelvis": (0, 0, -0.06)}), (22, claw, None), (36, merge(claw, {"head": (-10, 0, 16)}), None),
-            (45, merge(STAND, HANDS), None)]
-    return _clip(arm, "select", 45, keys)
+def respawn(armature):
+    keys = [(0, KNEEL, {"pelvis": (0, 0.04, -0.46)}, "settle"), (14, merge(IDLE, {"head": (-30, 0, 0)}), {"pelvis": (0, 0, -0.06)}), (26, IDLE, None)]
+    return _clip(armature, "respawn", 26, keys)
 
 
-def emote_taunt(arm):
-    base = merge(STAND, HANDS)
-    out = merge(base, arm_r(0.2, 1, 0.0, 0.1, 1, 0.1), {"head": (-5, 0, 0)})
-    curl = merge(base, arm_r(0.2, 1, 0.0, 0.1, 0.5, 0.8), {"head": (-5, 0, 0)})
-    keys = [(0, base, None), (8, out, None), (14, curl, None), (20, out, None), (26, curl, None), (40, base, None)]
-    return _clip(arm, "emote_taunt", 40, keys)
+def select(armature):
+    # Raises the staff, the skull blazing, her other hand spread beside her face, and cackles,
+    # head thrown back.
+    frame = merge(STAND, BENT, staff(at(0.30, 0.30, 2.40, "r")), hand("l", at(0.20, 0.18, 1.72, "l"), aim=at(0.3, 0.3, 0.9, "l")), {"fingers_l": (-20, 0, 0)}, shawl(4))
+    keys = [(0, IDLE, None), (12, frame, None), (20, merge(frame, {"head": (-44, 0, 0)}), None), (24, merge(frame, {"head": (-36, 0, 0)}), None),
+            (28, merge(frame, {"head": (-44, 0, 0)}), None), (40, IDLE, None)]
+    return _clip(armature, "select", 40, keys)
 
 
-def emote_joke(arm):
-    # Takes a rib from her corset, snaps it like a wishbone, and puts the halves back.
-    base = merge(STAND, HANDS)
-    hold = merge(STAND, arms((0.2, 0.5, -0.3), (-0.4, 0.6, 0.4)), {"head": (14, 0, 0)})
-    snap = merge(STAND, arms((0.35, 0.5, -0.3), (0.3, 0.6, 0.4)), {"head": (10, 0, 0)})
-    keys = [(0, base, None), (12, hold, None), (20, hold, None), (24, snap, None), (32, snap, None), (40, hold, None), (50, base, None)]
-    return _clip(arm, "emote_joke", 50, keys)
+def emote_taunt(armature):
+    # Crooks one finger, beckoning, slowly.
+    one = merge(STAND, BENT, staff(at(0.18, 0.40, 1.62, "r"), at(0.20, 0.46, 0.0, "r")), shawl(3))
+    out = merge(one, arm("l", 0.2, 1, 0.0, 0.1, 1, 0.1), {"fingers_l": (0, 0, 0)})
+    curl = merge(out, {"fingers_l": (90, 0, 0)})
+    keys = [(0, IDLE, None), (10, out, None), (18, curl, None), (26, out, None), (34, curl, None), (46, IDLE, None)]
+    return _clip(armature, "emote_taunt", 46, keys)
 
 
-def emote_laugh(arm):
-    belly = arm_l(0.15, 0.3, -0.9, -0.7, 0.6, 0.2)
-    keys = [(0, merge(STAND, HANDS), None)]
+def emote_joke(armature):
+    # Holds the staff's skull up to her face and makes it "talk", waggling it.
+    talk = [merge(STAND, BENT, staff(at(0.10, 0.42, 1.78 + (0.03 if i % 2 else 0.0), "r"), at(0.35, 0.15, 0.70, "r")), arm("l", 0.5, 0.3, -0.6, 0.3, 0.5, -0.4),
+                  {"head": (-14, 0, -20)}, shawl(3)) for i in range(2)]
+    keys = [(0, IDLE, None), (12, talk[0], None)]
+    for i, f in enumerate(range(16, 36, 4)):
+        keys.append((f, talk[i % 2], None, "snap"))
+    keys.append((48, IDLE, None))
+    return _clip(armature, "emote_joke", 48, keys)
+
+
+def emote_laugh(armature):
+    keys = [(0, IDLE, None)]
     for i in range(1, 9):
-        s = -1 if i % 2 else -0.5
-        keys.append((4 * i, merge(STAND, HANDS, belly, {"spine_01": (-8 * abs(s), 0, 0), "head": (-18 * abs(s), 0, 0)}, sym("clavicle", 0, 3 * s, 0)), None))
-    keys.append((40, merge(STAND, HANDS), None))
-    return _clip(arm, "emote_laugh", 40, keys)
+        s = 1.0 if i % 2 else 0.4
+        keys.append((4 * i, merge(IDLE, {"spine_01": (-4 * s, 0, 0), "head": (-40 * s, 0, 0)}, sym("clavicle", 0, -6 * s, 0)), {"pelvis": (0, 0, -0.04)}))
+    keys.append((44, IDLE, None))
+    return _clip(armature, "emote_laugh", 44, keys)
 
 
-def emote_dance(arm):
-    # A swaying, puppet-jointed shuffle.
-    a = merge(arms((0.7, 0.2, 0.3), (0.7, 0.2, -0.6), (0.4, 0.2, -0.8), (0.4, 0.3, 0.6)), CLAWS, {"thigh_l": (-24, 0, 0), "calf_l": (36, 0, 0), "pelvis": (0, -8, 16),
-                                                                                             "head": (0, -14, 0)}, shawl(0, -8))
-    mid = merge(STAND, HANDS, shawl(4))
-    b = merge(arms((0.4, 0.2, -0.8), (0.4, 0.3, 0.6), (0.7, 0.2, 0.3), (0.7, 0.2, -0.6)), CLAWS, {"thigh_r": (-24, 0, 0), "calf_r": (36, 0, 0), "pelvis": (0, 8, -16),
-                                                                                             "head": (0, 14, 0)}, shawl(0, 8))
-    keys = [(0, a, {"pelvis": (0.06, 0, 0)}), (12, mid, {"pelvis": (0, 0, -0.04)}), (24, b, {"pelvis": (-0.06, 0, 0)}), (36, mid, {"pelvis": (0, 0, -0.04)})]
-    return _clip(arm, "emote_dance", 48, keys, loop=True)
+def emote_dance(armature):
+    # A crooked shuffle round the staff, her free hand waving overhead.
+    a = merge(BENT, staff(at(0.25, 0.40, 1.70, "r"), at(0.25, 0.45, 0.0, "r")), arm("l", 0.4, 0.2, 0.85, 0.3, 0.1, 0.95), OPEN_L,
+              feet((0.15, 0.08), (0.12, -0.08), lift_l=0.12), {"pelvis": (0, -8, 10)}, shawl(4, 8))
+    b = merge(BENT, staff(at(0.25, 0.40, 1.70, "r"), at(0.25, 0.45, 0.0, "r")), arm("l", 0.6, 0.2, 0.75, 0.6, 0.1, 0.85), OPEN_L,
+              feet((0.12, 0.08), (0.15, -0.08), lift_r=0.12), {"pelvis": (0, 8, -10)}, shawl(4, -8))
+    mid = merge(BENT, STAND, staff(at(0.25, 0.40, 1.66, "r"), at(0.25, 0.45, 0.0, "r")), arm("l", 0.5, 0.2, 0.8, 0.45, 0.1, 0.9), OPEN_L)
+    keys = [(0, a, {"pelvis": (0.03, 0, -0.04)}), (12, mid, {"pelvis": (0, 0, -0.07)}), (24, b, {"pelvis": (-0.03, 0, -0.04)}),
+            (36, mid, {"pelvis": (0, 0, -0.07)}), (48, a, {"pelvis": (0.03, 0, -0.04)})]
+    return _clip(armature, "emote_dance", 48, keys, loop=True)
 
 
-OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, run, run_fast, attack_1, attack_2, q, w, e, r,
+OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, walk, run, run_fast, attack_1, attack_2, q, w, e, r,
        recall, death, respawn, select, emote_taunt, emote_joke, emote_laugh, emote_dance]
-SHARED = ["walk", "cast_utility", "attack_melee_alt", "cc_stunned", "cc_rooted", "cc_airborne", "cc_knockback", "cc_suppressed",
-          "cc_sleep", "cc_forced_move"]
 
 
-def bake_shared(arm):
-    """Copy the shared library's clips in (10 §7.3): the same skeleton, so a direct copy."""
-    path = os.path.join(ROOT, "art", "library", "biped", "biped_library.blend")
-    with bpy.data.libraries.load(path, link=False) as (src, dst):
-        dst.actions = [n for n in src.actions if n in SHARED]
-    for act in dst.actions:
-        act.use_fake_user = True
-        clips.stash(arm, act)
-    return [a.name for a in dst.actions]
+def _extras(armature):
+    rig.add_chain(armature, "cloak", "chest", SHAWL)
+    # Her bolts and the bones leave from the skull's jaws.
+    h, t = Vector(BONES["hand_r"][2]), Vector(BONES["hand_r"][3])
+    champion.place_socket(armature, "socket_projectile", tuple(h + (t - h).normalized() * STAFF_TOP))
 
 
-def build():
-    bpy.ops.wm.read_homefile(use_empty=True)
-    bpy.context.scene.render.fps = 30
-    rig.use_shape("standard")
-    arm = rig.build_armature(name="marrow")
-    rig.add_chain(arm, "cloak", "chest", SHAWL)
-    own = [f(arm).name for f in OWN]
-    body = mesh.build_mannequin(arm, name="marrow", part_list=parts())
-    shared = bake_shared(arm)
-    print(f"marrow: {len(arm.data.bones)} bones, {mesh.triangle_count(body)} triangles, {len(own)} own clips, shared {shared}")
+def build(only=None):
+    return champion.build("marrow", SHAPE, parts, OWN, 1.85, extras=_extras, only=only, shared=champion.SHARED + ["attack_melee_alt"], cloth={"cloak": dict(stiffness=0.3, inertia=0.84)})
 
 
 if __name__ == "__main__":
-    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
-    build()
-    if "--out" in argv:
-        out = os.path.abspath(argv[argv.index("--out") + 1])
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        bpy.ops.wm.save_as_mainfile(filepath=out, compress=True)
-        print(f"saved {out}")
+    champion.main(build)

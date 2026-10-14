@@ -82,6 +82,14 @@ static func build() -> Theme:
 	t.set_font("font", "PrimaryButton", bold)
 	t.set_color("font_color", "PrimaryButton", CREAM)
 	t.set_color("font_hover_color", "PrimaryButton", Color.WHITE)
+	# A choice with consequences (trusting a server's new key): a red edge, never the default.
+	t.set_type_variation("DangerButton", "Button")
+	t.set_stylebox("normal", "DangerButton", _box(Color(0.30, 0.09, 0.07), Color(0.86, 0.32, 0.24), 1, 4, Vector4(16, 8, 16, 8)))
+	t.set_stylebox("hover", "DangerButton", _box(Color(0.42, 0.12, 0.09), Color(1.0, 0.5, 0.4), 1, 4, Vector4(16, 8, 16, 8)))
+	t.set_stylebox("pressed", "DangerButton", _box(Color(0.22, 0.06, 0.05), Color(0.86, 0.32, 0.24), 1, 4, Vector4(16, 8, 16, 8)))
+	t.set_font("font", "DangerButton", bold)
+	t.set_color("font_color", "DangerButton", CREAM)
+	t.set_color("font_hover_color", "DangerButton", Color.WHITE)
 
 	# Text fields: recessed.
 	t.set_stylebox("normal", "LineEdit", _box(Color(0.02, 0.025, 0.035), Color(0.24, 0.26, 0.3), 1, 4, Vector4(10, 7, 10, 7)))

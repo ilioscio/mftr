@@ -1,33 +1,40 @@
-// Cairn's VFX (A12): moss and stone. Stone chips where his staff lands (`attack.fire`), Stone
-// Lash's skittering line of shards, Shelter's green-gold ward rising on the ally, Rockfall's
-// stones dropping into a ring on its true radius, and Monolith's eruption of standing stone around
-// him (the shared hard-CC clang plays with its knock-up). Instances of the client's VFX kit
-// (05 §5.1); hand-authored next to the export; validated by `pack validate`.
+// Cairn's VFX (A6, 14 §4): emerald. His staff lands under an emerald smear with a star, cracks and
+// stone chips; Stone Lash leaves in an emerald flare and flies as a green-cored shard; Shelter
+// rings its ally in emerald; Rockfall falls in a column and a shock to its edge; Monolith cracks
+// the ground around him and erupts in emerald light and stone. Instances of the client's VFX kit
+// (05 §5.1); hand-authored next to the export; validated by `mftr-tools pack validate`.
 (
     effects: [
-        // Basic attacks: stone chips and a puff of moss-green dust.
-        (event: "attack.fire", kit: "burst", ramp: [(0.74, 0.76, 0.7), (0.52, 0.54, 0.5), (0.34, 0.36, 0.32)], count: 12, speed: 3.0, lifetime: 0.3),
-        (event: "attack.fire", kit: "dust", ramp: [(0.46, 0.52, 0.38), (0.36, 0.42, 0.3), (0.26, 0.3, 0.22)], count: 6, speed: 0.9),
+        // Basic attack.
+        (event: "attack.fire", kit: "slash", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30), (0.04, 0.28, 0.14)], count: 28, size: 1.2, arc: 110, tilt: 90),
+        (event: "attack.fire", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.60, 1.0, 0.72), (0.14, 0.70, 0.36)], count: 6),
+        (event: "attack.fire", kit: "crack", ramp: [(0.70, 1.0, 0.76), (0.20, 0.80, 0.40), (0.08, 0.42, 0.20), (0.20, 0.18, 0.16)], count: 4, lifetime: 0.8),
+        (event: "attack.fire", kit: "burst", ramp: [(0.72, 0.70, 0.64), (0.52, 0.50, 0.46), (0.34, 0.33, 0.31)], count: 10, speed: 3.0),
 
-        // Q Stone Lash: a whip-crack of shards along the line.
-        (event: "q.release", kit: "flare", ramp: [(0.8, 0.84, 0.72), (0.52, 0.6, 0.42), (0.3, 0.36, 0.26)], count: 10),
-        (event: "q.projectile", kit: "arrow", ramp: [(0.72, 0.74, 0.68), (0.5, 0.52, 0.48), (0.32, 0.34, 0.3)]),
-        (event: "q.impact", kit: "burst", ramp: [(0.8, 0.82, 0.76), (0.54, 0.58, 0.5), (0.34, 0.36, 0.32)], count: 14, speed: 3.4),
+        // Q Stone Lash.
+        (event: "q.release", kit: "flare", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30)], count: 12, speed: 3.0),
+        (event: "q.projectile", kit: "shard", ramp: [(0.80, 1.0, 0.86), (0.36, 0.40, 0.34), (0.08, 0.50, 0.26)], count: 3, speed: 1.2, lifetime: 0.35),
+        (event: "q.impact", kit: "burst", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30), (0.34, 0.33, 0.31)], count: 14, speed: 3.2),
 
-        // W Shelter: a green-gold ward rising on the ally.
-        (event: "w.fire", kit: "flare", ramp: [(0.94, 1.0, 0.76), (0.6, 0.86, 0.44), (0.3, 0.52, 0.24)], count: 18, speed: 2.2, lifetime: 0.5),
+        // W Shelter.
+        (event: "w.fire", kit: "shock", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30)], size: 0.8, lifetime: 0.3),
+        (event: "w.fire", kit: "flare", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30)], count: 14, speed: 1.8, lifetime: 0.5),
 
-        // E Rockfall: his staff calls; the stones fall into a ring.
-        (event: "e.fire", kit: "flare", ramp: [(0.82, 0.9, 0.66), (0.52, 0.66, 0.4), (0.3, 0.4, 0.24)], count: 8, speed: 1.6),
-        (event: "e.detonate", kit: "burst", ramp: [(0.78, 0.8, 0.74), (0.54, 0.56, 0.52), (0.36, 0.37, 0.34), (0.24, 0.25, 0.23)], count: 22, speed: 4.0, lifetime: 0.45),
-        (event: "e.detonate", kit: "ring", ramp: [(0.7, 0.8, 0.56), (0.48, 0.58, 0.38), (0.3, 0.36, 0.24)], speed: 1.6),
-        (event: "e.detonate", kit: "dust", ramp: [(0.52, 0.5, 0.46), (0.4, 0.39, 0.36), (0.28, 0.27, 0.25)], count: 12, speed: 1.6, size: 1.2),
+        // E Rockfall: the shadows of the rocks grow on the ground until they drop; they land on
+        // the root: stones, a shock to the edge, shards, dust.
+        (event: "e.telegraph", kit: "rocks", ramp: [(0.70, 1.0, 0.76), (0.22, 0.42, 0.26)]),
+        (event: "e.detonate", kit: "rocks", ramp: [(0.62, 0.60, 0.54), (0.46, 0.44, 0.40), (0.30, 0.29, 0.27)], count: 18, size: 1.2),
+        (event: "e.detonate", kit: "shock", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30)]),
+        (event: "e.detonate", kit: "burst", ramp: [(0.72, 0.70, 0.64), (0.52, 0.50, 0.46), (0.34, 0.33, 0.31)], count: 22, speed: 4.4),
+        (event: "e.detonate", kit: "dust", ramp: [(0.54, 0.52, 0.47), (0.43, 0.41, 0.38), (0.32, 0.31, 0.29)], count: 14, speed: 1.8, size: 1.2),
 
-        // R Monolith: the staff strikes the ground; stone erupts in a ring on the area's delay.
-        (event: "r.fire", kit: "dust", ramp: [(0.52, 0.5, 0.46), (0.4, 0.39, 0.36), (0.28, 0.27, 0.25)], count: 12, speed: 1.4),
-        (event: "r.fire", kit: "ring", ramp: [(0.8, 0.92, 0.6), (0.5, 0.66, 0.38), (0.28, 0.38, 0.22)], speed: 0.6),
-        (event: "r.detonate", kit: "burst", ramp: [(0.8, 0.82, 0.78), (0.56, 0.58, 0.54), (0.38, 0.39, 0.36), (0.26, 0.27, 0.25)], count: 40, speed: 6.0, lifetime: 0.6),
-        (event: "r.detonate", kit: "ring", ramp: [(0.86, 0.96, 0.66), (0.54, 0.7, 0.4), (0.3, 0.4, 0.24)]),
-        (event: "r.detonate", kit: "dust", ramp: [(0.5, 0.48, 0.45), (0.38, 0.37, 0.35), (0.27, 0.26, 0.25)], count: 18, speed: 2.4, size: 1.6),
+        // R Monolith: cracks spread through the ground indicator; the staff goes in with a star;
+        // the eruption comes with the knock-up: the stone, a shock, cracks, dust.
+        (event: "r.telegraph", kit: "cracks", ramp: [(0.70, 1.0, 0.76), (0.16, 0.44, 0.22)]),
+        (event: "r.fire", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.60, 1.0, 0.72), (0.14, 0.70, 0.36)], count: 8),
+        (event: "r.detonate", kit: "crack", ramp: [(0.70, 1.0, 0.76), (0.20, 0.80, 0.40), (0.08, 0.42, 0.20), (0.20, 0.18, 0.16)], count: 8, lifetime: 1.2),
+        (event: "r.detonate", kit: "shock", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30)]),
+        (event: "r.detonate", kit: "burst", ramp: [(0.72, 0.70, 0.64), (0.52, 0.50, 0.46), (0.34, 0.33, 0.31)], count: 26, speed: 5.0, lifetime: 0.5),
+        (event: "r.detonate", kit: "dust", ramp: [(0.54, 0.52, 0.47), (0.43, 0.41, 0.38), (0.32, 0.31, 0.29)], count: 18, speed: 2.4, size: 1.4),
     ],
 )

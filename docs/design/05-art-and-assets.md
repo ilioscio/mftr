@@ -64,7 +64,7 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
 
 Full specification: **[10 — Characters & Animation](10-characters-and-animation.md)**. In short:
 
-- "Faceted PS1" low-poly meshes, **2,500–4,000 triangles** (cap 6,000), with vertex colors and ≤ 4 material slots including the team accent; no texture maps (D48).
+- "Faceted PS1" low-poly meshes, **5,000–8,000 triangles** (cap 12,000; D59), with vertex colors and ≤ 4 material slots including the team accent; no texture maps (D48).
 - Shading: faceted toon ramp + rim light + team-accent region + procedural detail noise in object space.
 - Skeletal animation on a shared rig standard, with the **complete animation set** per champion (~35–45 clips: locomotion, attacks, every ability phase, CC poses, recall, death, emotes), timed by the sim's action contract. Exported as glTF plus a marker sidecar, and shipped inside content packs ([11](11-content-packs-and-mods.md)).
 - Optional **outline** pass (inverted hull or post-process) to strengthen silhouettes. A user setting.
@@ -87,13 +87,24 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 | `dust` | `start`, `land`, `detonate` | Slow, growing ground puffs |
 | `trail` | `projectile` | Sparks shed behind the projectile |
 | `arrow`, `net`, `orb` | `projectile` | A style *inside* the projectile's gameplay body (a shaft, a spinning frame, nothing) plus a trail behind it |
+| `wave`, `shard`, `beam`, `bones`, `flame`, `bolt` | `projectile` | The body's shape in the missile shader ([14 §4.4](14-champion-art-direction.md#44-projectiles-and-indicators-in-character)): a crescent wave, a jagged shard, a long beam (its trail stretched to 400–900 u), a rattle of bone spurs, a licking flame, a fat bolt; the body is the champion's color, the sheath the team's |
+| `grab` | `projectile` | An open hand, fingers spread, inside the body, and a chain strung back to the caster's fist every frame (a grapple reads as an arm) |
 | `lob` | `projectile` (areas) | A bomb that arcs from the socket to the area's centre and sizzles until it detonates |
+| `slash` | `fire`, `start`, `land` | A swing's arc smear ([14 §4.3](14-champion-art-direction.md#43-effects-that-sell-the-hit)): a crescent drawn all at once, thick in the middle, fading in 3–4 frames. `arc` sets its sweep, `tilt` its plane (0 a level sweep centered on the point, 90 an overhead blow ending on it). With no direction (novas) it rings the area's radius |
+| `flash` | any | An impact star: a white-hot core and a few short rays, 2–3 frames |
+| `crack` | `fire`, `land`, `detonate` | Jagged lines radiating over the ground that linger (radius from gameplay data, else from `size`) |
+| `pillar` | `land`, `fire`, `detonate` | A column of light rising from the ground |
+| `shock` | `fire`, `detonate`, `land` | A ring expanding from the center to the **gameplay radius** over its lifetime |
+| `rocks` | `detonate`, `land`, `fire` | Stones dropped from above across the radius, landing with a bounce |
+| `rain` | `detonate` | A volley that keeps falling across the area for its lifetime (up to 4 s): streaks of arrows, each a short line of pixels |
+| any particle kit | `travel` | Streamed off a dashing champion every step until the dash lands, so a quarter-second dash leaves a visible path |
+| `plain`, `cracks`, `rocks`, `frost`, `flames`, `bones`, `stars`, `arrows`, `sigil`, `shadow` | `telegraph` | The *inside* of a delayed area's ground indicator, in the champion's colors (its outline keeps the team's): cracks that spread, rock shadows that grow, frost, flames, strewn bones, stars, arrowheads, a turning sigil, a pool of shadow |
 
 - **Pixel style:** all particles share one MultiMesh of camera-facing squares whose corners snap to a grid of screen pixels (2 px at 1080p). They step at **20 Hz** ("on twos") and walk their 2–6 color ramp in whole steps, with no blending.
 - **Honest sizes:** projectile kits can't set a size. Shafts and frames are fitted inside the body's gameplay width, and trails only fall *behind* it (§1.1). Rings take the area's radius from the render state.
 - **`fire`** (A6): when an action's animation passes its `fire` marker. It is centered and sized for novas, at reach in front for melee blows and slams, and at the chest otherwise; any particle kit plays there (10 §6).
 - **Events:** the client fires `<action>.<phase>`. It finds the action from the kit: an area's or missile's radius is matched against the owner's abilities (augment-widened too), bolts are `attack`, and dashes are the kit's dash slot. A champion's own `action.phase` wins, then its `*.phase`, then the shared library's (`biped_library.vfx.ron`).
-- **Caps:** ≤ 48 particles per effect, ≤ 4 effects per event, ≤ 64 effects per pack, lifetimes ≤ 1.5 s, and 2,048 live particles client-wide.
+- **Caps:** ≤ 48 particles per effect, ≤ 4 effects per event, ≤ 64 effects per pack, lifetimes ≤ 1.5 s (a `rain` ≤ 4 s), and 2,048 live particles client-wide.
 
 ## 6. UI
 
@@ -191,9 +202,9 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 | Engine + `mftr-gdext` + client scripts (custom Godot export template with unused modules stripped) | ≤ 40 MB |
 | ARAM map | ≤ 4 MB |
 | Main map | ≤ 8 MB |
-| Per champion (meshes, anims, VFX, SFX, icons) | ≤ 1.5 MB |
+| Per champion (meshes, anims, VFX, SFX, icons) | ≤ 1.7 MB |
 | UI, fonts (base language) | ≤ 5 MB |
-| **v1.0 total with 40 champions** | **≤ 120 MB** (150 MB hard cap) |
+| **v1.0 total with 40 champions** | **≤ 125 MB** (150 MB hard cap; was 120 MB before D59 doubled the champion meshes) |
 | Optional: music pack, voice packs, HD outlines, etc. | separate downloads |
 
 CI produces a **size report per PR**, and the build fails if a budget is exceeded without an approved exception.

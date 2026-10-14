@@ -5,8 +5,9 @@
 //!
 //! Events are `<action>.<phase>`: actions `attack`, `q`, `w`, `e`, `r`, `d`, `f` or `*` (any);
 //! phases `release` (leaving the projectile socket), `projectile` (the projectile's style),
-//! `impact`, `detonate` (delayed areas), `start` and `land` (dashes), and `fire` (the animation
-//! passing its `fire` marker: melee blows, novas, heals; A6).
+//! `impact`, `detonate` (delayed areas), `start` and `land` (dashes), `fire` (the animation
+//! passing its `fire` marker: melee blows, novas, heals; A6), and `telegraph` (the look of a
+//! delayed area's ground indicator, 14 §4.4).
 
 use nanoserde::DeRon;
 
@@ -16,13 +17,24 @@ pub const MAX_EFFECTS: usize = 64;
 pub const MAX_PER_EVENT: usize = 4;
 pub const MAX_COUNT: u32 = 48;
 pub const MAX_LIFETIME: f32 = 1.5;
+/// A `rain` keeps falling across its area for its lifetime: a volley lasts longer.
+pub const MAX_RAIN_LIFETIME: f32 = 4.0;
 
 /// Particle kits (any phase but `projectile`).
-pub const PARTICLE_KITS: &[&str] = &["flare", "burst", "ring", "dust", "trail"];
-/// Projectile styles (the `projectile` phase): they decorate the gameplay-sized body.
-pub const PROJECTILE_KITS: &[&str] = &["orb", "arrow", "net", "lob"];
+pub const PARTICLE_KITS: &[&str] =
+    &["flare", "burst", "ring", "dust", "trail", "slash", "flash", "crack", "pillar", "shock", "rocks", "rain"];
+/// Projectile styles (the `projectile` phase): they decorate and color the gameplay-sized body;
+/// its sheath keeps the team's color (14 §4.4).
+pub const PROJECTILE_KITS: &[&str] =
+    &["orb", "arrow", "net", "lob", "wave", "shard", "beam", "bones", "flame", "bolt", "grab"];
+/// Ground-indicator motifs (the `telegraph` phase): the inside of a delayed area in the
+/// champion's colors; its outline keeps the team's color.
+pub const TELEGRAPH_KITS: &[&str] =
+    &["plain", "cracks", "rocks", "frost", "flames", "bones", "stars", "arrows", "sigil", "shadow"];
 pub const ACTIONS: &[&str] = &["attack", "q", "w", "e", "r", "d", "f", "*"];
-pub const PHASES: &[&str] = &["release", "projectile", "impact", "detonate", "start", "land", "fire"];
+/// `travel` streams a particle kit off a dashing champion every step until it lands.
+pub const PHASES: &[&str] =
+    &["release", "projectile", "impact", "detonate", "start", "travel", "land", "fire", "telegraph"];
 
 #[derive(Clone, Debug, DeRon)]
 pub struct VfxFile {
@@ -47,6 +59,12 @@ pub struct Effect {
     /// Particle lifetime in seconds (up to 1.5).
     #[nserde(default)]
     pub lifetime: Option<f32>,
+    /// `slash` only: the arc's sweep in degrees (10–360; default 140).
+    #[nserde(default)]
+    pub arc: Option<f32>,
+    /// `slash` only: the arc's plane, 0 = a level sweep, 90 = straight down onto the point (0–90).
+    #[nserde(default)]
+    pub tilt: Option<f32>,
 }
 
 pub fn parse(text: &str) -> Result<VfxFile, String> {
@@ -75,7 +93,11 @@ pub fn check(f: &VfxFile) -> Vec<String> {
             out.push(at(format!("unknown phase `{phase}`")));
         }
         let projectile = phase == "projectile";
-        let kits = if projectile { PROJECTILE_KITS } else { PARTICLE_KITS };
+        let kits = match phase {
+            "projectile" => PROJECTILE_KITS,
+            "telegraph" => TELEGRAPH_KITS,
+            _ => PARTICLE_KITS,
+        };
         if !kits.contains(&e.kit.as_str()) {
             out.push(at(format!("kit `{}` can't play on `{phase}` (allowed: {})", e.kit, kits.join(", "))));
         }
@@ -97,8 +119,18 @@ pub fn check(f: &VfxFile) -> Vec<String> {
         if e.speed.is_some_and(|s| !(0.0..=12.0).contains(&s)) {
             out.push(at("speed 0–12 m/s".into()));
         }
-        if e.lifetime.is_some_and(|l| !(0.02..=MAX_LIFETIME).contains(&l)) {
-            out.push(at(format!("lifetime 0.02–{MAX_LIFETIME} s")));
+        let max_life = if e.kit == "rain" { MAX_RAIN_LIFETIME } else { MAX_LIFETIME };
+        if e.lifetime.is_some_and(|l| !(0.02..=max_life).contains(&l)) {
+            out.push(at(format!("lifetime 0.02–{max_life} s")));
+        }
+        if (e.arc.is_some() || e.tilt.is_some()) && e.kit != "slash" {
+            out.push(at("`arc` and `tilt` are for `slash`".into()));
+        }
+        if e.arc.is_some_and(|a| !(10.0..=360.0).contains(&a)) {
+            out.push(at("arc 10–360°".into()));
+        }
+        if e.tilt.is_some_and(|t| !(0.0..=90.0).contains(&t)) {
+            out.push(at("tilt 0–90°".into()));
         }
     }
     let mut events: Vec<&str> = f.effects.iter().map(|e| e.event.as_str()).collect();

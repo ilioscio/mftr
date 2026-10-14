@@ -1,6 +1,6 @@
 # Ember — concept
 
-Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an owner brief while the owner tested Rook; everything here is open to change.
+Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** (awaiting the owner's approval). Designed without an owner brief while the owner tested Rook; everything here is open to change.
 
 ## Identity
 
@@ -10,23 +10,25 @@ Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an 
   - **E Flicker:** a short blink.
   - **R Binding Sigil:** a thrown sigil that stuns (hard-CC line, ultimate).
 - **Personality in three words:** quick, cocky, volatile.
-- **Silhouette class:** *pyromancer*.
-  - A lean figure in a charcoal long coat.
-  - Coat tails trail behind him (an `extra_coat` chain, 2 bones).
-  - A tall ember-orange collar wraps the back of his neck and flares up behind his head; it reads from the gameplay camera.
-  - No staff or wand: fire comes from his bare hands, with glowing ember cuffs at the wrists.
-- **Head:** the shared sculpted head, young and lean, with short dark hair and amber eyes.
-- **Archetype:** `biped` v1, plus the `extra_coat` chain.
+- **Shape (14 §2):** *a flame*. Slim, top-heavy proportions on the `biped` bones (`SHAPE` in `build.py`: ×0.97, shoulders out 4 cm, arms ×1.04, hands ×1.3), about 1.8 m, 2.2 m to the tips of his hair. Burning hair sweeping up and back from his crown; a tall flared collar of soot-black petals lined with ember red behind his head; a charcoal coat with lapels over an ember-red lining, its tails on an `extra_coat` chain (3 bones); bell sleeves flaring wide at the wrists; fire burning in both palms; slim legs in pointed boots.
+- **Weapon:** his hands.
+- **Gait (14 §3.6):** light: a short contact, a long airborne phase, the coat tails streaming.
 
-## Palette (10 §2)
+## Palette (14 §4)
+
+Signature: **flame orange** (25°).
 
 | Slot | Colors |
 |---|---|
-| skin | (0.80, 0.60, 0.47) |
-| cloth | charcoal coat (0.17, 0.15, 0.15), ember collar and tail lining (0.78, 0.36, 0.14), trousers (0.20, 0.17, 0.16), leather belt (0.34, 0.21, 0.13), boots (0.20, 0.13, 0.09), dark hair (0.15, 0.10, 0.09) |
-| metal | gold trim on the coat's front edges and the buckle (0.82, 0.62, 0.28) |
-| emissive | glowing ember cuffs and a rune on his chest (1.0, 0.55, 0.15) |
-| accent | a sash over the belt and bands on the forearms |
+| skin | warm (0.76, 0.54, 0.40) |
+| cloth | charcoal coat (0.11, 0.10, 0.10), soot black (0.05, 0.045, 0.045), ember red lining, petals, cuffs and the coat's hem (0.55, 0.10, 0.04) |
+| metal | gold buttons, brooch, hem and knee plates (0.60, 0.40, 0.12) |
+| emissive | flame (1.0, 0.50, 0.10) to hot yellow at the roots (1.0, 0.82, 0.30): his hair and the fire in his palms |
+| accent | a band at his belt |
+
+## Weight (14 §3)
+
+Every cast coils (the palm drawn back by his ear, or both palms to his hip for the lance), cocks, thrusts in one frame on `fire`, and holds; Ember Lance's recoil rocks him back a step. Feet planted by IK.
 
 ## Clip checklist (10 §5)
 
@@ -46,12 +48,7 @@ Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an 
 
 ## Effects and sounds
 
-- **VFX** (`export/ember.vfx.ron`):
-  - fireballs (flare, orb, burst);
-  - a white-hot lance;
-  - Cinder Bloom's embers, ring and ash on its true radius;
-  - a flash where he Flickers in;
-  - a spinning gold sigil.
+- **VFX** (`export/ember.vfx.ron`), all flame (white → orange → ember red): flares and hot orbs for his bolts, a white star and embers on hits; Ember Lance's release flares with a whip-crack `slash` and flies white-hot; Cinder Bloom erupts in a fire `pillar` with a `shock` to its edge; Flicker vanishes in a puff and a short column; the sigil flies burning and binds in a ring of fire.
 - **SFX** (`sounds.ron`), 14 sounds:
   - a crackle as each flame catches, whooshing and popping fireballs;
   - the Lance's roar and crack;

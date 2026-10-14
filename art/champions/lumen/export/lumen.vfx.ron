@@ -1,25 +1,43 @@
-// Lumen's VFX (A9): light. Gold motes for her attacks, a rising glow when she heals (Mending
-// Light) and a pale blue one when she shields (Aegis), a slow lilac orb for Lull, and Binding
-// Halo's ring of gold on its true radius (the shared hard-CC clang plays with its root).
-// Instances of the client's VFX kit (05 §5.1); hand-authored; validated by `pack validate`.
+// Lumen's VFX (A4b, 14 §4): pale sun gold. Her motes leave the lantern and fly as soft golden
+// orbs, landing in a gentle star; Mending Light rises in a column of light; Aegis rings its ally
+// in gold; Lull, her strike, bursts from the lantern in a white flash and pours out as a beam of
+// sunlight that hits in a blaze; Binding Halo's sigil burns on the ground until the staff is
+// planted, then closes in a column, a shock and a ring. Instances of the client's VFX kit (05 §5.1); hand-authored next to the export;
+// validated by `mftr-tools pack validate`.
 (
     effects: [
-        (event: "attack.release", kit: "flare", ramp: [(1.0, 1.0, 0.92), (1.0, 0.9, 0.6), (0.85, 0.7, 0.35)], count: 6, lifetime: 0.12),
-        (event: "attack.projectile", kit: "orb", ramp: [(1.0, 0.98, 0.85), (1.0, 0.86, 0.5), (0.8, 0.64, 0.3)]),
-        (event: "attack.impact", kit: "burst", ramp: [(1.0, 1.0, 0.92), (1.0, 0.86, 0.5), (0.7, 0.56, 0.28)], count: 12, speed: 2.8),
+        // Basic attack.
+        (event: "attack.release", kit: "flare", ramp: [(1.0, 1.0, 0.92), (1.0, 0.92, 0.60), (0.92, 0.70, 0.26)], count: 8, speed: 2.0),
+        (event: "attack.projectile", kit: "orb", ramp: [(1.0, 1.0, 0.90), (1.0, 0.88, 0.50), (0.90, 0.66, 0.24)]),
+        (event: "attack.impact", kit: "flash", ramp: [(1.0, 1.0, 1.0), (1.0, 0.94, 0.70), (0.94, 0.74, 0.30)], count: 5, size: 0.8),
+        (event: "attack.impact", kit: "burst", ramp: [(1.0, 1.0, 0.92), (1.0, 0.90, 0.56), (0.92, 0.70, 0.26)], count: 10, speed: 2.4),
 
-        // Q Mending Light and W Aegis: instant, from her hands.
-        (event: "q.fire", kit: "flare", ramp: [(1.0, 1.0, 0.9), (1.0, 0.88, 0.5), (0.8, 0.66, 0.3)], count: 18, speed: 2.0, lifetime: 0.6),
-        (event: "w.fire", kit: "flare", ramp: [(0.9, 0.97, 1.0), (0.62, 0.84, 1.0), (0.36, 0.56, 0.86)], count: 18, speed: 2.4, lifetime: 0.5),
+        // Q Mending Light: light rising from her offered palm, a column over her ally.
+        (event: "q.fire", kit: "flare", ramp: [(1.0, 1.0, 0.92), (1.0, 0.92, 0.60), (0.92, 0.70, 0.26)], count: 14, speed: 1.6, lifetime: 0.5),
+        (event: "q.fire", kit: "pillar", ramp: [(1.0, 1.0, 0.94), (1.0, 0.92, 0.62), (0.94, 0.72, 0.28), (0.70, 0.50, 0.16)], count: 22, speed: 2.0, lifetime: 0.45),
 
-        // E Lull: a slow lilac orb that leaves soft sparks.
-        (event: "e.release", kit: "flare", ramp: [(0.96, 0.92, 1.0), (0.78, 0.7, 0.96), (0.5, 0.42, 0.72)], count: 8),
-        (event: "e.projectile", kit: "orb", ramp: [(0.96, 0.92, 1.0), (0.78, 0.7, 0.96), (0.52, 0.44, 0.76)]),
-        (event: "e.impact", kit: "burst", ramp: [(0.96, 0.92, 1.0), (0.78, 0.7, 0.96), (0.46, 0.4, 0.66)], count: 14, speed: 2.4),
+        // W Aegis: a ring of gold pressed out from her palm.
+        (event: "w.fire", kit: "shock", ramp: [(1.0, 1.0, 0.94), (1.0, 0.90, 0.56), (0.92, 0.70, 0.26)], size: 0.8, lifetime: 0.3),
+        (event: "w.fire", kit: "flare", ramp: [(1.0, 1.0, 0.92), (1.0, 0.92, 0.60), (0.92, 0.70, 0.26)], count: 12, speed: 1.8, lifetime: 0.45),
 
-        // R Binding Halo: drawn overhead, then a ring of gold lands on the area.
-        (event: "r.fire", kit: "flare", ramp: [(1.0, 1.0, 0.9), (1.0, 0.86, 0.45), (0.8, 0.6, 0.25)], count: 12, size: 1.3),
-        (event: "r.detonate", kit: "ring", ramp: [(1.0, 0.95, 0.7), (1.0, 0.82, 0.4), (0.7, 0.56, 0.26)], count: 30),
-        (event: "r.detonate", kit: "burst", ramp: [(1.0, 1.0, 0.9), (1.0, 0.86, 0.5), (0.72, 0.58, 0.3)], count: 20, speed: 3.0),
+        // E Lull: the lantern blazes (a white star, a flare, a smear along the thrust), a beam of
+        // sunlight, and a hit that flashes, bursts and rings.
+        (event: "e.release", kit: "flash", ramp: [(1.0, 1.0, 1.0), (1.0, 0.96, 0.76), (0.96, 0.78, 0.34)], count: 12, size: 1.8),
+        (event: "e.release", kit: "flare", ramp: [(1.0, 1.0, 0.94), (1.0, 0.92, 0.60), (0.92, 0.70, 0.26)], count: 28, speed: 5.0),
+        (event: "e.release", kit: "slash", ramp: [(1.0, 1.0, 0.94), (1.0, 0.90, 0.56), (0.90, 0.66, 0.24)], count: 24, size: 1.0, arc: 50, lifetime: 0.2),
+        (event: "e.projectile", kit: "beam", ramp: [(1.0, 1.0, 0.94), (1.0, 0.90, 0.56), (0.92, 0.66, 0.22)], count: 4, speed: 1.0, lifetime: 0.4),
+        (event: "e.impact", kit: "flash", ramp: [(1.0, 1.0, 1.0), (1.0, 0.94, 0.70), (0.94, 0.74, 0.30)], count: 12, size: 1.6),
+        (event: "e.impact", kit: "burst", ramp: [(1.0, 1.0, 0.92), (1.0, 0.90, 0.56), (0.92, 0.70, 0.26)], count: 24, speed: 4.4),
+        (event: "e.impact", kit: "shock", ramp: [(1.0, 1.0, 0.94), (1.0, 0.90, 0.56), (0.92, 0.70, 0.26)], size: 0.7, lifetime: 0.3),
+
+        // R Binding Halo: a burning sigil on the ground; a flare as the staff is planted; then
+        // light closes on the area.
+        (event: "r.telegraph", kit: "sigil", ramp: [(1.0, 0.96, 0.70), (0.80, 0.58, 0.18)]),
+        (event: "r.fire", kit: "flash", ramp: [(1.0, 1.0, 1.0), (1.0, 0.94, 0.70), (0.94, 0.74, 0.30)], count: 10, size: 1.4),
+        (event: "r.fire", kit: "flare", ramp: [(1.0, 1.0, 0.92), (1.0, 0.92, 0.60), (0.92, 0.70, 0.26)], count: 18, speed: 2.4),
+        (event: "r.detonate", kit: "pillar", ramp: [(1.0, 1.0, 0.94), (1.0, 0.92, 0.62), (0.94, 0.72, 0.28), (0.70, 0.50, 0.16)], count: 36),
+        (event: "r.detonate", kit: "shock", ramp: [(1.0, 1.0, 0.94), (1.0, 0.90, 0.56), (0.92, 0.70, 0.26)]),
+        (event: "r.detonate", kit: "ring", ramp: [(1.0, 1.0, 0.92), (1.0, 0.90, 0.56), (0.92, 0.70, 0.26)], speed: 1.0),
+        (event: "r.detonate", kit: "burst", ramp: [(1.0, 1.0, 0.92), (1.0, 0.90, 0.56), (0.92, 0.70, 0.26)], count: 18, speed: 3.0),
     ],
 )

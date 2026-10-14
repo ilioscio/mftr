@@ -11,6 +11,8 @@ calf rx + = knee bends, foot rx - = toes up, spine/neck/head rx + = bend forward
 left, ry + = lean to the character's left.
 """
 
+import math
+
 from . import clips, rig
 from .clips import aim_sym, merge, sym
 
@@ -45,16 +47,23 @@ def _mirror_locs(locs):
 
 
 def _clip(arm, name, frames, keys, loop=False, layer="full", bones=None, markers=None, stride_speed=None):
-    """keys: [(frame, pose, locs)]. Loops get their first key repeated on the last frame."""
+    """keys: [(frame, pose, locs)] or [(frame, pose, locs, ease)], `ease` saying how the key
+    leaves for the next (`clips.EASES`, 14 §3.4; default "ease"). Loops get their first key
+    repeated on the last frame."""
     act = clips.new_action(arm, name, frames, loop=loop, layer=layer, stride_speed=stride_speed)
     bones = bones or clips.full_body(arm)
+    keys = [tuple(k) + ("ease",) * (4 - len(k)) for k in keys]
     if loop and keys[-1][0] != frames:
-        keys = keys + [(frames, keys[0][1], keys[0][2])]
+        keys = keys + [(frames, keys[0][1], keys[0][2], keys[0][3])]
     # A bone with a location on any key gets one on every key (zero by default), so an offset
     # authored on one key doesn't hold across the whole clip.
-    moved = {b for _, _, locs in keys for b in (locs or {})}
-    for frame, pose, locs in keys:
-        clips.key_pose(arm, frame, pose, bones=bones, locs={b: (locs or {}).get(b, (0, 0, 0)) for b in moved})
+    moved = {b for _, _, locs, _ in keys for b in (locs or {})}
+    prev = {}
+    for frame, pose, locs, _ in keys:
+        clips.key_pose(arm, frame, pose, bones=bones, locs={b: (locs or {}).get(b, (0, 0, 0)) for b in moved}, prev=prev)
+    for frame, _, _, ease in keys:
+        if ease != "ease":
+            clips.set_ease(arm, act, frame, ease)
     for m, f in (markers or {}).items():
         clips.set_marker(act, m, f)
     if not loop:
@@ -62,6 +71,50 @@ def _clip(arm, name, frames, keys, loop=False, layer="full", bones=None, markers
     clips.stash(arm, act)
     clips.reset_pose(arm)
     return act
+
+
+def gait(frames, stride, contact=0.45, lift=0.22, bob=0.04, lean=8.0, twist=8.0, width=None, step=2,
+         upper=None, crouch=0.0, toe_off=20.0):
+    """Keys for an in-place locomotion loop with planted feet (14 §3.6): each foot is an IK
+    target that slides back `stride` meters while in contact (the first `contact` fraction of
+    its cycle, the left foot's starting at 0 and the right's at 0.5), then swings forward,
+    `lift` meters high at its peak.
+    The body bobs `bob` meters (lowest mid-contact), leans `lean` degrees, and the hips turn
+    `twist` degrees with the stepping leg. `crouch` lowers the hips (heavy, sneaky gaits).
+    `upper(p)` returns the pose of everything else (arms, head) at phase p in [0, 1).
+    Ground speed = stride / (contact * frames / 30)."""
+    bones = {b[0]: b for b in rig.bone_table()}
+    ankle = {s: bones[f"foot_{s}"][2] for s in ("l", "r")}
+    keys = []
+    for f in range(0, frames, step):
+        p = f / frames
+        pose = {}
+        for side, off in (("l", 0.0), ("r", 0.5)):
+            q = (p - off) % 1.0
+            x = ankle[side][0] if width is None else (width if side == "l" else -width)
+            z = ankle[side][2]
+            if q < contact:
+                fwd = stride * (0.5 - q / contact)
+                lift_z = 0.0
+                foot_aim = None
+            else:
+                s = (q - contact) / (1.0 - contact)
+                fwd = stride * (-0.5 + s)
+                lift_z = lift * math.sin(math.pi * s) ** 0.8
+                # Toes trail at push-off, then the foot swings through level.
+                pitch = math.radians(toe_off) * (1.0 - s) ** 2
+                foot_aim = (0.0, -math.cos(pitch), -0.42 - math.sin(pitch))
+            pose[f"ik_foot_{side}"] = clips.ik(clips.at(abs(x), fwd, z + lift_z, side), aim=foot_aim)
+        mid_l = contact / 2.0
+        down = 0.5 + 0.5 * math.cos(4.0 * math.pi * (p - mid_l))
+        turn = twist * math.sin(2.0 * math.pi * (p - mid_l))
+        pose["pelvis"] = (0.0, 0.0, turn)
+        pose["spine_01"] = (lean, 0.0, -turn * 0.6)
+        pose["spine_02"] = (lean * 0.3, 0.0, -turn * 0.5)
+        if upper:
+            pose = merge(pose, upper(p))
+        keys.append((f, pose, {"pelvis": (0.0, 0.0, -crouch - bob * down)}))
+    return keys
 
 
 def walk_half():

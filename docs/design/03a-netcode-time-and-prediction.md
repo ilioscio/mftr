@@ -212,6 +212,7 @@ T_needed = t_human + t_net + (r_proj + r_ref) / MS_ref
 
 reaction_time(d) = windup + d / speed           (linear)
 reaction_time    = windup + detonation_delay    (delayed ground AoE; t_move uses the AoE radius)
+reaction_time    = windup                       (channeled beam: instant along its length)
 
 rule: reaction_time(d_class) ≥ T_needed
       d_class = 80% of max range for hard CC, 90% for burst, 100% for poke

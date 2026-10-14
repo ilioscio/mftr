@@ -157,6 +157,8 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
     let target = match kind {
         "minion" => rules::MINION_TRIANGLES_TARGET,
         "prop" => rules::PROP_TRIANGLES_TARGET,
+        // The shared library's and the rig's mannequins only preview clips: no lower bound.
+        "library" | "rig" => (0, rules::TRIANGLES_TARGET.1),
         _ => rules::TRIANGLES_TARGET,
     };
     let max = if prop { rules::PROP_TRIANGLES_MAX } else { rules::TRIANGLES_MAX };
@@ -214,8 +216,23 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
         r.warn(format!("{over_target} vertices use more than {} bone influences", rules::INFLUENCES_TARGET));
     }
 
-    // Ground contact and facing in the rest pose.
-    let min_y = m.meshes.iter().flatten().flat_map(|p| p.positions.iter().map(|v| v[1])).fold(f32::INFINITY, f32::min);
+    // Ground contact in the rest pose: what the body stands on. Arms and what the hands hold
+    // don't count: a two-handed weapon hangs below the feet in the A-pose (14 §3.3).
+    let held = |p: &crate::glb::Primitive, i: usize| -> bool {
+        let (Some(j), Some(w)) = (p.joints.get(i), p.weights.get(i)) else { return false };
+        let k = (0..4).max_by(|&a, &b| w[a].total_cmp(&w[b])).unwrap_or(0);
+        let node = m.skins.first().and_then(|s| s.get(j[k] as usize)).and_then(|&n| m.nodes.get(n));
+        node.is_some_and(|n| {
+            let base = n.name.strip_suffix("_l").or_else(|| n.name.strip_suffix("_r")).unwrap_or(&n.name);
+            matches!(base, "upperarm" | "forearm" | "hand" | "fingers" | "thumb" | "prop")
+        })
+    };
+    let min_y = m
+        .meshes
+        .iter()
+        .flatten()
+        .flat_map(|p| p.positions.iter().enumerate().filter(|&(i, _)| !held(p, i)).map(|(_, v)| v[1]))
+        .fold(f32::INFINITY, f32::min);
     if min_y.is_finite() && min_y.abs() > rules::GROUND_TOLERANCE_M {
         r.err(format!("the model's lowest point is at {min_y:.3} m; it should stand on y = 0"));
     }

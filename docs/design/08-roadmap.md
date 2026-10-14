@@ -797,6 +797,58 @@ objective pits.
 - **Hosting:** an ARAM map file adds ARAM, Mayhem and Hyper (as offered) on it; a real client
   joined a hosted bent ARAM map and played.
 
+## C — Champion art v2 (between S and M4 slice 5)
+
+The owner's call: the first block-outs' models, animations and effects were the next worst gap.
+Measured against the reference's Wukong (R05), the rules are [14](14-champion-art-direction.md)
+(D59, Proposed).
+
+### Status (2026-10-14): ✅ all ten rebuilt (awaiting the owner's review)
+- **Tooling:** heroic proportions per champion (`rig.use_shape`: `shoulder`, `arm`, `hand`);
+  curved and block parts (`mesh.path_part`, `box_part`); IK hands and feet, two-handed `grip`s,
+  per-key easing and quaternion continuity (`clips`); IK-planted locomotion (`library.gait`);
+  the shared champion generator (`mftr_blender.champion`: the detail pass, sculpted hands,
+  24-sided heads).
+- **Budget:** doubled to 5,000–8,000 triangles (cap 12,000); the ten land at 5,022–5,454.
+- **Effects:** the kit gains `slash`, `flash`, `crack`, `pillar` and `shock`; every champion's
+  effects are in its signature hue.
+- **The roster:** Rook (a block on legs, crimson), Bastion (a crystal-crowned boulder, ice),
+  Vesper (recurve and cloak, teal), Shade (a hunched blade, violet), Ember (a flame), Lumen (a
+  wind-blown dress and a halo, sun gold), Quill (hat and orrery, indigo), Cairn (antlers and stone,
+  emerald), Marrow (a hooded crone with a skull staff, magenta), Wren (crest and feathers, lime).
+- **Checked:** a lineup in color and black silhouettes (every outline nameable), review sheets,
+  and every champion in game at the gameplay camera; `pack validate` clean.
+- **Cloth:** capes, scarves, coat tails and shawls follow through on their own: a rope
+  simulation over each chain, baked into every clip (14 §3.5).
+- **Next:** the owner's notes per champion; polish passes in Blender.
+
+### The owner's first notes (2026-10-14): ✅ addressed (awaiting review)
+- **Style in character** (14 §4.4): projectile shapes (`wave`, `shard`, `beam`, `bones`,
+  `flame`, `bolt`, `grab`) and ground-indicator motifs (`telegraph`: cracks, rocks, frost,
+  flames, bones, stars, arrows, sigil, shadow) in each champion's colors, team color kept on
+  the edges; shockwaves moved onto the damage (`detonate`, `impact`); dashes leave a path
+  (`travel`); new kits `rocks` and `rain`.
+- **Fixes:** every champion's own `walk` (the staff no longer smacks the ground when a run
+  stops); staffs fire from their heads (`champion.place_socket`).
+- **Per champion:** Vesper's bow the right way round, held across her hips at rest, and drawn
+  (the limbs bend, the string comes back); Ember's Q and W holds longer and a new idle;
+  Bastion's grapple an open hand on a chain; Rook's Rupture a crimson wave; Lumen redesigned (a
+  wind-blown dress, the staff two-handed, Lull a beam from the lantern); Shade's blades held
+  forward, a lower sneak, a heavier Execution and longer Q and attack effects; Quill's Static
+  Field strikes from its circle, Recoil a starlight glide, Starfall Lance a beam; Cairn's war
+  paint, rockfall and cracks; Marrow redesigned (a hood that frames her face, a skull staff);
+  Wren (a he) fires one-handed and canted, a braced Ricochet, a hail of arrows that keeps
+  falling.
+- **The sim follows (protocol 24):** Quill's Starfall Lance is a channel: an 0.85 s aim
+  everyone sees at its full length and width, then 1.5 s of beam from the orrery striking the
+  first enemy on it seven times (280 + 110% AP over the channel, +140 a rank), cut short by
+  stuns, knock-ups, pulls or death. Wren's Hail of Arrows lands for 80 + 60% AD and a slow, then
+  keeps falling for 2.5 s: five more strikes at a quarter of that each, re-slowing whoever
+  stays. Bots cast the beam and step out of enemy areas (telegraphed or still raining) and off
+  beam lines.
+- **Still waiting:** Shade's R rebalance with the game-AI pass; Marrow's kit, on the owner's
+  direction.
+
 ## S — One server, many matches (between E and M4 slice 5)
 The server plays whatever its players ask for ([13](13-server-instances.md), D57): one process
 on one port runs match instances of every full-match queue, created and stopped with their

@@ -100,7 +100,7 @@ const MODEL_LIFT := -0.85                # bodies sit at y 0.85 (the placeholder
 var vfx: Node3D
 var _vfx_tables := {}                    # champion name -> { event: [effect] }
 var _vfx_recent := {}                    # dedupe key -> time (a prediction and its confirmation)
-const PARTICLE_KITS := ["flare", "burst", "ring", "dust"]
+const PARTICLE_KITS := ["flare", "burst", "ring", "dust", "slash", "flash", "crack", "pillar", "shock", "rocks", "rain"]
 # A4c: the SFX player and each champion's sounds by event, from its pack's `<id>.sfx.ron`,
 # falling back to the shared library's (as the VFX do).
 var sfx: Node3D
@@ -138,6 +138,11 @@ func _ready() -> void:
 	while i < args.size():
 		if args[i] == "--shot-at" and i + 1 < args.size():
 			_shot_at = float(args[i + 1])
+			i += 1
+		elif args[i] == "--shot-trust":
+			_shot_trust = true
+		elif args[i] == "--shot-seq" and i + 1 < args.size():
+			_shot_seq = int(args[i + 1])
 			i += 1
 		elif args[i] == "--shot" and i + 1 < args.size():
 			_shot_path = args[i + 1]
@@ -348,6 +353,9 @@ var _shot_path := ""
 var _shot_timer := 0.0
 var _shot_moved := false
 var _shot_at := 1.05                     # `--shot-at <seconds>` after joining
+var _shot_seq := 0                        # `--shot-seq <frames>`: that many frames from --shot-at
+var _shot_trust := false                  # `--shot-trust`: press "Trust the new key" when it shows
+var _shot_seq_i := 0
 var _shot_shop := false                  # `--shot-shop`: buy from the fountain, show the shop
 var _shot_lobby := false                 # `--shot-lobby`: reroll in champion select, capture it
 var _shot_loading := false                # `--shot-loading`: ready up, capture the loading screen
@@ -462,6 +470,13 @@ func _update_shot(delta: float) -> void:
 	elif _shot_settings >= 0 and _shot_moved and settings_panel == null:
 		_open_settings()
 		settings_panel.tabs.current_tab = _shot_settings
+	elif _shot_moved and _shot_timer > _shot_at and _shot_seq > 0:
+		# A frame sequence (14 §6 reviews): <path>_000.png, _001, ...
+		get_viewport().get_texture().get_image().save_png(_shot_path.get_basename() + "_%03d.png" % _shot_seq_i)
+		_shot_seq_i += 1
+		if _shot_seq_i >= _shot_seq:
+			print("MFTR: saved %d frames to " % _shot_seq, _shot_path.get_basename(), "_*.png")
+			get_tree().quit()
 	elif _shot_moved and _shot_timer > _shot_at:
 		get_viewport().get_texture().get_image().save_png(_shot_path)
 		print("MFTR: saved screenshot to ", _shot_path)
@@ -921,6 +936,9 @@ func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
 		var slot := int(body.get_meta("dash_slot", -1))
 		var action: String = ["q", "w", "e", "r", "d", "f"][slot] if slot >= 0 else client.dash_action(champ)
 		_vfx_play(champ, action, "start" if dashing else "land", body.global_position)
+		if dashing:
+			for e in _effects(champ, action, "travel"):
+				vfx.follow(body, e)
 	if not _models_shown(body) or delta <= 0.0:
 		return
 	var rig: Dictionary = body.get_meta("rig")
@@ -1329,6 +1347,7 @@ func _process(delta: float) -> void:
 	_update_hover()
 	_update_missiles()
 	_update_areas()
+	_update_beams()
 	_update_bolts()
 	_update_combat_text(delta)
 	_update_fx(delta)
@@ -1496,7 +1515,15 @@ func _update_remotes(delta: float) -> void:
 				body.set_meta("shown_protected", u.protected)
 				for m in body.get_node("Model").get_meta("prop_mats", []):
 					m.set_shader_parameter("protected_glow", 1.0 if u.protected else 0.0)
-		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO))
+		var aim_len := 6.0
+		var aim_width := 0.08
+		if u.champion != "" and u.has("windup_slot"):
+			# A beam's aim shows its whole length and width: that is all the warning it gives.
+			var info: Dictionary = client.action_info(u.champion, ["q", "w", "e", "r", "d", "f"][int(u.windup_slot)])
+			if info.get("shape", "") == "beam":
+				aim_len = float(info.reach)
+				aim_width = float(info.radius) * 2.0
+		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO), aim_len, aim_width)
 		_show_statuses(body, u.stunned, u.rooted, u.shield, u.get("slowed", false))
 		if u.champion != "":
 			_show_recall(body, u.get("recalling", false), ALLY_COLOR if u.ally else ENEMY_COLOR, u.champion)
@@ -1917,14 +1944,17 @@ func _make_windup_indicator() -> MeshInstance3D:
 	return line
 
 
-func _show_windup(body: Node3D, progress: float, dir: Vector2) -> void:
+func _show_windup(body: Node3D, progress: float, dir: Vector2, length := 6.0, width := 0.08) -> void:
 	var line: MeshInstance3D = body.get_node("Windup")
 	line.visible = progress >= 0.0
 	if not line.visible:
 		return
 	var angle := atan2(dir.y, dir.x)
+	# The body is scaled to its hitbox; the line keeps world sizes.
+	var s := maxf(body.scale.x, 0.01)
+	line.scale = Vector3(length / 6.0, 1.0, width / 0.08) / s
 	line.global_rotation = Vector3(0, -angle, 0)
-	line.global_position = Vector3(body.global_position.x, 0.05, body.global_position.z) + Vector3(dir.x, 0, dir.y) * 3.0
+	line.global_position = Vector3(body.global_position.x, 0.05, body.global_position.z) + Vector3(dir.x, 0, dir.y) * length * 0.5
 	(line.material_override as StandardMaterial3D).albedo_color.a = 0.15 + 0.6 * progress
 
 
@@ -1981,11 +2011,30 @@ func _side_color(side: String) -> Color:
 ## hitbox width, so what you see is what can hit you. Hard CC adds a ring accent (05 §1).
 var missile_nodes := {}                 # key -> Node3D
 
+# The champion's style for a projectile's body and an area's inside (14 §4.4): the first
+# `<action>.projectile` / `<action>.telegraph` effect that names one. The edges stay the team's.
+const MISSILE_MOTIFS := {"orb": 0, "net": 0, "grab": 0, "wave": 1, "shard": 2, "beam": 3, "bones": 4, "flame": 5, "bolt": 6, "arrow": 6}
+const TELEGRAPH_MOTIFS := {"plain": 0, "cracks": 1, "rocks": 2, "frost": 3, "flames": 4, "bones": 5, "stars": 6, "arrows": 7, "sigil": 8, "shadow": 9}
 
-func _make_missile(side: String, radius_u: float, hard_cc: bool) -> Node3D:
+
+## {motif, color, core} for a champion's `<action>.<phase>` from `table` (empty: the default look).
+func _style(champion: String, action: String, phase: String, table: Dictionary) -> Dictionary:
+	if champion == "" or action == "":
+		return {}
+	for e in _effects(champion, action, phase):
+		if table.has(e.kit):
+			var ramp: PackedColorArray = e.ramp
+			return {"motif": table[e.kit], "core": ramp[0], "color": ramp[1] if ramp.size() > 1 else ramp[0]}
+	return {}
+
+
+func _make_missile(side: String, radius_u: float, hard_cc: bool, champion := "", action := "") -> Node3D:
 	var root := Node3D.new()
 	var color := _side_color(side)
+	var style := _style(champion, action, "projectile", MISSILE_MOTIFS)
 	var trail_u := clampf(radius_u * 4.0, 100.0, 260.0)
+	if style.get("motif", 0) == 3:
+		trail_u = clampf(radius_u * 12.0, 400.0, 900.0)  # a beam: long behind its head
 	var body := MeshInstance3D.new()
 	body.name = "Body"
 	var plane := PlaneMesh.new()
@@ -1994,7 +2043,11 @@ func _make_missile(side: String, radius_u: float, hard_cc: bool) -> Node3D:
 	body.mesh = plane
 	var m := ShaderMaterial.new()
 	m.shader = load("res://shaders/missile.gdshader")
-	m.set_shader_parameter("color", color)
+	m.set_shader_parameter("color", style.get("color", color))
+	m.set_shader_parameter("edge_color", color)
+	if style.has("core"):
+		m.set_shader_parameter("core_color", style.core)
+	m.set_shader_parameter("motif", style.get("motif", 0))
 	m.set_shader_parameter("accent", HARD_CC_COLOR)
 	m.set_shader_parameter("radius", radius_u)
 	m.set_shader_parameter("trail", trail_u)
@@ -2022,7 +2075,7 @@ func _update_missiles() -> void:
 		seen[key] = true
 		var world := Vector3(m.pos.x * UNITS_TO_METERS, 0.0, m.pos.y * UNITS_TO_METERS)
 		if not missile_nodes.has(key):
-			var node := _make_missile(m.side, m.radius, m.hard_cc)
+			var node := _make_missile(m.side, m.radius, m.hard_cc, m.get("champion", ""), m.get("action", ""))
 			add_child(node)
 			missile_nodes[key] = node
 			# Spawn streak (03a §7): enemy missiles are on T_input, their caster on T_interp; a
@@ -2041,11 +2094,34 @@ func _update_missiles() -> void:
 				_vfx_play(champ, action, "release", src, dir3, 0.0, "rel%d_%s" % [m.owner, action])
 				for e in _effects(champ, action, "projectile"):
 					vfx.decorate(node, e, float(m.radius) * UNITS_TO_METERS)
+					if e.kit == "grab" and owner != null:
+						# The chain from the caster's fist to the hand, restrung every frame.
+						var chain := MeshInstance3D.new()
+						chain.name = "Chain"
+						var cb := BoxMesh.new()
+						cb.size = Vector3(1, 0.05, 0.05)
+						chain.mesh = cb
+						var ramp: PackedColorArray = e.ramp
+						chain.material_override = _unshaded(ramp[ramp.size() - 1] if ramp.size() > 2 else ramp[0])
+						chain.top_level = true
+						node.add_child(chain)
+						node.set_meta("chain_owner", owner)
 				node.set_meta("vfx", [champ, action])
 		var node: Node3D = missile_nodes[key]
 		var dir: Vector2 = m.dir
 		node.position = world
 		node.rotation = Vector3(0, -atan2(dir.y, dir.x), 0)
+		if node.has_meta("chain_owner"):
+			var owner_node = node.get_meta("chain_owner")
+			var chain: MeshInstance3D = node.get_node_or_null("Chain")
+			if chain != null and is_instance_valid(owner_node):
+				var a: Vector3 = _socket_world(owner_node, "socket_projectile")
+				var b: Vector3 = world + Vector3(0, 0.35, 0)
+				var mid := (a + b) * 0.5
+				var span := b - a
+				chain.global_position = mid
+				chain.scale = Vector3(maxf(span.length(), 0.01), 1, 1)
+				chain.global_rotation = Vector3(0, -atan2(span.z, span.x), atan2(span.y, Vector2(span.x, span.z).length()))
 		node.get_node("Body").visible = not m.impact
 		node.get_node("Impact").visible = m.impact
 		for c in node.get_children():
@@ -2068,10 +2144,89 @@ func _update_missiles() -> void:
 
 ## Delayed ground AoE telegraph (05 §1): the outline appears at cast and the inside fills
 ## toward detonation, so you can read how long you have. Drawn at the true radius.
+var beam_nodes := {}                    # key -> Node3D
+
+
+## A channeled beam (Starfall Lance): one shaft of light from the caster's staff head to where
+## it stops, and under it a faint footprint of its gameplay width in the missile style (motif
+## `beam`: the champion's color inside, the team's on the edge, 14 §4.4). The footprint stays
+## faint: drawn bright, it read as a second beam beside the raised shaft whenever the beam ran
+## across the screen. Each strike flares where it lands.
+func _update_beams() -> void:
+	var seen := {}
+	for b in client.beams():
+		var key: int = b.key
+		seen[key] = true
+		var champ: String = b.get("champion", "")
+		var action: String = b.get("action", "")
+		var dir := Vector3(b.dir.x, 0, b.dir.y).normalized()
+		var length_u: float = b.length
+		var radius_u: float = b.radius
+		var start := Vector3(b.origin.x * UNITS_TO_METERS, 0.0, b.origin.y * UNITS_TO_METERS)
+		var end := start + dir * length_u * UNITS_TO_METERS
+		var node: Node3D = beam_nodes.get(key)
+		if node == null:
+			node = Node3D.new()
+			node.top_level = true
+			var ground := _make_missile(b.side, radius_u, false, champ, action)
+			ground.name = "Ground"
+			(ground.get_node("Body").material_override as ShaderMaterial).set_shader_parameter("dim", 0.18)
+			node.add_child(ground)
+			var style := _style(champ, action, "projectile", MISSILE_MOTIFS)
+			var core_color: Color = style.get("core", Color(1, 1, 0.9))
+			var glow_color: Color = style.get("color", _side_color(b.side))
+			for part in [["Glow", glow_color, 0.34, 0.55], ["Core", core_color, 0.14, 1.0]]:
+				var shaft := MeshInstance3D.new()
+				shaft.name = part[0]
+				var box := BoxMesh.new()
+				box.size = Vector3(1, part[2], part[2])
+				shaft.mesh = box
+				shaft.material_override = _unshaded(part[1], part[3])
+				shaft.top_level = true
+				node.add_child(shaft)
+			add_child(node)
+			beam_nodes[key] = node
+			node.set_meta("strikes", 0)
+			var owner_body = _body_of(b.owner)
+			var from: Vector3 = _socket_world(owner_body, "socket_projectile") if owner_body != null else start + Vector3(0, 1.2, 0)
+			_vfx_play(champ, action, "release", from, dir)
+		# The ground strip: a missile body whose head sits at the stop point and whose trail runs
+		# back to the caster.
+		var ground: Node3D = node.get_node("Ground")
+		ground.position = end
+		ground.rotation = Vector3(0, -atan2(dir.z, dir.x), 0)
+		var body: MeshInstance3D = ground.get_node("Body")
+		var trail_u := maxf(length_u - radius_u, 1.0)
+		var plane: PlaneMesh = body.mesh
+		plane.size = Vector2((radius_u + trail_u) * UNITS_TO_METERS, radius_u * 2.0 * UNITS_TO_METERS)
+		plane.center_offset = Vector3((radius_u - trail_u) * 0.5 * UNITS_TO_METERS, 0, 0)
+		(body.material_override as ShaderMaterial).set_shader_parameter("trail", trail_u)
+		# The shaft, from the staff head to the stop point at chest height, flickering.
+		var owner_body = _body_of(b.owner)
+		var a3: Vector3 = _socket_world(owner_body, "socket_projectile") if owner_body != null else start + Vector3(0, 1.2, 0)
+		var b3 := end + Vector3(0, 1.0, 0)
+		var span := b3 - a3
+		var flick := 1.0 + 0.18 * sin(Time.get_ticks_msec() * 0.04)
+		for name in ["Glow", "Core"]:
+			var shaft: MeshInstance3D = node.get_node(name)
+			shaft.global_position = (a3 + b3) * 0.5
+			shaft.scale = Vector3(maxf(span.length(), 0.01), flick, flick)
+			shaft.global_rotation = Vector3(0, -atan2(span.z, span.x), atan2(span.y, Vector2(span.x, span.z).length()))
+		# A strike: the champion's impact effect where the beam stops.
+		var strikes: int = b.strikes
+		if strikes > int(node.get_meta("strikes")):
+			node.set_meta("strikes", strikes)
+			_vfx_play(champ, action, "impact", b3 - Vector3(0, 0.7, 0), dir)
+	for key in beam_nodes.keys():
+		if not seen.has(key):
+			beam_nodes[key].queue_free()
+			beam_nodes.erase(key)
+
+
 var area_nodes := {}                    # key -> Node3D
 
 
-func _make_area(side: String, radius_u: float, hard_cc: bool) -> Node3D:
+func _make_area(side: String, radius_u: float, hard_cc: bool, champion := "", action := "") -> Node3D:
 	var node := MeshInstance3D.new()
 	var plane := PlaneMesh.new()
 	var d := radius_u * 2.0 * UNITS_TO_METERS
@@ -2079,7 +2234,12 @@ func _make_area(side: String, radius_u: float, hard_cc: bool) -> Node3D:
 	node.mesh = plane
 	var m := ShaderMaterial.new()
 	m.shader = load("res://shaders/area.gdshader")
-	m.set_shader_parameter("color", _side_color(side))
+	var style := _style(champion, action, "telegraph", TELEGRAPH_MOTIFS)
+	m.set_shader_parameter("color", style.get("color", _side_color(side)))
+	m.set_shader_parameter("edge_color", _side_color(side))
+	if style.has("core"):
+		m.set_shader_parameter("core", style.core)
+	m.set_shader_parameter("motif", style.get("motif", 0))
 	m.set_shader_parameter("radius", radius_u)
 	m.set_shader_parameter("rim_color", HARD_CC_COLOR)
 	m.set_shader_parameter("hard_cc", 1.0 if hard_cc else 0.0)
@@ -2097,7 +2257,7 @@ func _update_areas() -> void:
 		var action: String = a.get("action", "")
 		var tag := "area%d_%d_%d" % [a.get("owner", 0), roundi(a.center.x), roundi(a.center.y)]
 		if not area_nodes.has(key):
-			var node := _make_area(a.side, a.radius, a.get("hard_cc", false))
+			var node := _make_area(a.side, a.radius, a.get("hard_cc", false), champ, action)
 			add_child(node)
 			area_nodes[key] = node
 			var now := Time.get_ticks_msec() / 1000.0
@@ -2151,6 +2311,9 @@ func _update_bolts() -> void:
 				_vfx_play(champ, "attack", "release", src, Vector3(b.dir.x, 0, b.dir.y), 0.0, "atk%d" % b.owner)
 				for e in _effects(champ, "attack", "projectile"):
 					vfx.decorate(node, e, 0.09, 0.0)
+					# The bolt itself in the champion's color (14 §4.4).
+					var ramp: PackedColorArray = e.ramp
+					node.material_override = _unshaded(ramp[0])
 				node.set_meta("vfx", champ)
 		var bolt: Node3D = bolt_nodes[key]
 		bolt.position = Vector3(b.pos.x * UNITS_TO_METERS, 1.0, b.pos.y * UNITS_TO_METERS)
@@ -4460,6 +4623,7 @@ var _last_phase_seen := ""
 var pause_panel: PanelContainer
 var connecting_panel: PanelContainer
 var connecting_label: Label
+var connecting_trust: Button
 
 
 func _load_servers() -> Array:
@@ -4692,6 +4856,14 @@ func _update_connecting(phase: String) -> void:
 		connecting_label = Label.new()
 		connecting_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		v.add_child(connecting_label)
+		# A server whose key changed (07): say so plainly and let the player decide, in game.
+		connecting_trust = Button.new()
+		connecting_trust.text = "Trust the new key and connect"
+		connecting_trust.theme_type_variation = "DangerButton"
+		connecting_trust.tooltip_text = "Saves this server's new key in place of the old one. Do this only if you expected it to change."
+		connecting_trust.visible = false
+		connecting_trust.pressed.connect(_trust_new_key)
+		v.add_child(connecting_trust)
 		var cancel := Button.new()
 		cancel.text = "Back to the server list"
 		connecting_label.theme_type_variation = "HeaderLabel"
@@ -4699,7 +4871,19 @@ func _update_connecting(phase: String) -> void:
 		v.add_child(cancel)
 	var err: String = client.last_error()
 	connecting_label.text = "Connecting to %s…%s" % [_server_address, ("\n\n" + err) if err != "" else ""]
+	connecting_trust.visible = not client.key_conflict().is_empty()
 	_center(connecting_panel)
+	if _shot_trust and connecting_trust.visible:
+		_shot_trust = false
+		print("MFTR: trusting the new key")
+		_trust_new_key()
+
+
+## The player accepted a server's new key: save it, then connect again (without any pin the
+## address carried, which named the old key).
+func _trust_new_key() -> void:
+	if client.trust_new_key():
+		_connect(_server_address.split("#")[0])
 
 
 ## ---- Queues (13 §1): what to play on this server ---------------------------------------------

@@ -1,32 +1,48 @@
-// Wren's VFX (A14): steel and feathers. Quick bolts from her hand crossbow, Ricochet's bright
-// spinning bolt and spark, Caltrops tossed in a low arc and scattering on their true radius, dust
-// for her Pounce, and Hail of Arrows' volley falling over its area. Instances of the client's VFX
-// kit (05 §5.1); hand-authored; validated by `mftr-tools pack validate`.
+// Wren's VFX (A4b, 14 §4): lime. His bolts leave the crossbow in a lime spark and fly as bright
+// lime bolts; Ricochet goes off with a heavy flash and smear and flies as a fat lime bolt; the
+// caltrops' indicator is spiked and they land in a scatter of lime sparks; Pounce lands with
+// cracks and a star; Hail of Arrows marks its area with arrowheads, then arrows keep falling
+// across it for seconds. Instances of the client's VFX kit (05 §5.1); hand-authored
+// next to the export; validated by `mftr-tools pack validate`.
 (
     effects: [
-        (event: "attack.release", kit: "flare", ramp: [(0.96, 0.92, 0.8), (0.72, 0.64, 0.5), (0.4, 0.34, 0.26)], count: 5, lifetime: 0.1),
-        (event: "attack.projectile", kit: "arrow", ramp: [(0.86, 0.84, 0.8), (0.6, 0.5, 0.36), (0.36, 0.26, 0.16)]),
-        (event: "attack.impact", kit: "burst", ramp: [(0.94, 0.92, 0.86), (0.68, 0.64, 0.56), (0.36, 0.3, 0.24)], count: 8, speed: 2.6),
+        // Basic attack.
+        (event: "attack.release", kit: "flare", ramp: [(0.96, 1.0, 0.86), (0.70, 1.0, 0.24), (0.34, 0.56, 0.06)], count: 8, speed: 2.6),
+        (event: "attack.projectile", kit: "bolt", ramp: [(0.92, 1.0, 0.70), (0.66, 1.0, 0.20), (0.30, 0.50, 0.05)]),
+        (event: "attack.impact", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.80, 1.0, 0.44), (0.44, 0.70, 0.10)], count: 5, size: 0.7),
+        (event: "attack.impact", kit: "burst", ramp: [(0.96, 1.0, 0.86), (0.70, 1.0, 0.24), (0.34, 0.56, 0.06)], count: 10, speed: 2.8),
 
-        // Q Ricochet: a bright bolt and a spark where it bites.
-        (event: "q.release", kit: "flare", ramp: [(1.0, 0.96, 0.82), (0.86, 0.72, 0.44), (0.5, 0.36, 0.2)], count: 9),
-        (event: "q.projectile", kit: "arrow", ramp: [(1.0, 0.96, 0.84), (0.86, 0.74, 0.48), (0.5, 0.38, 0.22)]),
-        (event: "q.impact", kit: "burst", ramp: [(1.0, 0.96, 0.84), (0.9, 0.72, 0.4), (0.5, 0.34, 0.16)], count: 14, speed: 3.4),
+        // Q Ricochet: a muzzle flash, a heavy smear and smoke off the crossbow; a fat lime bolt;
+        // a hard hit with cracks.
+        (event: "q.release", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.86, 1.0, 0.50), (0.44, 0.70, 0.10)], count: 10, size: 1.4),
+        (event: "q.release", kit: "flare", ramp: [(1.0, 1.0, 0.92), (0.74, 1.0, 0.30), (0.36, 0.58, 0.06)], count: 22, speed: 5.0),
+        (event: "q.release", kit: "slash", ramp: [(1.0, 1.0, 0.92), (0.70, 1.0, 0.24), (0.34, 0.56, 0.06)], count: 22, size: 0.9, arc: 80, lifetime: 0.14),
+        (event: "q.release", kit: "dust", ramp: [(0.62, 0.62, 0.52), (0.46, 0.46, 0.40), (0.32, 0.32, 0.30)], count: 10, speed: 1.2, lifetime: 0.7),
+        (event: "q.projectile", kit: "bolt", ramp: [(1.0, 1.0, 0.86), (0.70, 1.0, 0.24), (0.34, 0.56, 0.06)], count: 3, speed: 0.6, lifetime: 0.3),
+        (event: "q.impact", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.80, 1.0, 0.44), (0.44, 0.70, 0.10)], count: 8, size: 1.2),
+        (event: "q.impact", kit: "burst", ramp: [(0.96, 1.0, 0.86), (0.70, 1.0, 0.24), (0.34, 0.56, 0.06)], count: 16, speed: 4.0),
+        (event: "q.impact", kit: "crack", ramp: [(0.86, 1.0, 0.56), (0.56, 0.90, 0.16), (0.26, 0.44, 0.05), (0.22, 0.20, 0.16)], count: 4, size: 0.8, lifetime: 0.8),
 
-        // W Caltrops: lobbed low, scattering in a ring of steel.
-        (event: "w.projectile", kit: "lob", ramp: [(0.82, 0.84, 0.88), (0.58, 0.6, 0.64), (0.36, 0.37, 0.4)]),
-        (event: "w.detonate", kit: "ring", ramp: [(0.86, 0.88, 0.92), (0.6, 0.62, 0.66), (0.36, 0.37, 0.4)], count: 20, speed: 0.8),
-        (event: "w.detonate", kit: "burst", ramp: [(0.86, 0.88, 0.92), (0.6, 0.62, 0.66), (0.34, 0.35, 0.38)], count: 12, speed: 2.4),
+        // W Caltrops: a spiked lime indicator.
+        (event: "w.telegraph", kit: "stars", ramp: [(0.86, 1.0, 0.56), (0.28, 0.46, 0.05)]),
+        (event: "w.projectile", kit: "lob", ramp: [(0.70, 1.0, 0.24), (0.30, 0.22, 0.12)]),
+        (event: "w.detonate", kit: "burst", ramp: [(0.96, 1.0, 0.86), (0.70, 1.0, 0.24), (0.34, 0.56, 0.06), (0.36, 0.34, 0.30)], count: 20, speed: 3.2),
+        (event: "w.detonate", kit: "shock", ramp: [(0.92, 1.0, 0.76), (0.66, 1.0, 0.20), (0.30, 0.50, 0.05)]),
+        (event: "w.detonate", kit: "ring", ramp: [(0.92, 1.0, 0.76), (0.66, 1.0, 0.20), (0.30, 0.50, 0.05)], speed: 1.0),
 
-        // E Pounce: dust at the spring and a burst on the landing.
-        (event: "e.start", kit: "dust", ramp: [(0.6, 0.56, 0.48), (0.48, 0.44, 0.38), (0.36, 0.34, 0.3)], count: 10),
-        (event: "e.land", kit: "burst", ramp: [(0.96, 0.92, 0.82), (0.7, 0.62, 0.48), (0.4, 0.32, 0.22)], count: 14, speed: 3.2),
-        (event: "e.land", kit: "dust", ramp: [(0.6, 0.56, 0.48), (0.48, 0.44, 0.38), (0.36, 0.34, 0.3)], count: 10, speed: 1.2),
+        // E Pounce: dust off the spring; on all fours: cracks, a star, dust.
+        (event: "e.start", kit: "dust", ramp: [(0.58, 0.52, 0.44), (0.46, 0.42, 0.37), (0.34, 0.32, 0.30)], count: 10, speed: 1.4),
+        (event: "e.land", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.80, 1.0, 0.44), (0.44, 0.70, 0.10)], count: 6),
+        (event: "e.land", kit: "crack", ramp: [(0.86, 1.0, 0.56), (0.56, 0.90, 0.16), (0.26, 0.44, 0.05), (0.22, 0.20, 0.16)], count: 5, size: 0.9, lifetime: 0.8),
+        (event: "e.land", kit: "dust", ramp: [(0.58, 0.52, 0.44), (0.46, 0.42, 0.37), (0.34, 0.32, 0.30)], count: 14, speed: 1.8),
 
-        // R Hail of Arrows: a flash at the sky shot, then the volley lands over the area.
-        (event: "r.fire", kit: "flare", ramp: [(1.0, 0.96, 0.84), (0.86, 0.74, 0.48), (0.5, 0.38, 0.22)], count: 12, speed: 2.0),
-        (event: "r.detonate", kit: "burst", ramp: [(0.96, 0.94, 0.88), (0.74, 0.66, 0.52), (0.46, 0.38, 0.28), (0.3, 0.26, 0.22)], count: 40, speed: 4.4, lifetime: 0.5),
-        (event: "r.detonate", kit: "ring", ramp: [(0.96, 0.9, 0.74), (0.74, 0.62, 0.4), (0.4, 0.32, 0.2)]),
-        (event: "r.detonate", kit: "dust", ramp: [(0.6, 0.56, 0.48), (0.48, 0.44, 0.38), (0.36, 0.34, 0.3)], count: 16, speed: 2.0, size: 1.4),
+        // R Hail of Arrows: the volley goes up off the crossbow; arrowheads mark the area; when it
+        // lands, arrows keep falling across it for seconds, bursting and kicking up dust.
+        (event: "r.fire", kit: "flare", ramp: [(1.0, 1.0, 0.92), (0.74, 1.0, 0.30), (0.36, 0.58, 0.06)], count: 16, speed: 3.6),
+        (event: "r.telegraph", kit: "arrows", ramp: [(0.90, 1.0, 0.60), (0.30, 0.50, 0.05)]),
+        (event: "r.detonate", kit: "rain", ramp: [(1.0, 1.0, 0.86), (0.70, 1.0, 0.24), (0.34, 0.56, 0.06)], count: 7, lifetime: 2.6),
+        (event: "r.detonate", kit: "burst", ramp: [(0.96, 1.0, 0.86), (0.70, 1.0, 0.24), (0.34, 0.56, 0.06)], count: 28, speed: 4.0),
+        (event: "r.detonate", kit: "crack", ramp: [(0.86, 1.0, 0.56), (0.56, 0.90, 0.16), (0.26, 0.44, 0.05), (0.22, 0.20, 0.16)], count: 8, size: 1.2, lifetime: 1.5),
+        (event: "r.detonate", kit: "dust", ramp: [(0.58, 0.52, 0.44), (0.46, 0.42, 0.37), (0.34, 0.32, 0.30)], count: 16, speed: 2.2, size: 1.3),
     ],
 )

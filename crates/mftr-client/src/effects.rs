@@ -1,8 +1,13 @@
-//! Delayed ground areas and basic-attack bolts: tracking and display timelines (03a §7).
+//! Delayed ground areas, channeled beams and basic-attack bolts: tracking and display
+//! timelines (03a §7).
 //!
 //! - **Areas:** enemy telegraphs are drawn on `T_input` from the first event, so the
 //!   detonation you see is when the server judges it against your own (predicted) position.
 //!   Own areas appear at once from prediction (also on `T_input`); allied ones on `T_interp`.
+//! - **Lingering areas** (damage over time) stay drawn, detonated, until their last strike.
+//! - **Beams** are drawn from their caster along the aim, to where the first enemy stands as
+//!   drawn (the server's own hits say what was struck). Own beams on `T_input`, others on
+//!   `T_interp`; an interrupted beam stops where the server says.
 //! - **Bolts** are homing and not dodgeable, so they only need to look right: own bolts leave
 //!   the hand on `T_input` (predicted), everyone else's fly on `T_interp`. All of them aim at
 //!   wherever the target is drawn.
@@ -10,7 +15,7 @@
 //! Damage is never predicted: health changes and numbers come from the server.
 
 use crate::missiles::Side;
-use mftr_sim::{Area, Bolt, SUBTICKS, SimDuration, SimTime, Team, UnitId, Vec2};
+use mftr_sim::{Area, Bolt, Channel, SUBTICKS, SimDuration, SimTime, Team, UnitId, Vec2};
 use std::collections::BTreeMap;
 
 /// How long a detonation flash stays visible (seconds).
@@ -42,6 +47,21 @@ pub struct AreaRender {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BeamRender {
+    pub key: u32,
+    pub side: Side,
+    pub origin: Vec2,
+    pub dir: Vec2,
+    /// From the origin to where it stops: the first enemy on it, else its full range.
+    pub length: f32,
+    pub radius: f32,
+    pub owner: UnitId,
+    pub slot: u8,
+    /// Strikes so far, counting the first (a new one starts a pulse of light).
+    pub strikes: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BoltRender {
     pub key: u32,
     pub side: Side,
@@ -64,6 +84,8 @@ pub struct EffectBook {
     /// Own areas predicted locally, by cast sequence.
     predicted_areas: BTreeMap<(u32, u8), Area>,
     bolts: BTreeMap<u32, TrackedBolt>,
+    /// Beams, with the instant they were interrupted, if they were.
+    beams: BTreeMap<u32, (Channel, Side, Option<SimTime>)>,
     /// Own bolts predicted locally, by launch instant.
     predicted_bolts: BTreeMap<SimTime, Bolt>,
 }
@@ -99,6 +121,17 @@ impl EffectBook {
         self.areas.insert(a.id, (a, side));
     }
 
+    pub fn on_beam(&mut self, c: Channel, own_unit: UnitId, own_team: Team) {
+        let side = side_of(c.owner, c.team, own_unit, own_team);
+        self.beams.insert(c.id, (c, side, None));
+    }
+
+    pub fn on_beam_interrupted(&mut self, id: u32, at: SimTime) {
+        if let Some(b) = self.beams.get_mut(&id) {
+            b.2 = Some(at);
+        }
+    }
+
     pub fn on_bolt(&mut self, b: Bolt, own_unit: UnitId, own_team: Team) {
         let side = side_of(b.owner, b.team, own_unit, own_team);
         if side == Side::Own {
@@ -124,7 +157,8 @@ impl EffectBook {
     pub fn forget_before(&mut self, t_interp: f64) {
         let now = st(t_interp);
         let flash = st(FLASH_SECONDS * 30.0);
-        self.areas.retain(|_, (a, _)| now < a.detonate_at.0 as f64 + flash);
+        self.areas.retain(|_, (a, _)| now < a.end_at().0 as f64 + flash);
+        self.beams.retain(|_, (c, ..)| now < c.end_at.0 as f64 + st(30.0));
         self.bolts.retain(|_, t| t.landed.is_none_or(|l| now < l.0 as f64 + st(1.0)));
         let stale = SimTime(st(t_interp - STALE_SECONDS * 30.0).max(0.0) as u64);
         self.prune_predicted(SimTime(u64::MAX), stale);
@@ -135,7 +169,7 @@ impl EffectBook {
         let mut push = |key: u32, a: &Area, side: Side| {
             let at = st(if side == Side::Ally { t_interp } else { t_input });
             let (s, d) = (a.spawn_at.0 as f64, a.detonate_at.0 as f64);
-            if at < s || at >= d + st(FLASH_SECONDS * 30.0) {
+            if at < s || at >= a.end_at().0 as f64 + st(FLASH_SECONDS * 30.0) {
                 return;
             }
             let progress = ((at - s) / (d - s).max(1.0)).min(1.0) as f32;
@@ -156,6 +190,33 @@ impl EffectBook {
         }
         for (id, (a, side)) in &self.areas {
             push(*id, a, *side);
+        }
+        out
+    }
+
+    /// Beams being channeled. `units` are the units as drawn this frame: `(id, team, radius,
+    /// position)`, for where each beam stops.
+    pub fn beams(&self, t_input: f64, t_interp: f64, units: &[(UnitId, Team, f32, Vec2)]) -> Vec<BeamRender> {
+        let mut out = Vec::new();
+        for (id, (c, side, cut)) in &self.beams {
+            let at = st(if *side == Side::Own { t_input } else { t_interp });
+            let end = cut.unwrap_or(c.end_at).min(c.end_at);
+            if at < c.spawn_at.0 as f64 || at >= end.0 as f64 {
+                continue;
+            }
+            let length = c.first_on_beam(units.iter().copied()).map_or(c.spec.range, |(_, along)| along);
+            let strikes = ((at - c.spawn_at.0 as f64) / c.spec.every.0.max(1) as f64) as u32 + 1;
+            out.push(BeamRender {
+                key: *id,
+                side: *side,
+                origin: c.origin,
+                dir: c.dir,
+                length,
+                radius: c.spec.radius,
+                owner: c.owner,
+                slot: c.slot,
+                strikes,
+            });
         }
         out
     }

@@ -91,12 +91,7 @@ def _mirror_part(p):
     bone, a, b, sides, prof, slot, color = p
     mb = bone[:-2] + "_r" if bone.endswith("_l") else bone
 
-    def mpt(pt):
-        if isinstance(pt[0], str):
-            return (pt[0][:-2] + "_r", pt[1])
-        return (-pt[0], pt[1], pt[2])
-
-    return (mb, mpt(a), mpt(b), sides, prof, slot, color)
+    return (mb, _mirror_point(a), _mirror_point(b), sides, prof, slot, color)
 
 
 def parts():
@@ -126,7 +121,12 @@ def _smooth(profile):
 
 
 def _resolve(pt):
-    return Vector(_bone_point(*pt) if isinstance(pt[0], str) else pt)
+    """A coordinate, a (bone, t) point along a bone, or (bone, t, (dx, dy, dz)): that point
+    moved by an offset in armature axes."""
+    if isinstance(pt[0], str):
+        base = Vector(_bone_point(pt[0], pt[1]))
+        return base + Vector(pt[2]) if len(pt) > 2 else base
+    return Vector(pt)
 
 
 def _loft(bm, a, b, sides, profile, mat, color, group, layers):
@@ -168,6 +168,139 @@ def _loft(bm, a, b, sides, profile, mat, color, group, layers):
             # Height-based occlusion in alpha: darker toward the ground (05 §2 cavity/AO).
             ao = max(0.55, min(1.0, 0.55 + 0.45 * vert.co.z / AO_HEIGHT))
             vert[col] = (*color, ao)
+
+
+def _loft_path(bm, centers, radii, sides, mat, color, group, layers, roll=0.0, ref=None, colors=None):
+    """A loft through `centers` (a polyline), one ring per point with (ru, rv) radii; (0, 0) is an
+    apex. The ring's `u` axis starts along `ref` (default: character X, or Z for paths lying
+    along X), turned by `roll` degrees about the path, and is carried along it (parallel
+    transport), so bent shapes (horns, plumes, curved blades) don't twist. `colors` optionally
+    gives one color per ring."""
+    deform, col = layers
+    n = len(centers)
+    tangents = []
+    for i in range(n):
+        a, b = centers[max(i - 1, 0)], centers[min(i + 1, n - 1)]
+        tangents.append((b - a).normalized())
+    if ref is None:
+        ref = Vector((1, 0, 0)) if abs(tangents[0].x) < 0.9 else Vector((0, 0, 1))
+    u = (Vector(ref) - tangents[0] * Vector(ref).dot(tangents[0])).normalized()
+    if roll:
+        from mathutils import Matrix
+        u = Matrix.Rotation(math.radians(roll), 3, tangents[0]) @ u
+    frames = []
+    for i in range(n):
+        if i:
+            # Parallel transport: rotate u by the turn between consecutive tangents.
+            q = tangents[i - 1].rotation_difference(tangents[i])
+            u = (q @ u)
+            u = (u - tangents[i] * u.dot(tangents[i])).normalized()
+        frames.append((u.copy(), tangents[i].cross(u)))
+    rings = []
+    for i, (c, (ru, rv)) in enumerate(zip(centers, radii)):
+        uu, vv = frames[i]
+        if ru == 0 and rv == 0:
+            rings.append([bm.verts.new(c)])
+            continue
+        ring = []
+        for k in range(sides):
+            ang = 2 * math.pi * (k + 0.5) / sides
+            ring.append(bm.verts.new(c + uu * (ru * math.cos(ang)) + vv * (rv * math.sin(ang))))
+        rings.append(ring)
+    faces = []
+    for r0, r1 in zip(rings, rings[1:]):
+        if len(r1) == 1 and len(r0) == 1:
+            continue
+        if len(r1) == 1:
+            faces += [bm.faces.new((r0[k], r0[(k + 1) % sides], r1[0])) for k in range(sides)]
+        elif len(r0) == 1:
+            faces += [bm.faces.new((r1[(k + 1) % sides], r1[k], r0[0])) for k in range(sides)]
+        else:
+            faces += [bm.faces.new((r0[k], r0[(k + 1) % sides], r1[(k + 1) % sides], r1[k])) for k in range(sides)]
+    if len(rings[0]) > 1:
+        faces.append(bm.faces.new(list(reversed(rings[0]))))
+    if len(rings[-1]) > 1:
+        faces.append(bm.faces.new(rings[-1]))
+    for f in faces:
+        f.material_index = mat
+        f.smooth = False
+    for i, ring in enumerate(rings):
+        c = colors[i] if colors else color
+        for vert in ring:
+            vert[deform][group] = 1.0
+            ao = max(0.55, min(1.0, 0.55 + 0.45 * vert.co.z / AO_HEIGHT))
+            vert[col] = (*c, ao)
+
+
+def path_part(bone, points, sides, radii, slot, color, roll=0.0, ref=None, colors=None):
+    """A part lofted along a polyline (14 §2.3): `points` are coordinates or (bone, t) pairs,
+    `radii` one (ru, rv) per point. Returns a builder for `build_mannequin`'s part list."""
+    def build(bm, layers, groups, mats):
+        _loft_path(bm, [_resolve(p) for p in points], radii, sides, mats[slot], color, groups[bone], layers,
+                   roll, ref, colors)
+    build.mftr_path = (bone, points, sides, radii, slot, color, roll, ref, colors)
+    return build
+
+
+def _mirror_point(p):
+    if isinstance(p[0], str):
+        if len(p) > 2:
+            return (_swap_side(p[0]), p[1], (-p[2][0], p[2][1], p[2][2]))
+        return (_swap_side(p[0]), p[1])
+    return (-p[0], p[1], p[2])
+
+
+def _swap_side(name):
+    if name.endswith("_l"):
+        return name[:-2] + "_r"
+    if name.endswith("_r"):
+        return name[:-2] + "_l"
+    return name
+
+
+def path_pair(bone, points, sides, radii, slot, color, roll=0.0, ref=None, colors=None):
+    """`path_part` for the left side and its mirror for the right."""
+    mref = None if ref is None else (-ref[0], ref[1], ref[2])
+    return [path_part(bone, points, sides, radii, slot, color, roll, ref, colors),
+            path_part(_swap_side(bone), [_mirror_point(p) for p in points], sides, radii, slot, color, -roll, mref, colors)]
+
+
+def box_part(bone, center, size, slot, color, rot=(0.0, 0.0, 0.0), taper=1.0, bevel=0.0):
+    """A block (14 §2.3): `size` (x, y, z) about `center` (a coordinate or (bone, t)), turned by
+    `rot` degrees (XYZ, armature axes); `taper` scales the top face; `bevel` cuts the vertical
+    edges (0–0.45 of the smaller side), an octagonal prism instead of a box."""
+    def build(bm, layers, groups, mats):
+        from mathutils import Euler
+        deform, col = layers
+        c = _resolve(center)
+        sx, sy, sz = size[0] / 2, size[1] / 2, size[2] / 2
+        b = bevel * min(sx, sy) * 2
+        if b > 0:
+            ring = [(sx - b, -sy), (sx, -sy + b), (sx, sy - b), (sx - b, sy), (-sx + b, sy), (-sx, sy - b), (-sx, -sy + b), (-sx + b, -sy)]
+        else:
+            ring = [(sx, -sy), (sx, sy), (-sx, sy), (-sx, -sy)]
+        m = Euler(tuple(math.radians(a) for a in rot), "XYZ").to_matrix()
+        lo = [bm.verts.new(c + m @ Vector((x, y, -sz))) for x, y in ring]
+        hi = [bm.verts.new(c + m @ Vector((x * taper, y * taper, sz))) for x, y in ring]
+        k = len(ring)
+        faces = [bm.faces.new((lo[i], lo[(i + 1) % k], hi[(i + 1) % k], hi[i])) for i in range(k)]
+        faces.append(bm.faces.new(list(reversed(lo))))
+        faces.append(bm.faces.new(hi))
+        for f in faces:
+            f.material_index = mats[slot]
+            f.smooth = False
+        for v in lo + hi:
+            v[deform][groups[bone]] = 1.0
+            ao = max(0.55, min(1.0, 0.55 + 0.45 * v.co.z / AO_HEIGHT))
+            v[col] = (*color, ao)
+    build.mftr_box = (bone, center, size, slot, color, rot, taper, bevel)
+    return build
+
+
+def box_pair(bone, center, size, slot, color, rot=(0.0, 0.0, 0.0), taper=1.0, bevel=0.0):
+    """`box_part` and its mirror (the rotation mirrored about X)."""
+    return [box_part(bone, center, size, slot, color, rot, taper, bevel),
+            box_part(_swap_side(bone), _mirror_point(center), size, slot, color, (rot[0], -rot[1], -rot[2]), taper, bevel)]
 
 
 def build_mannequin(armature, name="biped_v1_mannequin", collection=None, part_list=None):

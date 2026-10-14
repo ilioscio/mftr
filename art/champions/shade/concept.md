@@ -1,6 +1,6 @@
 # Shade — concept
 
-Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an owner brief, from the placeholder's "a sharp blade of a body with two forward blades".
+Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** (awaiting the owner's approval). Designed without an owner brief, from the placeholder's "a sharp blade of a body with two forward blades".
 
 ## Identity
 
@@ -10,22 +10,24 @@ Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an 
   - **E Veil Step:** a short dash out.
   - **R Execution:** a lunging finisher (ultimate).
 - **Personality in three words:** quiet, precise, cold.
-- **Silhouette class:** *shadow assassin*.
-  - Lean and fitted, in violet-black leathers, with a violet sash across the chest.
-  - A curved dagger in each hand.
-  - A long scarf in the team color on an `extra_scarf` chain (3 bones) that streams behind him: the team read, and his motion trail.
-- **Head:** the shared sculpted head, lean, with short dark hair and violet eyes. A dark mask covers his face from the nose down.
-- **Archetype:** `biped` v1, plus the `extra_scarf` chain. The daggers lie along the hand bones, so each pose aims them.
+- **Shape (14 §2):** *a blade*. Lean proportions on the `biped` bones (`SHAPE` in `build.py`: narrow, ×0.95, arms ×1.08, hands ×1.35), about 1.75 m to the hood's tip, always hunched forward. A tall pointed hood sweeping back into a point, a black mask with violet eyes burning out of it, a violet scarf streaming behind on an `extra_scarf` chain (3 bones), a spiked steel guard on his right shoulder only, two spare blades sheathed crossed on his back, kunai strapped to his thighs.
+- **Weapons:** two long curved hand blades held **forward**, punch-dagger style: each leaves the front of the fist past the knuckles and sweeps out to the thumb side, its edge glowing violet. (Held reversed along the forearm they read as bracers.)
+- **Gait (14 §3.6):** sneaky: low (a 26 cm crouch at a run), leaning 30°, arms swept back and low behind the hips (never up behind the back), the blades trailing.
 
-## Palette (10 §2)
+## Palette (14 §4)
+
+Signature: **violet** (275°).
 
 | Slot | Colors |
 |---|---|
-| skin | (0.78, 0.6, 0.5) |
-| cloth | violet-black leathers (0.17, 0.13, 0.2 / 0.1, 0.08, 0.12), a violet sash and cuffs (0.32, 0.22, 0.42), wraps (0.24, 0.2, 0.26), dark hair |
-| metal | steel blades (0.74, 0.76, 0.82) |
-| emissive | none: he hides in the dark |
-| accent | the scarf, wound at the neck and streaming behind |
+| cloth | black (0.06, 0.055, 0.09), indigo (0.12, 0.09, 0.20), violet cloth for the scarf and front flap (0.26, 0.10, 0.38), wraps (0.24, 0.21, 0.28), leather (0.18, 0.12, 0.10) |
+| metal | steel blades (0.42, 0.44, 0.50), dark steel guards (0.20, 0.21, 0.25) |
+| emissive | violet (0.78, 0.36, 1.0): eyes, blade edges, the scarf's end |
+| accent | a band at his waist |
+
+## Weight (14 §3)
+
+Slashes coil the cutting arm across the body, cock, and cut through in one frame on `fire`, the cut held out. Each of his three dashes ends with a hold: a cross-slash (Shadow Step), a long skid (Veil Step), both knives plunged down and left there (Execution). Feet planted by IK.
 
 ## Clip checklist (10 §5)
 
@@ -44,11 +46,7 @@ Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an 
 
 ## Effects and sounds
 
-- **VFX** (`export/shade.vfx.ron`):
-  - violet-white glints on his slashes;
-  - smoke for Veil Step;
-  - Fan of Blades' ring of glinting steel on its true radius;
-  - bursts where Shadow Step and Execution strike.
+- **VFX** (`export/shade.vfx.ron`), all violet (white → violet → deep violet): a thin level `slash`, a star and sparks on his cuts; a column of shadow (`pillar`) as he dashes away; a cross-`slash` and star when Shadow Step arrives; Fan of Blades rings him with a `slash` and runs a `shock` to its edge; Execution lands in a big `flash`, a `shock` and `crack`s.
 - **SFX** (`sounds.ron`), 10 sounds:
   - swishes and thin metallic slices;
   - a hushed rush of air for each step;

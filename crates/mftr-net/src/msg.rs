@@ -7,13 +7,13 @@
 use crate::bits::{BitReader, BitWriter, DecodeError};
 use crate::delta::{self, UnitUpdate};
 use crate::packet::PacketHeader;
-use mftr_sim::ability::{Cc, Damage, DamageKind, LineSkillshot, SLOTS};
+use mftr_sim::ability::{Beam, Cc, Damage, DamageKind, LineSkillshot, Pulses, SLOTS};
 use mftr_sim::items::INVENTORY;
 use mftr_sim::map::MapId;
 use mftr_sim::world::{BufferedCast, DamageOrigin, EchoCast, MAX_PATH, Path, Progress, Recovery, Rules, Trade, UNDO};
 use mftr_sim::{
-    Area, AttackWindup, Bolt, Cast, ChampionId, Command, CommandKind, DashMove, MinionKind, Missile, Order, PlayerId,
-    QPoint, SimDuration, SimEvent, SimTime, SubTick, Team, Tick, UnitId, UnitKind, UnitState, Vec2,
+    Area, AttackWindup, Bolt, Cast, ChampionId, Channel, Command, CommandKind, DashMove, MinionKind, Missile, Order,
+    PlayerId, QPoint, SimDuration, SimEvent, SimTime, SubTick, Team, Tick, UnitId, UnitKind, UnitState, Vec2,
 };
 
 const MAGIC: u8 = 0x4D; // 'M'
@@ -652,6 +652,76 @@ fn read_line_spec(r: &mut BitReader) -> Result<LineSkillshot, DecodeError> {
     Ok(LineSkillshot { windup, speed, radius, range, damage, cc })
 }
 
+fn write_damage(w: &mut BitWriter, d: &Damage) {
+    write_damage_kind(w, d.kind);
+    w.write_f32(d.base);
+    w.write_f32(d.ad_ratio);
+    w.write_f32(d.ap_ratio);
+}
+
+fn read_damage(r: &mut BitReader) -> Result<Damage, DecodeError> {
+    let kind = read_damage_kind(r)?;
+    Ok(Damage { kind, base: read_finite(r)?, ad_ratio: read_finite(r)?, ap_ratio: read_finite(r)? })
+}
+
+fn write_pulses(w: &mut BitWriter, p: &Pulses) {
+    w.write_u8(p.count);
+    write_duration(w, p.every);
+    w.write_f32(p.share);
+    write_cc(w, p.cc);
+}
+
+fn read_pulses(r: &mut BitReader) -> Result<Pulses, DecodeError> {
+    Ok(Pulses { count: r.read_u8()?, every: read_duration(r)?, share: read_finite(r)?, cc: read_cc(r)? })
+}
+
+fn write_channel(w: &mut BitWriter, c: &Channel) {
+    w.write_u32(c.id);
+    w.write_u32(c.owner.0);
+    write_team(w, c.team);
+    write_vec2(w, c.origin);
+    write_vec2(w, c.dir);
+    write_duration(w, c.spec.windup);
+    w.write_f32(c.spec.range);
+    w.write_f32(c.spec.radius);
+    write_duration(w, c.spec.duration);
+    write_duration(w, c.spec.every);
+    write_damage(w, &c.spec.damage);
+    write_cc(w, c.spec.cc);
+    write_time(w, c.spawn_at);
+    write_time(w, c.end_at);
+    w.write_f32(c.power);
+    w.write_u32(c.cast_seq);
+    w.write(c.slot as u64, 3);
+    w.write_u8(c.strikes);
+}
+
+fn read_channel(r: &mut BitReader) -> Result<Channel, DecodeError> {
+    let (id, owner, team) = (r.read_u32()?, UnitId(r.read_u32()?), read_team(r)?);
+    let (origin, dir) = (read_vec2(r)?, read_vec2(r)?);
+    let windup = read_duration(r)?;
+    let (range, radius) = (read_finite(r)?, read_finite(r)?);
+    let (duration, every) = (read_duration(r)?, read_duration(r)?);
+    if every.0 == 0 {
+        return Err(DecodeError::Invalid("beam spec"));
+    }
+    let spec = Beam { windup, range, radius, duration, every, damage: read_damage(r)?, cc: read_cc(r)? };
+    Ok(Channel {
+        id,
+        owner,
+        team,
+        origin,
+        dir,
+        spec,
+        spawn_at: read_time(r)?,
+        end_at: read_time(r)?,
+        power: read_finite(r)?,
+        cast_seq: r.read_u32()?,
+        slot: r.read(3)? as u8,
+        strikes: r.read_u8()?,
+    })
+}
+
 fn write_missile(w: &mut BitWriter, m: &Missile) {
     w.write_u32(m.id);
     w.write_u32(m.owner.0);
@@ -777,6 +847,8 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             write_cc(w, a.cc);
             w.write(a.shot as u64, 4);
             w.write(a.slot as u64, 3);
+            write_pulses(w, &a.pulses);
+            w.write_bool(a.lingering);
         }
         SimEvent::AreaDetonated { id, at } => {
             w.write(5, 5);
@@ -863,6 +935,15 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             w.write(18, 5);
             write_time(w, *at);
         }
+        SimEvent::BeamStarted(c) => {
+            w.write(19, 5);
+            write_channel(w, c);
+        }
+        SimEvent::BeamInterrupted { id, at } => {
+            w.write(20, 5);
+            w.write_u32(*id);
+            write_time(w, *at);
+        }
         SimEvent::Reward { unit, gold, xp, at } => {
             w.write(16, 5);
             w.write_u32(unit.0);
@@ -908,6 +989,8 @@ fn read_event_of(kind: u64, r: &mut BitReader) -> Result<SimEvent, DecodeError> 
             cc: read_cc(r)?,
             shot: r.read(4)? as u8,
             slot: r.read(3)? as u8,
+            pulses: read_pulses(r)?,
+            lingering: r.read_bool()?,
         }),
         5 => SimEvent::AreaDetonated { id: r.read_u32()?, at: read_time(r)? },
         6 => SimEvent::AttackLaunched(Bolt {
@@ -948,6 +1031,8 @@ fn read_event_of(kind: u64, r: &mut BitReader) -> Result<SimEvent, DecodeError> 
         16 => SimEvent::Reward { unit: unit(r)?, gold: read_finite(r)?, xp: r.read_u32()?, at: read_time(r)? },
         17 => SimEvent::PlatesBroken { unit: unit(r)?, count: r.read(3)? as u8, at: read_time(r)? },
         18 => SimEvent::HordeWon { at: read_time(r)? },
+        19 => SimEvent::BeamStarted(read_channel(r)?),
+        20 => SimEvent::BeamInterrupted { id: r.read_u32()?, at: read_time(r)? },
         _ => return Err(DecodeError::Invalid("event kind")),
     })
 }
@@ -2289,6 +2374,66 @@ mod tests {
         }
     }
 
+    /// Beams (start, interruption) and a lingering area's pulses survive the wire exactly.
+    #[test]
+    fn beam_events_and_area_pulses_round_trip() {
+        use mftr_sim::ability::Effect;
+        let beam = Channel {
+            id: 13,
+            owner: UnitId(3),
+            team: Team::Red,
+            origin: Vec2::new(5.0, 6.0),
+            dir: Vec2::new(1.0, 0.0),
+            spec: Beam {
+                windup: SimDuration::from_millis(850),
+                range: 1800.0,
+                radius: 70.0,
+                duration: SimDuration::from_millis(1500),
+                every: SimDuration::from_millis(250),
+                damage: Damage { kind: DamageKind::Magic, base: 280.0, ad_ratio: 0.0, ap_ratio: 1.1 },
+                cc: Cc::None,
+            },
+            spawn_at: SimTime(8_000),
+            end_at: SimTime(12_500),
+            power: 40.0,
+            cast_seq: 43,
+            slot: 3,
+            strikes: 0,
+        };
+        let Effect::Area(hail) = ChampionId::Wren.def().abilities[3].effect else { panic!() };
+        let events = [
+            SimEvent::BeamStarted(beam),
+            SimEvent::BeamInterrupted { id: 13, at: SimTime(9_000) },
+            SimEvent::AreaSpawned(Area {
+                id: 14,
+                owner: UnitId(5),
+                team: Team::Blue,
+                center: Vec2::new(1.0, 2.0),
+                radius: hail.radius,
+                spawn_at: SimTime(100),
+                detonate_at: SimTime(2_500),
+                kind: hail.damage.kind,
+                power: 90.0,
+                cast_seq: 7,
+                cc: hail.cc,
+                shot: 0,
+                slot: 3,
+                pulses: hail.pulses,
+                lingering: true,
+            }),
+        ];
+        let mut w = BitWriter::new();
+        for e in &events {
+            write_event(&mut w, e);
+        }
+        let bytes = w.finish();
+        let mut r = BitReader::new(&bytes);
+        for e in &events {
+            let kind = r.read(5).unwrap();
+            assert_eq!(read_event_of(kind, &mut r).unwrap(), *e);
+        }
+    }
+
     /// Every skillshot spec and CC kind of the six kits survives the wire exactly.
     #[test]
     fn every_kit_spec_and_cc_round_trips() {
@@ -2357,6 +2502,13 @@ mod tests {
             cc: Cc::Knockup(SimDuration::from_millis(1000)),
             shot: 4,
             slot: 1,
+            pulses: Pulses {
+                count: 5,
+                every: SimDuration::from_millis(500),
+                share: 0.25,
+                cc: Cc::Slow { pct: 30, duration: SimDuration::from_millis(600) },
+            },
+            lingering: false,
         };
         let bolt = Bolt {
             id: 12,

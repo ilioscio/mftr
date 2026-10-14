@@ -20,6 +20,7 @@ This is a living document. Each file covers one area. Record decisions in [DECIS
 | 09 | [Naming & Legal](09-naming-and-legal.md) | Legally distinct names, licensing, IP hygiene |
 | 10 | [Characters & Animation](10-characters-and-animation.md) | Faceted PS1 style, facing, action timing contract, the full animation set, rig standard, Blender pipeline, pilots |
 | 11 | [Content Packs & Mods](11-content-packs-and-mods.md) | Server-pushed packs, threat model, data-only format, validation, signatures, cache |
+| 14 | [Champion Art Direction](14-champion-art-direction.md) | Silhouette and heroic proportions, weight (blow timing, holds, grips), signature colors in model and effects, the roster's briefs |
 | — | [Decisions & Open Questions](DECISIONS.md) | Decision log and unresolved questions |
 
 ### Reference analyses
@@ -32,6 +33,7 @@ Measurements taken from captures of the reference game. The captures stay in the
 | R02 | [Allied champion pathing](reference/R02-video-allied-champion-pathing.md) | *Superseded by R03* (misread an ambiguous pass) |
 | R03 | [Allied champion collision](reference/R03-video-allied-champion-collision.md) | Champions block allied champions: stop at contact, path around (D23) |
 | R04 | [Facing and attack animation](reference/R04-video-facing-and-attack-animation.md) | Turn speed and latency, attack windup, release, cancellable follow-through, impact feedback |
+| R05 | [A heavy melee kit (Wukong)](reference/R05-video-wukong-abilities.md) | Silhouette and proportions, the blow's timing shape, impact holds, two-handed carries, one palette for model and effects |
 
 ## Conventions
 

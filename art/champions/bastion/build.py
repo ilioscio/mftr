@@ -1,368 +1,461 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Bastion (A8): the block-out generator for his model and clips.
+"""Bastion (rebuilt for 14): the generator for his model and clips.
 
     blender -b --python art/champions/bastion/build.py -- --out art/champions/bastion/bastion.blend
 
-A stone guardian: a golem of blocky masonry on the `biped` bones in the `large` shape (made
-bulkier still), iron-banded and mossy, with no face but a glowing rune visor. A chain grapple
-wraps his right fist and hangs to a hook; a stone slab shield rides his left forearm. Blocky
-four-sided segments throughout: he reads as a wall. Like the other block-outs this is a starting
-point: run once, then the .blend is the source of truth.
+A boulder (14 §5): a stone guardian whose shoulders stand above his head, on the `biped` bones
+in hulking proportions (short stumpy legs, a huge chest, long arms ending in boulder fists). Ice
+crystals grow from his back and shoulders and glow in his chest and visor: his signature is ice
+blue (14 §4). A chain wound round his right fist ends in the grapple's hook.
+
+Weight (14 §3): he stands hunched with his fists hanging low; blows wind up with the whole body,
+land in 1–2 frames and hold; the stomps and slams leave his fists in the ground a beat. Feet are
+planted by IK.
 """
 
+import math
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
-sys.path.insert(0, os.path.join(ROOT, "tools", "blender"))
+sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "blender")))
 
-import bpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
-from mftr_blender import clips, mesh, rig  # noqa: E402
-from mftr_blender.clips import merge, sym  # noqa: E402
-from mftr_blender.library import _clip, arms, cycle, run_half  # noqa: E402
+from mftr_blender import champion, clips, rig  # noqa: E402
+from mftr_blender.champion import arm, feet, hand  # noqa: E402
+from mftr_blender.clips import at, merge, sym  # noqa: E402
+from mftr_blender.library import _clip, gait  # noqa: E402
+from mftr_blender.mesh import box_part, path_part  # noqa: E402
 
-# Palette (concept.md): slate stone in three shades, moss, iron, a pale rune glow.
-STONE = (0.40, 0.42, 0.46)
-STONE_DARK = (0.28, 0.30, 0.33)
-STONE_LIGHT = (0.50, 0.52, 0.55)
-MOSS = (0.28, 0.40, 0.20)
-IRON = (0.26, 0.27, 0.30)
-RUNE = (0.55, 0.88, 1.0)
+# Warm granite, so the ice reads against it.
+STONE = (0.24, 0.22, 0.21)
+STONE_LIGHT = (0.32, 0.30, 0.27)
+STONE_DARK = (0.13, 0.12, 0.12)
+MOSS = (0.16, 0.27, 0.10)
+IRON = (0.11, 0.11, 0.13)
+ICE = (0.36, 0.78, 1.0)
+ICE_DEEP = (0.10, 0.40, 0.88)
 ACCENT = (0.18, 0.52, 0.95)
 
-SCALE, BULK = 1.08, 1.12  # on top of the large shape
-WIDE, DEEP = 1.22 * BULK, 1.18
+# Hulking (14 §2.2): low hips and short legs, the neck below the shoulder line, very broad and
+# deep, the shoulders pushed far out, long arms, huge hands.
+SHAPE = {
+    "heights": [(0.0, 0.0), (0.03, 0.03), (0.09, 0.09), (0.54, 0.42), (1.00, 0.84), (1.12, 0.98),
+                (1.26, 1.14), (1.40, 1.32), (1.56, 1.52), (1.64, 1.47), (1.88, 1.70), (2.15, 1.98)],
+    "x": 1.45, "y": 1.35, "scale": 1.12, "shoulder": 0.16, "arm": 1.22, "hand": 1.9,
+}
+rig.use_shape(SHAPE)
 
 
-def pt(p):
-    return p if isinstance(p[0], str) else rig.shaped(p)
-
-
-def part(bone, a, b, sides, prof, slot, color):
-    return (bone, pt(a), pt(b), sides, [(t, ru * WIDE, rv * DEEP) for t, ru, rv in prof], slot, color)
+def sp(p):
+    return rig.shaped(p)
 
 
 # --- Mesh -----------------------------------------------------------------------------------
 
+def cluster(bone, base, out, length, width, colors=(None, None, None), seed=0):
+    """Three faceted crystal shards growing from `base` (a point or bone point) along `out`
+    (armature space), the middle one longest, fanned apart."""
+    o = Vector(out).normalized()
+    side = o.cross(Vector((0, 0, 1)))
+    side = side.normalized() if side.length > 1e-3 else Vector((1, 0, 0))
+    up = side.cross(o).normalized()
+    parts = []
+    for k, (spread, lf, wf) in enumerate(((-0.45, 0.62, 0.7), (0.0, 1.0, 1.0), (0.5, 0.74, 0.78))):
+        d = (o + side * spread * 0.6 + up * (0.15 * ((k + seed) % 2) - 0.05)).normalized()
+        L, W = length * lf, width * wf
+        if isinstance(base[0], str):
+            pts = [(base[0], base[1], tuple(Vector(base[2] if len(base) > 2 else (0, 0, 0)) + d * f * L)) for f in (0.0, 0.45, 0.85, 1.0)]
+        else:
+            pts = [tuple(Vector(base) + d * f * L) for f in (0.0, 0.45, 0.85, 1.0)]
+        col = ICE if (k + seed) % 2 == 0 else ICE_DEEP
+        parts.append(path_part(bone, pts, 6, [(W, W * 0.85), (W * 0.95, W * 0.8), (W * 0.55, W * 0.5), (0, 0)], "emissive", col))
+    return parts
+
+
 def _center():
     return [
-        # Hips and belly: rounded boulders, the chest a great slab-sided rock.
-        part("pelvis", (0, 0, 0.86), (0, 0, 1.15), 8, [(0, .18, .14), (.3, .23, .17), (.75, .245, .18), (1, .22, .16)], "cloth", STONE_DARK),
-        part("spine_01", (0, 0.01, 1.11), (0, 0.0, 1.31), 8, [(0, .22, .16), (.5, .26, .19), (1, .25, .18)], "cloth", STONE),
-        part("spine_02", (0, 0, 1.27), (0, 0, 1.45), 8, [(0, .27, .19), (.5, .31, .21), (1, .32, .215)], "cloth", STONE),
-        part("chest", (0, 0.01, 1.42), (0, 0.02, 1.70), 8, [(0, .32, .22), (.3, .35, .24), (.7, .34, .23), (1, .26, .19)], "cloth", STONE_LIGHT),
-        part("spine_02", (0, 0, 1.40), (0, 0, 1.465), 8, [(0, .325, .222), (1, .33, .225)], "metal", IRON),
-        part("chest", (0.13, 0.02, 1.62), (0.16, 0.04, 1.73), 6, [(0, .13, .1), (.6, .12, .09), (1, .06, .05)], "cloth", MOSS),
-        part("chest", (-0.17, 0.05, 1.6), (-0.19, 0.06, 1.68), 6, [(0, .08, .07), (1, .04, .04)], "cloth", MOSS),
-        # A rune glowing on his chest, and a crack of light down from it.
-        part("chest", (0, -0.2, 1.55), (0, -0.235, 1.55), 4, [(0, .055, .055), (.5, .055, .055), (1, 0, 0)], "emissive", RUNE),
-        part("chest", (0.02, -0.215, 1.5), (0.04, -0.22, 1.43), 4, [(0, .012, .008), (1, .008, .006)], "emissive", RUNE),
-        # The team-colored banner hanging from an iron belt.
-        part("pelvis", (0, -0.17, 1.10), (0, -0.19, 0.72), 4, [(0, .15, .02), (1, .16, .02)], "accent", ACCENT),
-        part("pelvis", (0, 0, 1.09), (0, 0, 1.16), 8, [(0, .245, .178), (1, .245, .178)], "metal", IRON),
-        # The head: a rough rock set low between the shoulders, a heavy brow over a rune visor,
-        # a crown of moss.
-        part("head", (0, -0.02, 1.58), (0, -0.01, 1.86), 8, [(0, .12, .12), (.35, .145, .14), (.75, .13, .13), (1, .09, .09)], "cloth", STONE),
-        part("head", (0, -0.1, 1.78), (0, -0.16, 1.78), 6, [(0, .14, .04), (1, .12, .03)], "cloth", STONE_DARK),
-        part("head", (0, -0.125, 1.72), (0, -0.155, 1.72), 4, [(0, .1, .016), (1, .09, .013)], "emissive", RUNE),
-        part("head", (0, 0.0, 1.84), (0, 0.01, 1.9), 6, [(0, .11, .1), (1, .05, .05)], "cloth", MOSS),
+        # Boulder hips, belly and the great chest, broader at the top.
+        box_part("pelvis", sp((0, 0, 0.98)), (0.50, 0.42, 0.30), "cloth", STONE_DARK, bevel=0.35),
+        ("pelvis", sp((0, 0, 1.00)), sp((0, 0, 1.06)), 8, [(0, .29, .25), (1, .29, .25)], "accent", ACCENT),
+        box_part("spine_01", sp((0, 0, 1.18)), (0.58, 0.46, 0.30), "cloth", STONE, bevel=0.35),
+        box_part("spine_02", sp((0, 0.02, 1.40)), (0.84, 0.62, 0.40), "cloth", STONE, taper=1.12, bevel=0.38),
+        box_part("chest", sp((0, 0.04, 1.58)), (0.90, 0.62, 0.20), "cloth", STONE_LIGHT, taper=0.85, bevel=0.38),
+        # The crystal core in his chest, set in an iron ring.
+        path_part("chest", [sp((0, -0.26, 1.44)), sp((0, -0.38, 1.44)), sp((0, -0.48, 1.44))], 6,
+                  [(.15, .19), (.13, .16), (0, 0)], "emissive", ICE, ref=(1, 0, 0)),
+        path_part("chest", [sp((0, -0.25, 1.44)), sp((0, -0.30, 1.44))], 8, [(.19, .22), (.19, .22)], "metal", IRON, ref=(1, 0, 0)),
+        # Rock lumps across the back and belly.
+        box_part("spine_02", sp((0.22, 0.25, 1.30)), (0.20, 0.14, 0.18), "cloth", STONE_DARK, rot=(10, 20, 15), bevel=0.3),
+        box_part("spine_01", sp((0.18, 0.20, 1.12)), (0.16, 0.12, 0.14), "cloth", STONE, rot=(-10, 10, 25), bevel=0.3),
+        box_part("spine_01", sp((-0.18, 0.21, 1.14)), (0.15, 0.12, 0.14), "cloth", STONE_LIGHT, rot=(8, -12, -20), bevel=0.3),
+        box_part("spine_02", sp((-0.20, 0.27, 1.36)), (0.18, 0.14, 0.20), "cloth", STONE_LIGHT, rot=(-12, -10, 25), bevel=0.3),
+        box_part("spine_01", sp((0.10, -0.22, 1.14)), (0.20, 0.12, 0.14), "cloth", STONE_LIGHT, rot=(5, 15, -10), bevel=0.3),
+        # Crystals growing from his back: the silhouette's spikes.
+        path_part("chest", [sp((0.08, 0.22, 1.55)), sp((0.14, 0.42, 1.85)), sp((0.17, 0.50, 2.02))], 5,
+                  [(.08, .07), (.05, .045), (0, 0)], "emissive", ICE_DEEP),
+        path_part("chest", [sp((-0.12, 0.24, 1.50)), sp((-0.22, 0.46, 1.74)), sp((-0.28, 0.54, 1.86))], 5,
+                  [(.07, .06), (.045, .04), (0, 0)], "emissive", ICE),
+        path_part("spine_02", [sp((0.02, 0.26, 1.34)), sp((0.04, 0.50, 1.52)), sp((0.05, 0.60, 1.60))], 5,
+                  [(.06, .05), (.035, .03), (0, 0)], "emissive", ICE_DEEP),
+        path_part("chest", [sp((0.24, 0.20, 1.60)), sp((0.36, 0.38, 1.80)), sp((0.41, 0.44, 1.88))], 5,
+                  [(.06, .05), (.035, .03), (0, 0)], "emissive", ICE),
+        path_part("chest", [sp((-0.30, 0.18, 1.58)), sp((-0.42, 0.34, 1.82)), sp((-0.47, 0.40, 1.92))], 5,
+                  [(.07, .06), (.04, .035), (0, 0)], "emissive", ICE_DEEP),
+        path_part("spine_02", [sp((-0.18, 0.28, 1.28)), sp((-0.26, 0.50, 1.38)), sp((-0.29, 0.58, 1.42))], 5,
+                  [(.05, .045), (.03, .025), (0, 0)], "emissive", ICE),
+        box_part("pelvis", sp((0.18, -0.20, 0.92)), (0.16, 0.10, 0.14), "cloth", STONE_LIGHT, rot=(0, 10, 20), bevel=0.3),
+        box_part("pelvis", sp((-0.16, -0.21, 0.94)), (0.15, 0.10, 0.13), "cloth", STONE, rot=(0, -12, -15), bevel=0.3),
+        # Crystal clusters across his back.
+        *cluster("chest", sp((0.0, 0.26, 1.62)), (0.0, 0.5, 0.9), 0.36, 0.06, seed=0),
+        *cluster("spine_02", sp((0.20, 0.27, 1.40)), (0.4, 0.8, 0.5), 0.28, 0.05, seed=1),
+        *cluster("spine_02", sp((-0.20, 0.27, 1.38)), (-0.4, 0.8, 0.5), 0.26, 0.05, seed=2),
+        # Rock plates over his chest and belly.
+        *[box_part("spine_02", sp((x, -0.29, z)), (0.16, 0.06, 0.13), "cloth", c, rot=(r, 0, x * 40), bevel=0.3)
+          for x, z, r, c in ((0.16, 1.50, -8, STONE_LIGHT), (-0.16, 1.50, -8, STONE_LIGHT), (0.20, 1.33, 4, STONE), (-0.20, 1.33, 4, STONE))],
+        *[box_part("spine_01", sp((x, -0.24, 1.15)), (0.14, 0.05, 0.11), "cloth", STONE_DARK, rot=(0, 0, x * 30), bevel=0.3) for x in (0.11, -0.11)],
+        # Moss on the top of his back.
+        box_part("chest", sp((0, 0.12, 1.69)), (0.60, 0.34, 0.05), "cloth", MOSS, bevel=0.4),
     ]
 
 
 def _left():
     ua, fa, th, ca = "upperarm_l", "forearm_l", "thigh_l", "calf_l"
     return [
-        # Boulder shoulders, moss on top, a team-colored band of paint.
-        part(ua, (0.22, 0.0, 1.52), (0.42, 0.0, 1.72), 8, [(0, .13, .13), (.35, .18, .17), (.75, .16, .15), (1, 0, 0)], "cloth", STONE_LIGHT),
-        part(ua, (0.33, 0.0, 1.69), (0.36, 0.0, 1.77), 6, [(0, .1, .09), (1, .05, .05)], "cloth", MOSS),
-        part(ua, (0.29, 0.0, 1.5), (0.32, 0.0, 1.62), 8, [(0, .175, .165), (1, .175, .165)], "accent", ACCENT),
-        part(ua, (ua, 0), (ua, 1), 6, [(0, .11, .1), (.5, .12, .11), (1, .09, .09)], "cloth", STONE_DARK),
-        # Massive forearms with rune lines, iron bands, fists like boulders.
-        part(fa, (fa, -0.05), (fa, 1), 8, [(0, .11, .11), (.4, .13, .13), (.8, .145, .14), (1, .13, .13)], "cloth", STONE),
-        part(fa, (fa, .5), (fa, .58), 8, [(0, .15, .145), (1, .15, .145)], "metal", IRON),
-        part(fa, (fa, .15), (fa, .42), 4, [(0, .02, .145), (1, .02, .145)], "emissive", RUNE),
-        part("hand_l", ("hand_l", -0.2), ("hand_l", 1.5), 8, [(0, .1, .09), (.5, .12, .1), (1, .09, .08)], "cloth", STONE_DARK),
-        # Legs: thick pillars on wide rock feet, moss at the knees.
-        part(th, (0.11, 0, 1.0), (th, 1), 8, [(0, .13, .13), (.5, .12, .12), (1, .1, .1)], "cloth", STONE_DARK),
-        part(ca, (ca, -0.05), (ca, 1), 8, [(0, .1, .1), (.4, .12, .12), (1, .11, .11)], "cloth", STONE),
-        part(ca, (ca, -0.06), (ca, 0.08), 6, [(0, .12, .12), (1, .11, .11)], "cloth", MOSS),
-        part("foot_l", ("foot_l", -0.3), ("foot_l", 1.1), 8, [(0, .11, .062), (.5, .12, .06), (1, .1, .048)], "cloth", STONE_DARK),
-        part("toe_l", ("toe_l", 0), ("toe_l", 1), 6, [(0, .1, .026), (1, .08, .02)], "cloth", STONE_DARK),
+        # Boulder shoulders standing above his head, moss on top, a crystal from each.
+        path_part("clavicle_l", [("clavicle_l", 0.4, (0, 0, 0.12)), ("clavicle_l", 1.0, (0.04, 0, 0.20)),
+                                 ("clavicle_l", 1.0, (0.20, 0, 0.17)), ("clavicle_l", 1.0, (0.30, 0, 0.02)),
+                                 ("clavicle_l", 1.0, (0.32, 0, -0.10))],
+                  6, [(.24, .10), (.29, .16), (.30, .17), (.27, .13), (.20, .05)], "cloth", STONE_LIGHT, ref=(0, 1, 0)),
+        box_part("clavicle_l", ("clavicle_l", 1.0, (0.10, 0.02, 0.33)), (0.30, 0.34, 0.06), "cloth", MOSS, rot=(0, -18, 0), bevel=0.4),
+        path_part("clavicle_l", [("clavicle_l", 1.0, (0.12, 0.10, 0.30)), ("clavicle_l", 1.0, (0.20, 0.22, 0.56)),
+                                 ("clavicle_l", 1.0, (0.24, 0.27, 0.70))], 6, [(.09, .08), (.05, .045), (0, 0)], "emissive", ICE),
+        path_part("clavicle_l", [("clavicle_l", 1.0, (0.24, 0.04, 0.22)), ("clavicle_l", 1.0, (0.40, 0.10, 0.40)),
+                                 ("clavicle_l", 1.0, (0.46, 0.12, 0.47))], 5, [(.06, .05), (.035, .03), (0, 0)], "emissive", ICE_DEEP),
+        path_part("clavicle_l", [("clavicle_l", 1.0, (0.02, 0.16, 0.24)), ("clavicle_l", 1.0, (0.04, 0.34, 0.42)),
+                                 ("clavicle_l", 1.0, (0.05, 0.40, 0.48))], 5, [(.05, .045), (.03, .025), (0, 0)], "emissive", ICE),
+        *cluster("clavicle_l", ("clavicle_l", 1.0, (0.30, 0.0, 0.06)), (1.0, 0.1, 0.5), 0.24, 0.05, seed=1),
+        box_part("clavicle_l", ("clavicle_l", 1.0, (0.24, -0.16, 0.16)), (0.16, 0.06, 0.16), "cloth", MOSS, rot=(30, 0, 10), bevel=0.4),
+        # Arms: stacked stone, iron bands, the forearms swelling toward the fists.
+        (ua, (ua, 0), (ua, 1), 10, [(0, .17, .16), (.5, .18, .17), (1, .15, .15)], "cloth", STONE),
+        (fa, (fa, 0), (fa, 1), 10, [(0, .15, .15), (.6, .19, .18), (1, .2, .19)], "cloth", STONE_LIGHT),
+        (fa, (fa, .30), (fa, .40), 8, [(0, .175, .17), (1, .18, .175)], "metal", IRON),
+        box_part(fa, (fa, 0.2, (0.0, 0.12, 0.08)), (0.16, 0.10, 0.04), "cloth", MOSS, rot=(40, 0, 0), bevel=0.4),
+        (fa, (fa, .70), (fa, .78), 8, [(0, .205, .195), (1, .205, .195)], "metal", IRON),
+        (fa, (fa, .55), (fa, .62), 4, [(0, .03, .2), (1, .03, .2)], "emissive", ICE),
+        # Boulder fists.
+        box_part("hand_l", ("hand_l", 0.45), (0.38, 0.33, 0.36), "cloth", STONE_DARK, bevel=0.35),
+        box_part("fingers_l", ("fingers_l", 0.3), (0.36, 0.30, 0.20), "cloth", STONE, bevel=0.35),
+        box_part("thumb_l", ("thumb_l", 0.5), (0.14, 0.14, 0.14), "cloth", STONE_DARK, bevel=0.3),
+        box_part("fingers_l", ("fingers_l", 0.7, (0.09, -0.06, 0)), (0.10, 0.10, 0.10), "cloth", STONE_LIGHT, rot=(0, 20, 0), bevel=0.3),
+        box_part("fingers_l", ("fingers_l", 0.7, (-0.01, -0.08, 0)), (0.10, 0.10, 0.10), "cloth", STONE_LIGHT, rot=(0, -10, 0), bevel=0.3),
+        box_part("fingers_l", ("fingers_l", 0.7, (-0.10, -0.06, 0)), (0.10, 0.10, 0.10), "cloth", STONE_LIGHT, rot=(0, 10, 0), bevel=0.3),
+        box_part(ua, (ua, 0.2, (-0.02, -0.08, 0.04)), (0.11, 0.11, 0.12), "cloth", STONE_DARK, rot=(25, 0, 20), bevel=0.3),
+        # Rock lumps on the arms and a crystal on each forearm's back.
+        box_part(ua, (ua, 0.45, (0.10, 0.05, 0.02)), (0.12, 0.14, 0.14), "cloth", STONE_LIGHT, rot=(20, 10, 30), bevel=0.3),
+        box_part(fa, (fa, 0.35, (0.08, 0.10, 0.04)), (0.12, 0.12, 0.14), "cloth", STONE_DARK, rot=(-15, 25, 10), bevel=0.3),
+        *cluster(fa, (fa, 0.5, (0.04, 0.12, 0.02)), (0.3, 1.0, 0.4), 0.26, 0.045, seed=0),
+        # Short stumpy legs and boulder feet.
+        (th, sp((0.10, 0, 1.00)), (th, 1), 10, [(0, .20, .19), (.5, .19, .18), (1, .16, .16)], "cloth", STONE_DARK),
+        box_part(ca, (ca, 0.02, (0, -0.07, 0)), (0.24, 0.12, 0.20), "cloth", STONE_LIGHT, bevel=0.35),
+        box_part(th, (th, 0.4, (0.08, -0.04, 0)), (0.14, 0.14, 0.18), "cloth", STONE_LIGHT, rot=(10, 15, 25), bevel=0.3),
+        box_part(ca, (ca, 0.55, (0.06, 0.06, 0)), (0.12, 0.12, 0.14), "cloth", STONE_DARK, rot=(-10, 20, 10), bevel=0.3),
+        box_part(th, (th, 0.75, (-0.06, -0.08, 0)), (0.12, 0.12, 0.14), "cloth", STONE, rot=(15, -10, 20), bevel=0.3),
+        *cluster(ca, (ca, 0.05, (0.06, -0.06, 0.02)), (0.6, -0.6, 0.6), 0.16, 0.035, seed=0),
+        *cluster(th, (th, 0.1, (0.12, 0.02, 0.0)), (1.0, 0.2, 0.3), 0.18, 0.04, seed=1),
+        box_part("foot_l", ("foot_l", 0.2, (0.10, 0.04, 0.06)), (0.12, 0.14, 0.12), "cloth", STONE_LIGHT, rot=(0, 15, 20), bevel=0.3),
+        box_part("pelvis", sp((0.22, 0.06, 1.02)), (0.12, 0.18, 0.16), "cloth", STONE, rot=(0, 20, 0), bevel=0.3),
+        (ca, (ca, 0), (ca, 1), 10, [(0, .16, .16), (.6, .17, .17), (1, .19, .18)], "cloth", STONE),
+        box_part("foot_l", ("foot_l", 0.45), (0.28, 0.36, 0.18), "cloth", STONE_DARK, bevel=0.35),
+        box_part("toe_l", ("toe_l", 0.3), (0.27, 0.14, 0.12), "cloth", STONE, bevel=0.35),
     ]
 
 
-def _gear():
-    """The grapple on the right fist and the slab shield on the left forearm."""
-    # The bone table is already placed for the current shape.
-    hr = Vector(next(b[2] for b in rig.bone_table() if b[0] == "hand_r"))
-    ht = Vector(next(b[3] for b in rig.bone_table() if b[0] == "hand_r"))
-    tip = ht + (ht - hr).normalized() * 0.06
-    g = []
-    # Chain wound around the right forearm, a few links hanging from the fist, the hook.
-    for t in (0.25, 0.45, 0.65):
-        g.append(("forearm_r", ("forearm_r", t), ("forearm_r", t + 0.07), 4, [(0, .15 * WIDE, .15), (1, .15 * WIDE, .15)], "metal", IRON))
-    drop = Vector((0, 0, -0.42))
-    g.append(("hand_r", tuple(tip), tuple(tip + drop), 4, [(0, .022, .022), (1, .022, .022)], "metal", IRON))
-    hook = tip + drop
-    g.append(("hand_r", tuple(hook), tuple(hook + Vector((0, -0.1, -0.05))), 4, [(0, .03, .03), (1, .02, .02)], "metal", IRON))
-    g.append(("hand_r", tuple(hook + Vector((0, -0.1, -0.05))), tuple(hook + Vector((0, -0.12, 0.08))), 4, [(0, .02, .02), (1, 0, 0)], "metal", IRON))
-    # The slab shield, on the outside of the left forearm: long along the arm, wide front to
-    # back, thin; a team-colored emblem on its face.
-    fa = [b for b in rig.bone_table() if b[0] == "forearm_l"][0]
-    a, b = Vector(fa[2]), Vector(fa[3])
-    axis = (b - a).normalized()
-    out = Vector((1, 0, 0))
-    out = (out - axis * out.dot(axis)).normalized()
-    off = out * 0.17 * WIDE
-    g.append(("forearm_l", tuple(a + off - axis * 0.12), tuple(b + off + axis * 0.08), 6, [(0, .035, .28), (.1, .045, .32), (.9, .045, .32), (1, .035, .28)], "cloth", STONE_LIGHT))
-    g.append(("forearm_l", tuple(a + off * 1.25 + axis * 0.15), tuple(a + off * 1.25 + axis * 0.4), 4, [(0, .03, .12), (1, .03, .12)], "accent", ACCENT))
-    return g
+def _head():
+    hb = "head"
+    return [
+        # A rough block head under a heavy brow, a glowing visor slit, moss on the crown.
+        box_part(hb, sp((0, -0.06, 1.73)), (0.30, 0.30, 0.28), "cloth", STONE_LIGHT, taper=0.85, bevel=0.3),
+        box_part(hb, sp((0, -0.18, 1.81)), (0.34, 0.11, 0.08), "cloth", STONE_DARK, bevel=0.3),
+        box_part(hb, sp((0.10, -0.16, 1.86)), (0.10, 0.08, 0.03), "cloth", MOSS, rot=(10, 0, 15), bevel=0.4),
+        box_part(hb, sp((0, -0.215, 1.755)), (0.26, 0.03, 0.05), "emissive", ICE),
+        box_part(hb, sp((0, -0.05, 1.885)), (0.22, 0.24, 0.05), "cloth", MOSS, bevel=0.4),
+        box_part("neck", sp((0, 0, 1.60)), (0.24, 0.24, 0.12), "cloth", STONE_DARK, bevel=0.3),
+        # A crown of crystal breaking through the back of his skull.
+        *cluster(hb, sp((0.0, 0.04, 1.86)), (0.0, 0.35, 1.0), 0.22, 0.04, seed=1),
+    ]
+
+
+def _chain():
+    """The grapple's chain wound round the right fist, its hook hanging from the knuckles."""
+    hb = "hand_r"
+    return [
+        path_part(hb, [("hand_r", 0.15), ("hand_r", 0.32)], 8, [(.175, .17), (.175, .17)], "metal", IRON),
+        path_part("forearm_r", [("forearm_r", 0.9), ("forearm_r", 1.0)], 8, [(.215, .205), (.215, .205)], "metal", IRON),
+        # Chain links wound up the forearm.
+        *[box_part("forearm_r", ("forearm_r", 0.62 + 0.035 * k, (0.21 * math.cos(a), 0.21 * math.sin(a), 0.0)), (0.05, 0.05, 0.03), "metal", IRON,
+                   rot=(0, 0, math.degrees(a)), bevel=0.3)
+          for k, a in enumerate([2 * math.pi * i / 8 for i in range(8)])],
+        path_part(hb, [("fingers_r", 0.9, (0, -0.05, -0.05)), ("fingers_r", 0.9, (0.0, -0.10, -0.20)),
+                       ("fingers_r", 0.9, (-0.06, -0.16, -0.24)), ("fingers_r", 0.9, (-0.08, -0.20, -0.17))], 5,
+                  [(.025, .025), (.03, .03), (.03, .03), (0, 0)], "metal", IRON),
+    ]
 
 
 def parts():
-    left = _left()
-    out = _center() + left + [mesh._mirror_part(p) for p in left]
-    # Rounded rocks get extra sides and smoothed in-between rings, like the other models.
-    out = [(b, a, e, s + 2 if s >= 8 else s, mesh._smooth(prof) if s >= 6 else prof, slot, col) for b, a, e, s, prof, slot, col in out]
-    return out + _gear()
+    return _center() + champion.mirrored(_left()) + _head() + _chain()
 
 
 # --- Poses ----------------------------------------------------------------------------------
 
-STAND = merge(sym("thigh", -3, -6, 0), sym("calf", 6, 0, 0), sym("foot", -3, 0, 0), {"spine_01": (4, 0, 0)})
-CROUCH = merge(sym("thigh", -18, -8, 0), sym("calf", 30, 0, 0), sym("foot", -12, 0, 0), {"spine_01": (12, 0, 0), "spine_02": (4, 0, 0)})
-HEAVY = arms((0.45, 0.1, -0.9), (0.3, 0.4, -0.85))
-GUARD = arms((0.3, 0.6, -0.5), (-0.5, 0.8, 0.2), (0.4, 0.4, -0.7), (0.1, 0.9, -0.2))
-READY = merge(CROUCH, GUARD)
-DOWN = {"pelvis": (0, 0, -0.07)}
+STAND_FEET = feet((0.30, 0.06), (0.30, -0.08))
+HUNCH = {"spine_01": (14, 0, 0), "spine_02": (6, 0, 0), "chest": (4, 0, 0), "head": (-18, 0, 0)}
 
 
-def arm_r(out, fwd, up, f_out, f_fwd, f_up):
-    return {"upperarm_r": clips.aim(out, fwd, up, "r"), "forearm_r": clips.aim(f_out, f_fwd, f_up, "r")}
+def fists_low(spread=0.62, fwd=0.20, up=0.80):
+    """Both fists hanging low in front of his thighs, knuckles forward."""
+    return merge(hand("l", at(spread, fwd, up, "l"), aim=at(0.1, 0.3, -1, "l")),
+                 hand("r", at(spread, fwd, up, "r"), aim=at(0.1, 0.3, -1, "r")))
 
 
-def arm_l(out, fwd, up, f_out, f_fwd, f_up):
-    return {"upperarm_l": clips.aim(out, fwd, up), "forearm_l": clips.aim(f_out, f_fwd, f_up)}
+IDLE = merge(STAND_FEET, HUNCH, fists_low())
+GUARD = merge(feet((0.32, 0.18), (0.32, -0.12)), HUNCH, {"spine_01": (18, 0, 0)},
+              hand("l", at(0.30, 0.55, 1.45, "l"), aim=at(-0.2, 0.6, 0.6, "l")),
+              hand("r", at(0.34, 0.35, 1.35, "r"), aim=at(-0.2, 0.6, 0.6, "r")))
+GUARD_DOWN = {"pelvis": (0, 0, -0.10)}
 
 
-# --- Clips ----------------------------------------------------------------------------------
-
-def idle(arm):
-    a = merge(STAND, HEAVY, {"head": (-2, 0, 0)})
-    b = merge(STAND, HEAVY, sym("clavicle", 0, -3, 0), {"head": (-4, 0, 6), "chest": (-2, 0, 0)})
-    return _clip(arm, "idle", 90, [(0, a, None), (45, b, {"pelvis": (0, 0, 0.015)})], loop=True)
+def idle(armature):
+    breathe = merge(IDLE, sym("clavicle", 0, -6, 0), {"chest": (0, 0, 0), "head": (-22, 0, 0)})
+    return _clip(armature, "idle", 80, [(0, IDLE, {"pelvis": (0, 0, -0.03)}), (40, breathe, {"pelvis": (0, 0, -0.01)})], loop=True)
 
 
-def idle_fidget_1(arm):
-    # Grinds his head side to side; dust would sift off.
-    base = merge(STAND, HEAVY)
-    keys = [(0, base, None), (14, merge(base, {"head": (0, 18, 0), "neck": (0, 8, 0)}), None), (30, merge(base, {"head": (0, -18, 0), "neck": (0, -8, 0)}), None),
-            (44, merge(base, {"head": (-10, 0, 0)}), None), (60, base, None)]
-    return _clip(arm, "idle_fidget_1", 60, keys)
+def idle_fidget_1(armature):
+    # Rolls his great shoulders, one then the other, grinding stone.
+    keys = [(0, IDLE, None), (14, merge(IDLE, {"clavicle_l": (0, -14, 0), "chest": (0, 6, 0)}), None),
+            (28, merge(IDLE, {"clavicle_r": (0, 14, 0), "chest": (0, -6, 0)}), None), (42, merge(IDLE, sym("clavicle", 0, -10, 0)), {"pelvis": (0, 0, 0.02)}),
+            (56, IDLE, None)]
+    return _clip(armature, "idle_fidget_1", 56, keys)
 
 
-def idle_fidget_2(arm):
-    # Raps his fist on his shield.
-    base = merge(STAND, HEAVY)
-    shield_up = arm_l(0.2, 0.6, -0.3, -0.6, 0.6, 0.3)
-    keys = [(0, base, None), (12, merge(STAND, shield_up, arm_r(0.35, 0.3, -0.6, -0.3, 0.8, 0.1)), None)]
-    for i in range(3):
-        keys += [(16 + 8 * i, merge(STAND, shield_up, arm_r(0.3, 0.4, -0.5, -0.6, 0.7, 0.0)), None),
-                 (20 + 8 * i, merge(STAND, shield_up, arm_r(0.35, 0.3, -0.6, -0.3, 0.8, 0.1)), None)]
-    keys += [(52, base, None)]
-    return _clip(arm, "idle_fidget_2", 52, keys)
+def idle_fidget_2(armature):
+    # Pounds his fists together twice; each blow lands and holds.
+    meet = merge(STAND_FEET, HUNCH, hand("l", at(0.10, 0.62, 1.20, "l"), aim=at(-1, 0.2, 0, "l")),
+                 hand("r", at(0.10, 0.62, 1.20, "r"), aim=at(-1, 0.2, 0, "r")))
+    apart = merge(STAND_FEET, HUNCH, hand("l", at(0.62, 0.55, 1.30, "l"), aim=at(0.2, 0.6, 0.2, "l")),
+                  hand("r", at(0.62, 0.55, 1.30, "r"), aim=at(0.2, 0.6, 0.2, "r")))
+    keys = [(0, IDLE, None), (10, apart, None, "whip"), (13, meet, {"pelvis": (0, 0, -0.04)}), (18, meet, {"pelvis": (0, 0, -0.04)}),
+            (24, apart, None, "whip"), (27, meet, {"pelvis": (0, 0, -0.05)}), (33, meet, {"pelvis": (0, 0, -0.05)}), (48, IDLE, None)]
+    return _clip(armature, "idle_fidget_2", 48, keys)
 
 
-def idle_ready(arm):
-    keys = [(0, READY, DOWN), (24, merge(READY, {"spine_01": (15, 0, 0)}), {"pelvis": (0, 0, -0.09)})]
-    return _clip(arm, "idle_ready", 48, keys, loop=True)
+def idle_ready(armature):
+    keys = [(0, GUARD, GUARD_DOWN), (20, merge(GUARD, {"spine_01": (21, 0, 0)}), {"pelvis": (0, 0, -0.12)})]
+    return _clip(armature, "idle_ready", 40, keys, loop=True)
 
 
-def _run(frames, legs_scale, lean):
-    keys = []
-    for f, pose, locs in cycle(run_half(), 20):
-        p = {k: ((v[0] * legs_scale, v[1], v[2]) if k.split("_")[0] in ("thigh", "calf", "foot") and isinstance(v, tuple) else v)
-             for k, v in pose.items()}
-        p["spine_01"] = (lean, 0, pose.get("spine_01", (0, 0, 0))[2])
-        keys.append((round(f * frames / 20), p, locs))
-    return keys
+def _run_upper(swing):
+    def upper(p):
+        c = math.cos(2 * math.pi * p)
+        return merge(arm("l", 0.5, -0.5 * swing * c, -0.75, 0.2, 0.45 - 0.4 * swing * c, -0.65),
+                     arm("r", 0.5, 0.5 * swing * c, -0.75, 0.2, 0.45 + 0.4 * swing * c, -0.65),
+                     {"head": (-20, 0, 0), "chest": (4, 0, 0)})
+    return upper
 
 
-def run(arm):
-    return _clip(arm, "run", 20, _run(20, 0.85, 14), loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=335.0)
+
+def walk(armature):
+    # A walk (heavy slows, and the moment a run comes to a stop): the run's body type, slower,
+    # the weapon carried as in it, never hanging into the ground (14 §3.6).
+    keys = gait(32, 0.90, contact=0.6, lift=0.10, bob=0.02, lean=10, twist=6, width=0.31, crouch=0.04, upper=_run_upper(0.4))
+    return _clip(armature, "walk", 32, keys, loop=True, markers={"foot_l": 0, "foot_r": 16}, stride_speed=140.0)
+
+def run(armature):
+    keys = gait(20, 1.0, contact=0.45, lift=0.18, bob=0.07, lean=16, twist=12, width=0.31, crouch=0.05, upper=_run_upper(1.0))
+    return _clip(armature, "run", 20, keys, loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=335.0)
 
 
-def run_fast(arm):
-    return _clip(arm, "run_fast", 16, _run(16, 1.05, 18), loop=True, markers={"foot_l": 0, "foot_r": 8}, stride_speed=450.0)
+def run_fast(armature):
+    keys = gait(16, 0.96, contact=0.40, lift=0.22, bob=0.08, lean=21, twist=14, width=0.31, crouch=0.06, upper=_run_upper(1.3))
+    return _clip(armature, "run_fast", 16, keys, loop=True, markers={"foot_l": 0, "foot_r": 8}, stride_speed=450.0)
 
 
-def attack_1(arm):
-    # A hammer-fist: the right fist rises and comes down on `fire` (sim: 13.8).
-    up = merge(CROUCH, arm_r(0.4, -0.1, 0.8, 0.0, 0.3, 1), arm_l(0.3, 0.6, -0.5, -0.5, 0.8, 0.2), {"spine_02": (-8, 0, -10)})
-    hit = merge(CROUCH, arm_r(0.2, 0.9, -0.3, 0.0, 0.8, -0.6), arm_l(0.4, 0.2, -0.8, 0.2, 0.5, -0.8), {"spine_01": (18, 0, 0), "spine_02": (8, 0, 10)})
-    keys = [(0, READY, DOWN), (8, up, {"pelvis": (0, 0.02, -0.03)}), (14, hit, {"pelvis": (0, -0.06, -0.12)}), (20, hit, {"pelvis": (0, -0.06, -0.12)}), (32, READY, DOWN)]
-    return _clip(arm, "attack_1", 32, keys, markers={"fire": 14})
+def attack_1(armature):
+    # A right hook: wind back with the whole body, cock, the fist lands in 2 frames on `fire`
+    # (sim: 14) and stays there, then a heavy return.
+    st = feet((0.32, 0.20), (0.32, -0.16))
+    wind = merge(st, HUNCH, {"pelvis": (0, 0, -22), "spine_01": (16, 0, -24), "spine_02": (6, 0, -14), "head": (-18, 0, 20)},
+                 hand("r", at(0.75, -0.30, 1.25, "r"), aim=at(0.2, -0.6, 0.3, "r")), hand("l", at(0.35, 0.55, 1.35, "l"), aim=at(-0.2, 0.6, 0.6, "l")))
+    cock = merge(wind, {"pelvis": (0, 0, -28), "spine_01": (16, 0, -32)}, hand("r", at(0.70, -0.50, 1.20, "r"), aim=at(0.3, -0.6, 0.2, "r")))
+    hit = merge(feet((0.32, 0.34), (0.32, -0.22)), HUNCH, {"pelvis": (0, 0, 18), "spine_01": (20, 0, 26), "spine_02": (6, 0, 16), "head": (-16, 0, -20)},
+                hand("r", at(0.05, 1.45, 1.10, "r"), aim=at(-0.1, 1, 0, "r")), hand("l", at(0.55, 0.0, 1.15, "l"), aim=at(0.1, -0.4, 0.4, "l")))
+    keys = [(0, GUARD, GUARD_DOWN), (8, wind, {"pelvis": (0, 0.03, -0.12)}), (12, cock, {"pelvis": (0, 0.04, -0.13)}, "snap"),
+            (14, hit, {"pelvis": (0, -0.08, -0.15)}), (20, merge(hit, {"spine_01": (22, 0, 28)}), {"pelvis": (0, -0.08, -0.16)}, "settle"),
+            (32, GUARD, GUARD_DOWN)]
+    return _clip(armature, "attack_1", 32, keys, markers={"fire": 14})
 
 
-def attack_2(arm):
-    # A shield bash with the left arm.
-    wind = merge(CROUCH, arm_l(0.5, -0.3, -0.3, 0.4, 0.2, -0.2), arm_r(0.35, 0.4, -0.6, 0.0, 0.8, -0.2), {"spine_02": (0, 0, 22)})
-    bash = merge(CROUCH, arm_l(0.1, 1, 0.0, -0.4, 0.9, 0.1), arm_r(0.45, -0.1, -0.8, 0.3, 0.2, -0.8), {"spine_02": (8, 0, -18)}, {"thigh_l": (-30, 0, 0), "calf_l": (30, 0, 0)})
-    keys = [(0, READY, DOWN), (8, wind, DOWN), (14, bash, {"pelvis": (0, -0.08, -0.08)}), (20, bash, {"pelvis": (0, -0.08, -0.08)}), (32, READY, DOWN)]
-    return _clip(arm, "attack_2", 32, keys, markers={"fire": 14})
+def attack_2(armature):
+    # Both fists raised high, held, then hammered down in front on `fire` (sim: 14); they stay
+    # in the ground a beat.
+    st = feet((0.32, 0.18), (0.32, -0.12))
+    up = merge(st, {"spine_01": (-4, 0, 0), "spine_02": (-10, 0, 0), "head": (-10, 0, 0)},
+               hand("l", at(0.18, 0.15, 2.35, "l"), aim=at(-0.4, -0.2, 1, "l")), hand("r", at(0.18, 0.15, 2.35, "r"), aim=at(-0.4, -0.2, 1, "r")))
+    cock = merge(up, {"spine_02": (-16, 0, 0)}, hand("l", at(0.16, -0.05, 2.3, "l"), aim=at(-0.4, -0.5, 0.8, "l")),
+                 hand("r", at(0.16, -0.05, 2.3, "r"), aim=at(-0.4, -0.5, 0.8, "r")))
+    hit = merge(feet((0.34, 0.30), (0.34, -0.16)), {"spine_01": (34, 0, 0), "spine_02": (14, 0, 0), "head": (-26, 0, 0)},
+                hand("l", at(0.16, 1.20, 0.30, "l"), aim=at(-0.2, 0.5, -1, "l")), hand("r", at(0.16, 1.20, 0.30, "r"), aim=at(-0.2, 0.5, -1, "r")))
+    keys = [(0, GUARD, GUARD_DOWN), (7, up, {"pelvis": (0, 0.02, 0.03)}), (11, cock, {"pelvis": (0, 0.03, 0.02)}, "snap"),
+            (14, hit, {"pelvis": (0, -0.10, -0.30)}), (21, merge(hit, {"spine_01": (36, 0, 0)}), {"pelvis": (0, -0.10, -0.31)}, "settle"),
+            (32, GUARD, GUARD_DOWN)]
+    return _clip(armature, "attack_2", 32, keys, markers={"fire": 14})
 
 
-def q(arm):
-    # Grapple: the hook swung back, flung forward on `fire` (sim 10.5), then hauled in.
-    swing = merge(CROUCH, arm_r(0.6, -0.5, 0.3, 0.5, -0.3, 0.6), arm_l(0.3, 0.6, -0.5, -0.5, 0.8, 0.2), {"spine_02": (-4, 0, -25)})
-    fling = merge(CROUCH, arm_r(0.1, 1, 0.2, 0.0, 1, 0.25), arm_l(0.4, 0.2, -0.8, 0.2, 0.5, -0.8), {"spine_02": (8, 0, 18)}, {"thigh_l": (-26, 0, 0), "calf_l": (24, 0, 0)})
-    haul = merge(CROUCH, arm_r(0.4, 0.1, -0.5, -0.3, 0.2, 0.4), arm_l(0.4, 0.2, -0.8, 0.2, 0.5, -0.8), {"spine_01": (-6, 0, 0), "spine_02": (-6, 0, -10)})
-    keys = [(0, READY, DOWN), (6, swing, DOWN), (11, fling, {"pelvis": (0, -0.05, -0.08)}), (18, fling, {"pelvis": (0, -0.05, -0.08)}),
-            (26, haul, {"pelvis": (0, 0.06, -0.06)}), (34, READY, DOWN)]
-    return _clip(arm, "q", 34, keys, markers={"fire": 11})
+def q(armature):
+    # Grapple: the hook swung back, then hurled down the line on `fire` (sim: 11), the arm
+    # flung out after it; then he leans back and hauls the chain in hand over fist.
+    st = feet((0.32, 0.22), (0.32, -0.18))
+    wind = merge(st, HUNCH, {"pelvis": (0, 0, -18), "spine_01": (10, 0, -22), "head": (-14, 0, 18)},
+                 hand("r", at(0.85, -0.55, 1.55, "r"), aim=at(0.3, -0.6, 0.6, "r")), hand("l", at(0.45, 0.6, 1.3, "l"), aim=at(0, 1, 0.2, "l")))
+    # The throw: the arm flung all the way out, the hand open at the end of it (the grab flies
+    # from it as an open stone hand); then the fists close as he hauls.
+    throw = merge(feet((0.32, 0.34), (0.32, -0.22)), HUNCH, {"pelvis": (0, 0, 16), "spine_01": (20, 0, 20), "head": (-16, 0, -14)},
+                  hand("r", at(0.15, 1.70, 1.30, "r"), aim=at(0, 1, 0.05, "r")), hand("l", at(0.6, -0.1, 1.1, "l"), aim=at(0.3, -0.5, 0, "l")),
+                  {"fingers_r": (-35, 0, 0), "thumb_r": (-30, 0, 0)}, sym("clavicle", 0, 0, 0), {"clavicle_r": (0, 0, 14)})
+    haul1 = merge(feet((0.32, 0.30), (0.32, -0.30)), {"spine_01": (-6, 0, 6), "spine_02": (-6, 0, 0), "head": (-6, 0, 0)}, sym("fingers", 75, 0, 0),
+                  hand("r", at(0.30, 0.35, 1.20, "r"), aim=at(0, 1, 0.2, "r")), hand("l", at(0.15, 0.95, 1.25, "l"), aim=at(-0.2, 1, 0, "l")))
+    haul2 = merge(feet((0.32, 0.30), (0.32, -0.30)), {"spine_01": (-10, 0, -6), "spine_02": (-8, 0, 0), "head": (-4, 0, 0)}, sym("fingers", 75, 0, 0),
+                  hand("l", at(0.35, 0.30, 1.20, "l"), aim=at(0, 1, 0.2, "l")), hand("r", at(0.15, 0.95, 1.25, "r"), aim=at(-0.2, 1, 0, "r")))
+    keys = [(0, GUARD, GUARD_DOWN), (7, wind, {"pelvis": (0, 0.03, -0.10)}), (9, merge(wind, {"spine_01": (10, 0, -28)}), {"pelvis": (0, 0.04, -0.10)}, "snap"),
+            (11, throw, {"pelvis": (0, -0.06, -0.13)}), (17, merge(throw, {"spine_01": (22, 0, 22)}), {"pelvis": (0, -0.06, -0.14)}, "settle"),
+            (21, haul1, {"pelvis": (0, 0.08, -0.12)}), (26, haul2, {"pelvis": (0, 0.10, -0.12)}), (34, GUARD, GUARD_DOWN)]
+    return _clip(armature, "q", 34, keys, markers={"fire": 11})
 
 
-def w(arm):
-    # Bulwark: instant, so it plays as a pulse from `fire`: the shield slams up in front and he
-    # sets his feet behind it.
-    brace = merge(CROUCH, arm_l(0.15, 0.9, -0.1, -0.6, 0.7, 0.3), arm_r(0.35, 0.3, -0.6, -0.4, 0.8, 0.2), {"spine_01": (14, 0, 0), "head": (-6, 0, 0)},
-                  sym("thigh", -24, -10, 0), sym("calf", 36, 0, 0))
-    keys = [(0, READY, DOWN), (4, brace, {"pelvis": (0, 0, -0.12)}), (14, brace, {"pelvis": (0, 0, -0.13)}), (24, READY, DOWN)]
-    return _clip(arm, "w", 24, keys, layer="upper", markers={"fire": 4})
+def w(armature):
+    # Bulwark (upper body, a pulse): forearms slammed together across his face on `fire` 4,
+    # held while the shield takes, then lowered.
+    cross = merge(HUNCH, {"spine_01": (18, 0, 0)}, arm("l", 0.6, 0.6, -0.4, -0.75, 0.3, 0.6), arm("r", 0.6, 0.6, -0.35, -0.75, 0.3, 0.7),
+                  sym("clavicle", 0, 8, 0))
+    low = merge(HUNCH, arm("l", 0.5, 0.2, -0.85, 0.2, 0.4, -0.8), arm("r", 0.5, 0.2, -0.85, 0.2, 0.4, -0.8))
+    keys = [(0, low, None),
+            (2, merge(HUNCH, arm("l", 0.8, 0.2, -0.3, 0.3, 0.3, 0.7), arm("r", 0.8, 0.2, -0.3, 0.3, 0.3, 0.7)), None, "snap"),
+            (4, cross, None), (14, merge(cross, {"spine_01": (20, 0, 0)}), None, "settle"), (24, low, None)]
+    return _clip(armature, "w", 24, keys, layer="upper", markers={"fire": 4})
 
 
-def e(arm):
-    # Tremor: a knee raised high and a stomp on `fire` (sim 7.5).
-    lift = merge(STAND, {"thigh_r": (-70, 0, 0), "calf_r": (80, 0, 0), "foot_r": (-10, 0, 0)}, arms((0.6, 0.2, -0.3), (0.5, 0.4, 0.0)), {"spine_01": (-6, 0, 0)})
-    stomp = merge(CROUCH, {"thigh_r": (-20, 0, 0), "calf_r": (30, 0, 0)}, arms((0.6, 0.3, -0.5), (0.5, 0.5, -0.3)), {"spine_01": (16, 0, 0), "head": (6, 0, 0)})
-    keys = [(0, READY, DOWN), (5, lift, {"pelvis": (0, 0, 0.04)}), (8, stomp, {"pelvis": (0, 0, -0.14)}), (16, stomp, {"pelvis": (0, 0, -0.14)}), (26, READY, DOWN)]
-    return _clip(arm, "e", 26, keys, markers={"fire": 8})
+def e(armature):
+    # Tremor: rears up with both fists high and the right knee raised, then stamps and drives
+    # both fists into the ground on `fire` (sim: 8); everything stays planted a beat.
+    rear = merge(feet((0.30, 0.10), (0.30, -0.02), lift_r=0.40), {"spine_02": (-12, 0, 0), "head": (-8, 0, 0)},
+                 hand("l", at(0.40, 0.20, 2.25, "l"), aim=at(0, -0.2, 1, "l")), hand("r", at(0.40, 0.20, 2.25, "r"), aim=at(0, -0.2, 1, "r")))
+    slam = merge(feet((0.36, 0.14), (0.36, -0.10)), {"spine_01": (40, 0, 0), "spine_02": (14, 0, 0), "head": (-30, 0, 0)},
+                 hand("l", at(0.55, 0.80, 0.28, "l"), aim=at(0, 0.3, -1, "l")), hand("r", at(0.55, 0.80, 0.28, "r"), aim=at(0, 0.3, -1, "r")))
+    keys = [(0, GUARD, GUARD_DOWN), (6, rear, {"pelvis": (0, 0.02, 0.05)}, "snap"), (8, slam, {"pelvis": (0, -0.04, -0.34)}),
+            (16, merge(slam, {"spine_01": (42, 0, 0)}), {"pelvis": (0, -0.04, -0.35)}, "settle"), (26, GUARD, GUARD_DOWN)]
+    return _clip(armature, "e", 26, keys, markers={"fire": 8})
 
 
-def r(arm):
-    # Upheaval: both fists raised and driven into the ground (`fire` 8, sim 7.5); the earth
-    # erupts later, on the area's own delay.
-    raise_ = merge(STAND, arms((0.3, 0.1, 1), (0.1, 0.2, 1)), {"spine_02": (-12, 0, 0), "head": (-10, 0, 0)})
-    slam = merge(sym("thigh", -55, -8, 0), sym("calf", 85, 0, 0), sym("foot", -28, 0, 0), arms((0.2, 0.8, -0.6), (0.1, 0.6, -0.8)),
-                 {"spine_01": (30, 0, 0), "spine_02": (16, 0, 0)})
-    keys = [(0, READY, DOWN), (5, raise_, {"pelvis": (0, 0.02, 0.05)}), (8, slam, {"pelvis": (0, -0.06, -0.38)}), (20, slam, {"pelvis": (0, -0.06, -0.39)}),
-            (32, READY, DOWN)]
-    return _clip(arm, "r", 32, keys, markers={"fire": 8})
+def r(armature):
+    # Upheaval: both fists driven into the ground on `fire` (sim: 8), held, then he heaves
+    # upward with his whole body as if lifting the earth that knocks them up.
+    st = feet((0.36, 0.16), (0.36, -0.14))
+    raise_ = merge(st, {"spine_02": (-14, 0, 0), "head": (-10, 0, 0)},
+                   hand("l", at(0.30, 0.0, 2.35, "l"), aim=at(-0.2, -0.3, 1, "l")), hand("r", at(0.30, 0.0, 2.35, "r"), aim=at(-0.2, -0.3, 1, "r")))
+    plant = merge(st, {"spine_01": (40, 0, 0), "spine_02": (16, 0, 0), "head": (-30, 0, 0)},
+                  hand("l", at(0.45, 0.85, 0.28, "l"), aim=at(0, 0.3, -1, "l")), hand("r", at(0.45, 0.85, 0.28, "r"), aim=at(0, 0.3, -1, "r")))
+    heave = merge(st, {"spine_01": (-8, 0, 0), "spine_02": (-16, 0, 0), "head": (-24, 0, 0)},
+                  hand("l", at(0.70, 0.40, 2.10, "l"), aim=at(0.4, 0.2, 1, "l")), hand("r", at(0.70, 0.40, 2.10, "r"), aim=at(0.4, 0.2, 1, "r")))
+    keys = [(0, GUARD, GUARD_DOWN), (6, raise_, {"pelvis": (0, 0.02, 0.04)}, "snap"), (8, plant, {"pelvis": (0, -0.04, -0.36)}),
+            (14, merge(plant, {"spine_01": (42, 0, 0)}), {"pelvis": (0, -0.04, -0.37)}, "whip"), (20, heave, {"pelvis": (0, 0, 0.04)}),
+            (24, heave, {"pelvis": (0, 0, 0.04)}, "settle"), (34, GUARD, GUARD_DOWN)]
+    return _clip(armature, "r", 34, keys, markers={"fire": 8})
 
 
-KNEEL = merge({"thigh_r": (0, 0, 0), "calf_r": (90, 0, 0), "foot_r": (0, 0, 0), "thigh_l": (-80, 0, 0), "calf_l": (80, 0, 0),
-               "foot_l": (0, 0, 0), "spine_01": (10, 0, 0), "head": (16, 0, 0)},
-              arms((0.3, 0.6, -0.6), (-0.4, 0.8, 0.1), (0.3, 0.5, -0.8), (0.2, 0.4, -0.9)))
+KNEEL = merge({"ik_foot_l": clips.ik(at(0.30, 0.30, champion.ankle(), "l")), "thigh_r": (6, 0, 0), "calf_r": (100, 0, 0), "foot_r": (40, 0, 0)},
+              {"spine_01": (26, 0, 0), "head": (6, 0, 0)},
+              hand("l", at(0.55, 0.70, 0.28, "l"), aim=at(0, 0.3, -1, "l")), hand("r", at(0.45, 0.70, 0.28, "r"), aim=at(0, 0.3, -1, "r")))
 
 
-def recall(arm):
-    still = merge(KNEEL, {"head": (24, 0, 0)})
-    keys = [(0, merge(STAND, HEAVY), None), (15, KNEEL, {"pelvis": (0, 0, -0.5)}), (45, still, {"pelvis": (0, 0, -0.5)}),
-            (75, KNEEL, {"pelvis": (0, 0, -0.5)}), (90, merge(STAND, HEAVY), {"pelvis": (0, 0, -0.1)})]
-    return _clip(arm, "recall", 90, keys, markers={"loop_in": 15, "loop_out": 75})
+def recall(armature):
+    keys = [(0, IDLE, None), (15, KNEEL, {"pelvis": (0, 0.05, -0.44)}), (45, merge(KNEEL, sym("clavicle", 0, -6, 0)), {"pelvis": (0, 0.05, -0.42)}),
+            (75, KNEEL, {"pelvis": (0, 0.05, -0.44)}), (90, IDLE, None)]
+    return _clip(armature, "recall", 90, keys, markers={"loop_in": 15, "loop_out": 75})
 
 
-def death(arm):
-    # Crumbles: sags to his knees, topples forward like a felled wall.
-    keys = [
-        (0, merge(STAND, HEAVY), None),
-        (8, merge(STAND, arms((0.6, 0.1, -0.5), (0.5, 0.3, -0.6)), {"spine_01": (-8, 0, 0), "head": (-14, 0, 0)}), {"pelvis": (0, 0.03, -0.02)}),
-        (18, merge(sym("thigh", 0, 0, 0), sym("calf", 95, 0, 0), arms((0.35, 0.4, -0.9), (0.3, 0.5, -0.8)), {"spine_01": (14, 0, 0), "head": (18, 0, 0)}),
-         {"pelvis": (0, 0, -0.52)}),
-        (28, merge(sym("thigh", -30, 0, 0), sym("calf", 100, 0, 0), arms((0.4, 0.9, 0.1), (0.4, 1, 0.0)), {"pelvis": (60, 0, 0), "spine_01": (16, 0, 0)}),
-         {"pelvis": (0, -0.35, -0.72)}),
-        (36, merge(sym("thigh", -10, 0, 0), sym("calf", 20, 0, 0), arms((0.6, 0.8, 0.1), (0.6, 0.9, 0.0)), {"pelvis": (86, 0, 0)}),
-         {"pelvis": (0, -0.6, -0.9)}),
-    ]
-    return _clip(arm, "death", 36, keys)
+def death(armature):
+    # His legs give way; he drops onto his fists, then topples forward like a felled wall.
+    knees = merge({"thigh_l": (0, 0, 0), "thigh_r": (0, 0, 0), "calf_l": (100, 0, 0), "calf_r": (100, 0, 0), "foot_l": (40, 0, 0), "foot_r": (40, 0, 0)},
+                  {"spine_01": (30, 0, 0), "head": (-10, 0, 0)},
+                  hand("l", at(0.55, 0.65, 0.28, "l"), aim=at(0, 0.3, -1, "l")), hand("r", at(0.55, 0.65, 0.28, "r"), aim=at(0, 0.3, -1, "r")))
+    fall = merge({"thigh_l": (-14, 0, 0), "thigh_r": (-10, 0, 0), "calf_l": (24, 0, 0), "calf_r": (20, 0, 0)},
+                 arm("l", 0.7, 0.6, 0.1, 0.6, 0.8, 0.0), arm("r", 0.7, 0.6, 0.1, 0.6, 0.8, 0.0), {"pelvis": (82, 0, 0), "head": (-20, 0, 0)})
+    keys = [(0, IDLE, None), (8, merge(IDLE, {"spine_01": (-10, 0, 0), "head": (-30, 0, 0)}), {"pelvis": (0, 0.06, 0)}, "settle"),
+            (17, knees, {"pelvis": (0, 0, -0.46)}, "snap"), (21, merge(knees, {"spine_01": (34, 0, 0)}), {"pelvis": (0, 0, -0.47)}),
+            (30, fall, {"pelvis": (0, -0.70, -0.70)}, "snap"), (36, fall, {"pelvis": (0, -0.70, -0.72)})]
+    return _clip(armature, "death", 36, keys)
 
 
-def respawn(arm):
-    low = merge(sym("thigh", -55, -6, 0), sym("calf", 95, 0, 0), sym("foot", -30, 0, 0), GUARD, {"spine_01": (25, 0, 0)})
-    keys = [(0, low, {"pelvis": (0, 0, -0.34)}), (12, merge(STAND, arms((0.8, 0.1, 0.2), (0.7, 0.2, 0.5)), {"head": (-10, 0, 0)}), {"pelvis": (0, 0, -0.04)}),
-            (20, merge(STAND, HEAVY), None), (28, merge(STAND, HEAVY), None)]
-    return _clip(arm, "respawn", 28, keys)
+def respawn(armature):
+    keys = [(0, KNEEL, {"pelvis": (0, 0.05, -0.44)}, "settle"), (14, merge(IDLE, sym("clavicle", 0, -8, 0)), {"pelvis": (0, 0, -0.05)}), (26, IDLE, None)]
+    return _clip(armature, "respawn", 26, keys)
 
 
-def select(arm):
-    # Raises the shield and strikes it with his fist; the rune visor flares (in the shader's time).
-    shield = arm_l(0.2, 0.7, 0.1, -0.5, 0.6, 0.5)
-    keys = [(0, merge(STAND, HEAVY), None), (12, merge(STAND, shield, arm_r(0.4, -0.1, 0.7, 0.0, 0.2, 1)), None),
-            (18, merge(STAND, shield, arm_r(0.2, 0.7, 0.2, -0.5, 0.7, 0.3), {"spine_02": (4, 0, -10)}), None),
-            (30, merge(STAND, shield, arm_r(0.2, 0.7, 0.2, -0.5, 0.7, 0.3), {"head": (-12, 0, 0)}), None), (45, merge(STAND, HEAVY), None)]
-    return _clip(arm, "select", 45, keys)
+def select(armature):
+    # Beats his chest with both fists, then throws his arms wide and roars.
+    beat_l = merge(STAND_FEET, HUNCH, hand("l", at(0.12, 0.38, 1.50, "l"), aim=at(-1, 0.1, 0, "l")), hand("r", at(0.6, 0.6, 1.3, "r"), aim=at(0, 1, 0.3, "r")))
+    beat_r = merge(STAND_FEET, HUNCH, hand("r", at(0.12, 0.38, 1.50, "r"), aim=at(-1, 0.1, 0, "r")), hand("l", at(0.6, 0.6, 1.3, "l"), aim=at(0, 1, 0.3, "l")))
+    wide = merge(STAND_FEET, {"spine_02": (-14, 0, 0), "head": (-28, 0, 0)}, arm("l", 1, 0.2, 0.35, 1, 0.3, 0.5), arm("r", 1, 0.2, 0.35, 1, 0.3, 0.5))
+    keys = [(0, IDLE, None), (8, beat_l, None, "snap"), (11, beat_r, None, "snap"), (14, beat_l, None, "snap"), (17, beat_r, None),
+            (26, wide, {"pelvis": (0, 0, 0.04)}), (40, merge(wide, {"head": (-34, 0, 0)}), {"pelvis": (0, 0, 0.04)}), (54, IDLE, None)]
+    return _clip(armature, "select", 54, keys)
 
 
-def emote_taunt(arm):
-    base = merge(STAND, HEAVY)
-    out = merge(base, arm_r(0.2, 1, 0.0, 0.1, 1, 0.1), {"head": (-5, 0, 0)})
-    curl = merge(base, arm_r(0.2, 1, 0.0, 0.1, 0.5, 0.8), {"head": (-5, 0, 0)})
-    keys = [(0, base, None), (8, out, None), (14, curl, None), (20, out, None), (26, curl, None), (40, base, None)]
-    return _clip(arm, "emote_taunt", 40, keys)
+def emote_taunt(armature):
+    # Pounds the ground in front of him with one fist, twice, staring.
+    pound = merge(STAND_FEET, {"spine_01": (34, 0, 0), "head": (-30, 0, 0)}, hand("r", at(0.4, 0.75, 0.28, "r"), aim=at(0, 0.3, -1, "r")),
+                  hand("l", at(0.6, 0.2, 0.85, "l"), aim=at(0.1, 0.3, -1, "l")))
+    lift = merge(pound, hand("r", at(0.4, 0.55, 1.4, "r"), aim=at(0, 0.3, 1, "r")), {"spine_01": (24, 0, 0)})
+    keys = [(0, IDLE, None), (10, lift, None, "whip"), (13, pound, {"pelvis": (0, 0, -0.12)}), (18, pound, {"pelvis": (0, 0, -0.12)}),
+            (24, lift, None, "whip"), (27, pound, {"pelvis": (0, 0, -0.12)}), (34, pound, {"pelvis": (0, 0, -0.12)}), (46, IDLE, None)]
+    return _clip(armature, "emote_taunt", 46, keys)
 
 
-def emote_joke(arm):
-    # Pretends to be a statue, then nudges a nearby "wall" (his own shield).
-    base = merge(STAND, HEAVY)
-    statue = merge(STAND, arms((0.9, 0.0, 0.3), (0.9, 0.0, 0.4)))
-    keys = [(0, base, None), (10, statue, None), (34, statue, None), (40, merge(statue, {"head": (0, 25, 0)}), None), (50, base, None)]
-    return _clip(arm, "emote_joke", 50, keys)
+def emote_joke(armature):
+    # A double-biceps flex; a crystal glints (the pose holds).
+    flex = merge(STAND_FEET, {"spine_02": (-6, 0, 0), "head": (-10, 0, 0)}, arm("l", 1, 0.0, 0.1, 0.0, 0.1, 1), arm("r", 1, 0.0, 0.1, 0.0, 0.1, 1))
+    keys = [(0, IDLE, None), (12, flex, None), (16, merge(flex, sym("clavicle", 0, -10, 0)), None, "snap"), (30, merge(flex, sym("clavicle", 0, -10, 0)), None),
+            (34, flex, None), (50, IDLE, None)]
+    return _clip(armature, "emote_joke", 50, keys)
 
 
-def emote_laugh(arm):
-    keys = [(0, merge(STAND, HEAVY), None)]
+def emote_laugh(armature):
+    keys = [(0, IDLE, None)]
     for i in range(1, 9):
-        s = -1 if i % 2 else -0.5
-        keys.append((4 * i, merge(STAND, HEAVY, {"spine_01": (-6 * abs(s), 0, 0), "head": (-16 * abs(s), 0, 0)}, sym("clavicle", 0, 3 * s, 0)), None))
-    keys.append((40, merge(STAND, HEAVY), None))
-    return _clip(arm, "emote_laugh", 40, keys)
+        s = 1.0 if i % 2 else 0.5
+        keys.append((4 * i, merge(IDLE, {"spine_01": (6 * s, 0, 0), "head": (-30 * s, 0, 0)}, sym("clavicle", 0, -8 * s, 0)), {"pelvis": (0, 0, -0.02 * s)}))
+    keys.append((44, IDLE, None))
+    return _clip(armature, "emote_laugh", 44, keys)
 
 
-def emote_dance(arm):
-    # A slow, ground-shaking side-to-side stomp.
-    a = merge(HEAVY, {"thigh_l": (-40, -6, 0), "calf_l": (55, 0, 0), "pelvis": (0, -8, 0)})
-    mid = merge(STAND, HEAVY)
-    b = merge(HEAVY, {"thigh_r": (-40, 6, 0), "calf_r": (55, 0, 0), "pelvis": (0, 8, 0)})
-    keys = [(0, a, {"pelvis": (0.06, 0, 0.02)}), (12, mid, {"pelvis": (0, 0, -0.08)}), (24, b, {"pelvis": (-0.06, 0, 0.02)}), (36, mid, {"pelvis": (0, 0, -0.08)})]
-    return _clip(arm, "emote_dance", 48, keys, loop=True)
+def emote_dance(armature):
+    # A slow, ground-shaking side-to-side stomp, fists swinging.
+    a = merge(feet((0.30, 0.06), (0.30, -0.08), lift_l=0.32), HUNCH, {"pelvis": (0, -8, 0)}, fists_low(0.7, 0.3, 0.9))
+    b = merge(feet((0.30, 0.06), (0.30, -0.08), lift_r=0.32), HUNCH, {"pelvis": (0, 8, 0)}, fists_low(0.7, 0.3, 0.9))
+    land = merge(STAND_FEET, HUNCH, fists_low(0.66, 0.25, 0.8))
+    keys = [(0, a, {"pelvis": (0.05, 0, 0.0)}, "whip"), (10, land, {"pelvis": (0, 0, -0.08)}), (24, b, {"pelvis": (-0.05, 0, 0.0)}, "whip"),
+            (34, land, {"pelvis": (0, 0, -0.08)})]
+    return _clip(armature, "emote_dance", 48, keys, loop=True)
 
 
-OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, run, run_fast, attack_1, attack_2, q, w, e, r,
+OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, walk, run, run_fast, attack_1, attack_2, q, w, e, r,
        recall, death, respawn, select, emote_taunt, emote_joke, emote_laugh, emote_dance]
-SHARED = ["walk", "cast_utility", "cc_stunned", "cc_rooted", "cc_airborne", "cc_knockback", "cc_suppressed", "cc_sleep", "cc_forced_move"]
 
 
-def bake_shared(arm):
-    """Copy the shared library's clips in (10 §7.3): the same bones, so a direct copy."""
-    path = os.path.join(ROOT, "art", "library", "biped", "biped_library.blend")
-    with bpy.data.libraries.load(path, link=False) as (src, dst):
-        dst.actions = [n for n in src.actions if n in SHARED]
-    for act in dst.actions:
-        act.use_fake_user = True
-        clips.stash(arm, act)
-    return [a.name for a in dst.actions]
-
-
-def build():
-    bpy.ops.wm.read_homefile(use_empty=True)
-    bpy.context.scene.render.fps = 30
-    rig.use_shape("large", scale=SCALE, x=BULK)
-    mesh.AO_HEIGHT = 2.2
-    arm = rig.build_armature(name="bastion")
-    own = [f(arm).name for f in OWN]
-    body = mesh.build_mannequin(arm, name="bastion", part_list=parts())
-    shared = bake_shared(arm)
-    print(f"bastion: {len(arm.data.bones)} bones, {mesh.triangle_count(body)} triangles, {len(own)} own clips, shared {shared}")
+def build(only=None):
+    return champion.build("bastion", SHAPE, parts, OWN, 2.2, only=only)
 
 
 if __name__ == "__main__":
-    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
-    build()
-    if "--out" in argv:
-        out = os.path.abspath(argv[argv.index("--out") + 1])
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        bpy.ops.wm.save_as_mainfile(filepath=out, compress=True)
-        print(f"saved {out}")
+    champion.main(build)
