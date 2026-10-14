@@ -2147,9 +2147,11 @@ func _update_missiles() -> void:
 var beam_nodes := {}                    # key -> Node3D
 
 
-## A channeled beam (Starfall Lance): its gameplay width on the ground, in the missile style
-## (motif `beam`: the champion's color inside, the team's on the edge, 14 §4.4), and a shaft
-## of light from the caster's staff head to where it stops. Each strike flares where it lands.
+## A channeled beam (Starfall Lance): one shaft of light from the caster's staff head to where
+## it stops, and under it a faint footprint of its gameplay width in the missile style (motif
+## `beam`: the champion's color inside, the team's on the edge, 14 §4.4). The footprint stays
+## faint: drawn bright, it read as a second beam beside the raised shaft whenever the beam ran
+## across the screen. Each strike flares where it lands.
 func _update_beams() -> void:
 	var seen := {}
 	for b in client.beams():
@@ -2168,6 +2170,7 @@ func _update_beams() -> void:
 			node.top_level = true
 			var ground := _make_missile(b.side, radius_u, false, champ, action)
 			ground.name = "Ground"
+			(ground.get_node("Body").material_override as ShaderMaterial).set_shader_parameter("dim", 0.18)
 			node.add_child(ground)
 			var style := _style(champ, action, "projectile", MISSILE_MOTIFS)
 			var core_color: Color = style.get("core", Color(1, 1, 0.9))

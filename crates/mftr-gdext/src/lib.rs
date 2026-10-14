@@ -940,8 +940,9 @@ impl MatchClient {
     /// Everything a tooltip says about our champion's ability in `slot` (0–3 Q W E R, 4–5 D F;
     /// F may be an augment's spell), straight from the sim's data, so tooltips can't drift
     /// from the game: `{ name, kind, rank, max_rank, cooldowns: [s per rank], range, radius,
-    /// speed, windup, delay, damage: { kind, base: [per rank], ad, ap, total }, heal: {…},
-    /// shield: {…}, cc: { kind, seconds, pct } }`, with absent parts left out. `total`s use the
+    /// speed, windup, delay, channel, strikes, pulses: { count, every, share, cc }, damage: {
+    /// kind, base: [per rank], ad, ap, total }, heal: {…}, shield: {…}, cc: { kind, seconds,
+    /// pct } }`, with absent parts left out. `total`s use the
     /// champion's current attack damage and ability power at its current rank (rank 1 if
     /// unlearned).
     #[func]
@@ -1036,6 +1037,17 @@ impl MatchClient {
                 d.set("delay", secs(r.delay));
                 d.set("damage", &damage(r.damage));
                 set_cc(&mut d, r.cc);
+                if r.pulses.count > 0 {
+                    // A lingering area: `{ count, every (s), share, cc }` strikes after landing.
+                    let mut p = VarDictionary::new();
+                    p.set("count", r.pulses.count as i64);
+                    p.set("every", secs(r.pulses.every));
+                    p.set("share", r.pulses.share);
+                    if let Some(m) = cc(r.pulses.cc) {
+                        p.set("cc", &m);
+                    }
+                    d.set("pulses", &p);
+                }
             }
             Effect::Beam(b) => {
                 // A channel: the tooltip's damage is the whole channel's, `strikes` its hits.
