@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "blender")))
 
 import bpy  # noqa: E402
-from mathutils import Vector  # noqa: E402
+from mathutils import Matrix, Quaternion, Vector  # noqa: E402
 
 from mftr_blender import champion, clips, head, rig  # noqa: E402
 from mftr_blender.champion import arm, feet, hand  # noqa: E402
@@ -49,6 +49,15 @@ SHAPE = {"heights": [(0.0, 0.0), (2.15, 2.15)], "x": 1.05, "y": 1.0, "scale": 0.
 rig.use_shape(SHAPE)
 CAPE = [rig.shaped(p) for p in [(0.10, 0.14, 1.52), (0.14, 0.20, 1.18), (0.16, 0.24, 0.84), (0.17, 0.27, 0.50)]]
 ARM = None  # set while building, for the bow's frame
+# The bow (14 §3.3): a 1.7 m recurve on `hand_l`, rigged so it draws. `BOW_REST` (grip, axis,
+# back) is its rest-pose frame, set in `_extras`; each limb is two bones (`extra_bow_1..4`) that
+# bend toward her as the string comes back, and the string is two bones (`extra_string_1..2`)
+# from the tips to the nocking point that turn and stretch to follow her drawing fingers.
+BOW_REST = None
+HALF = 0.85          # grip to tip, m
+LIMB_SPLIT = 0.45    # where each limb's inner bone ends
+BRACE, RECURVE = 0.20, 0.05
+DRAWS = {}           # shot clip -> its `fire` frame (the string is baked onto these)
 
 
 def sp(p):
@@ -134,38 +143,40 @@ def _left():
     ]
 
 
-def _bow(axis, back):
-    """A 1.7 m recurve weighted to the left hand. `axis` and `back` are the rest-pose directions
-    that become *up* and *toward her* at full draw (`bow_frame`)."""
-    h = next(Vector(b[2]) for b in rig.bone_table() if b[0] == "hand_l")
-    t = next(Vector(b[3]) for b in rig.bone_table() if b[0] == "hand_l")
-    grip = h + (t - h).normalized() * 0.06
-    half = 0.85
+def _bow_pt(s):
+    """A point on the bow's centerline, `s` meters from the grip along the limbs (rest pose)."""
+    grip, axis, back = BOW_REST
+    u = abs(s) / HALF
+    # The limbs curve back toward her from the grip (the string side), and the recurve flicks
+    # the tips forward again; the string runs behind the grip, never in front of it.
+    return grip + axis * s + back * (BRACE * u * u) - back * (RECURVE * u ** 8)
 
-    def pt(s):
-        u = abs(s) / half
-        # The recurve: limbs bow away from her, the tips flick back toward her.
-        return tuple(grip + axis * s - back * (0.16 * u * u) + back * (0.09 * u ** 8))
 
+def _bow():
     def radius(s):
-        return 0.042 - 0.024 * abs(s) / half
+        return 0.042 - 0.024 * abs(s) / HALF
 
-    stations = [-0.85, -0.74, -0.58, -0.40, -0.20, -0.07, 0.07, 0.20, 0.40, 0.58, 0.74, 0.85]
+    def bone(mid):
+        if abs(mid) < 0.07:
+            return "hand_l"
+        return f"extra_bow_{(1 if mid > 0 else 3) + (1 if abs(mid) > LIMB_SPLIT else 0)}"
+
+    stations = [-0.85, -0.74, -0.6, -0.45, -0.3, -0.17, -0.07, 0.07, 0.17, 0.3, 0.45, 0.6, 0.74, 0.85]
     out = []
     for a, b in zip(stations, stations[1:]):
         mid = abs((a + b) / 2)
         slot, color = ("emissive", TEAL) if mid > 0.74 else ("metal", SILVER) if mid > 0.6 else ("cloth", LEATHER_DARK) if mid < 0.07 else ("cloth", WOOD)
-        out.append(("hand_l", pt(a), pt(b), 6, [(0, radius(a), radius(a) * 1.3), (1, radius(b), radius(b) * 1.3)], slot, color))
-    out.append(("hand_l", pt(-half), pt(half), 4, [(0, .006, .006), (1, .006, .006)], "cloth", STRING))
+        out.append((bone((a + b) / 2), tuple(_bow_pt(a)), tuple(_bow_pt(b)), 6, [(0, radius(a), radius(a) * 1.3), (1, radius(b), radius(b) * 1.3)], slot, color))
+    nock = tuple((_bow_pt(HALF) + _bow_pt(-HALF)) / 2)
+    out.append(("extra_string_1", tuple(_bow_pt(HALF)), nock, 4, [(0, .006, .006), (1, .006, .006)], "cloth", STRING))
+    out.append(("extra_string_2", tuple(_bow_pt(-HALF)), nock, 4, [(0, .006, .006), (1, .006, .006)], "cloth", STRING))
     return out
 
 
 def bow_frame():
     """Rest-pose directions for the bow: whatever the left hand turns into *up* and *backward*
-    at the full-draw frame of `attack_1` (defaults if it wasn't built)."""
+    at the full-draw frame of `attack_1`."""
     act = bpy.data.actions.get("attack_1")
-    if ARM is None or act is None:
-        return Vector((0, 0, 1)), Vector((0, 1, 0))
     ARM.animation_data.action = act
     if ARM.animation_data.action_slot is None and act.slots:
         ARM.animation_data.action_slot = act.slots[0]
@@ -184,8 +195,106 @@ def bow_frame():
     return axis, back
 
 
+def _bow_bones(armature):
+    grip = BOW_REST[0]
+    axis = BOW_REST[1]
+    p = _bow_pt
+    nock = (p(HALF) + p(-HALF)) / 2
+    specs = [("extra_bow_1", grip + axis * 0.07, p(LIMB_SPLIT), "hand_l"), ("extra_bow_2", p(LIMB_SPLIT), p(HALF), "extra_bow_1"),
+             ("extra_bow_3", grip - axis * 0.07, p(-LIMB_SPLIT), "hand_l"), ("extra_bow_4", p(-LIMB_SPLIT), p(-HALF), "extra_bow_3"),
+             ("extra_string_1", p(HALF), nock, "extra_bow_2"), ("extra_string_2", p(-HALF), nock, "extra_bow_4")]
+    prev = bpy.context.view_layer.objects.active
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode="EDIT")
+    eb = armature.data.edit_bones
+    for name, a, b, parent in specs:
+        bone = eb.new(name)
+        bone.head, bone.tail = a, b
+        bone.use_deform = True
+        bone.align_roll(BOW_REST[2])
+        bone.parent = eb[parent]
+    bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.context.view_layer.objects.active = prev
+    for pb in armature.pose.bones:
+        pb.rotation_mode = "QUATERNION"
+
+
+def _bake_draws(armature):
+    """The draw, baked on every frame of each shot: the nocking point follows her right fingers
+    from the nock to the release, the limbs bend toward her by how far it comes back, the string
+    halves turn and stretch from the (bent) tips to it; on `fire` the string snaps forward and
+    shivers for a few frames."""
+    grip, axis, back = BOW_REST
+    side = axis.cross(back).normalized()
+    p = _bow_pt
+    h_top, h_bot, m_top, m_bot, tip_top, tip_bot = grip + axis * 0.07, grip - axis * 0.07, p(LIMB_SPLIT), p(-LIMB_SPLIT), p(HALF), p(-HALF)
+    nock0 = (tip_top + tip_bot) / 2
+    pb = armature.pose.bones
+    rest = {n: pb[n].bone.matrix_local.to_quaternion() for n in ("extra_bow_1", "extra_bow_2", "extra_bow_3", "extra_bow_4", "extra_string_1", "extra_string_2")}
+    ad = armature.animation_data
+    sc = bpy.context.scene
+    saved = ad.action
+    shiver = (-0.05, 0.035, -0.02, 0.01)
+    for name, fire in DRAWS.items():
+        act = bpy.data.actions.get(name)
+        if act is None:
+            continue
+        ad.action = act
+        if ad.action_slot is None and act.slots:
+            ad.action_slot = act.slots[0]
+        full = max(fire - 4, 2)
+        for f in range(0, int(act.frame_range[1]) + 1):
+            sc.frame_set(f)
+            hl = pb["hand_l"]
+            to_rest = (hl.matrix @ hl.bone.matrix_local.inverted()).inverted()
+            if f < fire:
+                d = min(1.0, f / full)
+                nock = nock0.lerp(to_rest @ pb["fingers_r"].head, d * d * (3 - 2 * d))
+            elif f - fire < len(shiver):
+                nock = nock0 + back * shiver[f - fire]
+            else:
+                nock = nock0.copy()
+            pull = max(0.0, (nock - nock0).dot(back))
+            bend = min(pull / 0.55, 1.2)
+            a1, a2 = math.radians(10) * bend, math.radians(9) * bend
+            q1, q12 = Quaternion(side, a1), Quaternion(side, a1 + a2)
+            q3, q34 = Quaternion(side, -a1), Quaternion(side, -(a1 + a2))
+            tt = h_top + q1 @ (m_top - h_top) + q12 @ (tip_top - m_top)
+            tb = h_bot + q3 @ (m_bot - h_bot) + q34 @ (tip_bot - m_bot)
+            turns = {"extra_bow_1": q1, "extra_bow_2": Quaternion(side, a2), "extra_bow_3": q3, "extra_bow_4": Quaternion(side, -a2)}
+            scales = {}
+            for s_name, tip0, tip, parent_q in (("extra_string_1", tip_top, tt, q12), ("extra_string_2", tip_bot, tb, q34)):
+                want = nock - tip
+                turns[s_name] = parent_q.inverted() @ (nock0 - tip0).rotation_difference(want)
+                scales[s_name] = want.length / (nock0 - tip0).length
+            for n, q_arm in turns.items():
+                b = pb[n]
+                b.rotation_quaternion = rest[n].inverted() @ q_arm @ rest[n]
+                b.keyframe_insert("rotation_quaternion", frame=f, group=n)
+                if n in scales:
+                    b.scale = (1.0, scales[n], 1.0)
+                    b.keyframe_insert("scale", frame=f, group=n)
+    ad.action = saved
+    clips.reset_pose(armature)
+    sc.frame_set(0)
+
+
+def bow_turn(want_axis, want_back):
+    """`hand_l` turned so the bow's limbs lie along `want_axis` and its string faces
+    `want_back` (armature space)."""
+    def turn():
+        _, axis, back = BOW_REST
+        a = Vector(want_axis).normalized()
+        b = Vector(want_back)
+        b = (b - a * b.dot(a)).normalized()
+        rest = Matrix((axis, back, axis.cross(back))).transposed()
+        want = Matrix((a, b, a.cross(b))).transposed()
+        return (want @ rest.transposed()).to_quaternion()
+    return {"hand_l": {"turn": turn}}
+
+
 def parts():
-    return _center() + champion.mirrored(_left()) + _bow(*bow_frame()) + [_head]
+    return _center() + champion.mirrored(_left()) + _bow() + [_head]
 
 
 # --- Poses ----------------------------------------------------------------------------------
@@ -198,7 +307,9 @@ def cape(back=0.0, sway=0.0):
 
 STAND = feet((0.13, 0.04), (0.13, -0.06))
 STANCE = feet((0.18, 0.20), (0.20, -0.22))  # side-on for shooting, left foot forward
-BOW_LOW = merge(arm("l", 0.25, 0.15, -1, 0.15, 0.55, -0.8), arm("r", 0.25, 0.0, -1, 0.2, 0.2, -1))
+# At rest the bow is held low against her body (the user's sketch): the grip in the left hand
+# before her left thigh, the bow lying across the front of her legs, the string up.
+BOW_LOW = merge(hand("l", at(0.12, 0.17, 0.90, "l")), bow_turn((-1, -0.22, -0.10), (0, 0.25, 1)), arm("r", 0.25, 0.0, -1, 0.2, 0.2, -1))
 READY = merge(feet((0.18, 0.12), (0.18, -0.16)), arm("l", 0.15, 0.75, -0.55, 0.05, 1, -0.15), arm("r", 0.3, 0.3, -0.8, -0.2, 0.85, -0.3),
               {"spine_01": (8, 0, 0), "head": (-4, 0, 0)}, cape(4))
 DOWN = {"pelvis": (0, 0, -0.06)}
@@ -260,6 +371,13 @@ def _run_upper(swing, cape_back):
     return upper
 
 
+
+def walk(armature):
+    # A walk (heavy slows, and the moment a run comes to a stop): the run's body type, slower,
+    # the weapon carried as in it, never hanging into the ground (14 §3.6).
+    keys = gait(32, 0.90, contact=0.6, lift=0.10, bob=0.02, lean=4, twist=6, width=0.12, crouch=0.0, upper=_run_upper(0.4, 12))
+    return _clip(armature, "walk", 32, keys, loop=True, markers={"foot_l": 0, "foot_r": 16}, stride_speed=140.0)
+
 def run(armature):
     keys = gait(20, 0.97, contact=0.44, lift=0.24, bob=0.045, lean=11, twist=9, width=0.12, upper=_run_upper(1.0, 28))
     return _clip(armature, "run", 20, keys, loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=330.0)
@@ -281,6 +399,7 @@ def _shot(armature, name, frames, fire, aim_up=0.0, lean=0.0, crouch=0.0, depth=
     full = merge(body, aim_l(0.04 + aim_up), draw_r(depth, aim_up), cape(4, -1))
     held = merge(full, {"spine_02": (2 + lean * 0.5, 0, -18)})
     release = merge(body, aim_l(0.10 + aim_up), RELEASE_R, cape(7, 3), {"head": (-4, 0, 16)})
+    DRAWS[name] = fire
     keys = [(0, nock, low), (max(fire - 4, 1), drawing, low), (fire - 2, full, low), (fire - 1, held, low, "snap"),
             (fire, release, low), (fire + 4, merge(release, {"spine_02": (lean * 0.5, 0, -14)}), low, "settle"), (frames, READY, DOWN)]
     return _clip(armature, name, frames, keys, markers={"fire": fire})
@@ -428,20 +547,28 @@ def emote_dance(armature):
     return _clip(armature, "emote_dance", 48, keys, loop=True)
 
 
-OWN = [attack_1, idle, idle_fidget_1, idle_fidget_2, idle_ready, run, run_fast, attack_2, q, w, e_start, e_travel, e_land, r,
+OWN = [attack_1, idle, idle_fidget_1, idle_fidget_2, idle_ready, walk, run, run_fast, attack_2, q, w, e_start, e_travel, e_land, r,
        recall, death, respawn, select, emote_taunt, emote_joke, emote_laugh, emote_dance]
 
 
 def _extras(armature):
-    global ARM
+    global ARM, BOW_REST
     ARM = armature
     rig.add_chain(armature, "cape", "chest", CAPE)
+    # A first draw to learn the bow's frame (it's rebuilt with the rest, keying the bow bones).
+    attack_1(armature)
+    axis, back = bow_frame()
+    h = next(Vector(b[2]) for b in rig.bone_table() if b[0] == "hand_l")
+    t = next(Vector(b[3]) for b in rig.bone_table() if b[0] == "hand_l")
+    BOW_REST = (h + (t - h).normalized() * 0.06, axis, back)
+    _bow_bones(armature)
 
 
 def build(only=None):
-    if only is not None and "attack_1" not in only:
-        only = list(only) + ["attack_1"]
-    return champion.build("vesper", SHAPE, parts, OWN, 1.85, extras=_extras, only=only, shared=champion.SHARED + ["attack_melee_alt"], cloth={"cape": dict(stiffness=0.26, inertia=0.86)})
+    armature, body = champion.build("vesper", SHAPE, parts, OWN, 1.85, extras=_extras, only=only, shared=champion.SHARED + ["attack_melee_alt"],
+                                    cloth={"cape": dict(stiffness=0.26, inertia=0.86)})
+    _bake_draws(armature)
+    return armature, body
 
 
 if __name__ == "__main__":

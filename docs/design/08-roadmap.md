@@ -814,13 +814,34 @@ Measured against the reference's Wukong (R05), the rules are [14](14-champion-ar
   effects are in its signature hue.
 - **The roster:** Rook (a block on legs, crimson), Bastion (a crystal-crowned boulder, ice),
   Vesper (recurve and cloak, teal), Shade (a hunched blade, violet), Ember (a flame), Lumen (a
-  bell with a halo, sun gold), Quill (hat and orrery, indigo), Cairn (antlers and stone,
-  emerald), Marrow (a crone with a bone fan, magenta), Wren (crest and feathers, lime).
+  wind-blown dress and a halo, sun gold), Quill (hat and orrery, indigo), Cairn (antlers and stone,
+  emerald), Marrow (a hooded crone with a skull staff, magenta), Wren (crest and feathers, lime).
 - **Checked:** a lineup in color and black silhouettes (every outline nameable), review sheets,
   and every champion in game at the gameplay camera; `pack validate` clean.
 - **Cloth:** capes, scarves, coat tails and shawls follow through on their own: a rope
   simulation over each chain, baked into every clip (14 §3.5).
 - **Next:** the owner's notes per champion; polish passes in Blender.
+
+### The owner's first notes (2026-10-14): ✅ addressed (awaiting review)
+- **Style in character** (14 §4.4): projectile shapes (`wave`, `shard`, `beam`, `bones`,
+  `flame`, `bolt`, `grab`) and ground-indicator motifs (`telegraph`: cracks, rocks, frost,
+  flames, bones, stars, arrows, sigil, shadow) in each champion's colors, team color kept on
+  the edges; shockwaves moved onto the damage (`detonate`, `impact`); dashes leave a path
+  (`travel`); new kits `rocks` and `rain`.
+- **Fixes:** every champion's own `walk` (the staff no longer smacks the ground when a run
+  stops); staffs fire from their heads (`champion.place_socket`).
+- **Per champion:** Vesper's bow the right way round, held across her hips at rest, and drawn
+  (the limbs bend, the string comes back); Ember's Q and W holds longer and a new idle;
+  Bastion's grapple an open hand on a chain; Rook's Rupture a crimson wave; Lumen redesigned (a
+  wind-blown dress, the staff two-handed, Lull a beam from the lantern); Shade's blades held
+  forward, a lower sneak, a heavier Execution and longer Q and attack effects; Quill's Static
+  Field strikes from its circle, Recoil a starlight glide, Starfall Lance a beam; Cairn's war
+  paint, rockfall and cracks; Marrow redesigned (a hood that frames her face, a skull staff);
+  Wren (a he) fires one-handed and canted, a braced Ricochet, a hail of arrows that keeps
+  falling.
+- **Waiting on the sim:** Quill's R as an interruptible channel beam that stops on the first
+  target, and Wren's R as damage over time in its area; Shade's R rebalance with the game-AI
+  pass; Marrow's kit, on the owner's direction.
 
 ## S — One server, many matches (between E and M4 slice 5)
 The server plays whatever its players ask for ([13](13-server-instances.md), D57): one process

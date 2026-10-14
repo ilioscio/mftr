@@ -264,6 +264,13 @@ def _run_upper(swing):
     return upper
 
 
+
+def walk(armature):
+    # A walk (heavy slows, and the moment a run comes to a stop): the run's body type, slower,
+    # the weapon carried as in it, never hanging into the ground (14 §3.6).
+    keys = gait(32, 0.90, contact=0.6, lift=0.10, bob=0.02, lean=10, twist=6, width=0.31, crouch=0.04, upper=_run_upper(0.4))
+    return _clip(armature, "walk", 32, keys, loop=True, markers={"foot_l": 0, "foot_r": 16}, stride_speed=140.0)
+
 def run(armature):
     keys = gait(20, 1.0, contact=0.45, lift=0.18, bob=0.07, lean=16, twist=12, width=0.31, crouch=0.05, upper=_run_upper(1.0))
     return _clip(armature, "run", 20, keys, loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=335.0)
@@ -311,14 +318,17 @@ def q(armature):
     st = feet((0.32, 0.22), (0.32, -0.18))
     wind = merge(st, HUNCH, {"pelvis": (0, 0, -18), "spine_01": (10, 0, -22), "head": (-14, 0, 18)},
                  hand("r", at(0.85, -0.55, 1.55, "r"), aim=at(0.3, -0.6, 0.6, "r")), hand("l", at(0.45, 0.6, 1.3, "l"), aim=at(0, 1, 0.2, "l")))
+    # The throw: the arm flung all the way out, the hand open at the end of it (the grab flies
+    # from it as an open stone hand); then the fists close as he hauls.
     throw = merge(feet((0.32, 0.34), (0.32, -0.22)), HUNCH, {"pelvis": (0, 0, 16), "spine_01": (20, 0, 20), "head": (-16, 0, -14)},
-                  hand("r", at(0.15, 1.55, 1.25, "r"), aim=at(0, 1, -0.1, "r")), hand("l", at(0.6, -0.1, 1.1, "l"), aim=at(0.3, -0.5, 0, "l")))
-    haul1 = merge(feet((0.32, 0.30), (0.32, -0.30)), {"spine_01": (-6, 0, 6), "spine_02": (-6, 0, 0), "head": (-6, 0, 0)},
+                  hand("r", at(0.15, 1.70, 1.30, "r"), aim=at(0, 1, 0.05, "r")), hand("l", at(0.6, -0.1, 1.1, "l"), aim=at(0.3, -0.5, 0, "l")),
+                  {"fingers_r": (-35, 0, 0), "thumb_r": (-30, 0, 0)}, sym("clavicle", 0, 0, 0), {"clavicle_r": (0, 0, 14)})
+    haul1 = merge(feet((0.32, 0.30), (0.32, -0.30)), {"spine_01": (-6, 0, 6), "spine_02": (-6, 0, 0), "head": (-6, 0, 0)}, sym("fingers", 75, 0, 0),
                   hand("r", at(0.30, 0.35, 1.20, "r"), aim=at(0, 1, 0.2, "r")), hand("l", at(0.15, 0.95, 1.25, "l"), aim=at(-0.2, 1, 0, "l")))
-    haul2 = merge(feet((0.32, 0.30), (0.32, -0.30)), {"spine_01": (-10, 0, -6), "spine_02": (-8, 0, 0), "head": (-4, 0, 0)},
+    haul2 = merge(feet((0.32, 0.30), (0.32, -0.30)), {"spine_01": (-10, 0, -6), "spine_02": (-8, 0, 0), "head": (-4, 0, 0)}, sym("fingers", 75, 0, 0),
                   hand("l", at(0.35, 0.30, 1.20, "l"), aim=at(0, 1, 0.2, "l")), hand("r", at(0.15, 0.95, 1.25, "r"), aim=at(-0.2, 1, 0, "r")))
     keys = [(0, GUARD, GUARD_DOWN), (7, wind, {"pelvis": (0, 0.03, -0.10)}), (9, merge(wind, {"spine_01": (10, 0, -28)}), {"pelvis": (0, 0.04, -0.10)}, "snap"),
-            (11, throw, {"pelvis": (0, -0.06, -0.13)}), (16, merge(throw, {"spine_01": (22, 0, 22)}), {"pelvis": (0, -0.06, -0.14)}, "settle"),
+            (11, throw, {"pelvis": (0, -0.06, -0.13)}), (17, merge(throw, {"spine_01": (22, 0, 22)}), {"pelvis": (0, -0.06, -0.14)}, "settle"),
             (21, haul1, {"pelvis": (0, 0.08, -0.12)}), (26, haul2, {"pelvis": (0, 0.10, -0.12)}), (34, GUARD, GUARD_DOWN)]
     return _clip(armature, "q", 34, keys, markers={"fire": 11})
 
@@ -439,7 +449,7 @@ def emote_dance(armature):
     return _clip(armature, "emote_dance", 48, keys, loop=True)
 
 
-OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, run, run_fast, attack_1, attack_2, q, w, e, r,
+OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, walk, run, run_fast, attack_1, attack_2, q, w, e, r,
        recall, death, respawn, select, emote_taunt, emote_joke, emote_laugh, emote_dance]
 
 

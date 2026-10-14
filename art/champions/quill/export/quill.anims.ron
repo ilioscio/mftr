@@ -18,7 +18,7 @@
         (name: "cc_stunned", frames: 40, looping: true, layer: "full", stride_speed: None, markers: []),
         (name: "cc_suppressed", frames: 30, looping: true, layer: "full", stride_speed: None, markers: []),
         (name: "death", frames: 34, looping: false, layer: "full", stride_speed: None, markers: [(name: "end", frame: 34)]),
-        (name: "e_land", frames: 10, looping: false, layer: "full", stride_speed: None, markers: [(name: "end", frame: 10)]),
+        (name: "e_land", frames: 12, looping: false, layer: "full", stride_speed: None, markers: [(name: "end", frame: 12)]),
         (name: "e_start", frames: 4, looping: false, layer: "full", stride_speed: None, markers: [(name: "fire", frame: 2), (name: "end", frame: 4)]),
         (name: "e_travel", frames: 10, looping: true, layer: "full", stride_speed: None, markers: []),
         (name: "emote_dance", frames: 48, looping: true, layer: "full", stride_speed: None, markers: []),

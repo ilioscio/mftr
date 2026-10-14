@@ -1,15 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Wren (rebuilt for 14): the generator for her model and clips.
+"""Wren (rebuilt for 14): the generator for his model and clips.
 
     blender -b --python art/champions/wren/build.py -- --out art/champions/wren/wren.blend
 
-A feather crest and a short cape of feathers (14 §5): a small, quick scout with a tall crest of
-lime-tipped feathers swept back from her head, a capelet of layered feathers on an `extra_cape`
-chain, a fan of tail feathers at her belt, a russet tunic and a hand crossbow in her right hand.
-Her signature is lime (14 §4).
+A feather crest and a short cape of feathers (14 §5): a lethal birdman, small and quick, with a
+tall crest of lime-tipped feathers swept back from his head, a capelet of layered feathers on an
+`extra_cape` chain, a fan of tail feathers at his belt, a russet tunic and a hand crossbow in his
+right hand. His signature is lime (14 §4).
 
-Weight (14 §3): she's light and restless: a springing run, bird-quick head flicks at idle; each
-shot kicks the crossbow up and she holds the recoil a beat; Pounce lands her on all fours and she
+Weight (14 §3): he's light and restless: a springing run, bird-quick head flicks at idle; he
+fires the crossbow one-handed and canted, arm straight out, and holds the kick a beat; Ricochet
+is braced low and two-handed and its recoil shoves him back; Pounce lands him on all fours and he
 stays there a moment before springing up. Feet (and, for Pounce, hands) planted by IK.
 """
 
@@ -20,7 +21,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "blender")))
 
-from mathutils import Vector  # noqa: E402
+from mathutils import Matrix, Vector  # noqa: E402
 
 from mftr_blender import champion, clips, head, mesh, rig  # noqa: E402
 from mftr_blender.champion import arm, feet, hand  # noqa: E402
@@ -80,16 +81,16 @@ def _center():
         box_part("chest", sp((0, -0.10, 1.40)), (0.18, 0.04, 0.26), "cloth", LEATHER, taper=1.15, bevel=0.3),
         box_part("chest", sp((0, -0.125, 1.40)), (0.02, 0.02, 0.22), "cloth", LIME_CLOTH),
         ("neck", sp((0, 0, 1.55)), sp((0, -0.01, 1.66)), 8, [(0, .045, .045), (1, .042, .042)], "skin", SKIN),
-        # Belt pouches, and a quiver of bolts at her right thigh.
+        # Belt pouches, and a quiver of bolts at his right thigh.
         box_part("pelvis", sp((0.15, -0.06, 1.02)), (0.07, 0.06, 0.08), "cloth", LEATHER, rot=(0, 0, 25), bevel=0.3),
         box_part("pelvis", sp((0.04, -0.13, 1.03)), (0.06, 0.05, 0.07), "cloth", LEATHER, bevel=0.3),
         box_part("pelvis", sp((-0.05, -0.13, 1.06)), (0.04, 0.02, 0.04), "metal", IRON, rot=(0, 45, 0), bevel=0.3),
         path_part("pelvis", [sp((-0.17, 0.03, 0.78)), sp((-0.18, 0.06, 1.02))], 8, [(.04, .035), (.045, .04)], "cloth", LEATHER),
         *[path_part("pelvis", [sp((-0.17 + dx, 0.06 + dy, 1.02)), sp((-0.18 + dx, 0.07 + dy, 1.10))], 4, [(.012, .004), (0, 0)], "emissive", LIME)
           for dx, dy in ((0.015, 0.0), (-0.015, 0.01), (0.0, -0.015))],
-        # A fan of tail feathers at the back of her belt.
+        # A fan of tail feathers at the back of his belt.
         *[_feather("pelvis", sp((x * 0.3, 0.13, 1.02)), (x, 0.55, -0.6), 0.30 - abs(x) * 0.12, 0.06, RUSSET, LIME) for x in (-0.35, -0.12, 0.12, 0.35)],
-        # The capelet: layered feathers over her shoulders and down her back, on the chain.
+        # The capelet: layered feathers over his shoulders and down his back, on the chain.
         *[_feather("chest", sp((x, 0.04, 1.58)), (x * 1.6, 0.25, -0.5), 0.22, 0.07, TAN if k % 2 else RUSSET, LIME) for k, x in enumerate((-0.15, -0.08, 0.0, 0.08, 0.15))],
         *[_feather("extra_cape_1", (CAPE[0][0] + x, CAPE[0][1] + 0.01, CAPE[0][2] - 0.04), (x * 1.5, 0.30, -1), 0.26, 0.075, RUSSET if k % 2 else TAN, LIME)
           for k, x in enumerate((-0.12, -0.04, 0.04, 0.12))],
@@ -99,7 +100,7 @@ def _center():
 
 
 def _crest():
-    # A tall crest of feathers swept back from her brow, lime at the tips.
+    # A tall crest of feathers swept back from his brow, lime at the tips.
     out = []
     for k, (x, ang, L) in enumerate(((0.0, 60, 0.38), (0.04, 52, 0.32), (-0.04, 52, 0.32), (0.075, 40, 0.26), (-0.075, 40, 0.26), (0.0, 72, 0.30),
                                      (0.10, 28, 0.20), (-0.10, 28, 0.20))):
@@ -177,7 +178,7 @@ def cape(back=0.0, sway=0.0):
 
 
 def aim_bow(target, pole=(1.0, -0.4, -0.8), support=False):
-    """The crossbow aimed along `target` (armature-space direction) from her right shoulder; the
+    """The crossbow aimed along `target` (armature-space direction) from his right shoulder; the
     left hand under its stock when `support`."""
     d = Vector(target).normalized()
     shoulder = Vector(BONES["upperarm_r"][2])
@@ -188,8 +189,36 @@ def aim_bow(target, pole=(1.0, -0.4, -0.8), support=False):
     return out
 
 
+def _turn(axis_r, up_r, axis_w, up_w):
+    """The rotation taking a rest frame (axis, up) to a wanted one, both armature space."""
+    a = Vector(axis_w).normalized()
+    u = Vector(up_w)
+    u = (u - a * u.dot(a)).normalized()
+    rest = Matrix((axis_r, up_r, axis_r.cross(up_r))).transposed()
+    want = Matrix((a, u, a.cross(u))).transposed()
+    return (want @ rest.transposed()).to_quaternion()
+
+
+def aim_gun(target, cant=(1.0, 0.0, 0.35), reach=0.95, pole=(1.0, -0.1, -0.6)):
+    """The crossbow fired one-handed like a pistol (14 §3.3): the right arm straight out from the
+    shoulder along `target`, the crossbow rolled on its side so its top leans toward `cant`
+    (armature space; +X is toward his left)."""
+    d = Vector(target).normalized()
+    shoulder = Vector(BONES["upperarm_r"][2])
+    span = (Vector(BONES["upperarm_r"][3]) - shoulder).length + (Vector(BONES["forearm_r"][3]) - Vector(BONES["forearm_r"][2])).length
+    wrist = shoulder + d * span * reach
+
+    def turn():
+        bones = {b[0]: b for b in rig.bone_table()}
+        h, t = Vector(bones["hand_r"][2]), Vector(bones["hand_r"][3])
+        axis = (t - h).normalized()
+        up = axis.cross(Vector((0, 1, 0))).normalized().cross(axis).normalized()
+        return _turn(axis, up, d, cant)
+    return {"ik_hand_r": ik(tuple(wrist), pole=pole), "hand_r": {"turn": turn}}
+
+
 STAND = feet((0.11, 0.06), (0.13, -0.08))
-# Weight on one leg, the crossbow propped on her shoulder, a hand on her hip.
+# Weight on one leg, the crossbow propped on his shoulder, a hand on his hip.
 IDLE = merge(STAND, {"pelvis": (0, -5, 0), "spine_01": (0, 4, 0)}, arm("r", 0.3, 0.2, -0.8, -0.25, 0.75, 0.6), {"hand_r": clips.aim(-0.1, -0.3, 1, "r")},
              arm("l", 0.5, -0.1, -0.6, -0.4, 0.4, 0.3), {"head": (-4, 0, 0)}, cape(2))
 READY = merge(feet((0.15, 0.16), (0.15, -0.14)), {"spine_01": (12, 0, 0), "head": (-8, 0, 0)}, aim_bow((0, -1, -0.25), support=True), cape(4))
@@ -204,7 +233,7 @@ def idle(armature):
 
 
 def idle_fidget_1(armature):
-    # Spins the crossbow round her finger and catches it on her shoulder.
+    # Spins the crossbow round his finger and catches it on his shoulder.
     out = merge(IDLE, arm("r", 0.6, 0.6, -0.1, 0.5, 0.8, 0.0))
     keys = [(0, IDLE, None), (8, out, None)]
     for i, f in enumerate((11, 14, 17, 20)):
@@ -214,7 +243,7 @@ def idle_fidget_1(armature):
 
 
 def idle_fidget_2(armature):
-    # Preens a crest feather back into place, then shakes out her capelet.
+    # Preens a crest feather back into place, then shakes out his capelet.
     preen = merge(IDLE, arm("l", 0.3, 0.3, 0.6, -0.4, 0.0, 0.9), {"head": (-18, 0, 12)})
     keys = [(0, IDLE, None), (12, preen, None), (22, merge(preen, {"head": (-22, 0, 8)}), None), (28, merge(IDLE, cape(10, 6)), None, "snap"),
             (30, merge(IDLE, cape(10, -6)), None, "snap"), (32, merge(IDLE, cape(6, 4)), None, "snap"), (44, IDLE, None)]
@@ -234,6 +263,13 @@ def _run_upper(swing, trail):
     return upper
 
 
+
+def walk(armature):
+    # A walk (heavy slows, and the moment a run comes to a stop): the run's body type, slower,
+    # the weapon carried as in it, never hanging into the ground (14 §3.6).
+    keys = gait(32, 0.90, contact=0.6, lift=0.10, bob=0.02, lean=5, twist=6, width=0.11, crouch=0.0, upper=_run_upper(0.4, 10))
+    return _clip(armature, "walk", 32, keys, loop=True, markers={"foot_l": 0, "foot_r": 16}, stride_speed=140.0)
+
 def run(armature):
     # Light (14 §3.6): short contact, long airborne strides.
     keys = gait(20, 0.75, contact=0.34, lift=0.26, bob=0.06, lean=12, twist=10, width=0.11, upper=_run_upper(1.0, 30))
@@ -246,15 +282,17 @@ def run_fast(armature):
 
 
 def _shot(armature, name, frames, fire, flat=False):
-    """A crossbow shot: raised and aimed (the left hand under the stock), steadied, fired on
-    `fire` with the bow kicking up, the recoil held."""
-    st = feet((0.15, 0.22), (0.15, -0.18))
-    aimed = merge(st, aim_bow((0, -1, 0.0), support=True), {"spine_01": (6, 0, -10), "head": (-6, 0, 10)}, cape(3))
-    if flat:
-        aimed = merge(aimed, {"spine_01": (8, 0, -24), "head": (-8, 0, 22)})
-    kick = merge(st, aim_bow((0, -1, 0.45), support=True), {"spine_01": (-2, 0, -10), "head": (-10, 0, 8)}, cape(6))
-    keys = [(0, READY, DOWN), (fire - 3, aimed, DOWN), (fire - 1, aimed, DOWN, "snap"), (fire, kick, {"pelvis": (0, 0.03, -0.07)}),
-            (fire + 4, merge(kick, {"spine_01": (0, 0, -10)}), {"pelvis": (0, 0.03, -0.07)}, "settle"), (frames, READY, DOWN)]
+    """A pistol shot (14 §3.1): side-on, the crossbow snapped out one-handed and canted, the left
+    hand on his hip; steadied, fired on `fire` with the wrist kicking up and out, the kick held a
+    beat, then a flourish back to ready. `flat` cants it fully flat, the body turned further."""
+    st = feet((0.17, 0.10), (0.15, -0.22))
+    cant = (1.0, 0.0, 0.0) if flat else (1.0, 0.0, 0.45)
+    turned = {"pelvis": (0, 0, 14), "spine_01": (4, 0, 14 + (8 if flat else 0)), "spine_02": (0, 0, 8), "head": (-6, 0, -26 - (8 if flat else 0))}
+    hip = arm("l", 0.75, 0.05, -0.6, -0.15, -0.55, -0.45)
+    aimed = merge(st, turned, aim_gun((0, -1, 0.02), cant=cant), hip, cape(3))
+    kick = merge(st, turned, aim_gun((0.12, -1, 0.40), cant=(cant[0], 0.0, cant[2] + 0.3)), hip, {"spine_02": (-4, 0, 8), "head": (-10, 0, -24)}, cape(6))
+    keys = [(0, READY, DOWN), (fire - 3, aimed, DOWN, "snap"), (fire - 1, aimed, DOWN, "snap"), (fire, kick, {"pelvis": (0, 0.03, -0.07)}),
+            (fire + 5, merge(kick, {"head": (-8, 0, -22)}), {"pelvis": (0, 0.03, -0.07)}, "settle"), (frames, READY, DOWN)]
     return _clip(armature, name, frames, keys, markers={"fire": fire})
 
 
@@ -267,15 +305,18 @@ def attack_2(armature):
 
 
 def q(armature):
-    # Ricochet: a trick shot, the crossbow turned flat and fired from the hip on `fire` 8.
-    st = feet((0.16, 0.24), (0.16, -0.18))
-    hip = merge(st, aim_bow((0, -1, -0.1), pole=(1.0, 0.0, -1.0)), {"hand_r": None}, {"spine_01": (8, 0, -26), "head": (-8, 0, 24)},
-                arm("l", 0.5, 0.2, -0.3, 0.4, 0.4, 0.2), cape(4))
-    hip = {k: v for k, v in hip.items() if v is not None}
-    kick = merge(hip, aim_bow((0.2, -1, 0.35), pole=(1.0, 0.0, -1.0)), {"spine_01": (2, 0, -22)})
-    keys = [(0, READY, DOWN), (5, hip, DOWN), (7, hip, DOWN, "snap"), (8, kick, {"pelvis": (0, 0.03, -0.07)}),
-            (13, merge(kick, {"head": (-12, 0, 20)}), {"pelvis": (0, 0.03, -0.07)}, "settle"), (24, READY, DOWN)]
-    return _clip(armature, "q", 24, keys, markers={"fire": 8})
+    # Ricochet, the heavy shot: he drops into a wide brace, both hands on the crossbow at his
+    # hip, sights down it, fires on `fire` 8, and the recoil throws his arms up and shoves him
+    # back half a step; he holds it, then rocks forward to ready.
+    st = feet((0.22, 0.28), (0.20, -0.24))
+    brace = merge(st, aim_bow((0, -1, -0.05), pole=(1.0, 0.0, -1.0), support=True), {"spine_01": (14, 0, -18), "spine_02": (6, 0, -6), "head": (-14, 0, 18)}, cape(4))
+    sight = merge(brace, {"spine_01": (16, 0, -20), "head": (-16, 0, 20)})
+    kick = merge(feet((0.22, 0.22), (0.20, -0.32)), aim_bow((0, -0.7, 0.75), pole=(1.0, 0.0, -0.8), support=True),
+                 {"spine_01": (-8, 0, -14), "spine_02": (-8, 0, -4), "head": (-20, 0, 14)}, cape(14))
+    keys = [(0, READY, DOWN), (4, brace, {"pelvis": (0, 0, -0.16)}), (6, sight, {"pelvis": (0, 0, -0.17)}, "snap"), (7, sight, {"pelvis": (0, 0, -0.17)}, "snap"),
+            (8, kick, {"pelvis": (0, 0.10, -0.12)}), (17, merge(kick, {"spine_01": (-6, 0, -14)}), {"pelvis": (0, 0.11, -0.12)}, "settle"),
+            (28, READY, DOWN)]
+    return _clip(armature, "q", 28, keys, markers={"fire": 8})
 
 
 def w(armature):
@@ -330,7 +371,7 @@ KNEEL = merge({"ik_foot_l": ik(at(0.14, 0.26, champion.ankle(), "l")), "thigh_r"
 
 
 def recall(armature):
-    # Crouches and tinkers with her crossbow's string.
+    # Crouches and tinkers with his crossbow's string.
     keys = [(0, IDLE, None), (15, KNEEL, {"pelvis": (0, 0.04, -0.42)}), (30, merge(KNEEL, {"head": (18, 0, 8)}), {"pelvis": (0, 0.04, -0.41)}),
             (45, merge(KNEEL, arm("l", 0.3, 0.6, -0.4, -0.3, 0.6, 0.5)), {"pelvis": (0, 0.04, -0.41)}), (60, merge(KNEEL, {"head": (18, 0, -8)}), {"pelvis": (0, 0.04, -0.41)}),
             (75, KNEEL, {"pelvis": (0, 0.04, -0.42)}), (90, IDLE, None)]
@@ -361,7 +402,7 @@ def select(armature):
 
 
 def emote_taunt(armature):
-    # Blows a raspberry, thumbs at her ears, fingers wiggling.
+    # Blows a raspberry, thumbs at his ears, fingers wiggling.
     t = merge(IDLE, hand("l", at(0.12, 0.0, 1.80, "l"), aim=at(0.2, 0.2, 1, "l")), {"head": (-6, 0, 0)})
     keys = [(0, IDLE, None), (8, t, None)]
     for i, f in enumerate(range(12, 30, 3)):
@@ -371,7 +412,7 @@ def emote_taunt(armature):
 
 
 def emote_joke(armature):
-    # Flaps her capelet like wings and hops.
+    # Flaps his capelet like wings and hops.
     flap_up = merge(IDLE, arm("l", 1, 0.0, 0.4, 1, 0.0, 0.3), cape(-20))
     flap_dn = merge(IDLE, arm("l", 1, 0.0, -0.3, 1, 0.0, -0.4), cape(20))
     keys = [(0, IDLE, None)]
@@ -402,7 +443,7 @@ def emote_dance(armature):
     return _clip(armature, "emote_dance", 48, keys, loop=True)
 
 
-OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, run, run_fast, attack_1, attack_2, q, w, e_start, e_travel, e_land, r,
+OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, walk, run, run_fast, attack_1, attack_2, q, w, e_start, e_travel, e_land, r,
        recall, death, respawn, select, emote_taunt, emote_joke, emote_laugh, emote_dance]
 
 

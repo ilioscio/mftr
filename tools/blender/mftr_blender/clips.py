@@ -225,6 +225,8 @@ def _key_pose(armature, frame, pose, bones=None, locs=None, insert=True, prev=No
                     and swings hanging bones backward; +rz turns left.
       aim(...)      point the bone along a direction given in character space, absolute (not
                     relative to the parent); the intuitive form for arms and legs.
+      {"turn": q}   the bone's whole turn from rest, a Quaternion in armature axes (or a
+                    function returning one, evaluated when keyed): props held at an exact angle.
     `sym(...)`/`aim_sym(...)` build left/right pairs with the mirror rule.
     `bones` lists every bone to key (unlisted ones are keyed at rest, so clips never inherit
     poses); `locs` maps bone -> (x, y, z) offset in armature axes, in meters.
@@ -242,6 +244,10 @@ def _key_pose(armature, frame, pose, bones=None, locs=None, insert=True, prev=No
         value = pose.get(name, (0, 0, 0)) if name in bones else None
         if value is None:
             q_arm = Quaternion()
+        elif isinstance(value, dict) and "turn" in value:
+            # An absolute turn from rest (armature axes), whatever the parent does.
+            turn = value["turn"]() if callable(value["turn"]) else value["turn"]
+            q_arm = d_parent.inverted() @ turn
         elif isinstance(value, dict):
             rest_dir = (rest @ Vector((0, 1, 0))).normalized()
             target = d_parent.inverted() @ Vector(value["aim"]).normalized()

@@ -15,11 +15,13 @@
         // Q Ember Lance: a big flare and a smear on release, a white-hot shaft, a hard hit.
         (event: "q.release", kit: "flare", ramp: [(1.0, 1.0, 0.86), (1.0, 0.66, 0.20), (0.86, 0.26, 0.05)], count: 20, speed: 4.6),
         (event: "q.release", kit: "slash", ramp: [(1.0, 1.0, 0.86), (1.0, 0.62, 0.16), (0.80, 0.22, 0.04)], count: 16, size: 0.6, arc: 70, lifetime: 0.1),
-        (event: "q.projectile", kit: "arrow", ramp: [(1.0, 0.98, 0.80), (1.0, 0.60, 0.14), (0.80, 0.22, 0.04)]),
+        (event: "q.projectile", kit: "flame", ramp: [(1.0, 0.96, 0.70), (1.0, 0.48, 0.08), (0.70, 0.14, 0.02)], count: 3, speed: 0.8, lifetime: 0.3),
         (event: "q.impact", kit: "flash", ramp: [(1.0, 1.0, 0.92), (1.0, 0.72, 0.30), (0.90, 0.30, 0.06)], count: 8, size: 1.2),
         (event: "q.impact", kit: "burst", ramp: [(1.0, 0.94, 0.64), (1.0, 0.54, 0.12), (0.74, 0.18, 0.03), (0.24, 0.18, 0.16)], count: 18, speed: 4.0),
 
-        // W Cinder Bloom: a column of fire, a shock to the area's edge, embers and smoke.
+        // W Cinder Bloom: a burning ground indicator; on the eruption a column of fire, a shock to
+        // the area's edge, embers and smoke.
+        (event: "w.telegraph", kit: "flames", ramp: [(1.0, 0.86, 0.36), (0.80, 0.24, 0.04)]),
         (event: "w.detonate", kit: "pillar", ramp: [(1.0, 0.98, 0.80), (1.0, 0.64, 0.18), (0.86, 0.26, 0.05), (0.30, 0.20, 0.16)], count: 40),
         (event: "w.detonate", kit: "shock", ramp: [(1.0, 0.94, 0.64), (1.0, 0.54, 0.12), (0.74, 0.18, 0.03)]),
         (event: "w.detonate", kit: "burst", ramp: [(1.0, 0.94, 0.64), (1.0, 0.54, 0.12), (0.74, 0.18, 0.03), (0.24, 0.18, 0.16)], count: 24, speed: 4.8, lifetime: 0.5),
@@ -31,7 +33,7 @@
 
         // R Binding Sigil: the throw's flare, the burning sigil, a ring of fire where it binds.
         (event: "r.release", kit: "flare", ramp: [(1.0, 0.96, 0.70), (1.0, 0.62, 0.16), (0.80, 0.22, 0.04)], count: 14, speed: 2.6),
-        (event: "r.projectile", kit: "net", ramp: [(1.0, 0.70, 0.24), (0.86, 0.26, 0.05)]),
+        (event: "r.projectile", kit: "net", ramp: [(1.0, 0.86, 0.40), (0.90, 0.30, 0.05)]),
         (event: "r.impact", kit: "ring", ramp: [(1.0, 0.94, 0.64), (1.0, 0.54, 0.12), (0.74, 0.18, 0.03)], speed: 1.4),
         (event: "r.impact", kit: "flash", ramp: [(1.0, 1.0, 0.92), (1.0, 0.72, 0.30), (0.90, 0.30, 0.06)], count: 8),
         (event: "r.impact", kit: "burst", ramp: [(1.0, 0.94, 0.64), (1.0, 0.54, 0.12), (0.74, 0.18, 0.03)], count: 16, speed: 3.2),

@@ -13,24 +13,26 @@
 
         // Q Stone Lash.
         (event: "q.release", kit: "flare", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30)], count: 12, speed: 3.0),
-        (event: "q.projectile", kit: "arrow", ramp: [(0.80, 1.0, 0.86), (0.30, 0.92, 0.52), (0.08, 0.50, 0.26)]),
+        (event: "q.projectile", kit: "shard", ramp: [(0.80, 1.0, 0.86), (0.36, 0.40, 0.34), (0.08, 0.50, 0.26)], count: 3, speed: 1.2, lifetime: 0.35),
         (event: "q.impact", kit: "burst", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30), (0.34, 0.33, 0.31)], count: 14, speed: 3.2),
 
         // W Shelter.
         (event: "w.fire", kit: "shock", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30)], size: 0.8, lifetime: 0.3),
         (event: "w.fire", kit: "flare", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30)], count: 14, speed: 1.8, lifetime: 0.5),
 
-        // E Rockfall: the stamp's flare; then rocks fall in a column, a shock, dust.
-        (event: "e.fire", kit: "flare", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30)], count: 12, speed: 2.4),
-        (event: "e.detonate", kit: "pillar", ramp: [(0.86, 1.0, 0.90), (0.36, 0.96, 0.56), (0.08, 0.56, 0.28), (0.40, 0.38, 0.34)], count: 30),
+        // E Rockfall: the shadows of the rocks grow on the ground until they drop; they land on
+        // the root: stones, a shock to the edge, shards, dust.
+        (event: "e.telegraph", kit: "rocks", ramp: [(0.70, 1.0, 0.76), (0.22, 0.42, 0.26)]),
+        (event: "e.detonate", kit: "rocks", ramp: [(0.62, 0.60, 0.54), (0.46, 0.44, 0.40), (0.30, 0.29, 0.27)], count: 18, size: 1.2),
         (event: "e.detonate", kit: "shock", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30)]),
         (event: "e.detonate", kit: "burst", ramp: [(0.72, 0.70, 0.64), (0.52, 0.50, 0.46), (0.34, 0.33, 0.31)], count: 22, speed: 4.4),
         (event: "e.detonate", kit: "dust", ramp: [(0.54, 0.52, 0.47), (0.43, 0.41, 0.38), (0.32, 0.31, 0.29)], count: 14, speed: 1.8, size: 1.2),
 
-        // R Monolith: the staff goes in (cracks, a star); then the eruption around him.
-        (event: "r.fire", kit: "crack", ramp: [(0.70, 1.0, 0.76), (0.20, 0.80, 0.40), (0.08, 0.42, 0.20), (0.20, 0.18, 0.16)], count: 8, size: 1.6, lifetime: 1.2),
-        (event: "r.fire", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.60, 1.0, 0.72), (0.14, 0.70, 0.36)], count: 10, size: 1.4),
-        (event: "r.detonate", kit: "pillar", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30), (0.04, 0.28, 0.14)], count: 40),
+        // R Monolith: cracks spread through the ground indicator; the staff goes in with a star;
+        // the eruption comes with the knock-up: the stone, a shock, cracks, dust.
+        (event: "r.telegraph", kit: "cracks", ramp: [(0.70, 1.0, 0.76), (0.16, 0.44, 0.22)]),
+        (event: "r.fire", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.60, 1.0, 0.72), (0.14, 0.70, 0.36)], count: 8),
+        (event: "r.detonate", kit: "crack", ramp: [(0.70, 1.0, 0.76), (0.20, 0.80, 0.40), (0.08, 0.42, 0.20), (0.20, 0.18, 0.16)], count: 8, lifetime: 1.2),
         (event: "r.detonate", kit: "shock", ramp: [(0.92, 1.0, 0.94), (0.40, 1.0, 0.60), (0.08, 0.60, 0.30)]),
         (event: "r.detonate", kit: "burst", ramp: [(0.72, 0.70, 0.64), (0.52, 0.50, 0.46), (0.34, 0.33, 0.31)], count: 26, speed: 5.0, lifetime: 0.5),
         (event: "r.detonate", kit: "dust", ramp: [(0.54, 0.52, 0.47), (0.43, 0.41, 0.38), (0.32, 0.31, 0.29)], count: 18, speed: 2.4, size: 1.4),

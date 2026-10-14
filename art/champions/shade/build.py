@@ -154,8 +154,9 @@ def _left():
 
 
 def _knife(side):
-    """A long curved knife held reversed: the blade leaves the bottom of the fist and runs back
-    along the forearm, curving out, its edge glowing violet."""
+    """A long curved hand blade held forward, punch-dagger style: it leaves the front of the fist
+    past the knuckles and sweeps out to the thumb side, its edge glowing violet. (Held reversed
+    along the forearm it read as a bracer.)"""
     hb = f"hand_{side}"
     h = Vector(next(b[2] for b in rig.bone_table() if b[0] == hb))
     t = Vector(next(b[3] for b in rig.bone_table() if b[0] == hb))
@@ -167,14 +168,15 @@ def _knife(side):
     def p(v):
         return tuple(v)
 
-    spine = [g + axis * 0.02 - out * 0.02, g - axis * 0.12 + out * 0.04, g - axis * 0.32 + out * 0.09, g - axis * 0.50 + out * 0.10,
-             g - axis * 0.60 + out * 0.06]
+    # The grip runs across the fist; the guard sits over the knuckles; the blade goes on ahead.
+    k = g + axis * 0.10
+    spine = [k + axis * 0.02, k + axis * 0.16 + out * 0.03, k + axis * 0.34 + out * 0.08, k + axis * 0.48 + out * 0.12,
+             k + axis * 0.56 + out * 0.10]
     return [
-        path_part(hb, [p(g + axis * 0.05), p(g - axis * 0.02)], 6, [(.03, .03), (.03, .03)], "cloth", LEATHER),
-        path_part(hb, [p(g + axis * 0.05), p(g + axis * 0.09)], 8, [(.034, .034), (.02, .02)], "metal", STEEL_DARK),
-        path_part(hb, [p(g + axis * 0.09), p(g + axis * 0.12)], 6, [(.012, .012), (0, 0)], "emissive", VIOLET),
-        path_part(hb, [p(g - axis * 0.02), p(g - axis * 0.04)], 6, [(.05, .02), (.05, .02)], "metal", STEEL_DARK, ref=tuple(out)),
-        path_part(hb, [p(v) for v in spine], 8, [(.012, .05), (.012, .055), (.01, .045), (.008, .03), (0, 0)], "metal", STEEL, ref=tuple(out)),
+        path_part(hb, [p(g - axis * 0.02), p(g + axis * 0.04)], 6, [(.03, .03), (.03, .03)], "cloth", LEATHER),
+        path_part(hb, [p(g - axis * 0.06), p(g - axis * 0.02)], 6, [(.012, .012), (.024, .024)], "emissive", VIOLET),
+        path_part(hb, [p(k - axis * 0.02), p(k + axis * 0.02)], 6, [(.07, .022), (.07, .022)], "metal", STEEL_DARK, ref=tuple(out)),
+        path_part(hb, [p(v) for v in spine], 8, [(.014, .05), (.012, .055), (.01, .045), (.008, .03), (0, 0)], "metal", STEEL, ref=tuple(out)),
         path_part(hb, [p(v + out * 0.045) for v in spine[1:]], 4, [(.006, .012), (.006, .012), (.005, .01), (0, 0)], "emissive", VIOLET, ref=tuple(out)),
     ]
 
@@ -226,21 +228,29 @@ def idle_ready(armature):
 
 
 def _run_upper(trail):
-    # The sneak (14 §3.6): arms swept back, blades trailing, the scarf streaming.
+    # The sneak (14 §3.6): arms swept back and low behind the hips (not up behind the back,
+    # which read childish), blades trailing, the scarf streaming.
     def upper(p):
         c = math.cos(2 * math.pi * p)
-        return merge(arm("l", 0.35, -0.75 - 0.1 * c, -0.45, 0.30, -0.55, 0.1), arm("r", 0.35, -0.75 + 0.1 * c, -0.45, 0.30, -0.55, 0.1),
+        return merge(arm("l", 0.30, -0.55 - 0.1 * c, -0.78, 0.26, -0.70, -0.30), arm("r", 0.30, -0.55 + 0.1 * c, -0.78, 0.26, -0.70, -0.30),
                      {"head": (-34, 0, 0), "neck": (-8, 0, 0)}, scarf(trail + 8 * math.sin(4 * math.pi * p), 4 * math.sin(2 * math.pi * p)))
     return upper
 
 
+
+def walk(armature):
+    # A walk (heavy slows, and the moment a run comes to a stop): the run's body type, slower,
+    # the weapon carried as in it, never hanging into the ground (14 §3.6).
+    keys = gait(32, 0.90, contact=0.6, lift=0.10, bob=0.02, lean=16, twist=6, width=0.15, crouch=0.18, upper=_run_upper(25))
+    return _clip(armature, "walk", 32, keys, loop=True, markers={"foot_l": 0, "foot_r": 16}, stride_speed=140.0)
+
 def run(armature):
-    keys = gait(20, 1.0, contact=0.42, lift=0.22, bob=0.04, lean=28, twist=7, width=0.15, crouch=0.14, upper=_run_upper(45))
+    keys = gait(20, 1.0, contact=0.42, lift=0.20, bob=0.035, lean=30, twist=7, width=0.17, crouch=0.26, upper=_run_upper(45))
     return _clip(armature, "run", 20, keys, loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=345.0)
 
 
 def run_fast(armature):
-    keys = gait(16, 0.98, contact=0.38, lift=0.26, bob=0.045, lean=34, twist=8, width=0.15, crouch=0.16, upper=_run_upper(55))
+    keys = gait(16, 0.98, contact=0.38, lift=0.24, bob=0.04, lean=36, twist=8, width=0.17, crouch=0.28, upper=_run_upper(55))
     return _clip(armature, "run_fast", 16, keys, loop=True, markers={"foot_l": 0, "foot_r": 8}, stride_speed=460.0)
 
 
@@ -322,14 +332,21 @@ def e_start(armature):
 
 
 def r_start(armature):
-    # Execution: a leap with both knives raised, plunged down on arrival and held there long.
+    # Execution: a leap with both knives raised, plunged down on arrival and held there long:
+    # he stays buried in the target, still, then rips the blades out to the sides and rises
+    # slowly. The dash is over in a quarter second, so the weight is all in the landing.
     high = merge(arm("l", 0.3, 0.2, 0.9, 0.2, 0.1, 1), arm("r", 0.3, 0.2, 0.9, 0.2, 0.1, 1), sym("thigh", -60, 0, 0), sym("calf", 90, 0, 0),
                  {"spine_01": (10, 0, 0), "spine_02": (-10, 0, 0), "head": (-16, 0, 0)}, scarf(70))
     stab = merge(feet((0.24, 0.24), (0.24, -0.22)), {"spine_01": (44, 0, 0), "spine_02": (12, 0, 0), "head": (-34, 0, 0)},
                  arm("l", 0.2, 0.8, -0.6, 0.0, 0.5, -0.9), arm("r", 0.2, 0.8, -0.6, 0.0, 0.5, -0.9), scarf(20))
-    out = _trio(armature, "r", [(0, merge(high, {"spine_01": (24, 0, 0)}), {"pelvis": (0, 0, -0.20)}, "snap"), (2, stab, {"pelvis": (0, -0.04, -0.46)}),
-                                (9, merge(stab, {"spine_01": (46, 0, 0)}), {"pelvis": (0, -0.04, -0.47)}, "settle"), (16, READY, DOWN)],
-                travel=high, land_frames=16)
+    rip = merge(feet((0.26, 0.20), (0.26, -0.24)), {"spine_01": (30, 0, 0), "spine_02": (6, 0, 0), "head": (-26, 0, 0)},
+                arm("l", 0.9, 0.3, -0.3, 0.9, 0.0, -0.4), arm("r", 0.9, 0.3, -0.3, 0.9, 0.0, -0.4), scarf(-10, 8))
+    out = _trio(armature, "r", [(0, merge(high, {"spine_01": (24, 0, 0)}), {"pelvis": (0, 0, -0.20)}, "snap"), (2, stab, {"pelvis": (0, -0.04, -0.50)}),
+                                (8, merge(stab, {"spine_01": (48, 0, 0)}), {"pelvis": (0, -0.04, -0.52)}, "settle"),
+                                (18, merge(stab, {"spine_01": (47, 0, 0), "head": (-30, 0, 0)}), {"pelvis": (0, -0.04, -0.51)}),
+                                (21, rip, {"pelvis": (0, -0.02, -0.40)}, "snap"), (28, merge(rip, scarf(4, 0)), {"pelvis": (0, 0, -0.34)}, "settle"),
+                                (36, READY, DOWN)],
+                travel=high, land_frames=36)
     return out[0]
 
 
@@ -405,7 +422,7 @@ def emote_dance(armature):
     return _clip(armature, "emote_dance", 48, keys, loop=True)
 
 
-OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, run, run_fast, attack_1, attack_2, w, q_start, e_start, r_start,
+OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, walk, run, run_fast, attack_1, attack_2, w, q_start, e_start, r_start,
        recall, death, respawn, select, emote_taunt, emote_joke, emote_laugh, emote_dance]
 
 

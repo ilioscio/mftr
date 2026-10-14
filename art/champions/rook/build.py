@@ -331,6 +331,13 @@ def _run_upper(swing):
     return upper
 
 
+
+def walk(arm):
+    # A walk (heavy slows, and the moment a run comes to a stop): the run's body type, slower,
+    # the weapon carried as in it, never hanging into the ground (14 §3.6).
+    keys = gait(32, 0.90, contact=0.6, lift=0.10, bob=0.02, lean=6, twist=6, width=0.21, crouch=0.03, upper=_run_upper(0.4))
+    return _clip(arm, "walk", 32, keys, loop=True, markers={"foot_l": 0, "foot_r": 16}, stride_speed=140.0)
+
 def run(arm):
     # A heavy run (14 §3.6): long contact, a deep bob, wide feet, the maul braced on the shoulder.
     keys = gait(20, 0.95, contact=0.42, lift=0.20, bob=0.065, lean=13, twist=10, width=0.21, crouch=0.04,
@@ -548,7 +555,7 @@ def emote_dance(arm):
     return _clip(arm, "emote_dance", 48, keys, loop=True)
 
 
-OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, run, run_fast, attack_1, attack_2, q, w, e_start, e_travel, e_land, r,
+OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, walk, run, run_fast, attack_1, attack_2, q, w, e_start, e_travel, e_land, r,
        recall, death, respawn, select, emote_taunt, emote_joke, emote_laugh, emote_dance]
 
 

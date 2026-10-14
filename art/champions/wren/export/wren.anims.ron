@@ -29,7 +29,7 @@
         (name: "idle_fidget_1", frames: 38, looping: false, layer: "full", stride_speed: None, markers: [(name: "end", frame: 38)]),
         (name: "idle_fidget_2", frames: 44, looping: false, layer: "full", stride_speed: None, markers: [(name: "end", frame: 44)]),
         (name: "idle_ready", frames: 40, looping: true, layer: "full", stride_speed: None, markers: []),
-        (name: "q", frames: 24, looping: false, layer: "full", stride_speed: None, markers: [(name: "fire", frame: 8), (name: "end", frame: 24)]),
+        (name: "q", frames: 28, looping: false, layer: "full", stride_speed: None, markers: [(name: "fire", frame: 8), (name: "end", frame: 28)]),
         (name: "r", frames: 26, looping: false, layer: "full", stride_speed: None, markers: [(name: "fire", frame: 8), (name: "end", frame: 26)]),
         (name: "recall", frames: 90, looping: false, layer: "full", stride_speed: None, markers: [(name: "loop_in", frame: 15), (name: "loop_out", frame: 75), (name: "end", frame: 90)]),
         (name: "respawn", frames: 20, looping: false, layer: "full", stride_speed: None, markers: [(name: "end", frame: 20)]),

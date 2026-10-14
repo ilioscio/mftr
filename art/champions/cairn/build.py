@@ -100,15 +100,29 @@ def _antlers():
     return out
 
 
-def _head(bm, layers, groups, mats):
-    head.build(bm, layers, groups, mats, head.Head(
+def _face():
+    return head.Head(
         base=sp((0, -0.01, 1.63)), height=0.25, scale=1.16, jaw=0.2, chin=1.15, eye=0.85,
-        skin=SKIN, hair=HAIR, hair_style="short", eye_color=(0.2, 0.5, 0.25), lips=(0.5, 0.32, 0.28), beard=True))
+        skin=SKIN, hair=HAIR, hair_style="short", eye_color=(0.2, 0.5, 0.25), lips=(0.5, 0.32, 0.28), beard=True)
+
+
+def _head(bm, layers, groups, mats):
+    head.build(bm, layers, groups, mats, _face())
 
 
 def _paint():
-    # A stripe of emerald paint across his eyes.
-    return [box_part("head", sp((0, -0.115, 1.745)), (0.20, 0.02, 0.03), "emissive", EMERALD_DEEP, rot=(0, 0, 0))]
+    # War paint, laid on the face's own surface (not floating like a visor): a stripe down each
+    # side from the brow past the outer corner of the eye to the cheekbone, and a diamond on the
+    # brow. Vertical marks read as paint; a band across the eyes read as sunglasses.
+    f = _face()
+    k = f.scale
+    brow = f.front(0.75, 0)
+    out = [box_part("head", tuple(brow + Vector((0, -0.002, 0))), (0.026, 0.008, 0.026), "emissive", EMERALD_DEEP, rot=(0, 45, 0))]
+    for s in (1, -1):
+        top, low = f.front(0.72, 0.064 * k * s), f.front(0.46, 0.058 * k * s)
+        mid = (top + low) / 2 + Vector((0, -0.002, 0))
+        out.append(box_part("head", tuple(mid), (0.014, 0.008, (top - low).length), "emissive", EMERALD_DEEP, rot=(0, 0, 0)))
+    return out
 
 
 def _left():
@@ -228,6 +242,13 @@ def _run_upper(swing, trail):
                      cloak(trail + 5 * math.sin(4 * math.pi * p), 4 * math.sin(2 * math.pi * p)), {"head": (-10, 0, 0)})
     return upper
 
+
+
+def walk(armature):
+    # A walk (heavy slows, and the moment a run comes to a stop): the run's body type, slower,
+    # the weapon carried as in it, never hanging into the ground (14 §3.6).
+    keys = gait(32, 0.90, contact=0.6, lift=0.10, bob=0.02, lean=5, twist=6, width=0.17, crouch=0.02, upper=_run_upper(0.4, 10))
+    return _clip(armature, "walk", 32, keys, loop=True, markers={"foot_l": 0, "foot_r": 16}, stride_speed=140.0)
 
 def run(armature):
     keys = gait(20, 0.94, contact=0.44, lift=0.20, bob=0.06, lean=12, twist=9, width=0.17, crouch=0.03, upper=_run_upper(1.0, 28))
@@ -379,12 +400,15 @@ def emote_dance(armature):
     return _clip(armature, "emote_dance", 48, keys, loop=True)
 
 
-OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, run, run_fast, attack_1, attack_2, q, w, e, r,
+OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, walk, run, run_fast, attack_1, attack_2, q, w, e, r,
        recall, death, respawn, select, emote_taunt, emote_joke, emote_laugh, emote_dance]
 
 
 def _extras(armature):
     rig.add_chain(armature, "cloak", "chest", CLOAK)
+    # Stone Lash leaves from the staff's emerald.
+    h, t = Vector(BONES["hand_r"][2]), Vector(BONES["hand_r"][3])
+    champion.place_socket(armature, "socket_projectile", tuple(h + (t - h).normalized() * STAFF_TOP))
 
 
 def build(only=None):

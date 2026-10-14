@@ -31,7 +31,7 @@
         (name: "q_land", frames: 12, looping: false, layer: "full", stride_speed: None, markers: [(name: "end", frame: 12)]),
         (name: "q_start", frames: 5, looping: false, layer: "full", stride_speed: None, markers: [(name: "fire", frame: 2), (name: "end", frame: 5)]),
         (name: "q_travel", frames: 10, looping: true, layer: "full", stride_speed: None, markers: []),
-        (name: "r_land", frames: 16, looping: false, layer: "full", stride_speed: None, markers: [(name: "end", frame: 16)]),
+        (name: "r_land", frames: 36, looping: false, layer: "full", stride_speed: None, markers: [(name: "end", frame: 36)]),
         (name: "r_start", frames: 5, looping: false, layer: "full", stride_speed: None, markers: [(name: "fire", frame: 2), (name: "end", frame: 5)]),
         (name: "r_travel", frames: 10, looping: true, layer: "full", stride_speed: None, markers: []),
         (name: "recall", frames: 90, looping: false, layer: "full", stride_speed: None, markers: [(name: "loop_in", frame: 15), (name: "loop_out", frame: 75), (name: "end", frame: 90)]),

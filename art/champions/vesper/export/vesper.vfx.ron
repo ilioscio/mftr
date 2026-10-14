@@ -18,7 +18,9 @@
         (event: "q.impact", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.55, 0.98, 0.92), (0.14, 0.62, 0.58)], count: 8),
         (event: "q.impact", kit: "burst", ramp: [(1.0, 1.0, 1.0), (0.40, 0.96, 0.88), (0.10, 0.56, 0.52)], count: 16, speed: 4.0),
 
-        // W Shrapnel Charge: the lobbed bomb, then a teal burst, a shock to its edge, smoke.
+        // W Shrapnel Charge: a cracked teal indicator where it will land; the lobbed bomb, then a
+        // teal burst, a shock to its edge, smoke.
+        (event: "w.telegraph", kit: "cracks", ramp: [(0.70, 1.0, 0.94), (0.10, 0.44, 0.40)]),
         (event: "w.projectile", kit: "lob", ramp: [(0.40, 0.96, 0.88), (0.30, 0.22, 0.14)]),
         (event: "w.detonate", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.55, 0.98, 0.92), (0.14, 0.62, 0.58)], count: 8, size: 1.3),
         (event: "w.detonate", kit: "burst", ramp: [(1.0, 1.0, 0.94), (0.40, 0.96, 0.88), (0.10, 0.56, 0.52), (0.32, 0.30, 0.28)], count: 24, speed: 4.5),

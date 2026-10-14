@@ -80,6 +80,20 @@ def bake_shared(armature, names=None):
     return [a.name for a in dst.actions]
 
 
+def place_socket(armature, name, point):
+    """Move a socket bone (keeping its parent) so its head sits at `point` (armature space, rest):
+    a staff's projectiles leave from its head, not the fist holding it."""
+    prev = bpy.context.view_layer.objects.active
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode="EDIT")
+    eb = armature.data.edit_bones[name]
+    d = eb.tail - eb.head
+    eb.head = Vector(point)
+    eb.tail = Vector(point) + d
+    bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.context.view_layer.objects.active = prev
+
+
 def secondary(armature, chain, stiffness=0.28, inertia=0.86, sag=0.0, actions=None):
     """Secondary motion (14 §3): the `extra_<chain>_*` bones simulated as a rope of points that
     lags behind the authored pose and springs back to it, baked as a key on every frame of each
@@ -215,7 +229,9 @@ def build(name, shape, parts, own, height, extras=None, only=None, shared=None, 
         body = mesh.build_mannequin(armature, name=name, part_list=detailed(part_list) if detail >= 2 else part_list)
     finally:
         head.DEFAULT_DETAIL = 1
-    baked = bake_shared(armature, shared) if only is None else []
+    # The library's clips fill in only what the champion doesn't make itself (its own `walk`
+    # carries its weapon; the library's hangs the arms at rest).
+    baked = bake_shared(armature, [n for n in (shared or SHARED) if n not in made]) if only is None else []
     print(f"{name}: {len(armature.data.bones)} bones, {mesh.triangle_count(body)} triangles, {len(made)} own clips, shared {baked}")
     return armature, body
 

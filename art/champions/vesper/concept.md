@@ -12,6 +12,7 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
 - **Personality in three words:** patient, precise, wry.
 - **Shape (14 §2):** *a huge recurve and a long one-sided cloak*. Athletic heroic proportions on the `biped` bones (`SHAPE` in `build.py`: ×1.05 wide, hands ×1.35), about 1.85 m. A 1.7 m recurve with teal-glowing tips, taller than her shoulders; a quiver across her back whose teal-fletched arrows rise over her right shoulder; a forest-green cloak with a teal hem hanging off her left shoulder on an `extra_cape` chain (3 bones); a leather pauldron on the bow shoulder; the hood down, a cowl. A feminine hourglass build.
 - **Head:** the shared sculpted head, feminine and heroic-sized (×1.1): a narrower jaw, large green eyes, side-swept auburn bangs and a ponytail.
+- **The bow works (14 §3.3):** at rest she holds it low against her body, across her hips, the string up (`bow_turn`). It's rigged: two bones per limb (`extra_bow_1..4`) and two for the string (`extra_string_1..2`). Each shot is baked so the nocking point follows her drawing fingers, the limbs bend toward her as the string comes back, and on release the string snaps forward and shivers. The string is behind the grip, toward her (the first version curved the limbs the wrong way, so she held the bow backwards).
 - **Gait (14 §3.6):** athletic, the bow steady and low in her left hand, the cloak streaming.
 
 ## Palette (14 §4)

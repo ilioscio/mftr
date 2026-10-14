@@ -165,8 +165,17 @@ DOWN = {"pelvis": (0, 0, -0.05)}
 
 
 def idle(armature):
-    b = merge(IDLE, sym("clavicle", 0, -3, 0), {"head": (-6, 0, -2)}, coat(3, 2))
-    return _clip(armature, "idle", 64, [(0, IDLE, {"pelvis": (0.01, 0, -0.01)}), (32, b, {"pelvis": (0.01, 0, 0.0)})], loop=True)
+    # Restless and cocky: he weighs the flame in his palm, rolls it over his knuckles toward his
+    # face to admire it, clenches it brighter, lets it go back down; his weight shifts, the coat
+    # swings, the head cocks.
+    up = merge(IDLE, hand("r", at(0.22, 0.26, 1.42, "r"), aim=at(-0.3, 0.6, 0.6, "r")), {"head": (-10, 0, 14), "spine_02": (-3, 0, -6)},
+               {"fingers_r": (10, 0, 0)}, coat(4, -3))
+    clench = merge(up, {"fingers_r": (75, 0, 0), "thumb_r": (40, 0, 0)}, sym("clavicle", 0, -6, 0), {"head": (-14, 0, 10)})
+    shift = merge(IDLE, {"pelvis": (0, 5, 0), "spine_01": (0, -4, 0), "head": (-4, 0, -10)}, coat(2, 4))
+    keys = [(0, IDLE, {"pelvis": (0.01, 0, -0.01)}), (22, up, {"pelvis": (0.0, 0, 0.0)}), (34, up, {"pelvis": (0.0, 0, 0.0)}, "snap"),
+            (37, clench, {"pelvis": (0.0, 0, -0.02)}), (50, clench, {"pelvis": (0.0, 0, -0.02)}, "settle"), (66, shift, {"pelvis": (-0.01, 0, -0.01)}),
+            (82, IDLE, {"pelvis": (0.01, 0, -0.01)})]
+    return _clip(armature, "idle", 96, keys, loop=True)
 
 
 def idle_fidget_1(armature):
@@ -198,6 +207,13 @@ def _run_upper(swing, trail):
                      coat(trail + 6 * math.sin(4 * math.pi * p), 4 * math.sin(2 * math.pi * p)), {"head": (-8, 0, 0)})
     return upper
 
+
+
+def walk(armature):
+    # A walk (heavy slows, and the moment a run comes to a stop): the run's body type, slower,
+    # the weapon carried as in it, never hanging into the ground (14 §3.6).
+    keys = gait(32, 0.90, contact=0.6, lift=0.10, bob=0.02, lean=4, twist=6, width=0.11, crouch=0.0, upper=_run_upper(0.4, 10))
+    return _clip(armature, "walk", 32, keys, loop=True, markers={"foot_l": 0, "foot_r": 16}, stride_speed=140.0)
 
 def run(armature):
     keys = gait(20, 0.79, contact=0.36, lift=0.26, bob=0.05, lean=10, twist=10, width=0.11, upper=_run_upper(1.0, 32))
@@ -247,8 +263,10 @@ def q(armature):
                    arm("l", 0.15, 0.9, 0.25, 0.05, 0.8, 0.5), arm("r", 0.15, 0.9, 0.25, 0.05, 0.8, 0.5), coat(-4))
     keys = [(0, READY, DOWN), (5, gather, {"pelvis": (0, 0.02, -0.08)}), (7, cock, {"pelvis": (0, 0.03, -0.09)}, "snap"),
             (8, thrust, {"pelvis": (0, -0.05, -0.08)}, "snap"), (10, recoil, {"pelvis": (0, 0.06, -0.06)}),
-            (15, merge(recoil, {"spine_01": (-4, 0, 0)}), {"pelvis": (0, 0.06, -0.06)}, "settle"), (20, READY, DOWN)]
-    return _clip(armature, "q", 20, keys, markers={"fire": 8})
+            # The recoil is held: the lance's force stays in his arms a long beat (14 §3.2).
+            (18, merge(recoil, {"spine_01": (-4, 0, 0)}), {"pelvis": (0, 0.07, -0.06)}),
+            (24, merge(recoil, {"spine_01": (-2, 0, 0), "head": (-8, 0, 0)}), {"pelvis": (0, 0.06, -0.06)}, "settle"), (32, READY, DOWN)]
+    return _clip(armature, "q", 32, keys, markers={"fire": 8})
 
 
 def w(armature):
@@ -260,8 +278,10 @@ def w(armature):
     point = merge(feet((0.16, 0.30), (0.16, -0.18)), {"spine_01": (16, 0, 6), "spine_02": (6, 0, 0), "head": (-16, 0, 0)},
                   arm("r", 0.15, 0.85, -0.45, 0.08, 0.8, -0.55), arm("l", 0.6, -0.3, -0.4, 0.4, -0.1, -0.3), coat(7))
     keys = [(0, READY, DOWN), (5, high, {"pelvis": (0, 0, 0.0)}), (7, cock, {"pelvis": (0, 0.02, 0.01)}, "snap"), (8, point, {"pelvis": (0, -0.04, -0.08)}),
-            (14, merge(point, {"spine_01": (18, 0, 6)}), {"pelvis": (0, -0.04, -0.09)}, "settle"), (22, READY, DOWN)]
-    return _clip(armature, "w", 22, keys, markers={"fire": 8})
+            (16, merge(point, {"spine_01": (18, 0, 6)}), {"pelvis": (0, -0.04, -0.09)}),
+            # Held, pointing, until the bloom is about to burst; then he straightens.
+            (24, merge(point, {"spine_01": (19, 0, 8), "head": (-18, 0, 0)}), {"pelvis": (0, -0.04, -0.09)}, "settle"), (32, READY, DOWN)]
+    return _clip(armature, "w", 32, keys, markers={"fire": 8})
 
 
 def e(armature):
@@ -370,7 +390,7 @@ def emote_dance(armature):
     return _clip(armature, "emote_dance", 48, keys, loop=True)
 
 
-OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, run, run_fast, attack_1, attack_2, q, w, e, r,
+OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, walk, run, run_fast, attack_1, attack_2, q, w, e, r,
        recall, death, respawn, select, emote_taunt, emote_joke, emote_laugh, emote_dance]
 
 

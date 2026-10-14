@@ -11,8 +11,8 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
   - **R Execution:** a lunging finisher (ultimate).
 - **Personality in three words:** quiet, precise, cold.
 - **Shape (14 §2):** *a blade*. Lean proportions on the `biped` bones (`SHAPE` in `build.py`: narrow, ×0.95, arms ×1.08, hands ×1.35), about 1.75 m to the hood's tip, always hunched forward. A tall pointed hood sweeping back into a point, a black mask with violet eyes burning out of it, a violet scarf streaming behind on an `extra_scarf` chain (3 bones), a spiked steel guard on his right shoulder only, two spare blades sheathed crossed on his back, kunai strapped to his thighs.
-- **Weapons:** two long curved knives held **reversed**: the blade leaves the bottom of the fist and runs back along the forearm, curving out, its edge glowing violet.
-- **Gait (14 §3.6):** sneaky: low (a 14 cm crouch), leaning 28°, arms swept back with the blades trailing.
+- **Weapons:** two long curved hand blades held **forward**, punch-dagger style: each leaves the front of the fist past the knuckles and sweeps out to the thumb side, its edge glowing violet. (Held reversed along the forearm they read as bracers.)
+- **Gait (14 §3.6):** sneaky: low (a 26 cm crouch at a run), leaning 30°, arms swept back and low behind the hips (never up behind the back), the blades trailing.
 
 ## Palette (14 §4)
 

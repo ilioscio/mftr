@@ -86,6 +86,14 @@ hold** (two keys a few frames apart with a small drift) rather than a frozen one
   push off the ground instead of skating.
 - Carry poses put the weight on the skeleton: on the shoulder, across the back, or resting on the
   ground, never held out at arm's length.
+- A prop held at an **exact angle** (a bow across the hips, a crossbow canted on its side) turns its
+  hand with `{"turn": q}`: the bone's whole rotation from rest in armature axes, whatever its
+  parent does.
+- **Weapons that work move.** Vesper's bow has two bones per limb and two for the string
+  (`extra_bow_*`, `extra_string_*`); her shots are baked so the nocking point follows her
+  drawing fingers, the limbs bend toward her by how far it comes back, the string halves turn and
+  stretch to it, and on release it snaps forward and shivers. A staff's projectiles leave from
+  its head (`champion.place_socket` moves `socket_projectile` there), not from the fist.
 - Heavy weapons lead with the body: hips and chest turn before the arms, the arms before the
   weapon.
 
@@ -102,7 +110,9 @@ Capes, scarves, coat tails and shawls (`extra_<chain>` bones) aren't keyed by ha
 clips are built, `champion.secondary` simulates each chain as a rope of points that lags behind
 the authored pose and springs back to it, and bakes it as a key on every frame. Spins flare the
 cloth, stops overshoot, slams whip it through. Each chain has a `stiffness` and `inertia` (a
-loose scarf, a heavy cloak); loops are simulated for three cycles so they stay seamless.
+loose scarf, a heavy cloak); loops are simulated for three cycles so they stay seamless. A
+chain can also carry an authored pose under the simulation: Lumen's dress tails lift and drift
+in a wind at rest, so even her idle moves.
 
 ### 3.6 Locomotion has a body type
 
@@ -147,7 +157,26 @@ bracer), so team color never fights the signature for the silhouette.
 The kit gains (05 §5): **`slash`**, an arc smear in front of the champion along the swing, for 2–4
 frames; **`flash`**, a 2–3 frame star at the impact point; **`crack`**, radial ground lines that
 linger; **`pillar`**, a short vertical streak (landings, dash arrivals); **`shock`**, a ring that
-expands to a radius. All pixel-style, all colored by the ramp.
+expands to a radius; **`rocks`**, stones dropped across an area; **`rain`**, a volley that keeps
+falling for seconds. All pixel-style, all colored by the ramp.
+
+### 4.4 Projectiles and indicators in character
+
+A champion's projectiles and ground indicators are part of its look, not generic blue shapes:
+
+- **Projectiles** pick a shape (05 §5.1): Ember's lance is a `flame`, Rook's Rupture a crimson
+  `wave` rolling to its target, Cairn's lash a stone `shard`, Marrow's Grasping Bones a run of
+  `bones`, Quill's and Lumen's strikes a `beam` from the staff head, Wren's shots fat `bolt`s,
+  Bastion's grapple an open hand on a chain (`grab`). The body is the signature color; the
+  sheath stays the team's.
+- **Indicators** of delayed areas fill with the champion's motif (`telegraph`): Ember's burn,
+  Bastion's frost, Cairn's rock shadows grow until the rocks drop and his cracks spread before
+  Monolith, Marrow's ground is strewn with bones, Wren's marked with arrowheads, Quill's starred
+  and sigiled, Lumen's sigil burns. The outline stays the team's.
+- **The shockwave lands with the damage.** A `shock`, `crack` or `rocks` that says *this hurts*
+  plays on `detonate` or `impact`, when the sim applies the damage, never on the cast of a delayed
+  ability; the cast gets a flare or a flash at the caster. The indicator carries the warning.
+- **Dashes leave a path** (`travel`): a quarter-second dash is otherwise invisible.
 
 ## 5. The roster
 
@@ -157,14 +186,14 @@ Each champion's `concept.md` holds the full brief; the summary:
 |---|---|---|---|---|
 | **Rook** | A block on legs: slab pauldrons, a head sunk into the shoulders, a maul with a huge square head | Brute, ~2.15 m, heavy gait | Two-handed maul; idles with its head on the ground, both hands on the pommel; runs with it on his shoulder, braced | R: the maul held high a beat, slammed down, the head **left in the ground** a long moment |
 | **Bastion** | A boulder: shoulders above the head, giant fists, ice-blue crystal core | Hulking, ~2.3 m, heavy gait, knuckles low | His fists | E: both fists into the ground and held, cracks spreading |
-| **Vesper** | A huge recurve bow and a long one-sided cloak; quiver feathers over the shoulder | Athletic, ~1.85 m | Bow in the left hand, draws to the cheek | Q: a deep draw held, a snap release, recoil |
+| **Vesper** | A huge recurve bow and a long one-sided cloak; quiver feathers over the shoulder | Athletic, ~1.85 m | Bow in the left hand, held low across her hips at rest, string up; it bends and the string comes back on the draw | Q: a deep draw held, a snap release, recoil |
 | **Ember** | A flame: high flared collar, burning hair, bell sleeves; top-heavy | Slim, ~1.8 m, light gait | Bare hands with fire | Q: both palms drawn back, then thrust, the lance leaving with recoil |
-| **Lumen** | A bell: a long robe, a big halo ring behind the head, wide sleeves | Serene, ~1.8 m, floating gait | A lantern-staff | R: arms raised, the halo flaring |
-| **Shade** | A blade: hunched, a long scarf tail, two long curved knives held reversed, a pointed hood | Lean, ~1.75 m, sneaky gait | Twin knives, reverse grip | Q: vanish-crouch, a streak, a cross-slash on arrival |
+| **Lumen** | A wind-blown dress: a fitted bodice, an underskirt to mid-shin, three long tails lifting in the wind; a small halo, bare arms, bell sleeves | Serene, ~1.8 m, floating gait | A lantern-staff in the right hand, both hands on it to cast | E: the lantern thrust two-handed, a beam of sunlight |
+| **Shade** | A blade: hunched, a long scarf tail, two long curved hand blades, a pointed hood | Lean, ~1.75 m, sneaky gait, low, arms back at the hips | Twin punch-blades held forward past the knuckles (reversed along the forearm they read as bracers) | R: the plunge held buried in the target, then ripped out |
 | **Quill** | A tall pointed hat with a brim and a long coat; a staff topped by an orrery ring | Gangly, ~1.85 m (the hat to ~2.3 m) | Two-handed staff for the big casts | R: the staff planted, the lance charged and held, then fired |
 | **Cairn** | Antlers and a mossy stone mantle; a gnarled staff | Broad, ~2.0 m, heavy gait | Two-handed staff | E: the staff driven down, rocks falling |
-| **Marrow** | A hooded crone: a high bone collar, a ribcage corset, long claws, ragged skirt | Bent, ~1.8 m, unhurried gait | Bare clawed hands, a skull lantern at the hip | Q: arms flung wide, the drain pulled in |
-| **Wren** | A feather crest and a short cape of feathers; a crossbow at the hip | Small, ~1.65 m, light gait | One-handed crossbow, the other hand balances | E: a crouch, a spring, a landing on all fours |
+| **Marrow** | A hooded crone: a deep hood framing her face, its peak down her back, a ribcage corset, ragged skirt | Bent, ~1.8 m, unhurried gait | A crooked staff crowned with a horned skull, leaned on at rest; a skull lantern at the hip | W: the staff driven into the ground, bones erupting down the line |
+| **Wren** | A lethal birdman: a feather crest and a short cape of feathers | Small, ~1.65 m, light gait | A hand crossbow fired one-handed, arm straight out and canted on its side; braced two-handed for Ricochet | E: a crouch, a spring, a landing on all fours |
 
 ## 6. Review
 

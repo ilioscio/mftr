@@ -237,6 +237,13 @@ def _run_upper(swing, trail):
     return upper
 
 
+
+def walk(armature):
+    # A walk (heavy slows, and the moment a run comes to a stop): the run's body type, slower,
+    # the weapon carried as in it, never hanging into the ground (14 §3.6).
+    keys = gait(32, 0.90, contact=0.6, lift=0.10, bob=0.02, lean=4, twist=6, width=0.12, crouch=0.0, upper=_run_upper(0.4, 10))
+    return _clip(armature, "walk", 32, keys, loop=True, markers={"foot_l": 0, "foot_r": 16}, stride_speed=140.0)
+
 def run(armature):
     keys = gait(20, 0.95, contact=0.43, lift=0.24, bob=0.05, lean=10, twist=8, width=0.12, upper=_run_upper(1.0, 30))
     return _clip(armature, "run", 20, keys, loop=True, markers={"foot_l": 0, "foot_r": 10}, stride_speed=330.0)
@@ -295,26 +302,34 @@ def w(armature):
 
 
 def e_start(armature):
-    # Recoil: the staff jabbed into the ground in front, and she vaults back off it.
-    jab = merge(feet((0.15, 0.10), (0.15, -0.14)), staff(at(0.30, 0.75, 1.20, "r"), at(0.30, 1.05, 0.0, "r")),
-                {"spine_01": (24, 0, 0), "head": (-10, 0, 0)}, arm("l", 0.5, 0.4, -0.3, 0.3, 0.6, 0.0), coat(6))
-    vault = merge(staff(at(0.30, 0.55, 1.50, "r"), at(0.30, 1.0, 0.2, "r")), arm("l", 0.7, 0.4, 0.3, 0.6, 0.5, 0.4),
-                  {"thigh_l": (-30, 0, 0), "thigh_r": (-50, 0, 0), "calf_l": (50, 0, 0), "calf_r": (70, 0, 0), "spine_01": (4, 0, 0)}, coat(-30))
-    return _clip(armature, "e_start", 4, [(0, jab, {"pelvis": (0, 0, -0.18)}, "snap"), (4, vault, {"pelvis": (0, 0.1, 0.10)})], markers={"fire": 2})
+    # Recoil, a starlight slip (not a vault): she sweeps the staff back so the orrery flares
+    # behind her, flings the left hand ahead with the fingers spread, and rises off her toes.
+    gather = merge(feet((0.16, 0.14), (0.15, -0.16)), staff(at(0.42, -0.55, 1.45, "r"), at(0.32, 0.55, 0.95, "r")),
+                   arm("l", 0.25, 0.9, 0.0, 0.05, 1.0, 0.1), {"fingers_l": (-25, 0, 0), "thumb_l": (-20, 0, 0)},
+                   {"spine_01": (18, 0, 0), "head": (-12, 0, 0)}, coat(-8))
+    return _clip(armature, "e_start", 4, [(0, gather, {"pelvis": (0, 0, -0.12)}, "snap"), (4, merge(gather, coat(-30)), {"pelvis": (0, 0.0, 0.08)})],
+                 markers={"fire": 2})
+
+
+TRAVEL = merge(staff(at(0.40, -1.45, 1.30, "r"), at(0.34, 0.30, 1.05, "r")), arm("l", 0.2, 1.0, 0.15, 0.0, 1.0, 0.15),
+               {"fingers_l": (-25, 0, 0), "thumb_l": (-20, 0, 0), "thigh_l": (-14, 0, 0), "thigh_r": (-24, 0, 0), "calf_l": (24, 0, 0), "calf_r": (40, 0, 0),
+                "spine_01": (20, 0, 0), "head": (-16, 0, 0)}, coat(-55))
 
 
 def e_travel(armature):
-    air = merge(staff(at(0.35, 0.40, 1.90, "r"), at(0.30, 0.9, 0.6, "r")), arm("l", 0.8, 0.5, 0.3, 0.7, 0.5, 0.4),
-                {"thigh_l": (-40, 0, 0), "thigh_r": (-60, 0, 0), "calf_l": (60, 0, 0), "calf_r": (80, 0, 0), "spine_01": (10, 0, 0), "head": (-10, 0, 0)}, coat(-40))
-    return _clip(armature, "e_travel", 10, [(0, air, {"pelvis": (0, 0.1, 0.12)}), (5, merge(air, coat(-48)), {"pelvis": (0, 0.1, 0.15)})], loop=True)
+    # Gliding a hand's breadth off the ground, legs trailing, the orrery behind her like a
+    # comet's head and the coat streaming; a slow float, not a run.
+    keys = [(0, TRAVEL, {"pelvis": (0, 0.0, 0.22)}), (5, merge(TRAVEL, coat(-62), {"spine_01": (22, 0, 0)}), {"pelvis": (0, 0.0, 0.26)})]
+    return _clip(armature, "e_travel", 10, keys, loop=True)
 
 
 def e_land(armature):
-    # A skid back onto both feet, low, the staff dragging; held.
-    skid = merge(feet((0.18, 0.30), (0.16, -0.16)), staff(at(0.40, 0.40, 1.60, "r"), at(0.35, 0.95, 0.0, "r")), arm("l", 0.8, 0.5, -0.2, 0.7, 0.5, -0.2),
-                 {"spine_01": (22, 0, 0), "head": (-14, 0, 0)}, coat(10))
-    keys = [(0, skid, {"pelvis": (0, 0.04, -0.30)}, "settle"), (5, merge(skid, coat(4)), {"pelvis": (0, 0.04, -0.28)}), (10, READY, DOWN)]
-    return _clip(armature, "e_land", 10, keys)
+    # Touches down light on the toes, low, the left hand sweeping down to steady her; the staff
+    # swings back upright in front without touching the ground; held.
+    touch = merge(feet((0.18, 0.24), (0.16, -0.18)), staff(at(0.38, 0.45, 1.95, "r"), at(0.30, 0.15, 0.55, "r")), arm("l", 0.7, 0.4, -0.4, 0.6, 0.6, -0.6),
+                  {"fingers_l": (-10, 0, 0), "spine_01": (14, 0, 0), "head": (-10, 0, 0)}, coat(12))
+    keys = [(0, touch, {"pelvis": (0, 0.02, -0.20)}, "settle"), (6, merge(touch, coat(4)), {"pelvis": (0, 0.02, -0.18)}), (12, READY, DOWN)]
+    return _clip(armature, "e_land", 12, keys)
 
 
 def r(armature):
@@ -407,12 +422,15 @@ def emote_dance(armature):
     return _clip(armature, "emote_dance", 48, keys, loop=True)
 
 
-OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, run, run_fast, attack_1, attack_2, q, w, e_start, e_travel, e_land, r,
+OWN = [idle, idle_fidget_1, idle_fidget_2, idle_ready, walk, run, run_fast, attack_1, attack_2, q, w, e_start, e_travel, e_land, r,
        recall, death, respawn, select, emote_taunt, emote_joke, emote_laugh, emote_dance]
 
 
 def _extras(armature):
     rig.add_chain(armature, "coat", "pelvis", COAT)
+    # Bolts and the lance leave from the orrery's star.
+    h, t = Vector(BONES["hand_r"][2]), Vector(BONES["hand_r"][3])
+    champion.place_socket(armature, "socket_projectile", tuple(h + (t - h).normalized() * STAFF_TOP))
 
 
 def build(only=None):

@@ -12,7 +12,7 @@
 
         // Q Grapple: frost off the fist, the hook in flight, ice on the catch.
         (event: "q.release", kit: "flare", ramp: [(0.92, 0.98, 1.0), (0.55, 0.88, 1.0), (0.20, 0.52, 0.90)], count: 10, speed: 3.0),
-        (event: "q.projectile", kit: "arrow", ramp: [(0.80, 0.96, 1.0), (0.36, 0.74, 1.0), (0.16, 0.44, 0.84)]),
+        (event: "q.projectile", kit: "grab", ramp: [(0.86, 0.97, 1.0), (0.40, 0.80, 1.0), (0.30, 0.28, 0.26)]),
         (event: "q.impact", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.70, 0.94, 1.0), (0.26, 0.62, 0.96)], count: 6),
         (event: "q.impact", kit: "burst", ramp: [(0.92, 0.98, 1.0), (0.55, 0.88, 1.0), (0.20, 0.52, 0.90)], count: 12, speed: 3.0),
 
@@ -21,11 +21,14 @@
         (event: "w.fire", kit: "flare", ramp: [(0.92, 0.98, 1.0), (0.55, 0.88, 1.0), (0.20, 0.52, 0.90)], count: 14, speed: 1.8, lifetime: 0.5),
 
         // E Tremor: the fists hit, the ground cracks, a shock runs to the slow's edge.
+        (event: "e.telegraph", kit: "frost", ramp: [(0.86, 0.97, 1.0), (0.24, 0.56, 0.86)]),
         (event: "e.fire", kit: "crack", ramp: [(0.82, 0.96, 1.0), (0.36, 0.74, 1.0), (0.14, 0.40, 0.76), (0.20, 0.19, 0.18)], count: 7, lifetime: 1.0),
         (event: "e.fire", kit: "shock", ramp: [(0.90, 0.98, 1.0), (0.50, 0.86, 1.0), (0.20, 0.52, 0.90)]),
         (event: "e.fire", kit: "dust", ramp: [(0.52, 0.50, 0.47), (0.42, 0.40, 0.38), (0.32, 0.31, 0.30)], count: 16, speed: 2.2, size: 1.3),
 
-        // R Upheaval: the fists go in; then the area heaves: ice columns, shards, a ring, dust.
+        // R Upheaval: a frost-cracked ground indicator; the fists go in; then the area heaves:
+        // ice columns, shards, a ring, dust, all on the knock-up.
+        (event: "r.telegraph", kit: "frost", ramp: [(0.86, 0.97, 1.0), (0.24, 0.56, 0.86)]),
         (event: "r.fire", kit: "crack", ramp: [(0.82, 0.96, 1.0), (0.36, 0.74, 1.0), (0.14, 0.40, 0.76), (0.20, 0.19, 0.18)], count: 6, size: 1.2, lifetime: 1.0),
         (event: "r.fire", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.70, 0.94, 1.0), (0.26, 0.62, 0.96)], count: 8, size: 1.4),
         (event: "r.detonate", kit: "pillar", ramp: [(0.92, 0.98, 1.0), (0.55, 0.88, 1.0), (0.22, 0.56, 0.94), (0.12, 0.30, 0.62)], count: 36),

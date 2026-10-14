@@ -22,6 +22,15 @@ const KITS := {
 	"arrow": { "count": 2, "size": 0.06, "speed": 0.2, "lifetime": 0.22 },
 	"net": { "count": 1, "size": 0.08, "speed": 0.3, "lifetime": 0.25 },
 	"lob": { "count": 1, "size": 0.08, "speed": 0.6, "lifetime": 0.30 },
+	# The shaped projectiles' trails (14 §4.4): the body's shape is the missile shader's; these
+	# are the sparks it sheds.
+	"wave": { "count": 3, "size": 0.09, "speed": 0.8, "lifetime": 0.30 },
+	"shard": { "count": 2, "size": 0.08, "speed": 0.5, "lifetime": 0.25 },
+	"beam": { "count": 3, "size": 0.08, "speed": 0.6, "lifetime": 0.30 },
+	"bones": { "count": 2, "size": 0.08, "speed": 0.6, "lifetime": 0.30 },
+	"flame": { "count": 3, "size": 0.09, "speed": 0.9, "lifetime": 0.28 },
+	"bolt": { "count": 2, "size": 0.06, "speed": 0.3, "lifetime": 0.22 },
+	"grab": { "count": 1, "size": 0.07, "speed": 0.3, "lifetime": 0.20 },
 	# Hit sellers (14 §4.3): a swing's arc smear, an impact star, ground cracks, a light column
 	# and an expanding shock ring.
 	"slash": { "count": 36, "size": 0.11, "speed": 0.6, "lifetime": 0.14 },
@@ -29,6 +38,10 @@ const KITS := {
 	"crack": { "count": 6, "size": 0.08, "speed": 0.0, "lifetime": 0.80 },
 	"pillar": { "count": 24, "size": 0.10, "speed": 2.5, "lifetime": 0.35 },
 	"shock": { "count": 0, "size": 0.12, "speed": 0.0, "lifetime": 0.30 },
+	# Things that fall: stones dropping onto an area, and a volley of arrows that keeps falling
+	# across it for `lifetime` seconds (14 §4.3).
+	"rocks": { "count": 14, "size": 0.26, "speed": 9.0, "lifetime": 0.45 },
+	"rain": { "count": 6, "size": 0.07, "speed": 16.0, "lifetime": 2.0 },
 }
 
 var _mm: MultiMesh
@@ -47,6 +60,8 @@ var _rng := RandomNumberGenerator.new()
 var _trails := []
 # Bombs in flight or waiting to go off: { node, from, to, start, flight, spec }.
 var _lobs := []
+# Rains still falling: { pos, radius, left, spec }.
+var _rains := []
 
 
 func _ready() -> void:
@@ -161,6 +176,19 @@ func play(spec: Dictionary, pos: Vector3, dir := Vector3.ZERO, radius := 0.0) ->
 				var h := _rng.randf_range(0.0, 2.2)
 				var jitter := Vector3(_rng.randf_range(-0.12, 0.12), 0.0, _rng.randf_range(-0.12, 0.12))
 				_emit(g + jitter + Vector3(0, h, 0), Vector3(0, speed * _rng.randf_range(0.6, 1.2), 0), life * _rng.randf_range(0.6, 1.0), size, ramp, 0.0, -0.3, 1.0)
+		"rocks":
+			# Stones dropping from above onto points across the area, hard.
+			var r := radius if radius > 0.0 else 1.2
+			for i in n:
+				var a := _rng.randf() * TAU
+				var d := sqrt(_rng.randf()) * r * 0.9
+				var spot := Vector3(pos.x + cos(a) * d, 0.0, pos.z + sin(a) * d)
+				var h := _rng.randf_range(1.6, 3.2)
+				var fall := h / speed
+				_emit(spot + Vector3(0, h, 0), Vector3(0, -speed, 0), fall * 1.05, size * _rng.randf_range(0.7, 1.3), ramp, 0.0, 0.0, 1.0)
+		"rain":
+			# The volley keeps falling for `lifetime` seconds (stepped in `_step`).
+			_rains.append({"pos": Vector3(pos.x, 0.0, pos.z), "radius": radius if radius > 0.0 else 1.5, "left": life, "spec": spec})
 		"shock":
 			# A ring that expands from the center to `radius` (the gameplay radius) over its life.
 			var r := radius if radius > 0.0 else 1.2 * size / float(KITS.shock.size)
@@ -237,6 +265,50 @@ func decorate(node: Node3D, spec: Dictionary, radius: float, lift := 0.35) -> vo
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = ramp[0]
 	match kit:
+		"grab":
+			# An open hand reaching for the target, fingers spread, inside the body's width; the
+			# caller strings a chain back to the caster (14 §4.4: a grapple reads as an arm).
+			var hand := Node3D.new()
+			hand.name = "Grab"
+			hand.position = Vector3(0, lift, 0)
+			var s := minf(radius * 1.6, 0.42)
+			var palm_mat := StandardMaterial3D.new()
+			palm_mat.albedo_color = ramp[ramp.size() - 1] if ramp.size() > 2 else ramp[0]
+			var glow := StandardMaterial3D.new()
+			glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			glow.albedo_color = ramp[1] if ramp.size() > 1 else ramp[0]
+			var palm := MeshInstance3D.new()
+			var pb := BoxMesh.new()
+			pb.size = Vector3(s * 0.55, s * 0.22, s * 0.6)
+			palm.mesh = pb
+			palm.material_override = palm_mat
+			hand.add_child(palm)
+			for k in 4:
+				var f := MeshInstance3D.new()
+				var fb := BoxMesh.new()
+				fb.size = Vector3(s * 0.42, s * 0.12, s * 0.11)
+				f.mesh = fb
+				f.material_override = palm_mat
+				var spread := (float(k) - 1.5) * 0.28
+				f.position = Vector3(s * 0.45, 0.0, (float(k) - 1.5) * s * 0.15)
+				f.rotation = Vector3(0, -spread, 0)
+				hand.add_child(f)
+			var thumb := MeshInstance3D.new()
+			var tb := BoxMesh.new()
+			tb.size = Vector3(s * 0.3, s * 0.12, s * 0.12)
+			thumb.mesh = tb
+			thumb.material_override = palm_mat
+			thumb.position = Vector3(s * 0.12, 0.0, s * 0.38)
+			thumb.rotation = Vector3(0, -0.9, 0)
+			hand.add_child(thumb)
+			var core := MeshInstance3D.new()
+			var cb := BoxMesh.new()
+			cb.size = Vector3(s * 0.2, s * 0.24, s * 0.2)
+			core.mesh = cb
+			core.material_override = glow
+			core.position = Vector3(-s * 0.1, s * 0.08, 0)
+			hand.add_child(core)
+			node.add_child(hand)
 		"arrow":
 			# A thin bright shaft along the flight direction (+X in missile space), never wider
 			# than the body.
@@ -311,11 +383,17 @@ func _process(delta: float) -> void:
 	_step(dt)
 
 
+## A dash's `travel` effect: `spec` streams off `node` each step while `node`'s `was_dashing`
+## meta stays set (the caller sets it while the unit dashes).
+func follow(node: Node3D, spec: Dictionary, lift := 0.9) -> void:
+	_trails.append({ "node": node, "spec": spec, "kit": spec.kit, "lift": lift, "dash": true })
+
+
 func _step(dt: float) -> void:
 	# Trails: a spark or two behind every decorated projectile, each step.
 	for tr in _trails.duplicate():
 		var node = tr.node
-		if not is_instance_valid(node) or not node.is_inside_tree():
+		if not is_instance_valid(node) or not node.is_inside_tree() 				or (tr.has("dash") and not node.get_meta("was_dashing", false)):
 			_trails.erase(tr)
 			continue
 		if not node.visible:
@@ -325,12 +403,31 @@ func _step(dt: float) -> void:
 		var frame: Node3D = node.get_node_or_null("NetFrame")
 		if frame != null:
 			frame.rotation.y += dt * 9.0
+		var spread := 0.35 if tr.has("dash") else 0.06
 		for i in int(_knob(spec, kit, "count")):
-			var p: Vector3 = node.global_position + Vector3(0, tr.lift, 0) + _rand_dir() * 0.06
+			var p: Vector3 = node.global_position + Vector3(0, tr.lift, 0) + _rand_dir() * spread
 			_emit(p, _rand_dir() * _knob(spec, kit, "speed"), _knob(spec, kit, "lifetime"), _knob(spec, kit, "size"), spec.ramp)
 	for l in _lobs:
 		var spec: Dictionary = l.spec
 		_emit(l.node.position + Vector3(0, 0.12, 0), _rand_dir(1.0) * 0.8, 0.2, 0.06, spec.ramp, 2.0)
+	for rn in _rains.duplicate():
+		rn.left -= dt
+		if rn.left <= 0.0:
+			_rains.erase(rn)
+			continue
+		var spec: Dictionary = rn.spec
+		var speed := _knob(spec, "rain", "speed")
+		var size := _knob(spec, "rain", "size")
+		for i in int(_knob(spec, "rain", "count")):
+			var a := _rng.randf() * TAU
+			var d := sqrt(_rng.randf()) * float(rn.radius)
+			var spot: Vector3 = rn.pos + Vector3(cos(a) * d, 0.0, sin(a) * d)
+			var h := _rng.randf_range(2.0, 3.5)
+			var slant := Vector3(0.25, 0.0, 0.15)
+			# A streak: a few particles in a line, falling together.
+			for k in 3:
+				var p: Vector3 = spot + Vector3(0, h + 0.12 * k, 0) - slant * (h / speed) * speed * 0.3
+				_emit(p, Vector3(slant.x * speed * 0.3, -speed, slant.z * speed * 0.3), h / speed, size * (1.0 - 0.2 * k), spec.ramp, 0.0, 0.0, 1.0)
 
 	var i := 0
 	while i < _pos.size():

@@ -10,10 +10,10 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
   - **E Grave Pact:** a self heal (instant).
   - **R Ossuary:** a large delayed area that slows.
 - **Personality in three words:** sly, hungry, unhurried.
-- **Shape (14 §2):** *a hooded crone*. Bent proportions on the `biped` bones (`SHAPE` in `build.py`: ×0.95 wide, arms ×1.15, hands ×1.4), about 1.8 m, always hunched. A round, heavy plum hood whose peak droops forward over her face; a high collar of nine curved bone spikes fanning up behind it; a ribcage corset (a bone sternum and five pairs of ribs) over her robe; ragged sleeves with bone bangles over thin bare wrists; long bone claws on her fingertips; a robe to the shins with tattered strips hanging below; a grave-grey shawl on an `extra_cloak` chain (3 bones); a skull lantern with magenta eyes at her hip.
-- **Weapon:** her claws.
+- **Shape (14 §2):** *a hooded crone*. Bent proportions on the `biped` bones (`SHAPE` in `build.py`: ×0.95 wide, arms ×1.15, hands ×1.4), about 1.8 m, always hunched. A deep plum hood set back so her face shows in its opening, a heavy rolled rim framing it, the peak drooping down her back and a ragged cowl over her shoulders; a ribcage corset over her robe, a ragged skirt of tattered strips, a grave-grey shawl on an `extra_cloak` chain, a skull lantern at her left hip. (The first version fanned bone spikes up behind the hood and held up bone-clawed hands: they read as whiskers and as showing her nails.)
+- **Weapon:** a crooked staff of black wood in her right hand, crowned with a horned skull whose eye sockets burn magenta, bone charms hanging under it; she leans on it at rest with both hands. Her bolts and the bones leave from the skull's jaws (`socket_projectile` placed there).
 - **Head:** the shared sculpted head, aged, grey-haired, magenta-eyed, mostly hidden by the hood.
-- **Gait (14 §3.6):** unhurried: a hunched, stalking stride, claws forward.
+- **Gait (14 §3.6):** unhurried: a hunched, stalking stride, the staff swung like a walking stick, the free hand open.
 
 ## Palette (14 §4)
 
@@ -29,14 +29,14 @@ Signature: **magenta** (320°).
 
 ## Weight (14 §3)
 
-Bolts are flung with a clawed swipe: drawn back and cocked, one frame, held out with the claws spread. Siphon flings her arms wide, then drags the life in, fists pulled hard to her chest and held. Grasping Bones drives a claw into the ground and leaves it there. Ossuary raises both claws, cocks, sweeps them down and out and holds low while she cackles. Feet planted by IK.
+Bolts are jabbed from the skull (drawn back, cocked, one frame, held out) or swept round flat and stopped dead on the target. Siphon flings the staff up and her free arm wide, then drags the life in, the hand clenched hard to her chest, and holds. Grasping Bones drives the staff foot-first into the ground ahead and holds it there while the bones run. Grave Pact thrusts the staff high, the skull blazing, her head thrown back. Ossuary lifts the staff in both hands and slams it into the ground; she hangs on it while the boneyard rises.
 
 ## Clip checklist (10 §5)
 
 | Clip | Notes |
 |---|---|
-| idle, idle_fidget_1 (rolls a knucklebone across her knuckles), idle_fidget_2 (cracks her neck), idle_ready | A slight hunch, fingers curled |
-| run, run_fast | Shared run, claws, the shawl trailing |
+| idle, idle_fidget_1 (taps the skull lantern), idle_fidget_2 (cranes her neck out of the hood, sniffing), idle_ready | Leaning on the staff, both hands on it |
+| run, run_fast | Hunched, the staff swung like a walking stick, the shawl trailing |
 | walk, cast_utility, attack_melee_alt, cc_* | Shared |
 | attack_1, attack_2 | A clawed backhand and a palm thrust; `fire` 10 (sim 10.2) |
 | q | Siphon: claws flung wide, then dragged to her chest; `fire` 6 |
