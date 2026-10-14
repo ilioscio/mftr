@@ -8,8 +8,8 @@
 //! grow with rank (M2 slice 2). Sandboxes play everything at level 1, rank 1.
 
 use crate::ability::{
-    Ability, BARRIER, BLINK, Blink, Cc, Damage, DamageKind, Dash, DelayedArea, Effect, LineSkillshot, Lunge,
-    RankScaling, ReactionClass, Support, Transforms,
+    Ability, BARRIER, BLINK, Beam, Blink, Cc, Damage, DamageKind, Dash, DelayedArea, Effect, LineSkillshot, Lunge,
+    Pulses, RankScaling, ReactionClass, Support, Transforms,
 };
 use crate::combat::stat_at_level;
 use crate::time::SimDuration;
@@ -240,6 +240,7 @@ pub const EMBER: ChampionDef = ChampionDef {
                 delay: ms(850),
                 damage: Damage { kind: DamageKind::Magic, base: 90.0, ad_ratio: 0.0, ap_ratio: 0.7 },
                 cc: Cc::None,
+                pulses: Pulses::NONE,
             }),
             reaction: ReactionClass::Burst,
             per_rank: ranks(40.0, 500),
@@ -312,6 +313,7 @@ pub const VESPER: ChampionDef = ChampionDef {
                 delay: ms(1000),
                 damage: Damage { kind: DamageKind::Physical, base: 50.0, ad_ratio: 0.8, ap_ratio: 0.0 },
                 cc: Cc::None,
+                pulses: Pulses::NONE,
             }),
             reaction: ReactionClass::Burst,
             per_rank: ranks(30.0, 600),
@@ -376,7 +378,15 @@ const fn melee(range: f32, attack_speed: f32, windup_fraction: f32) -> AttackSpe
 
 /// A self-centered area: `range` 0, no delay after the windup.
 const fn nova(windup_ms: u64, radius: f32, damage: Damage, cc: Cc) -> Effect {
-    Effect::Area(DelayedArea { windup: ms(windup_ms), range: 0.0, radius, delay: ms(0), damage, cc })
+    Effect::Area(DelayedArea {
+        windup: ms(windup_ms),
+        range: 0.0,
+        radius,
+        delay: ms(0),
+        damage,
+        cc,
+        pulses: Pulses::NONE,
+    })
 }
 
 const NO_SUPPORT: Support =
@@ -431,6 +441,7 @@ pub const BASTION: ChampionDef = ChampionDef {
                 delay: ms(1150),
                 damage: magic(150.0, 0.6),
                 cc: Cc::Knockup(ms(1000)),
+                pulses: Pulses::NONE,
             }),
             reaction: ReactionClass::HardCc,
             per_rank: ranks(100.0, 15_000),
@@ -547,6 +558,7 @@ pub const LUMEN: ChampionDef = ChampionDef {
                 delay: ms(1000),
                 damage: magic(120.0, 0.5),
                 cc: Cc::Root(ms(1250)),
+                pulses: Pulses::NONE,
             }),
             reaction: ReactionClass::HardCc,
             per_rank: ranks(80.0, 10_000),
@@ -599,7 +611,15 @@ pub const SHADE: ChampionDef = ChampionDef {
 
 /// A delayed ground area at `range` (0: centered on the caster).
 const fn area(windup_ms: u64, range: f32, radius: f32, delay_ms: u64, damage: Damage, cc: Cc) -> Effect {
-    Effect::Area(DelayedArea { windup: ms(windup_ms), range, radius, delay: ms(delay_ms), damage, cc })
+    Effect::Area(DelayedArea {
+        windup: ms(windup_ms),
+        range,
+        radius,
+        delay: ms(delay_ms),
+        damage,
+        cc,
+        pulses: Pulses::NONE,
+    })
 }
 
 const fn line(windup_ms: u64, speed: f32, radius: f32, range: f32, damage: Damage, cc: Cc) -> Effect {
@@ -607,7 +627,7 @@ const fn line(windup_ms: u64, speed: f32, radius: f32, range: f32, damage: Damag
 }
 
 /// Artillery mage: long-range poke from behind the line, a slowing field, a hop back, and a
-/// map-length lance.
+/// channeled lance of starlight that burns the first enemy in its path.
 pub const QUILL: ChampionDef = ChampionDef {
     name: "Quill",
     stats: stats(540.0, 1.3, 20.0, 30.0, 48.0, 70.0, 325.0),
@@ -641,10 +661,20 @@ pub const QUILL: ChampionDef = ChampionDef {
         Ability {
             name: "Starfall Lance",
             cooldown: ms(80_000),
-            effect: line(600, 1600.0, 70.0, 2500.0, magic(180.0, 0.8), Cc::None),
+            // A 0.85 s aim everyone sees, then 1.5 s of beam: seven strikes on whatever enemy
+            // is first in its path. Stuns, knock-ups and pulls cut it short.
+            effect: Effect::Beam(Beam {
+                windup: ms(850),
+                range: 1800.0,
+                radius: 70.0,
+                duration: ms(1500),
+                every: ms(250),
+                damage: magic(280.0, 1.1),
+                cc: Cc::None,
+            }),
             reaction: ReactionClass::Burst,
-            per_rank: ranks(100.0, 15_000),
-            transforms: Transforms::LINE,
+            per_rank: ranks(140.0, 15_000),
+            transforms: Transforms::NONE,
         },
     ],
 };
@@ -776,7 +806,17 @@ pub const WREN: ChampionDef = ChampionDef {
         Ability {
             name: "Hail of Arrows",
             cooldown: ms(60_000),
-            effect: area(250, 1000.0, 280.0, 1250, physical(120.0, 0.9), slow(30, 1000)),
+            // The volley lands, then keeps falling for 2.5 s: five more strikes, each a quarter
+            // of the landing's damage, slowing whoever stays inside.
+            effect: Effect::Area(DelayedArea {
+                windup: ms(250),
+                range: 1000.0,
+                radius: 280.0,
+                delay: ms(1250),
+                damage: physical(80.0, 0.6),
+                cc: slow(30, 1000),
+                pulses: Pulses { count: 5, every: ms(500), share: 0.25, cc: slow(30, 600) },
+            }),
             reaction: ReactionClass::Burst,
             per_rank: ranks(80.0, 10_000),
             transforms: Transforms::AREA,
@@ -798,6 +838,7 @@ mod tests {
                 let (have, need) = match a.effect {
                     Effect::Line(s) => (s.reaction_time(frac * s.range), s.reaction_needed()),
                     Effect::Area(s) => (s.reaction_time(), s.reaction_needed()),
+                    Effect::Beam(s) => (s.reaction_time(), s.reaction_needed()),
                     _ => panic!("{}: only skillshots and areas are dodge-intended", a.name),
                 };
                 assert!(have >= need, "{} {}: {have:.3} s < {need:.3} s", c.def().name, a.name);
@@ -813,6 +854,7 @@ mod tests {
                     Effect::Line(s) => s.cc,
                     // Self-centered novas are melee-range tools, not skillshots.
                     Effect::Area(s) if s.range > 0.0 => s.cc,
+                    Effect::Beam(s) => s.cc,
                     Effect::Lunge(l) => {
                         assert!(!l.cc.is_hard(), "{}: point-and-click hard CC isn't dodgeable", a.name);
                         continue;

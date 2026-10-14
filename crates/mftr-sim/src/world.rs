@@ -18,7 +18,8 @@
 //! announced (id 0) so the client can draw them at once.
 
 use crate::ability::{
-    Ability, Cc, DamageKind, Effect, LUNGE_PICK, LineSkillshot, SLOTS, SUPPORT_PICK, TURRET_SHOT, Timing, Transforms,
+    Ability, Beam, Cc, DamageKind, Effect, LUNGE_PICK, LineSkillshot, Pulses, SLOTS, SUPPORT_PICK, TURRET_SHOT, Timing,
+    Transforms,
 };
 use crate::augments;
 use crate::champion::{AttackSpec, ChampionId, Stats};
@@ -1264,6 +1265,66 @@ pub struct Area {
     pub shot: u8,
     /// The ability slot that cast it (0–5).
     pub slot: u8,
+    /// Strikes still to come after the detonation (a lingering area; `count` 0: none).
+    pub pulses: Pulses,
+    /// Detonated and now lingering: `detonate_at` is the next strike, `power` a strike's.
+    pub lingering: bool,
+}
+
+impl Area {
+    /// When the area is gone: its detonation, or its last strike when it lingers.
+    pub fn end_at(&self) -> SimTime {
+        self.detonate_at.plus(self.pulses.span())
+    }
+}
+
+/// A channeled beam in progress (`ability::Beam`): from the caster's position along `dir`,
+/// striking the first enemy unit on it at `spawn_at` and every `spec.every` until `end_at`,
+/// unless the caster is interrupted first.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Channel {
+    pub id: u32,
+    pub owner: UnitId,
+    pub team: Team,
+    pub origin: Vec2,
+    pub dir: Vec2,
+    pub spec: Beam,
+    pub spawn_at: SimTime,
+    pub end_at: SimTime,
+    /// Raw damage of one strike.
+    pub power: f32,
+    pub cast_seq: u32,
+    pub slot: u8,
+    /// Strikes made so far.
+    pub strikes: u8,
+}
+
+impl Channel {
+    pub fn strike_at(&self, i: u8) -> SimTime {
+        self.spawn_at.plus(SimDuration(self.spec.every.0 * i as u64))
+    }
+
+    /// The first enemy on the beam, given each candidate's `(id, team, radius, position)`:
+    /// the one nearest the caster along it (ties: lowest id). Also used by clients to draw
+    /// where the beam stops.
+    pub fn first_on_beam(&self, units: impl Iterator<Item = (UnitId, Team, f32, Vec2)>) -> Option<(UnitId, f32)> {
+        let mut best: Option<(f32, UnitId)> = None;
+        for (id, team, r, p) in units {
+            if team == self.team || id == self.owner {
+                continue;
+            }
+            let rel = p - self.origin;
+            let along = rel.dot(self.dir);
+            let across = (rel - self.dir * along).length();
+            if along < -r || along > self.spec.range + r || across > self.spec.radius + r {
+                continue;
+            }
+            if best.is_none_or(|(a, b)| (along, id) < (a, b)) {
+                best = Some((along, id));
+            }
+        }
+        best.map(|(a, id)| (id, a.max(0.0)))
+    }
 }
 
 /// A homing basic-attack bolt: not dodgeable, flies at the target until it lands.
@@ -1337,7 +1398,15 @@ pub enum SimEvent {
         at: SimTime,
     },
     AreaSpawned(Area),
+    /// An area's detonation (once; a lingering area's later strikes have no event).
     AreaDetonated {
+        id: u32,
+        at: SimTime,
+    },
+    /// A channeled beam starts (at its first strike). In a world in prediction mode the id is 0.
+    BeamStarted(Channel),
+    /// A beam ended before its `end_at`: its caster was stunned, knocked up, pulled or killed.
+    BeamInterrupted {
         id: u32,
         at: SimTime,
     },
@@ -1500,6 +1569,7 @@ struct Target {
 enum Fired {
     Missile(Missile),
     Area(Area),
+    Channel(Channel),
     Bolt(Bolt),
     /// A melee hit, landing at the end of the windup.
     Melee {
@@ -1553,6 +1623,7 @@ pub struct World {
     rng: Pcg32,
     missiles: Vec<Missile>,
     areas: Vec<Area>,
+    channels: Vec<Channel>,
     bolts: Vec<Bolt>,
     map: Arc<Map>,
     /// Id counter shared by missiles, areas and bolts.
@@ -1580,6 +1651,7 @@ impl World {
             rng: Pcg32::new(seed, 0x4d46_5452),
             missiles: Vec::new(),
             areas: Vec::new(),
+            channels: Vec::new(),
             bolts: Vec::new(),
             next_missile: 1,
             struck: Vec::new(),
@@ -1621,6 +1693,10 @@ impl World {
         &self.areas
     }
 
+    pub fn channels(&self) -> &[Channel] {
+        &self.channels
+    }
+
     pub fn bolts(&self) -> &[Bolt] {
         &self.bolts
     }
@@ -1632,6 +1708,7 @@ impl World {
         if prediction {
             self.missiles.clear();
             self.areas.clear();
+            self.channels.clear();
             self.bolts.clear();
         }
     }
@@ -1764,6 +1841,7 @@ impl World {
         self.missiles.clear();
         self.struck.clear();
         self.areas.clear();
+        self.channels.clear();
         self.bolts.clear();
         for u in self.units.iter_mut() {
             let mut progress = self.rules.progress();
@@ -2046,6 +2124,7 @@ impl World {
             rng,
             missiles,
             areas,
+            channels,
             bolts,
             next_missile,
             next_unit,
@@ -2272,6 +2351,13 @@ impl World {
                         areas.push(a);
                     }
                 }
+                Fired::Channel(c) => {
+                    let c = Channel { id, ..c };
+                    events.push(SimEvent::BeamStarted(c));
+                    if !prediction {
+                        channels.push(c);
+                    }
+                }
                 Fired::Bolt(b) => {
                     let b = Bolt { id, ..b };
                     events.push(SimEvent::AttackLaunched(b));
@@ -2300,7 +2386,7 @@ impl World {
             }
             on_hit(units, &landed, events);
             resolve_direct(units, &mut direct, rng, s1, events);
-            resolve_effects(units, missiles, areas, bolts, struck, rng, &start_pos, s0, s1, events);
+            resolve_effects(units, missiles, areas, channels, bolts, struck, rng, &start_pos, s0, s1, events);
             let had_winner = game.winner.is_some();
             crate::jungle::aggro(units, &events[first_event..], map);
             note_outcomes(units, game, &events[first_event..], s1);
@@ -2456,6 +2542,21 @@ impl World {
             h.write_f32(a.power);
             h.write_f32(a.radius);
             h.write_u8(a.shot);
+            // Areas that don't linger hash as before.
+            if a.pulses.count > 0 || a.lingering {
+                h.write_u8(0xB0 | a.pulses.count);
+                h.write_u8(a.lingering as u8);
+            }
+        }
+        for c in &self.channels {
+            h.write_u32(c.id);
+            h.write_f32(c.origin.x);
+            h.write_f32(c.origin.y);
+            h.write_f32(c.dir.x);
+            h.write_f32(c.dir.y);
+            h.write_u64(c.spawn_at.0);
+            h.write_f32(c.power);
+            h.write_u8(c.strikes);
         }
         for v in &self.struck {
             h.write_u32(v.owner.0);
@@ -2611,7 +2712,30 @@ fn deliver(unit: &Unit, c: EchoCast, t: SimTime, echo: bool, fired: &mut Vec<Fir
                 cc: a.cc,
                 shot: first_shot,
                 slot: c.slot,
+                pulses: a.pulses,
+                lingering: false,
             }));
+        }
+        Effect::Beam(b) => {
+            if echo {
+                return false;
+            }
+            let total = (b.damage.raw(stats.attack_damage, stats.ability_power) + bonus) * scale;
+            fired.push(Fired::Channel(Channel {
+                id: 0,
+                owner: id,
+                team,
+                origin: unit.state.pos,
+                dir: c.dir,
+                spec: b,
+                spawn_at: t,
+                end_at: t.plus(b.duration),
+                power: total / b.strikes() as f32,
+                cast_seq: c.seq,
+                slot: c.slot,
+                strikes: 0,
+            }));
+            return false;
         }
         _ => return false,
     }
@@ -3079,6 +3203,16 @@ fn try_cast(
             st.cast = Some(Cast { slot, dir, point: target, fire_at, seq, mobile: timing.mobile });
             events.push(SimEvent::CastStarted { unit: id, slot, at: t, dir, point: target, fire_at, seq });
         }
+        Effect::Beam(b) => {
+            if dir == Vec2::ZERO {
+                return;
+            }
+            st.cancel_attack(t);
+            st.face(dir);
+            let fire_at = t.plus(b.windup);
+            st.cast = Some(Cast { slot, dir, point: target, fire_at, seq, mobile: timing.mobile });
+            events.push(SimEvent::CastStarted { unit: id, slot, at: t, dir, point: target, fire_at, seq });
+        }
         Effect::Area(a) => {
             st.cancel_attack(t);
             let point = if len > a.range { st.pos + dir * a.range } else { target };
@@ -3277,6 +3411,7 @@ fn resolve_effects(
     units: &mut [Unit],
     missiles: &mut Vec<Missile>,
     areas: &mut Vec<Area>,
+    channels: &mut Vec<Channel>,
     bolts: &mut Vec<Bolt>,
     struck: &mut Vec<VolleyHit>,
     rng: &mut Pcg32,
@@ -3338,12 +3473,14 @@ fn resolve_effects(
     });
     // A volley's hits matter only while some of its missiles still fly.
     struck.retain(|h| missiles.iter().any(|m| m.volley() == (h.owner, h.cast_seq, h.echo)));
-    areas.retain(|a| {
+    areas.retain_mut(|a| {
         if a.detonate_at > s1 {
             return true;
         }
         let frac = (a.detonate_at.0.saturating_sub(s0.0)) as f32 / SUBTICKS as f32;
-        events.push(SimEvent::AreaDetonated { id: a.id, at: a.detonate_at });
+        if !a.lingering {
+            events.push(SimEvent::AreaDetonated { id: a.id, at: a.detonate_at });
+        }
         for &(id, team, r, q0, q1) in &motion {
             let reach = a.radius + r;
             if team != a.team && (q0.lerp(q1, frac) - a.center).length_sq() <= reach * reach {
@@ -3362,7 +3499,52 @@ fn resolve_effects(
                 after_ability_hit(units, a.owner, id, dealt, a.detonate_at, events);
             }
         }
+        // A lingering area strikes again (damage over time): weaker, with its own CC.
+        if a.pulses.count > 0 {
+            if !a.lingering {
+                a.power *= a.pulses.share;
+                a.cc = a.pulses.cc;
+                a.lingering = true;
+            }
+            a.pulses.count -= 1;
+            a.detonate_at = a.detonate_at.plus(a.pulses.every);
+            return true;
+        }
         false
+    });
+    channels.retain_mut(|c| {
+        loop {
+            let at = c.strike_at(c.strikes);
+            if at > s1 || at > c.end_at {
+                return at <= c.end_at;
+            }
+            // Interrupted: dead, or hard CC took the channel's lock (`apply_cc`).
+            let held =
+                units.iter().find(|u| u.id == c.owner).is_some_and(|u| u.state.alive() && u.state.recovery.is_some());
+            if !held {
+                events.push(SimEvent::BeamInterrupted { id: c.id, at });
+                return false;
+            }
+            let frac = (at.0.saturating_sub(s0.0)) as f32 / SUBTICKS as f32;
+            let candidates = motion.iter().map(|&(id, team, r, q0, q1)| (id, team, r, q0.lerp(q1, frac)));
+            if let Some((target, _)) = c.first_on_beam(candidates) {
+                let amp = damage_amp(units, c.owner, target, true, rng);
+                if let Some(u) = units.iter_mut().find(|u| u.id == target) {
+                    apply_cc(u, c.spec.cc, at, c.origin, s1, events);
+                    let dealt = deal_damage(
+                        u,
+                        c.owner,
+                        DamageOrigin::Ability(c.slot),
+                        c.power * amp,
+                        c.spec.damage.kind,
+                        at,
+                        events,
+                    );
+                    after_ability_hit(units, c.owner, target, dealt, at, events);
+                }
+            }
+            c.strikes += 1;
+        }
     });
     let mut landed: Vec<(UnitId, UnitId, f32, SimTime)> = Vec::new();
     bolts.retain_mut(|b| {
@@ -5320,6 +5502,111 @@ mod tests {
                 _ => 0.0,
             })
             .sum()
+    }
+
+    /// Damage `source` dealt `target`, one entry per hit.
+    fn hits(ev: &[SimEvent], source: UnitId, target: UnitId) -> Vec<f32> {
+        ev.iter()
+            .filter_map(|e| match e {
+                SimEvent::Damage { source: s, target: t, amount, absorbed, .. } if *s == source && *t == target => {
+                    Some(amount + absorbed)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A red Quill at (1000, 1000) with every ability at rank 1, and blue `targets`.
+    fn quill_and(targets: &[(ChampionId, Vec2)]) -> (World, UnitId, Vec<UnitId>) {
+        let mut w = World::new(9);
+        let quill = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Quill, Vec2::new(1000.0, 1000.0));
+        let ids = targets
+            .iter()
+            .enumerate()
+            .map(|(i, &(c, p))| w.spawn_champion(PlayerId(2 + i as u8), Team::Blue, c, p))
+            .collect();
+        w.unit_mut(quill).unwrap().state.progress.ranks = [1; 4];
+        w.step(&[]);
+        (w, quill, ids)
+    }
+
+    /// Starfall Lance: after its windup the beam strikes the first enemy on it seven times over
+    /// the channel, and nothing behind it; the caster stays put meanwhile.
+    #[test]
+    fn quills_beam_strikes_only_the_first_enemy_through_the_channel() {
+        let (mut w, quill, ids) = quill_and(&[
+            (ChampionId::Bastion, Vec2::new(1600.0, 1000.0)),
+            (ChampionId::Ember, Vec2::new(2000.0, 1020.0)),
+        ]);
+        w.step(&[cast_slot(1, 1, 2, 0, 3, (3000.0, 1000.0))]);
+        let ev = run_until_quiet(&mut w, 30 * 4);
+        let Effect::Beam(b) = ChampionId::Quill.def().abilities[3].effect else { panic!() };
+        let first = hits(&ev, quill, ids[0]);
+        assert_eq!(first.len(), b.strikes() as usize, "{first:?}");
+        assert!(first.windows(2).all(|p| (p[0] - p[1]).abs() < 1e-3), "equal strikes: {first:?}");
+        assert!(hits(&ev, quill, ids[1]).is_empty(), "the beam stops on the first enemy");
+        let started = ev.iter().find_map(|e| match e {
+            SimEvent::BeamStarted(c) => Some(*c),
+            _ => None,
+        });
+        let c = started.expect("a beam");
+        assert_eq!(c.end_at.0 - c.spawn_at.0, b.duration.0);
+        assert!(!ev.iter().any(|e| matches!(e, SimEvent::BeamInterrupted { .. })));
+        assert_eq!(w.unit(quill).unwrap().state.pos, Vec2::new(1000.0, 1000.0));
+        assert!(w.channels().is_empty());
+    }
+
+    /// Hard CC on the caster ends the beam (roots don't), with an event saying when.
+    #[test]
+    fn a_stun_interrupts_the_beam_and_a_root_does_not() {
+        let strikes = |cc: Cc| {
+            let (mut w, quill, ids) = quill_and(&[(ChampionId::Bastion, Vec2::new(1600.0, 1000.0))]);
+            w.step(&[cast_slot(1, 1, 2, 0, 3, (3000.0, 1000.0))]);
+            let mut ev = Vec::new();
+            while w.channels().is_empty() {
+                w.step(&[]);
+                ev.extend(w.take_events());
+            }
+            // Two more strikes, then the CC.
+            for _ in 0..16 {
+                w.step(&[]);
+                ev.extend(w.take_events());
+            }
+            let now = SimTime::end_of(w.tick());
+            let mut sink = Vec::new();
+            apply_cc(w.unit_mut(quill).unwrap(), cc, now, Vec2::ZERO, now, &mut sink);
+            ev.extend(run_until_quiet(&mut w, 30 * 3));
+            let interrupted = ev.iter().any(|e| matches!(e, SimEvent::BeamInterrupted { .. }));
+            (hits(&ev, quill, ids[0]).len(), interrupted)
+        };
+        let (stunned, cut) = strikes(Cc::Stun(SimDuration::from_millis(500)));
+        assert!(cut && stunned == 3, "{stunned}");
+        let (rooted, cut) = strikes(Cc::Root(SimDuration::from_millis(500)));
+        assert!(!cut && rooted == 7, "{rooted}");
+    }
+
+    /// Hail of Arrows lands once, then keeps striking whoever stays inside: five more times, a
+    /// quarter of the landing each, with a single detonation event.
+    #[test]
+    fn wrens_hail_lingers_and_strikes_again() {
+        let mut w = World::new(9);
+        let wren = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Wren, Vec2::new(1000.0, 1000.0));
+        let target = w.spawn_champion(PlayerId(2), Team::Blue, ChampionId::Bastion, Vec2::new(1600.0, 1000.0));
+        w.unit_mut(wren).unwrap().state.progress.ranks = [1; 4];
+        w.step(&[]);
+        w.step(&[cast_slot(1, 1, 2, 0, 3, (1600.0, 1000.0))]);
+        let ev = run_until_quiet(&mut w, 30 * 5);
+        let got = hits(&ev, wren, target);
+        assert_eq!(got.len(), 6, "{got:?}");
+        assert!(got[1..].iter().all(|h| (h / got[0] - 0.25).abs() < 0.02), "{got:?}");
+        assert_eq!(ev.iter().filter(|e| matches!(e, SimEvent::AreaDetonated { .. })).count(), 1);
+        let area = ev.iter().find_map(|e| match e {
+            SimEvent::AreaSpawned(a) => Some(*a),
+            _ => None,
+        });
+        let a = area.unwrap();
+        assert_eq!(a.end_at().0 - a.detonate_at.0, SimDuration::from_millis(2500).0);
+        assert!(w.areas().is_empty());
     }
 
     /// M3 slice 6: Hyper rules give Q, W and E 300 ability haste (a quarter of the cooldown)

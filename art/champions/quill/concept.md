@@ -8,7 +8,7 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
   - **Q Arc Shot:** a long-range delayed area.
   - **W Static Field:** a slowing delayed area.
   - **E Recoil:** a hop back (dash).
-  - **R Starfall Lance:** a map-length line (2,500 range, 600 ms windup).
+  - **R Starfall Lance:** a channeled beam (850 ms windup, 1,800 range, 1.5 s channel): seven strikes on the first enemy on it, interrupted by hard CC.
 - **Personality in three words:** curious, meticulous, unflappable.
 - **Shape (14 §2):** *a tall pointed hat and a long coat*. Gangly proportions on the `biped` bones (`SHAPE` in `build.py`: long legs, ×0.97 wide, arms ×1.08, hands ×1.3), about 1.85 m, 2.35 m to the star on her hat's tip. A wide-brimmed astronomer's hat bending back to a point, brass goggles with glowing lenses on its band; a long navy coat flaring to her shins, its hem flecked with stars and its tails on an `extra_coat` chain; indigo lapels and shoulder capes; two rows of brass buttons; tall buckled boots; a scroll case and a brass spyglass at her hips.
 - **Weapon:** a tall staff topped by an orrery: three crossing brass rings and two little planets around a glowing star. Skinned to her right hand and held by IK (`staff()` in `build.py`); her big casts take it in both hands.
@@ -42,7 +42,7 @@ The orrery is thrust at her targets (drawn back, cocked, a one-frame thrust, hel
 | q | Arc Shot: the staff swept up and over; `fire` 8 |
 | w | Static Field: the staff's foot struck down; `fire` 8 |
 | e_start, e_travel, e_land | Recoil: a hop backward, the coat flaring |
-| r | Starfall Lance: the staff raised to the sky for a long beat, then levelled; `fire` 18 (sim 18) |
+| r | Starfall Lance: the staff raised to the sky, then levelled and trembling; `fire` 26 (sim 25.5); braced and shaking through the 1.5 s channel, then let go (80 frames) |
 | recall, death, respawn, select | Kneels and studies the sky; falls aside; rises; raises the staff to the stars |
 | emote_taunt, emote_joke, emote_laugh, emote_dance | Beckons; counts the stars on her fingers and loses count; laughs; spins with the staff as a partner |
 

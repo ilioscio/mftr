@@ -8,7 +8,7 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
   - **Q Ricochet:** a quick line.
   - **W Caltrops:** a slowing area at range.
   - **E Pounce:** a lunge onto a target.
-  - **R Hail of Arrows:** a wide delayed area that slows.
+  - **R Hail of Arrows:** a wide delayed area that slows, then keeps raining for 2.5 s: five more strikes at a quarter of the landing's damage, re-slowing whoever stays.
 - **Personality in three words:** cheeky, quick, restless.
 - **Shape (14 §2):** *a feather crest and a short cape of feathers*. Small and springy proportions on the `biped` bones (`SHAPE` in `build.py`: ×0.88, a big heroic head, hands ×1.35), about 1.65 m, 1.95 m to the crest's tips. A tall crest of russet feathers tipped in lime swept back from his brow; a capelet of layered feathers over his shoulders and down his back on an `extra_cape` chain (2 bones); a fan of tail feathers at the back of his belt; a russet tunic with a lime hem under a leather jerkin; feathered bracers and boot cuffs; a quiver of lime-fletched bolts at his thigh.
 - **Weapon:** a hand crossbow in his right hand (skinned to it and laid along it, so his fist aims it): a wooden stock, a swept iron prod with lime tips, a crank, a lime bolt. He fires it one-handed like a pistol, arm straight out, canted on its side (`aim_gun`, the hand turned with `{"turn": …}`); Ricochet is braced low in both hands.

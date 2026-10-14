@@ -188,6 +188,7 @@ pub fn expected_fire_frame(def: &ChampionDef, clip: &str) -> Option<f32> {
     match def.abilities[slot].effect {
         Effect::Line(l) => Some(subticks_to_frames(l.windup.0)),
         Effect::Area(a) => Some(subticks_to_frames(a.windup.0)),
+        Effect::Beam(b) => Some(subticks_to_frames(b.windup.0)),
         _ => None,
     }
 }

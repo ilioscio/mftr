@@ -839,9 +839,15 @@ Measured against the reference's Wukong (R05), the rules are [14](14-champion-ar
   paint, rockfall and cracks; Marrow redesigned (a hood that frames her face, a skull staff);
   Wren (a he) fires one-handed and canted, a braced Ricochet, a hail of arrows that keeps
   falling.
-- **Waiting on the sim:** Quill's R as an interruptible channel beam that stops on the first
-  target, and Wren's R as damage over time in its area; Shade's R rebalance with the game-AI
-  pass; Marrow's kit, on the owner's direction.
+- **The sim follows (protocol 24):** Quill's Starfall Lance is a channel: an 0.85 s aim
+  everyone sees at its full length and width, then 1.5 s of beam from the orrery striking the
+  first enemy on it seven times (280 + 110% AP over the channel, +140 a rank), cut short by
+  stuns, knock-ups, pulls or death. Wren's Hail of Arrows lands for 80 + 60% AD and a slow, then
+  keeps falling for 2.5 s: five more strikes at a quarter of that each, re-slowing whoever
+  stays. Bots cast the beam and step out of enemy areas (telegraphed or still raining) and off
+  beam lines.
+- **Still waiting:** Shade's R rebalance with the game-AI pass; Marrow's kit, on the owner's
+  direction.
 
 ## S — One server, many matches (between E and M4 slice 5)
 The server plays whatever its players ask for ([13](13-server-instances.md), D57): one process

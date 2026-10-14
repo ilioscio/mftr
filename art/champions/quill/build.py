@@ -333,22 +333,32 @@ def e_land(armature):
 
 
 def r(armature):
-    # Starfall Lance: feet planted wide, the staff raised to the sky in both hands, then lowered
-    # to aim down the line, trembling as the lance builds; released in one frame on `fire` 18;
-    # the recoil throws her back a step and holds through the hard lock.
+    # Starfall Lance, a channel (the sim: an 0.85 s aim, then 1.5 s of beam): feet planted wide,
+    # the staff raised to the sky in both hands, then lowered to aim down the line, trembling as
+    # the lance builds; on `fire` 26 the beam bursts out and she braces against it, leaning in,
+    # shaking, the coat streaming back, for the whole channel; then she lets it go.
     st = feet((0.22, 0.30), (0.22, -0.26))
     sky = merge(st, staff(at(0.15, 0.25, 2.75, "r"), at(0.20, 0.05, 1.30, "r"), left=0.25, pole=(1.0, 0.0, -0.4)),
                 {"spine_02": (-12, 0, 0), "head": (-30, 0, 0)}, coat(4))
     aim = merge(st, staff(at(0.06, 1.35, 1.55, "r"), at(0.20, 0.0, 1.20, "r"), left=0.30), {"spine_01": (14, 0, 0), "head": (-10, 0, 0)}, coat(6))
-    keys = [(0, READY, DOWN), (6, sky, {"pelvis": (0, 0, -0.06)}), (10, merge(sky, {"head": (-32, 0, 0)}), {"pelvis": (0, 0, -0.07)}),
-            (13, aim, {"pelvis": (0, 0, -0.12)})]
-    for i, f in enumerate((14, 15, 16, 17)):
+    keys = [(0, READY, DOWN), (8, sky, {"pelvis": (0, 0, -0.06)}), (14, merge(sky, {"head": (-32, 0, 0)}), {"pelvis": (0, 0, -0.07)}),
+            (19, aim, {"pelvis": (0, 0, -0.12)})]
+    for i, f in enumerate(range(20, 26)):
         j = 0.012 if i % 2 else -0.012
         keys.append((f, merge(aim, staff(at(0.06 + j, 1.35, 1.55 + j, "r"), at(0.20, 0.0, 1.20, "r"), left=0.30)), {"pelvis": (0, 0.01 * (i + 1), -0.13)}, "snap"))
-    recoil = merge(feet((0.22, 0.22), (0.22, -0.34)), staff(at(0.10, 1.05, 2.05, "r"), at(0.22, -0.1, 1.25, "r"), left=0.30),
-                   {"spine_01": (-8, 0, 0), "spine_02": (-8, 0, 0), "head": (-12, 0, 0)}, coat(-14))
-    keys += [(18, recoil, {"pelvis": (0, 0.12, -0.10)}), (26, merge(recoil, {"spine_01": (-6, 0, 0)}), {"pelvis": (0, 0.12, -0.10)}, "settle"), (36, READY, DOWN)]
-    return _clip(armature, "r", 36, keys, markers={"fire": 18})
+    # The channel: braced, the staff thrust at the line, shaking with the beam's push.
+    st2 = feet((0.24, 0.36), (0.22, -0.30))
+    brace = merge(st2, staff(at(0.04, 1.45, 1.50, "r"), at(0.18, 0.10, 1.18, "r"), left=0.34), {"spine_01": (20, 0, 0), "spine_02": (4, 0, 0), "head": (-14, 0, 0)},
+                  coat(-24))
+    keys.append((26, merge(brace, coat(-36)), {"pelvis": (0, 0.06, -0.18)}))
+    for i, f in enumerate(range(29, 72, 3)):
+        j = 0.016 if i % 2 else -0.016
+        keys.append((f, merge(brace, staff(at(0.04 + j, 1.45, 1.50 - j, "r"), at(0.18, 0.10, 1.18, "r"), left=0.34), coat(-28 - 6 * (i % 2))),
+                     {"pelvis": (0, 0.06 + 0.004 * (i % 2), -0.18)}, "snap"))
+    release = merge(feet((0.22, 0.24), (0.22, -0.34)), staff(at(0.10, 1.05, 2.05, "r"), at(0.22, -0.1, 1.25, "r"), left=0.30),
+                    {"spine_01": (-8, 0, 0), "spine_02": (-8, 0, 0), "head": (-12, 0, 0)}, coat(-6))
+    keys += [(72, release, {"pelvis": (0, 0.10, -0.10)}, "settle"), (80, READY, DOWN)]
+    return _clip(armature, "r", 80, keys, markers={"fire": 26})
 
 
 KNEEL = merge({"ik_foot_l": ik(at(0.14, 0.28, champion.ankle(), "l")), "thigh_r": (8, 0, 0), "calf_r": (110, 0, 0), "foot_r": (40, 0, 0)},

@@ -2,7 +2,7 @@
 // and fly as pale stars; Arc Shot's indicator is starred and it lands in a ring, a shock and a
 // star-burst; Static Field's sigil breaks into lightning across its circle when it hits;
 // Recoil is a slip of starlight, a streak from flash to flash; Starfall Lance is a white beam
-// from the orrery that strikes in a column of starlight.
+// from the orrery, held through the channel, striking in columns of starlight.
 // Instances of the client's VFX kit (05 §5.1); hand-authored next to the export; validated by
 // `mftr-tools pack validate`.
 (
@@ -36,11 +36,12 @@
         (event: "e.land", kit: "ring", ramp: [(0.94, 0.95, 1.0), (0.58, 0.60, 1.0), (0.28, 0.24, 0.76)], speed: 1.2),
         (event: "e.land", kit: "flare", ramp: [(0.96, 0.96, 1.0), (0.62, 0.64, 1.0), (0.30, 0.26, 0.80)], count: 14, speed: 2.2),
 
-        // R Starfall Lance: a white flare and a smear at the orrery, the beam, a column of starlight.
+        // R Starfall Lance: a white flare and a smear at the orrery, the beam held for the channel,
+        // and on every strike a flare of starlight where it stops.
         (event: "r.release", kit: "flare", ramp: [(1.0, 1.0, 1.0), (0.74, 0.76, 1.0), (0.38, 0.34, 0.90)], count: 24, speed: 5.0),
         (event: "r.release", kit: "slash", ramp: [(1.0, 1.0, 1.0), (0.66, 0.68, 1.0), (0.32, 0.28, 0.84)], count: 20, size: 0.8, arc: 70, lifetime: 0.12),
         (event: "r.projectile", kit: "beam", ramp: [(1.0, 1.0, 1.0), (0.66, 0.68, 1.0), (0.32, 0.28, 0.84)], count: 4, speed: 1.0, lifetime: 0.4),
-        (event: "r.impact", kit: "pillar", ramp: [(1.0, 1.0, 1.0), (0.74, 0.76, 1.0), (0.38, 0.34, 0.90), (0.18, 0.16, 0.44)], count: 28),
+        (event: "r.impact", kit: "pillar", ramp: [(1.0, 1.0, 1.0), (0.74, 0.76, 1.0), (0.38, 0.34, 0.90), (0.18, 0.16, 0.44)], count: 14, lifetime: 0.25),
         (event: "r.impact", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.74, 0.76, 1.0), (0.38, 0.34, 0.90)], count: 10, size: 1.2),
         (event: "r.impact", kit: "burst", ramp: [(0.96, 0.96, 1.0), (0.62, 0.64, 1.0), (0.30, 0.26, 0.80)], count: 16, speed: 3.6),
     ],

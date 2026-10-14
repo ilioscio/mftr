@@ -122,6 +122,13 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 
 > **Implemented (E4, protocol 20):** message kinds take 3 bits. A welcome onto a custom map names it by hash and length; `MapRequest { hash, have }` (client) asks for its text from byte `have`, and `MapChunk { hash, total, offset, bytes }` (server, up to 900 bytes) answers each request ([12 §4](12-map-editor.md#4-playing-a-map)).
 
+> **Implemented (C, protocol 24):** two events: `BeamStarted` (19: a channeled beam, its
+> owner, team, origin, aim, spec, start, end, strike power, cast and slot) and
+> `BeamInterrupted` (20: id and instant, only when hard CC or death cuts it short; clients
+> draw a beam to its end on their own). `AreaSpawned` gains its pulses (count, interval,
+> share, CC) and a lingering flag. Enemy beams are revealed once any point of the line is in
+> vision.
+
 > **Implemented (S1, protocol 21):** a Hello carries the queue to play (13 §2); without one, the
 > server answers with `Queues` (server kind 5: each queue's mode, Co-op flag, map name, humans
 > and matches; at most 64), unless it offers a single queue. The client picks one and says hello

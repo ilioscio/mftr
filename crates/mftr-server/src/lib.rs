@@ -13,8 +13,8 @@ use mftr_sim::ability::LineSkillshot;
 use mftr_sim::map::MapId;
 use mftr_sim::vision::Vision;
 use mftr_sim::{
-    Area, ChampionId, Command, MinionKind, Missile, PlayerId, QPoint, SimEvent, SimTime, SubTick, TICK_DT_F64, TICK_HZ,
-    Team, Tick, UnitId, UnitKind, Vec2, World,
+    Area, ChampionId, Channel, Command, MinionKind, Missile, PlayerId, QPoint, SimEvent, SimTime, SubTick, TICK_DT_F64,
+    TICK_HZ, Team, Tick, UnitId, UnitKind, Vec2, World,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -301,9 +301,10 @@ pub struct ServerCore {
     start: f64,
     conns: BTreeMap<ClientKey, Conn>,
     queue: Vec<Command>,
-    /// Live missiles and areas (for fog-of-war reveal), by id.
+    /// Live missiles, areas and beams (for fog-of-war reveal), by id.
     missiles: BTreeMap<u32, Missile>,
     areas: BTreeMap<u32, Area>,
+    channels: BTreeMap<u32, Channel>,
     pub stats: ServerStats,
 }
 
@@ -344,6 +345,7 @@ impl ServerCore {
             queue: Vec::new(),
             missiles: BTreeMap::new(),
             areas: BTreeMap::new(),
+            channels: BTreeMap::new(),
             stats: ServerStats::default(),
         }
     }
@@ -909,6 +911,7 @@ impl ServerCore {
         self.queue.clear();
         self.missiles.clear();
         self.areas.clear();
+        self.channels.clear();
         self.game.restart();
         self.lobby = Some(lobby);
         self.lobby_steps = 0;
@@ -1086,9 +1089,13 @@ impl ServerCore {
                 SimEvent::AreaSpawned(a) => {
                     self.areas.insert(a.id, a);
                 }
+                SimEvent::BeamStarted(c) => {
+                    self.channels.insert(c.id, c);
+                }
                 SimEvent::MissileHit { id, at, .. }
                 | SimEvent::MissileExpired { id, at }
-                | SimEvent::AreaDetonated { id, at } => {
+                | SimEvent::AreaDetonated { id, at }
+                | SimEvent::BeamInterrupted { id, at } => {
                     ended.insert(id, at);
                 }
                 _ => {}
@@ -1199,6 +1206,10 @@ impl ServerCore {
                         conn.revealed.insert(a.id);
                         push(conn, *e);
                     }
+                    SimEvent::BeamStarted(c) if at_spawn(c.team) => {
+                        conn.revealed.insert(c.id);
+                        push(conn, *e);
+                    }
                     _ => {}
                 }
             }
@@ -1223,11 +1234,23 @@ impl ServerCore {
                     push(conn, SimEvent::AreaSpawned(*a));
                 }
             }
+            // Enemy beams: shown once any part of the line is in vision (its caster may not be).
+            for c in self.channels.values() {
+                if !at_spawn(c.team)
+                    && !conn.revealed.contains(&c.id)
+                    && !ended.contains_key(&c.id)
+                    && [0.0, 0.25, 0.5, 0.75, 1.0].iter().any(|f| sees(ti, c.origin + c.dir * (c.spec.range * f)))
+                {
+                    conn.revealed.insert(c.id);
+                    push(conn, SimEvent::BeamStarted(*c));
+                }
+            }
             // Ends: only for things this client knows about.
             for e in &events {
                 if let SimEvent::MissileHit { id, .. }
                 | SimEvent::MissileExpired { id, .. }
                 | SimEvent::AreaDetonated { id, .. }
+                | SimEvent::BeamInterrupted { id, .. }
                 | SimEvent::AttackLanded { id, .. } = *e
                     && conn.revealed.remove(&id)
                 {
@@ -1316,6 +1339,15 @@ impl ServerCore {
         }
         self.missiles.retain(|id, _| !ended.contains_key(id));
         self.areas.retain(|id, _| !ended.contains_key(id));
+        // A beam that ran its course: clients draw it to its `end_at` on their own.
+        let done: Vec<u32> =
+            self.channels.values().filter(|c| ended.contains_key(&c.id) || c.end_at <= s1).map(|c| c.id).collect();
+        for id in done {
+            self.channels.remove(&id);
+            for conn in self.conns.values_mut() {
+                conn.revealed.remove(&id);
+            }
+        }
         out
     }
 

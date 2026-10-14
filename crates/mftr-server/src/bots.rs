@@ -132,6 +132,12 @@ impl Bot {
         }
         let champ = me.champion?;
         let team = me.team;
+        // Out of the way first: an enemy area about to land (or still raining), a beam's line.
+        if st.cast.is_none()
+            && let Some(to) = evade(world, me)
+        {
+            return Some(CommandKind::MoveTo(mftr_sim::QPoint::from_vec2(to)));
+        }
         let hp = st.health / me.stats.max_health.max(1.0);
         let ready = |slot: u8| st.can_cast(t, slot);
         let hidden = world.hidden(team);
@@ -240,6 +246,7 @@ impl Bot {
                 Some(Effect::Area(a)) if a.range == 0.0 => d <= a.radius * 0.8,
                 Some(Effect::Area(a)) => d <= a.range,
                 Some(Effect::Lunge(l)) => d <= l.range && !cautious,
+                Some(Effect::Beam(b)) => d <= b.range * 0.8,
                 _ => false,
             };
             let shots: Vec<u8> = (0..4u8).filter(|s| ready(*s) && in_range(*s)).collect();
@@ -382,6 +389,7 @@ impl Bot {
                 Some(Effect::Line(l)) => d <= l.range * 0.9,
                 Some(Effect::Area(a)) if a.range == 0.0 => d <= a.radius * 0.8,
                 Some(Effect::Area(a)) => d <= a.range,
+                Some(Effect::Beam(b)) => d <= b.range * 0.8,
                 _ => false,
             })
             .collect();
@@ -484,6 +492,39 @@ impl Bot {
         self.last_goal = Some((kind, self.now));
         Some(kind)
     }
+}
+
+/// Where to step to get out of an enemy's ground area (telegraphed, or lingering after it
+/// landed) or the line of an enemy beam (winding up or channeling): straight out of the circle,
+/// or sideways off the line, with a margin. None when nothing threatens `me`.
+fn evade(world: &World, me: &Unit) -> Option<Vec2> {
+    const MARGIN: f32 = 80.0;
+    let (p, r) = (me.state.pos, me.gameplay_radius);
+    for a in world.areas().iter().filter(|a| a.team != me.team) {
+        let rel = p - a.center;
+        if rel.length() <= a.radius + r {
+            let out = if rel.length() > 1.0 { rel.normalize_or_zero() } else { Vec2::new(1.0, 0.0) };
+            return Some(a.center + out * (a.radius + r + MARGIN));
+        }
+    }
+    let channels = world.channels().iter().filter(|c| c.team != me.team).map(|c| (c.origin, c.dir, c.spec));
+    let windups = world.units().iter().filter(|u| u.team != me.team && u.state.alive()).filter_map(|u| {
+        let c = u.state.cast?;
+        match u.ability(c.slot)?.effect {
+            Effect::Beam(b) => Some((u.state.pos, c.dir, b)),
+            _ => None,
+        }
+    });
+    for (origin, dir, b) in channels.chain(windups) {
+        let rel = p - origin;
+        let along = rel.dot(dir);
+        let side = rel - dir * along;
+        if along >= -r && along <= b.range + r && side.length() <= b.radius + r {
+            let perp = if side.length() > 1.0 { side.normalize_or_zero() } else { Vec2::new(-dir.y, dir.x) };
+            return Some(p + perp * (b.radius + r + MARGIN - side.length()));
+        }
+    }
+    None
 }
 
 fn cast(slot: u8, at: Vec2) -> CommandKind {

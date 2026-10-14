@@ -1062,6 +1062,8 @@ impl ClientSession {
                 SimEvent::MissileHit { id, target, at } => self.book.on_end(id, at, Some(target)),
                 SimEvent::MissileExpired { id, at } => self.book.on_end(id, at, None),
                 SimEvent::AreaSpawned(a) => self.effects.on_area(a, self.unit, self.team),
+                SimEvent::BeamStarted(c) => self.effects.on_beam(c, self.unit, self.team),
+                SimEvent::BeamInterrupted { id, at } => self.effects.on_beam_interrupted(id, at),
                 SimEvent::AttackLaunched(b) => self.effects.on_bolt(b, self.unit, self.team),
                 SimEvent::AttackLanded { id, at, .. } => self.effects.on_bolt_landed(id, at),
                 SimEvent::Damage { source, target, origin, kind, amount, absorbed, at } => {
@@ -1486,6 +1488,23 @@ impl ClientSession {
             return Vec::new();
         };
         self.effects.areas(t_input, t_interp)
+    }
+
+    /// Channeled beams, each stopping where the first enemy on it is drawn.
+    pub fn beams_render(&self, now: f64) -> Vec<effects::BeamRender> {
+        let (Some(t_input), Some(t_interp)) = (self.input_time(now), self.interp_time(now)) else {
+            return Vec::new();
+        };
+        let mut units: Vec<(UnitId, Team, f32, Vec2)> = self
+            .remote_render_units(now)
+            .iter()
+            .filter(|r| !r.kind.is_structure() && r.kind != mftr_sim::UnitKind::Ward)
+            .map(|r| (r.id, r.team, r.collision_radius, r.pos))
+            .collect();
+        if let Some(p) = self.own_render_position(now) {
+            units.push((self.unit, self.team, self.own_radius(), p));
+        }
+        self.effects.beams(t_input, t_interp, &units)
     }
 
     /// Basic-attack bolts in flight, aimed at wherever their targets are drawn.

@@ -87,6 +87,12 @@ The goal is that **most champions, all items and all augments are pure data**, c
 ### Building blocks
 - **Targeting:** `Direction(range)`, `Point(range)`, `Unit(range, filter)`, `Self`, `Vector(range, length)`.
 - **Delivery:** `LinearProjectile`, `HomingProjectile`, `ArcProjectile`, `DelayedArea`, `InstantArea(shape)`, `Dash`, `Blink`, `Zone(duration, tick)`, `Tether`, `Attach`.
+  *As built (C):* the sim's `Effect::Beam` is a **channel**: after its windup the caster holds
+  a beam along the aim for `duration`, striking the first enemy unit on it every `every` (an
+  equal share of the damage each time); stuns, knock-ups, pulls and death end it, roots don't,
+  and the caster can't act meanwhile. A `DelayedArea` may carry `Pulses` (the first `Zone`):
+  after detonating it strikes `count` more times, `every` apart, for `share` of the damage
+  each, with its own CC.
 - **Effects:** `Damage`, `Heal`, `Shield`, `ApplyStatus(cc | buff | debuff)`, `Displace`, `ModifyStat`, `Summon`, `Reset(cooldown)`, `GrantResource`, `Reveal`.
 - **Triggers:** `OnCast`, `OnHit`, `OnKill`, `OnTakedown`, `OnDamaged`, `OnBasicAttack`, `OnRecast(window)`, `Periodic`, `OnStatusApplied` …
 - **Conditions and scaling:** ratios over any stat (self or target), ability rank, level, stacks, target state (e.g. "if slowed").

@@ -1347,6 +1347,7 @@ func _process(delta: float) -> void:
 	_update_hover()
 	_update_missiles()
 	_update_areas()
+	_update_beams()
 	_update_bolts()
 	_update_combat_text(delta)
 	_update_fx(delta)
@@ -1514,7 +1515,15 @@ func _update_remotes(delta: float) -> void:
 				body.set_meta("shown_protected", u.protected)
 				for m in body.get_node("Model").get_meta("prop_mats", []):
 					m.set_shader_parameter("protected_glow", 1.0 if u.protected else 0.0)
-		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO))
+		var aim_len := 6.0
+		var aim_width := 0.08
+		if u.champion != "" and u.has("windup_slot"):
+			# A beam's aim shows its whole length and width: that is all the warning it gives.
+			var info: Dictionary = client.action_info(u.champion, ["q", "w", "e", "r", "d", "f"][int(u.windup_slot)])
+			if info.get("shape", "") == "beam":
+				aim_len = float(info.reach)
+				aim_width = float(info.radius) * 2.0
+		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO), aim_len, aim_width)
 		_show_statuses(body, u.stunned, u.rooted, u.shield, u.get("slowed", false))
 		if u.champion != "":
 			_show_recall(body, u.get("recalling", false), ALLY_COLOR if u.ally else ENEMY_COLOR, u.champion)
@@ -1935,14 +1944,17 @@ func _make_windup_indicator() -> MeshInstance3D:
 	return line
 
 
-func _show_windup(body: Node3D, progress: float, dir: Vector2) -> void:
+func _show_windup(body: Node3D, progress: float, dir: Vector2, length := 6.0, width := 0.08) -> void:
 	var line: MeshInstance3D = body.get_node("Windup")
 	line.visible = progress >= 0.0
 	if not line.visible:
 		return
 	var angle := atan2(dir.y, dir.x)
+	# The body is scaled to its hitbox; the line keeps world sizes.
+	var s := maxf(body.scale.x, 0.01)
+	line.scale = Vector3(length / 6.0, 1.0, width / 0.08) / s
 	line.global_rotation = Vector3(0, -angle, 0)
-	line.global_position = Vector3(body.global_position.x, 0.05, body.global_position.z) + Vector3(dir.x, 0, dir.y) * 3.0
+	line.global_position = Vector3(body.global_position.x, 0.05, body.global_position.z) + Vector3(dir.x, 0, dir.y) * length * 0.5
 	(line.material_override as StandardMaterial3D).albedo_color.a = 0.15 + 0.6 * progress
 
 
@@ -2132,6 +2144,82 @@ func _update_missiles() -> void:
 
 ## Delayed ground AoE telegraph (05 §1): the outline appears at cast and the inside fills
 ## toward detonation, so you can read how long you have. Drawn at the true radius.
+var beam_nodes := {}                    # key -> Node3D
+
+
+## A channeled beam (Starfall Lance): its gameplay width on the ground, in the missile style
+## (motif `beam`: the champion's color inside, the team's on the edge, 14 §4.4), and a shaft
+## of light from the caster's staff head to where it stops. Each strike flares where it lands.
+func _update_beams() -> void:
+	var seen := {}
+	for b in client.beams():
+		var key: int = b.key
+		seen[key] = true
+		var champ: String = b.get("champion", "")
+		var action: String = b.get("action", "")
+		var dir := Vector3(b.dir.x, 0, b.dir.y).normalized()
+		var length_u: float = b.length
+		var radius_u: float = b.radius
+		var start := Vector3(b.origin.x * UNITS_TO_METERS, 0.0, b.origin.y * UNITS_TO_METERS)
+		var end := start + dir * length_u * UNITS_TO_METERS
+		var node: Node3D = beam_nodes.get(key)
+		if node == null:
+			node = Node3D.new()
+			node.top_level = true
+			var ground := _make_missile(b.side, radius_u, false, champ, action)
+			ground.name = "Ground"
+			node.add_child(ground)
+			var style := _style(champ, action, "projectile", MISSILE_MOTIFS)
+			var core_color: Color = style.get("core", Color(1, 1, 0.9))
+			var glow_color: Color = style.get("color", _side_color(b.side))
+			for part in [["Glow", glow_color, 0.34, 0.55], ["Core", core_color, 0.14, 1.0]]:
+				var shaft := MeshInstance3D.new()
+				shaft.name = part[0]
+				var box := BoxMesh.new()
+				box.size = Vector3(1, part[2], part[2])
+				shaft.mesh = box
+				shaft.material_override = _unshaded(part[1], part[3])
+				shaft.top_level = true
+				node.add_child(shaft)
+			add_child(node)
+			beam_nodes[key] = node
+			node.set_meta("strikes", 0)
+			var owner_body = _body_of(b.owner)
+			var from: Vector3 = _socket_world(owner_body, "socket_projectile") if owner_body != null else start + Vector3(0, 1.2, 0)
+			_vfx_play(champ, action, "release", from, dir)
+		# The ground strip: a missile body whose head sits at the stop point and whose trail runs
+		# back to the caster.
+		var ground: Node3D = node.get_node("Ground")
+		ground.position = end
+		ground.rotation = Vector3(0, -atan2(dir.z, dir.x), 0)
+		var body: MeshInstance3D = ground.get_node("Body")
+		var trail_u := maxf(length_u - radius_u, 1.0)
+		var plane: PlaneMesh = body.mesh
+		plane.size = Vector2((radius_u + trail_u) * UNITS_TO_METERS, radius_u * 2.0 * UNITS_TO_METERS)
+		plane.center_offset = Vector3((radius_u - trail_u) * 0.5 * UNITS_TO_METERS, 0, 0)
+		(body.material_override as ShaderMaterial).set_shader_parameter("trail", trail_u)
+		# The shaft, from the staff head to the stop point at chest height, flickering.
+		var owner_body = _body_of(b.owner)
+		var a3: Vector3 = _socket_world(owner_body, "socket_projectile") if owner_body != null else start + Vector3(0, 1.2, 0)
+		var b3 := end + Vector3(0, 1.0, 0)
+		var span := b3 - a3
+		var flick := 1.0 + 0.18 * sin(Time.get_ticks_msec() * 0.04)
+		for name in ["Glow", "Core"]:
+			var shaft: MeshInstance3D = node.get_node(name)
+			shaft.global_position = (a3 + b3) * 0.5
+			shaft.scale = Vector3(maxf(span.length(), 0.01), flick, flick)
+			shaft.global_rotation = Vector3(0, -atan2(span.z, span.x), atan2(span.y, Vector2(span.x, span.z).length()))
+		# A strike: the champion's impact effect where the beam stops.
+		var strikes: int = b.strikes
+		if strikes > int(node.get_meta("strikes")):
+			node.set_meta("strikes", strikes)
+			_vfx_play(champ, action, "impact", b3 - Vector3(0, 0.7, 0), dir)
+	for key in beam_nodes.keys():
+		if not seen.has(key):
+			beam_nodes[key].queue_free()
+			beam_nodes.erase(key)
+
+
 var area_nodes := {}                    # key -> Node3D
 
 

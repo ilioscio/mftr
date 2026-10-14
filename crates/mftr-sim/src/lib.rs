@@ -29,6 +29,6 @@ pub use champion::ChampionId;
 pub use math::{QPoint, Vec2};
 pub use time::{SUBTICKS, SimDuration, SimTime, SubTick, TICK_DT, TICK_DT_F64, TICK_HZ, Tick};
 pub use world::{
-    Area, AttackWindup, Bolt, Brain, Cast, Command, CommandKind, DashMove, MinionKind, Missile, Order, PlayerId,
-    SimEvent, Team, Unit, UnitId, UnitKind, UnitState, World,
+    Area, AttackWindup, Bolt, Brain, Cast, Channel, Command, CommandKind, DashMove, MinionKind, Missile, Order,
+    PlayerId, SimEvent, Team, Unit, UnitId, UnitKind, UnitState, World,
 };

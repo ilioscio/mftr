@@ -7,7 +7,7 @@
 //! with the items, then conversions, then percent bonuses, then caps.
 
 use crate::ability::{
-    Ability, Cc, Damage, DamageKind, Dash, DelayedArea, Effect as Shape, RankScaling, ReactionClass, Support,
+    Ability, Cc, Damage, DamageKind, Dash, DelayedArea, Effect as Shape, Pulses, RankScaling, ReactionClass, Support,
     Transforms,
 };
 use crate::items::Bonus;
@@ -145,6 +145,7 @@ pub const STORMCALL: Ability = Ability {
         delay: ms(600),
         damage: Damage { kind: DamageKind::Magic, base: 80.0, ad_ratio: 0.0, ap_ratio: 0.5 },
         cc: Cc::Knockup(ms(750)),
+        pulses: Pulses::NONE,
     }),
     reaction: ReactionClass::None,
     per_rank: RankScaling::NONE,
