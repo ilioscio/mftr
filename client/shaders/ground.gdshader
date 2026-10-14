@@ -1,186 +1,162 @@
-// Procedural ground: no textures, only noise (D4), quantized to chunky texels so it sits with
-// the faceted PS1-style models (10 §2). Two-tone grass with a few flowers; on lane maps dirt
-// roads down the lanes, ragged at their edges, paved with worn cobbles along their spines, and
-// a shallow river where the map has one. Low contrast, so gameplay reads on top (05 §1 value
-// hierarchy).
+// The ground (15 §3, measured in R06 §1): one shader over four painted materials, grass, dirt,
+// paving and water, chosen by the map's ground control map (baked per map from its own data,
+// `mftr_client::ground`), so every map the editor makes is painted like an official one. Every
+// boundary is broken with noise: grass tongues over the dirt, loose slabs off the paving, ragged
+// banks. Chunky texels keep it with the faceted models (10 §2); low contrast keeps gameplay on
+// top (05 §1). The season (15 §9) sets every color. No textures besides the baked control map.
 shader_type spatial;
 render_mode diffuse_lambert, specular_disabled;
 #include "res://shaders/clouds.gdshaderinc"
+#include "res://shaders/world.gdshaderinc"
 
-uniform vec3 grass_a : source_color = vec3(0.21, 0.35, 0.16);
-uniform vec3 grass_b : source_color = vec3(0.29, 0.43, 0.19);
-uniform vec3 dirt : source_color = vec3(0.45, 0.37, 0.26);
-uniform vec3 dirt_dark : source_color = vec3(0.34, 0.28, 0.2);
-uniform vec3 cobble : source_color = vec3(0.47, 0.45, 0.41);
-uniform float lane_width = 9.0;
-// 0: a diagonal lane (the M1 arena); 1: the roads below (lane maps).
+// The ground control map: R dirt, G paving, B water, A wall distance (0..1 = 0..10 m).
+uniform sampler2D control : filter_linear, repeat_disable;
+uniform bool control_on = false;
+uniform vec2 map_size = vec2(100.0);     // meters, what the control map covers
+
+// The season's palette.
+uniform vec3 grass_dark : source_color = vec3(0.14, 0.25, 0.12);
+uniform vec3 grass_mid : source_color = vec3(0.20, 0.32, 0.14);
+uniform vec3 grass_light : source_color = vec3(0.30, 0.41, 0.17);
+uniform vec3 grass_gloom : source_color = vec3(0.10, 0.19, 0.15);   // under the canopy, by walls
+uniform vec3 dirt : source_color = vec3(0.42, 0.32, 0.22);
+uniform vec3 dirt_dark : source_color = vec3(0.31, 0.23, 0.16);
+uniform vec3 paving : source_color = vec3(0.42, 0.45, 0.47);
+uniform vec3 paving_dark : source_color = vec3(0.27, 0.30, 0.33);
+uniform vec3 water_shallow : source_color = vec3(0.24, 0.45, 0.42);
+uniform vec3 water_deep : source_color = vec3(0.10, 0.27, 0.33);
+uniform vec3 foam : source_color = vec3(0.62, 0.74, 0.70);
+uniform vec3 mud : source_color = vec3(0.24, 0.21, 0.15);
+uniform vec3 flower_a : source_color = vec3(0.40, 0.24, 0.55);
+uniform vec3 flower_b : source_color = vec3(0.30, 0.42, 0.68);
+uniform vec3 flower_c : source_color = vec3(0.70, 0.62, 0.22);
+
+// Sandboxes without a control map: 0, a diagonal lane (the M1 arena) and a 1 m grid.
 uniform float lane_mode = 0.0;
-// Road segments (a.xy, b.xy; meters, world x/z): every lane's polyline, cut into pieces.
-uniform vec4 roads[48];
-uniform int road_count = 0;
-// The river's segments, and its width (meters).
-uniform vec4 river[8];
-uniform int river_count = 0;
-uniform float river_width = 10.0;
-uniform vec3 water_deep : source_color = vec3(0.16, 0.33, 0.36);
-uniform vec3 water_shallow : source_color = vec3(0.3, 0.46, 0.42);
-uniform vec3 mud : source_color = vec3(0.3, 0.27, 0.19);
+uniform float lane_width = 9.0;
 // The size of a "texel" of grain, in meters.
 uniform float texel = 0.0625;
 
 varying vec3 world_pos;
 
-// Fog of war (the minimap's vision grid): ground our team doesn't see is darkened and cooled.
-global uniform sampler2D fog_map : filter_linear;
-global uniform vec2 fog_size;
-global uniform float fog_on;
-
-vec3 fogged(vec3 c, vec3 wp) {
-	if (fog_on < 0.5 || fog_size.x <= 0.0) {
-		return c;
-	}
-	vec2 uv = wp.xz / fog_size;
-	// Past the map (scenery), the nearest edge of the map decides.
-	float seen = texture(fog_map, clamp(uv, vec2(0.002), vec2(0.998))).r;
-	vec3 dark = mix(vec3(dot(c, vec3(0.3, 0.55, 0.15))), c, 0.45) * vec3(0.42, 0.46, 0.58);
-	return mix(dark, c, seen);
-}
-
-float hash(vec2 p) {
-	p = fract(p * vec2(123.34, 456.21));
-	p += dot(p, p + 45.32);
-	return fract(p.x * p.y);
-}
-
-vec2 hash2(vec2 p) {
-	return vec2(hash(p), hash(p + 19.19));
-}
-
-float value_noise(vec2 p) {
-	vec2 i = floor(p);
-	vec2 f = fract(p);
-	vec2 u = f * f * (3.0 - 2.0 * f);
-	return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-	           mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-
-float fbm(vec2 p) {
-	// Each octave turned (~37°) so the value noise's grid never lines up into squares.
-	const mat2 turn = mat2(vec2(0.8, 0.6), vec2(-0.6, 0.8));
-	float v = 0.0;
-	float a = 0.5;
-	p = turn * p;
-	for (int i = 0; i < 5; i++) {
-		v += a * value_noise(p);
-		p = turn * p * 2.03 + vec2(17.0, 9.0);
-		a *= 0.5;
-	}
-	return v;
-}
-
-// Cobbles: Voronoi cells; returns (distance to the cell's edge, the cell's id hash).
-vec2 cobbles(vec2 p) {
-	vec2 i = floor(p);
-	vec2 f = fract(p);
-	float d1 = 8.0;
-	float d2 = 8.0;
-	float id = 0.0;
-	for (int y = -1; y <= 1; y++) {
-		for (int x = -1; x <= 1; x++) {
-			vec2 g = vec2(float(x), float(y));
-			vec2 o = 0.15 + 0.7 * hash2(i + g);
-			float d = length(g + o - f);
-			if (d < d1) {
-				d2 = d1;
-				d1 = d;
-				id = hash(i + g);
-			} else if (d < d2) {
-				d2 = d;
-			}
-		}
-	}
-	return vec2(d2 - d1, id);
-}
-
-float segment_distance(vec2 p, vec4 s) {
-	vec2 ab = s.zw - s.xy;
-	float t = clamp(dot(p - s.xy, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0);
-	return length(p - s.xy - ab * t);
-}
-
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+vec3 grass_color(vec2 p, vec2 q, float grain, float gloom) {
+	float large = w_fbm(p * 0.05);
+	float patch = w_fbm(p * 0.16 + 3.0);
+	vec3 g = mix(grass_dark, grass_mid, smoothstep(0.3, 0.6, large));
+	g = mix(g, grass_light, smoothstep(0.55, 0.75, patch) * 0.8);
+	g *= 0.9 + 0.16 * w_fbm(q * 0.9) + 0.07 * (grain - 0.5);
+	// Blades: a fine streak pattern in chunky texels.
+	g *= 0.95 + 0.08 * step(0.55, w_hash(floor(q * vec2(1.0, 0.35)) + 7.0));
+	g = mix(g, grass_gloom, gloom);
+	// Flowers: small clusters of specks where a patch noise is high, never evenly sprinkled.
+	float cluster = smoothstep(0.66, 0.74, w_fbm(p * 0.22 + 41.0)) * (1.0 - gloom * 0.6);
+	float speck = step(0.93, w_hash(q + 5.0)) * cluster;
+	float pick = w_hash(floor(p * 0.4) + 3.0);
+	vec3 bloom = pick < 0.4 ? flower_a : (pick < 0.75 ? flower_b : flower_c);
+	return mix(g, bloom, speck * 0.85);
+}
+
+vec3 dirt_color(vec2 p, vec2 q, float grain) {
+	vec3 d = mix(dirt_dark, dirt, smoothstep(0.3, 0.7, w_fbm(p * 0.35 + 7.0)));
+	d *= 0.9 + 0.12 * (grain - 0.5) + 0.1 * w_fbm(q * 0.9);
+	// Thin dark cracks (cell edges of a Voronoi), only in patches.
+	vec2 cr = w_cells(p * 0.9 + 13.0);
+	d = mix(d, dirt_dark * 0.8, (1.0 - smoothstep(0.01, 0.03, cr.x)) * 0.5 * smoothstep(0.55, 0.7, w_fbm(p * 0.18)));
+	// A few small pebbles.
+	vec2 pb = w_cells(p * 6.0 + 31.0);
+	float pebble = step(0.975, pb.y) * smoothstep(0.08, 0.16, pb.x);
+	d = mix(d, paving * (0.7 + 0.3 * pb.y), pebble * 0.55);
+	return d;
+}
+
+// Big irregular slabs with dark joints and grass in the joints; `amount` is the paving's
+// control value (the outer slabs come loose and the grass takes the joints toward the edge).
+vec3 paving_color(vec2 p, vec2 q, float grain, float amount, vec3 under, out float covered) {
+	vec2 c = w_cells(p * 1.3);
+	float slab_id = c.y;
+	vec3 slab = mix(paving_dark, paving, 0.35 + 0.65 * slab_id) * (0.9 + 0.1 * (grain - 0.5) + 0.12 * w_fbm(q * 1.3));
+	// Moss and grime over some slabs.
+	slab = mix(slab, grass_dark * 1.1, smoothstep(0.6, 0.8, w_fbm(p * 0.4 + 5.0)) * 0.35);
+	// Worn: lighter toward each slab's middle, darker at its rim.
+	slab *= 0.9 + 0.12 * smoothstep(0.02, 0.25, c.x);
+	float joint = 1.0 - smoothstep(0.025, 0.07, c.x);
+	// Near the edge: grass in the joints, then missing slabs.
+	float edge = 1.0 - smoothstep(0.3, 1.0, amount);
+	float keep = step(edge * 0.95, slab_id * 0.9 + 0.1);
+	covered = keep;
+	vec3 joint_col = mix(paving_dark * 0.55, grass_dark, smoothstep(0.2, 0.7, edge + w_hash(q) * 0.3));
+	vec3 col = mix(slab, joint_col, joint);
+	return mix(under, col, keep);
 }
 
 void fragment() {
 	cloud_sun = cloud_shade(world_pos);
 	vec2 p = world_pos.xz;
 	vec2 q = floor(p / texel) * texel;     // chunky texels
-	float large = fbm(p * 0.06);
-	float grain = hash(q);
-	float mid = fbm(q * 0.9);
-	vec3 grass = mix(grass_a, grass_b, smoothstep(0.35, 0.65, large));
-	grass *= 0.86 + 0.2 * mid + 0.08 * (grain - 0.5);
-	// Flowers: a few bright specks in the grass.
-	float flower = step(0.997, hash(q + 5.0)) * smoothstep(0.45, 0.7, large);
-	// (Literal colors are linear; these are sRGB 0.72/0.68/0.42 and 0.66/0.5/0.62.)
-	grass = mix(grass, mix(vec3(0.48, 0.42, 0.15), vec3(0.39, 0.21, 0.34), hash(q + 3.0)), flower * 0.8);
-	// The road: a dirt band with ragged, grassy edges.
-	float d = abs(p.x - p.y) / sqrt(2.0);
-	if (lane_mode > 0.5) {
-		d = 1e6;
-		for (int i = 0; i < road_count; i++) {
-			d = min(d, segment_distance(p, roads[i]));
+	float grain = w_hash(q);
+	vec3 ground;
+	if (control_on) {
+		// Sample the control map with a warped lookup, so its edges wander like a painter's.
+		vec2 warp = vec2(w_fbm(p * 0.3) - 0.5, w_fbm(p * 0.3 + 9.0) - 0.5) * 1.6;
+		vec4 c = texture(control, (p + warp) / map_size);
+		vec4 c0 = texture(control, p / map_size);
+		float wall = c0.a;                         // 0 inside walls, 1 at 10 m from one
+		float gloom = (1.0 - smoothstep(0.05, 0.4, wall)) * 0.55;
+		ground = grass_color(p, q, grain, gloom);
+		// Dirt with grass tongues.
+		float tongue = (w_fbm(p * 0.55 + 2.0) - 0.5) * 0.55 + (w_fbm(q * 2.2) - 0.5) * 0.12;
+		float dirt_m = smoothstep(0.42, 0.58, c.r + tongue);
+		vec3 d = dirt_color(p, q, grain);
+		// A darker rim where grass meets dirt.
+		float rim = smoothstep(0.3, 0.45, c.r + tongue) * (1.0 - dirt_m);
+		ground = mix(ground, ground * 0.82, rim * 0.6);
+		ground = mix(ground, d, dirt_m);
+		// Paving: slabs, coming loose toward the edge.
+		float pave = c0.g + (w_fbm(p * 0.6 + 21.0) - 0.5) * 0.25;
+		if (pave > 0.12) {
+			float covered;
+			vec3 slabs = paving_color(p, q, grain, pave, ground, covered);
+			ground = mix(ground, slabs, smoothstep(0.12, 0.3, pave));
 		}
-	}
-	float edge = lane_width * 0.5 + (fbm(p * 0.25) - 0.5) * 3.0 + (fbm(q * 1.7) - 0.5) * 0.7;
-	float lane = 1.0 - smoothstep(edge - 0.35, edge + 0.35, d);
-	vec3 road = mix(mix(dirt_dark, dirt, 0.55), dirt, smoothstep(0.3, 0.7, fbm(p * 0.45 + 7.0)));
-	road *= 0.9 + 0.14 * (grain - 0.5) + 0.1 * mid;
-	// Wheel-worn ruts either side of the spine.
-	float rut = smoothstep(0.5, 0.1, abs(d - 1.4 - (fbm(p * 0.1) - 0.5)));
-	road = mix(road, dirt_dark * 0.9, rut * 0.35 * lane_mode);
-	// Cobbles along the spine, worn away in patches.
-	vec2 cb = cobbles(p * 2.2);
-	float paved = (1.0 - smoothstep(1.2, 1.9, d + (fbm(p * 0.35 + 3.0) - 0.5) * 2.4)) * smoothstep(0.34, 0.5, fbm(p * 0.3 + 11.0) + (fbm(q * 1.4) - 0.5) * 0.25);
-	vec3 stone = cobble * (0.78 + 0.34 * cb.y) * (0.92 + 0.12 * grain);
-	stone = mix(road * 0.8, stone, smoothstep(0.03, 0.08, cb.x));   // packed dirt between
-	road = mix(road, stone, paved * lane_mode);
-	// Pebbles strewn over the dirt.
-	vec2 pb = cobbles(p * 5.0 + 31.0);
-	float pebble = step(0.93, pb.y) * smoothstep(0.12, 0.2, pb.x) * (1.0 - paved);
-	road = mix(road, cobble * (0.72 + 0.3 * hash(floor(p * 5.0 + 31.0))), pebble * 0.7);
-	vec3 ground = mix(grass, road, lane);
-	if (river_count > 0) {
-		// The river: shallow water with a muddy bank, deeper and darker toward its middle, its
-		// edges as ragged as the roads'. Where a road crosses, it fords: the road shows through.
-		float dr = 1e6;
-		for (int i = 0; i < river_count; i++) {
-			dr = min(dr, segment_distance(p, river[i]));
+		// Water: a muddy wet bank, then shallows to deeps with ripples and foam at the edge.
+		float bank_noise = (w_fbm(p * 0.25 + 5.0) - 0.5) * 0.35 + (w_fbm(q * 1.5) - 0.5) * 0.08;
+		float wb = c.b + bank_noise;
+		if (wb > 0.0) {
+			float wet = smoothstep(0.0, 0.25, wb);
+			float water = smoothstep(0.32, 0.4, wb);
+			float depth = smoothstep(0.4, 1.0, wb);
+			vec3 w = mix(water_shallow, water_deep, depth * (0.75 + 0.25 * w_fbm(p * 0.15 + 2.0)));
+			float flow = TIME * 0.25;
+			float ripple = smoothstep(0.62, 0.7, w_fbm(q * 0.6 + vec2(flow, flow * 0.6)));
+			w = mix(w, water_shallow * 1.35, ripple * 0.3 * (1.0 - depth * 0.5));
+			float shore = (1.0 - smoothstep(0.4, 0.5, wb)) * water;
+			w = mix(w, foam, shore * (0.45 + 0.35 * sin(TIME * 1.7 + p.x * 0.8 + p.y * 0.5)));
+			ground = mix(ground, mud * (0.85 + 0.2 * w_fbm(q)), wet * (1.0 - water));
+			ground = mix(ground, w, water);
 		}
-		float bank = river_width * 0.5 + (fbm(p * 0.2 + 5.0) - 0.5) * 3.0 + (fbm(q * 1.5) - 0.5) * 0.6;
-		float wet = 1.0 - smoothstep(bank + 0.4, bank + 1.8, dr);
-		float water = 1.0 - smoothstep(bank - 0.3, bank + 0.3, dr);
-		float depth = 1.0 - smoothstep(0.0, bank, dr);
-		vec3 w = mix(water_shallow, water_deep, depth * (0.7 + 0.3 * fbm(p * 0.15 + 2.0)));
-		// Ripples: thin bright bands across the current, in chunky texels.
-		float ripple = smoothstep(0.62, 0.7, fbm(q * 0.8 + vec2(p.x + p.y) * 0.05));
-		w = mix(w, water_shallow * 1.35, ripple * 0.35) * (0.94 + 0.1 * (grain - 0.5));
-		ground = mix(ground, mud * (0.85 + 0.2 * mid), wet * (1.0 - lane * 0.6));
-		ground = mix(ground, w, water * (1.0 - lane * 0.45));
-	}
-	if (lane_mode < 0.5) {
-		// Subtle 1 m grid to help judge distances in the sandbox.
+		// The foot of every wall: a soft dark band of occlusion.
+		float foot = 1.0 - smoothstep(0.0, 0.11, wall);
+		ground *= 1.0 - foot * 0.45;
+	} else {
+		ground = grass_color(p, q, grain, 0.0);
+		// The sandbox's diagonal lane.
+		float d = abs(p.x - p.y) / sqrt(2.0);
+		float edge = lane_width * 0.5 + (w_fbm(p * 0.25) - 0.5) * 3.0;
+		float lane = 1.0 - smoothstep(edge - 0.35, edge + 0.35, d);
+		ground = mix(ground, dirt_color(p, q, grain), lane * (1.0 - lane_mode));
+		// Subtle 1 m grid to help judge distances.
 		vec2 g = abs(fract(p) - 0.5);
 		float grid = 1.0 - smoothstep(0.47, 0.5, max(g.x, g.y));
 		ground *= 1.0 - 0.06 * (1.0 - grid);
 	}
-	ALBEDO = fogged(ground, world_pos);
+	ALBEDO = w_fogged(ground, world_pos);
 	ROUGHNESS = 1.0;
 }
 
 void light() {
-	// Lambert, with cloud shadows dimming the sun.
-	float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
-	DIFFUSE_LIGHT += ndl * ATTENUATION * LIGHT_COLOR / PI * (LIGHT_IS_DIRECTIONAL ? cloud_sun : 1.0);
+	WORLD_LIGHT
 }

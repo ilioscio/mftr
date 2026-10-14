@@ -25,10 +25,16 @@ global uniform float fog_on;
 varying vec3 world_pos;
 varying vec3 tint;
 
+// An integer hash of a grid cell (exact at any world coordinate, unlike fract-of-products).
 float hash(vec3 p) {
-	p = fract(p * vec3(0.1031, 0.1030, 0.0973));
-	p += dot(p, p.yxz + 33.33);
-	return fract((p.x + p.y) * p.z);
+	uvec3 v = uvec3(ivec3(floor(p + 0.5)) + ivec3(1 << 20));
+	v = v * 1664525u + 1013904223u;
+	v.x += v.y * v.z;
+	v.y += v.z * v.x;
+	v.z += v.x * v.y;
+	v ^= v >> 16u;
+	v.x += v.y * v.z;
+	return float(v.x >> 8u) / 16777215.0;
 }
 
 vec3 fogged(vec3 c, vec3 wp) {

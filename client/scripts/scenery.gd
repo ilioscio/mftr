@@ -80,7 +80,9 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 			for k in 3:
 				var a := _rng.randf_range(0.0, TAU)
 				_add(["rock_2", "bush_1", "rock_1"][k], c + Vector2.from_angle(a) * rad * 0.9, rad / 190.0)
-	# Rocks along the walls' inner edges, half sunk into the cliff.
+	# Boulders at the foot of the cliffs (15 §4, R06 §3): on the ground, their centers pushed into
+	# the wall so they lean against its face and rise up it; never on the cliff's edge, where
+	# half a rock would hang over the drop. Only along edges that face open ground.
 	for poly in walls:
 		if is_outcrop(poly):
 			continue
@@ -89,14 +91,21 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 			var a: Vector2 = poly[i]
 			var b: Vector2 = poly[(i + 1) % n]
 			var len := a.distance_to(b)
-			var t := _rng.randf_range(0.0, 400.0)
+			var t := _rng.randf_range(0.0, 500.0)
 			while t < len:
 				var q := a.lerp(b, t / len)
-				if q.x > 0 and q.x < size.x and q.y > 0 and q.y < size.y:
-					var id: String = ["rock_1", "rock_2", "bush_1", "bush_1", "rock_1", "rock_3"][_rng.randi() % 6]
-					_add(id, q, _rng.randf_range(0.9, 1.6))
-				t += _rng.randf_range(350.0, 800.0)
-	# Tall grass filling the brush.
+				t += _rng.randf_range(420.0, 900.0)
+				if q.x <= 0 or q.x >= size.x or q.y <= 0 or q.y >= size.y:
+					continue
+				var normal := (b - a).orthogonal().normalized()
+				var into := normal if _inside_wall(q + normal * 30.0) else -normal
+				if _inside_wall(q - into * 30.0):
+					continue  # a seam between two pieces of rock, not a cliff face
+				var id: String = ["rock_1", "rock_2", "rock_3", "rock_1", "bush_1"][_rng.randi() % 5]
+				var scale := _rng.randf_range(1.1, 1.6)
+				var reach := 0.5 * 95.0 * scale      # half the rock's half-width (u): it leans on the face
+				_add_at(id, q + into * reach, scale, 0.0)
+	# Tall grass filling the brush.	# Tall grass filling the brush.
 	for poly in brush:
 		var r := _bounds(poly)
 		var gy := r.position.y
@@ -125,14 +134,12 @@ func _forest_at(p: Vector2, edge: float, near_camera: bool, lane_map: bool) -> v
 		if _rng.randf() < 0.55:
 			_add(["bush_1", "bush_1", "rock_1", "rock_2"][_rng.randi() % 4], p, _rng.randf_range(0.9, 1.5))
 		return
-	if edge < 120.0:
-		if _rng.randf() < 0.5:
-			_add("bush_1", p, _rng.randf_range(0.8, 1.3))
-		return
+	if edge < 160.0:
+		return  # the cliff's edge: nothing that could hang over the drop
 	if _rng.randf() < 0.9:
 		var id: String = ["pine_1", "pine_2", "pine_3"][_rng.randi() % 3]
 		_add(id, p, _rng.randf_range(0.85, 1.35))
-	elif _rng.randf() < 0.5:
+	elif _rng.randf() < 0.5 and edge > 260.0:
 		_add(["rock_1", "rock_3"][_rng.randi() % 2], p, _rng.randf_range(1.0, 1.8))
 
 
@@ -238,10 +245,15 @@ func _bounds(poly: PackedVector2Array) -> Rect2:
 
 
 func _add(id: String, p: Vector2, scale: float) -> void:
+	_add_at(id, p, scale, _height_at(p))
+
+
+## A prop at `p` standing at `height` (m).
+func _add_at(id: String, p: Vector2, scale: float, height: float) -> void:
 	if not _batches.has(id):
 		_batches[id] = []
 	var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU)).scaled(Vector3.ONE * scale)
-	var t := Transform3D(basis, Vector3(p.x * U, _height_at(p), p.y * U))
+	var t := Transform3D(basis, Vector3(p.x * U, height, p.y * U))
 	var k := _rng.randf_range(0.88, 1.1) * (0.82 if id.begins_with("pine") else 1.0)
 	var tint := Color(k * _rng.randf_range(0.96, 1.04), k, k * _rng.randf_range(0.94, 1.04)) * 0.5
 	_batches[id].append([t, tint])

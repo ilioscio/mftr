@@ -10,13 +10,14 @@ pub const FPS: u32 = 30;
 // Caps (10 §2, §7.2, §9).
 /// Doubled by D59 (14): room for silhouette detail, sculpted hands and heads.
 pub const TRIANGLES_TARGET: (usize, usize) = (5000, 8000);
-/// Lane minions (A5): many on screen at once, so lighter.
-pub const MINION_TRIANGLES_TARGET: (usize, usize) = (600, 2600);
+/// Lane minions (A5): many on screen at once, so lighter. ×1.5 by D60 (15 §2).
+pub const MINION_TRIANGLES_TARGET: (usize, usize) = (900, 3900);
 pub const TRIANGLES_MAX: usize = 12_000;
 /// Map props (structures, trees, rocks): static, one `root` bone, no clips. A structure is the
-/// most detailed thing on screen, so its cap is higher; scenery is drawn many times over.
-pub const PROP_TRIANGLES_TARGET: (usize, usize) = (20, 8000);
-pub const PROP_TRIANGLES_MAX: usize = 12_000;
+/// most detailed thing on screen, so its cap is higher; scenery is drawn many times over. ×1.5
+/// by D60 (15 §2).
+pub const PROP_TRIANGLES_TARGET: (usize, usize) = (20, 12_000);
+pub const PROP_TRIANGLES_MAX: usize = 18_000;
 /// A prop's bones: `root`, plus up to this many `part_<name>` bones for pieces that move.
 pub const PROP_PARTS_MAX: usize = 8;
 pub const BONES_TARGET: usize = 64;

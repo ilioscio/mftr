@@ -937,6 +937,13 @@ impl MatchClient {
         d
     }
 
+    /// What the ground is made of where (15 §3): the map's ground control map, an RGBA8 Image.
+    /// Baked on each call: call once per map (`map_geometry` is cheap and called often).
+    #[func]
+    fn map_ground(&self) -> Gd<godot::classes::Image> {
+        maps::ground_image(self.session.map())
+    }
+
     /// Everything a tooltip says about our champion's ability in `slot` (0–3 Q W E R, 4–5 D F;
     /// F may be an augment's spell), straight from the sim's data, so tooltips can't drift
     /// from the game: `{ name, kind, rank, max_rank, cooldowns: [s per rank], range, radius,

@@ -14,6 +14,8 @@ extends Node3D
 ## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`. `--menu-join`
 ## (scripted checks) opens the menu and joins the first remembered server through it.
 
+const Seasons = preload("res://scripts/seasons.gd")
+
 const UNITS_TO_METERS := 0.01           # 1 game unit = 1 cm
 const CAMERA_PITCH_DEG := 56.0          # D13 / R01 §1
 const CAMERA_VFOV_DEG := 45.0
@@ -43,6 +45,7 @@ var overlay: Control
 var world_env: Environment
 var portraits                             # champion portraits from their models (portraits.gd)
 var sun: DirectionalLight3D
+var vignette: ColorRect                  # shown while a match is on (15 §7)
 var atmosphere                            # cloud shadows and motes (atmosphere.gd), per map
 var _look_point := Vector3.ZERO           # where the camera looks, on the ground
 var _graphics_applied := []
@@ -163,6 +166,11 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--zoom" and i + 1 < args.size():
 			camera_zoom = maxf(0.05, float(args[i + 1]))
+			i += 1
+		elif args[i] == "--shot-tour" and i + 1 < args.size():
+			for xy in args[i + 1].split(";"):
+				var v := xy.split(",")
+				_shot_tour.append(Vector2(float(v[0]), float(v[1])))
 			i += 1
 		elif args[i] == "--look" and i + 1 < args.size():
 			var xy := args[i + 1].split(",")
@@ -362,6 +370,9 @@ var _shot_loading := false                # `--shot-loading`: ready up, capture 
 var _menu_auto_join := false             # `--menu-join`: join the first remembered server from the menu
 var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
 var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
+var _shot_tour: Array = []                # `--shot-tour "X,Y;X,Y;..."`: one shot at each point
+var _shot_tour_i := 0
+var _shot_tour_at := 0.0
 var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
 var _shot_settings := -1                  # `--shot-settings N`: open Settings on tab N
 var _shot_tab_hover := ""                 # `--tab-hover augment|item`: show one's tooltip in it
@@ -477,6 +488,21 @@ func _update_shot(delta: float) -> void:
 		if _shot_seq_i >= _shot_seq:
 			print("MFTR: saved %d frames to " % _shot_seq, _shot_path.get_basename(), "_*.png")
 			get_tree().quit()
+	elif _shot_moved and _shot_timer > _shot_at and not _shot_tour.is_empty():
+		# A tour (map art reviews): look at each point, let the camera settle, save
+		# <path>_<i>.png.
+		if _shot_tour_at == 0.0:
+			_shot_look = _shot_tour[0]
+			_shot_tour_at = _shot_timer
+		elif _shot_timer - _shot_tour_at > 1.2:
+			get_viewport().get_texture().get_image().save_png(_shot_path.get_basename() + "_%d.png" % _shot_tour_i)
+			_shot_tour_i += 1
+			if _shot_tour_i >= _shot_tour.size():
+				print("MFTR: saved %d tour shots to " % _shot_tour.size(), _shot_path.get_basename(), "_*.png")
+				get_tree().quit()
+			else:
+				_shot_look = _shot_tour[_shot_tour_i]
+				_shot_tour_at = _shot_timer
 	elif _shot_moved and _shot_timer > _shot_at:
 		get_viewport().get_texture().get_image().save_png(_shot_path)
 		print("MFTR: saved screenshot to ", _shot_path)
@@ -536,6 +562,21 @@ func _build_world() -> void:
 	sun.directional_shadow_max_distance = 45.0
 	sun.directional_shadow_split_1 = 0.4
 	add_child(sun)
+	Seasons.apply_light(Seasons.SUMMER, e, sun)
+	sun.shadow_opacity = 0.8
+
+	# A soft vignette over the view (15 §7): the corners darker, the fight brighter.
+	var vig_layer := CanvasLayer.new()
+	vig_layer.layer = 0
+	add_child(vig_layer)
+	vignette = ColorRect.new()
+	vignette.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var vm := ShaderMaterial.new()
+	vm.shader = load("res://shaders/vignette.gdshader")
+	vignette.material = vm
+	vignette.visible = false
+	vig_layer.add_child(vignette)
 
 	ground = MeshInstance3D.new()
 	_size_ground(Vector2(ARENA_U, ARENA_U))
@@ -1708,6 +1749,10 @@ func _size_ground(size_u: Vector2, margin_u := 0.0) -> void:
 func _build_map() -> void:
 	_map_built = true
 	var geo: Dictionary = client.map_geometry()
+	geo["ground"] = client.map_ground()
+	geo["season"] = "summer"
+	Seasons.apply_light(Seasons.get_season(geo.season), world_env, sun)
+	vignette.visible = true
 	var size: Vector2 = geo.size
 	_build_minimap(geo)
 	atmosphere = preload("res://scripts/atmosphere.gd").new()

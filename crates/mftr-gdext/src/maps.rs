@@ -28,6 +28,15 @@ fn polygons(polys: &[Vec<Vec2>]) -> VarArray {
     out
 }
 
+/// The ground control map (15 §3) as an RGBA8 image, one texel per `ground::TEXEL_U` units.
+pub fn ground_image(map: &Map) -> Gd<godot::classes::Image> {
+    use godot::classes::image::Format;
+    let g = mftr_client::ground::control_map(map);
+    let bytes: PackedByteArray = g.rgba.into_iter().collect();
+    godot::classes::Image::create_from_data(g.width as i32, g.height as i32, false, Format::RGBA8, &bytes)
+        .expect("ground image")
+}
+
 fn lines(ls: &[Line]) -> VarArray {
     let mut out = VarArray::new();
     for l in ls {
@@ -138,8 +147,8 @@ impl MftrMaps {
     /// team, tier, lane, spec_lane, pos }]`), `relics` (points, both halves), `camps`
     /// (`[{ kind, pos }]`, both halves), `fountains` (centers) and `fountain_radius`, `river`
     /// (the river's course), the base (`base_side`, a Classic base's corner square; or
-    /// `base_court`, an ARAM base's `[center, radius]`) and `ok` (false when the text doesn't
-    /// read).
+    /// `base_court`, an ARAM base's `[center, radius]`), `ground` (the ground control map, an
+    /// Image, 15 §3) and `ok` (false when the text doesn't read).
     #[func]
     fn build(text: GString) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -153,6 +162,7 @@ impl MftrMaps {
         d.set("size", spec.size);
         d.set("walls", &polygons(&map.walls));
         d.set("brush", &polygons(&map.brush));
+        d.set("ground", &ground_image(&map));
         let l = &map.layout;
         let mut lanes = VarArray::new();
         for lane in 0..spec.lanes.len() {

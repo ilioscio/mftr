@@ -9,6 +9,8 @@ extends Control
 ## objectives, clearings and turrets (along their lane); Delete removes; Ctrl+Z undoes; Ctrl+S
 ## saves.
 
+const Seasons = preload("res://scripts/seasons.gd")
+
 signal closed
 
 const MAPS_DIR := "user://maps"
@@ -1248,6 +1250,7 @@ func _show_actual(on: bool) -> void:
 		sun.shadow_opacity = 0.72
 		sun.directional_shadow_max_distance = 200.0
 		view_port.add_child(sun)
+		Seasons.apply_light(Seasons.SUMMER, e, sun)
 		view_cam = Camera3D.new()
 		view_cam.far = 400.0
 		view_port.add_child(view_cam)
@@ -1276,7 +1279,7 @@ func _build_view() -> void:
 	var s := float(spec.size)
 	var fountains: PackedVector2Array = built.fountains
 	var geo := {
-		"walls": built.walls, "brush": built.brush, "size": Vector2(s, s), "roads": built.lanes, "river": built.river,
+		"walls": built.walls, "brush": built.brush, "size": Vector2(s, s), "roads": built.lanes, "river": built.river, "ground": built.get("ground"),
 		"fountains": [{"center": fountains[0], "radius": float(built.get("fountain_radius", 750.0)), "ally": true}, {"center": fountains[1], "radius": float(built.get("fountain_radius", 750.0)), "ally": false}],
 	}
 	var ground := MapView.make_ground()

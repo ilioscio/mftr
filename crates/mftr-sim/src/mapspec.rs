@@ -18,7 +18,7 @@
 
 use crate::jungle::{Camp, CampKind};
 use crate::lane::{BASE_TURRET_TIER, GATEHOUSE_TIER, Pacing};
-use crate::map::{Layout, Map, MapId, Placement};
+use crate::map::{Layout, Map, MapId, Placement, Stroke, StrokeKind};
 use crate::math::Vec2;
 use crate::world::{Team, UnitKind};
 
@@ -891,6 +891,24 @@ pub fn build(spec: &MapSpec, id: MapId) -> Map {
         pts.extend(l.points.iter().map(|p| red(*p)));
         pts
     });
+    // The drawn features, both halves, for the client's ground (15 §3).
+    let mut strokes = Vec::new();
+    for (kind, lines) in [
+        (StrokeKind::Lane, &spec.lanes),
+        (StrokeKind::River, &spec.river),
+        (StrokeKind::Jungle, &spec.jungle),
+        (StrokeKind::Grass, &spec.grass),
+    ] {
+        for l in lines {
+            strokes.push(Stroke { kind, width: l.width, points: l.points.clone() });
+            strokes.push(Stroke { kind, width: l.width, points: l.points.iter().map(|p| red(*p)).collect() });
+        }
+    }
+    for (c, r) in spec.all_clearings() {
+        for p in [c, red(c)] {
+            strokes.push(Stroke { kind: StrokeKind::Clearing, width: r * 2.0, points: vec![p] });
+        }
+    }
     map.layout = Layout {
         lanes,
         wave_spawn,
@@ -904,6 +922,7 @@ pub fn build(spec: &MapSpec, id: MapId) -> Map {
         backdoor: !aram,
         camps,
         wards: !aram,
+        strokes,
     };
     map
 }
