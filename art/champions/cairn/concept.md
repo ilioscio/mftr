@@ -1,6 +1,6 @@
 # Cairn — concept
 
-Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an owner brief, from his kit (a warden who peels and holds a choke, with stone spells) and the placeholder's green.
+Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** (awaiting the owner's approval). Designed without an owner brief, from his kit (a warden who peels and holds a choke, with stone spells) and the placeholder's green.
 
 ## Identity
 
@@ -10,21 +10,25 @@ Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an 
   - **E Rockfall:** a delayed area at range that roots.
   - **R Monolith:** a delayed knock-up around himself.
 - **Personality in three words:** patient, weathered, wry.
-- **Silhouette class:** *antlered earth-warden*.
-  - Tall and spare, with antlers rising from his brow. They read from the gameplay camera.
-  - A moss-green cloak on an `extra_cloak` chain over bark-brown leathers, with a kilt of leather strips.
-  - A staff topped with a small cairn of stacked stones, bound with team-colored ribbons.
-  - Green paint in stripes down his cheeks and brow.
-- **Head:** the shared sculpted head, long-faced and older, with grey hair tied back in a ponytail.
-- **Archetype:** `biped` v1, plus `extra_cloak`. The staff lies along the right hand bone, so each pose aims it.
+- **Shape (14 §2):** *antlers and a mossy stone mantle*. Broad, heavy proportions on the `biped` bones (`SHAPE` in `build.py`: ×1.15 wide, ×1.1 deep, shoulders out 5 cm, hands ×1.4), about 2.0 m, 2.45 m to the antlers' tips. Great branching antlers (a main beam and three tines each) from his brow with emerald beads at their roots; a mantle of granite slabs over his shoulders and around his neck, mossed on top; stone pauldrons; bark plates on his chest, bracers and greaves; a kilt of hanging bark slats and moss; a stripe of emerald paint across his eyes; a moss-green cloak on an `extra_cloak` chain (3 bones).
+- **Weapon:** a gnarled, wandering staff crowned with a glowing emerald held in four twisted roots. Skinned to his right hand and held by IK; his blows take it in both hands (the left hand solved onto it).
+- **Head:** the shared sculpted head, weathered and bearded.
+- **Gait (14 §3.5):** heavy.
 
-## Palette (10 §2)
+## Palette (14 §4)
+
+Signature: **emerald** (135°).
 
 | Slot | Colors |
 |---|---|
-| skin | (0.72, 0.56, 0.44), green paint (0.3, 0.55, 0.28) |
-| cloth | moss cloak (0.24, 0.34, 0.18 / 0.16, 0.24, 0.12), bark leathers (0.32, 0.22, 0.14), leather (0.4, 0.28, 0.17), stones (0.5, 0.5, 0.47 / 0.36, 0.36, 0.34), antlers (0.78, 0.72, 0.6), grey hair |
-| accent | the sash and the staff's ribbons |
+| skin | weathered (0.62, 0.44, 0.32) |
+| cloth | bark (0.26, 0.18, 0.12 / 0.15, 0.10, 0.07), granite (0.30, 0.30, 0.28 / 0.18, 0.18, 0.17), moss (0.16, 0.30, 0.10 / 0.09, 0.18, 0.06), antler bone (0.62, 0.56, 0.44), leather (0.30, 0.20, 0.12), grey-brown hair |
+| emissive | emerald (0.30, 1.0, 0.55) and deep emerald (0.06, 0.62, 0.30): the staff's stone, the beads, the paint, a chest gem |
+| accent | a band at his belt |
+
+## Weight (14 §3)
+
+Two-handed staff blows with a cock and a held impact (an overhead strike into the ground; a low sweep held out); Rockfall stamps the staff's foot down beside him; Monolith drives it point-first into the ground at his feet and he leans on it, holding, as the stone rises. Feet planted by IK.
 
 ## Clip checklist (10 §5)
 
@@ -43,12 +47,7 @@ Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an 
 
 ## Effects and sounds
 
-- **VFX** (`export/cairn.vfx.ron`):
-  - stone chips and moss dust where the staff lands;
-  - Stone Lash's shards;
-  - Shelter's green-gold ward;
-  - Rockfall's falling stones and ring;
-  - Monolith's eruption.
+- **VFX** (`export/cairn.vfx.ron`), all emerald (white → emerald → deep emerald) with stone: an overhead `slash`, a star, `crack`s and stone chips for his strikes; Stone Lash flies as a green-cored shard; Shelter rings its ally in emerald; Rockfall falls in a `pillar` with a `shock` and stone; Monolith `crack`s the ground around him and erupts in emerald light and stone.
 - **SFX** (`sounds.ron`), 11 sounds:
   - a creaking swing and two stone knocks;
   - Stone Lash's whip-crack and shards;
