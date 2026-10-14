@@ -120,8 +120,8 @@ services.mftr = {
 |---|---|---|
 | `address`, `port` | `0.0.0.0`, `7777` | Where the main server listens (`::` for IPv6 as well). |
 | `openFirewall` | `false` | Open the main server's UDP port (and sandboxes', by default). |
-| `modes` | `[ "aram" "mayhem" "hyper" "classic" ]` | As `--modes`: a mode alone offers Versus and Co-op vs bots, `aram-versus` or `aram-coop` one of them. Every match has 10 seats, champion select and bots in the empty seats. |
-| `maps` | `[ ]` | Map files from the map editor (`*.mftrmap`): each adds its modes on that map (Classic on a Classic map; ARAM, Mayhem and Hyper on an ARAM map). |
+| `modes` | `[ "aram" "mayhem" "hyper" "classic" "horde" ]` | As `--modes`: the existing modes offer Versus and Co-op, or one side with a suffix. `horde`/`horde-coop` offers five blue champions defending against minion waves; `horde-versus` is invalid. Other matches have 10 seats; all use champion select and bots in the empty seats. |
+| `maps` | `[ ]` | Map files from the map editor (`*.mftrmap`): each adds its modes on that map (Classic on a Classic map; ARAM, Mayhem, Hyper and Horde on an ARAM map). |
 | `maxMatches`, `workers` | `32`, one per core | As `--max-matches` and `--workers`. |
 | `seed` | `1` | As `--seed`. |
 | `replay` | `false` | Record every match into `/var/lib/mftr/server/replays`. |
@@ -190,7 +190,7 @@ that key over the same way, without `adoptKeyFrom`.
 | `--bind ADDR` | `0.0.0.0:7777` | Address and UDP port to listen on. |
 | `--key FILE` | `server.key` | The server's key, created on first start (see below). |
 | `--fingerprint` | | Print the key's fingerprint and exit. |
-| `--modes LIST` | `aram,mayhem,hyper,classic` | What players can pick: a mode alone offers Versus and Co-op vs bots, `aram-versus` or `aram-coop` one of them. `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM: Mayhem, ARAM with augment drafts. `hyper`: Mayhem under Hyper rules (+300 ability haste on Q, W and E, +50% attack speed). `classic`: Classic 5v5 on Crossroads, three lanes and a jungle (M4, in progress). |
+| `--modes LIST` | `aram,mayhem,hyper,classic,horde` | What players can pick: the existing modes offer Versus and Co-op, or one side with a suffix. `horde`/`horde-coop`: [Mayhem: Horde](horde.md), five champions defending against 20 waves, then endless survival, co-op only. `aram`: The Bridge. `mayhem`: ARAM with augment drafts. `hyper`: Mayhem with faster basic abilities and attacks. `classic`: Classic 5v5 on Crossroads. |
 | `--map FILE` | none | Add a map from the map editor (`*.mftrmap`): Classic on it if it's a Classic map, the ARAM modes if it's an ARAM map; repeat for more maps. The server checks each at start (and refuses a map that breaks a rule, listing what's wrong); players download it as they join (a few hundred milliseconds), and replays carry it. |
 | `--max-matches N` | `32` | Matches running at once, at most. Past it, a player who'd need a new match is told the server is busy, and their client keeps asking. |
 | `--workers N` | one per core | Threads that step the matches. |

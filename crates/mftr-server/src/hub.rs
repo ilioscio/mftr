@@ -13,7 +13,8 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 /// The modes a hosted server offers (13 §1): full matches only.
-pub const HOSTED_MODES: [Scenario; 4] = [Scenario::Aram, Scenario::Mayhem, Scenario::Hyper, Scenario::Classic];
+pub const HOSTED_MODES: [Scenario; 5] =
+    [Scenario::Aram, Scenario::Mayhem, Scenario::Hyper, Scenario::Classic, Scenario::Horde];
 /// A connection that picked no queue is forgotten after this long without a word.
 const FRONT_TIMEOUT: f64 = 30.0;
 
@@ -47,6 +48,7 @@ pub fn map_name(scenario: Scenario) -> &'static str {
         mftr_sim::map::MapId::Open => "Open ground",
         mftr_sim::map::MapId::Arena => "The Arena",
         mftr_sim::map::MapId::Bridge => "The Bridge",
+        mftr_sim::map::MapId::HordeBridge => "The Bridge",
         mftr_sim::map::MapId::Crossroads | mftr_sim::map::MapId::Custom => "Crossroads",
     }
 }
@@ -62,7 +64,7 @@ pub struct ModeOffer {
 impl ModeOffer {
     /// Versus and Co-op.
     pub fn both(scenario: Scenario) -> Self {
-        Self { scenario, versus: true, coop: true }
+        Self { scenario, versus: scenario != Scenario::Horde, coop: true }
     }
 
     /// `aram` (both sides), `aram-versus` or `aram-coop`; full matches only.
@@ -76,6 +78,12 @@ impl ModeOffer {
         let scenario = Scenario::by_name(mode).ok_or(format!("unknown mode {name}"))?;
         if !HOSTED_MODES.contains(&scenario) {
             return Err(format!("{mode} isn't a full match: run it alone with --scenario {mode}"));
+        }
+        if scenario == Scenario::Horde {
+            if name.ends_with("-versus") {
+                return Err("Horde is a five-champion co-op mode; use horde or horde-coop".into());
+            }
+            return Ok(Self { scenario, versus: false, coop: true });
         }
         Ok(Self { scenario, versus, coop })
     }
@@ -109,7 +117,7 @@ pub struct HostedMap {
 pub fn map_kind(scenario: Scenario) -> Option<MapKind> {
     match scenario {
         Scenario::Classic => Some(MapKind::Classic),
-        Scenario::Aram | Scenario::Mayhem | Scenario::Hyper => Some(MapKind::Aram),
+        Scenario::Aram | Scenario::Mayhem | Scenario::Hyper | Scenario::Horde => Some(MapKind::Aram),
         _ => None,
     }
 }
@@ -126,7 +134,7 @@ pub fn hosted_queues(modes: &[ModeOffer], maps: &[HostedMap]) -> Vec<QueueSpec> 
         );
         for (map_name, map) in boards {
             for coop in [false, true] {
-                if (coop && offer.coop) || (!coop && offer.versus) {
+                if (coop && offer.coop) || (!coop && offer.versus && scenario != Scenario::Horde) {
                     queues.push(QueueSpec { scenario, coop, map_name: map_name.clone(), map: map.clone() });
                 }
             }
@@ -372,6 +380,12 @@ impl Hub {
             scenario: q.scenario,
             map: q.map.clone(),
             coop: q.coop,
+            max_players: if q.scenario == Scenario::Horde {
+                mftr_sim::horde::PLAYERS
+            } else {
+                self.cfg.base.max_players
+            },
+            bots: if q.scenario == Scenario::Horde { mftr_sim::horde::PLAYERS } else { self.cfg.base.bots },
             // Each instance plays its own matches.
             seed: self.cfg.base.seed.wrapping_add((id as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)),
             ..self.cfg.base.clone()
@@ -521,7 +535,7 @@ mod tests {
         let mut hub = hub(8);
         let msgs = replies(hub.handle_packet(1, &hello(None, 0, false), 0.0), 1);
         let Some(ServerMessage::Queues(qs)) = msgs.first() else { panic!("{msgs:?}") };
-        assert_eq!(qs.len(), 8, "four modes, Versus and Co-op");
+        assert_eq!(qs.len(), 9, "four Versus/Co-op modes and Horde co-op");
         assert!(qs.iter().any(|q| q.mode == msg::GameMode::Classic && q.coop && q.map == "Crossroads"));
         assert!(hub.instances().is_empty(), "asking costs nothing");
 
@@ -650,6 +664,43 @@ mod tests {
         assert!(ModeOffer::parse("duel").is_err());
         assert!(ModeOffer::parse("duel-coop").is_err());
         assert!(ModeOffer::parse("nonsense").is_err());
+        assert!(ModeOffer::parse("horde-versus").is_err());
+        assert_eq!(hosted_queues(&[ModeOffer::parse("horde").unwrap()], &[]).len(), 1);
+    }
+
+    #[test]
+    fn horde_queues_five_blue_champions_and_a_sixth_starts_another_match() {
+        let mut hub = hub(8);
+        let q = queue_index(&hub, Scenario::Horde, true);
+        for key in 1..=6 {
+            let messages = replies(hub.handle_packet(key, &hello(Some(q), 0, false), 0.0), key);
+            let Some(ServerMessage::Lobby(l)) = messages.first() else { panic!("no Horde lobby") };
+            assert!(l.pick);
+            assert_eq!(l.mode, msg::GameMode::Horde);
+            assert_eq!(l.slots.len(), 5);
+            assert!(l.slots.iter().all(|s| s.team == mftr_sim::Team::Blue));
+        }
+        assert_eq!(hub.instances().len(), 2);
+        assert_eq!(hub.instances()[0].core.humans(), 5);
+        assert_eq!(hub.instances()[1].core.humans(), 1);
+        assert_eq!(hub.instances()[0].core.cfg().max_players, 5);
+        let ready = encode_client(&PacketHeader::default(), &ClientMessage::Lobby(msg::LobbyAction::Ready(true)));
+        for key in 1..=5 {
+            hub.handle_packet(key, &ready, 0.0);
+        }
+        for k in 1..=105 {
+            hub.step(k as f64 * TICK_DT_F64);
+        }
+        let world = hub.instances()[0].core.world();
+        assert_eq!(world.units().iter().filter(|u| u.kind == mftr_sim::UnitKind::Champion).count(), 5);
+        assert!(
+            world
+                .units()
+                .iter()
+                .filter(|u| u.kind == mftr_sim::UnitKind::Champion)
+                .all(|u| u.team == mftr_sim::Team::Blue)
+        );
+        assert!(world.game().horde.is_some());
     }
 
     /// 13 §2: in co-op, five humans fill blue and the sixth opens another instance; in

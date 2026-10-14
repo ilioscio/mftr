@@ -34,6 +34,10 @@ use crate::rng::Pcg32;
 use crate::time::{SUBTICKS, SUBTICKS_PER_SECOND, SimDuration, SimTime, SubTick, TICK_DT, Tick};
 use std::sync::Arc;
 
+#[cfg(test)]
+#[path = "world_horde_tests.rs"]
+mod horde_tests;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PlayerId(pub u8);
 
@@ -431,23 +435,47 @@ pub struct Rules {
     pub augments: bool,
     /// Hyper (06 §2): basic abilities and attacks much faster.
     pub hyper: bool,
+    /// Mayhem: Horde: shared PvE rewards and drafts at wave milestones.
+    pub horde: bool,
 }
 
 impl Rules {
     /// Sandboxes: level 1, every ability at rank 1, no economy.
-    pub const SANDBOX: Rules =
-        Rules { start_level: 1, start_gold: 0.0, passive_gold: 0.0, ranked: false, augments: false, hyper: false };
+    pub const SANDBOX: Rules = Rules {
+        start_level: 1,
+        start_gold: 0.0,
+        passive_gold: 0.0,
+        ranked: false,
+        augments: false,
+        hyper: false,
+        horde: false,
+    };
     /// ARAM (06 §2): a quick start and faster gold *(start values)*.
-    pub const ARAM: Rules =
-        Rules { start_level: 3, start_gold: 1400.0, passive_gold: 4.0, ranked: true, augments: false, hyper: false };
+    pub const ARAM: Rules = Rules {
+        start_level: 3,
+        start_gold: 1400.0,
+        passive_gold: 4.0,
+        ranked: true,
+        augments: false,
+        hyper: false,
+        horde: false,
+    };
     /// ARAM: Mayhem (06 §2): ARAM with augment drafts.
     pub const MAYHEM: Rules = Rules { augments: true, ..Rules::ARAM };
     /// ARAM: Mayhem under Hyper rules: the stress mode (M3 exit).
     pub const HYPER: Rules = Rules { hyper: true, ..Rules::MAYHEM };
+    pub const HORDE: Rules = Rules { horde: true, ..Rules::MAYHEM };
     /// Classic 5v5 on Crossroads (M4): level 1, a starting purse for a first item and potion,
     /// and the reference 5v5's passive income (20.4 gold per 10 s).
-    pub const CLASSIC: Rules =
-        Rules { start_level: 1, start_gold: 500.0, passive_gold: 2.04, ranked: true, augments: false, hyper: false };
+    pub const CLASSIC: Rules = Rules {
+        start_level: 1,
+        start_gold: 500.0,
+        passive_gold: 2.04,
+        ranked: true,
+        augments: false,
+        hyper: false,
+        horde: false,
+    };
 
     pub fn progress(&self) -> Progress {
         if !self.ranked {
@@ -1380,6 +1408,10 @@ pub enum SimEvent {
         winner: Team,
         at: SimTime,
     },
+    /// The Horde campaign was won; the same champions continue into endless survival.
+    HordeWon {
+        at: SimTime,
+    },
     /// A turret lost `count` plates (`lane::PLATES`).
     PlatesBroken {
         unit: UnitId,
@@ -1717,7 +1749,11 @@ impl World {
         let camps = vec![started_at.plus(crate::jungle::FIRST_SPAWN); self.map.layout.camps.len()];
         self.game = MatchState { started_at, camps, ..MatchState::default() };
         if !self.map.layout.lanes.is_empty() {
-            self.game.next_wave_at = Some(SimTime::end_of(self.tick).plus(self.map.layout.pacing.first_wave()));
+            let first = if self.rules.horde { crate::horde::PREPARE } else { self.map.layout.pacing.first_wave() };
+            self.game.next_wave_at = Some(started_at.plus(first));
+            if self.rules.horde {
+                self.game.horde = Some(crate::horde::HordeState::default());
+            }
         }
     }
 
@@ -1789,6 +1825,89 @@ impl World {
         for u in self.units.iter_mut().filter(|u| u.kind == UnitKind::Turret) {
             u.stats.attack_damage = damage;
         }
+    }
+
+    /// Horde waves are paced by clears, not elapsed time. All progress is authoritative,
+    /// hashed and replayed; clients only predict their champion's commands and purchases.
+    fn update_horde(&mut self, now: SimTime) {
+        use crate::horde::{GOAL, PACK_INTERVAL, PACK_SIZE, Wave};
+        if self.game.winner.is_some() {
+            return;
+        }
+        let Some(mut horde) = self.game.horde.take() else { return };
+        if self.game.next_wave_at.is_some_and(|at| at <= now) {
+            horde.wave = horde.wave.saturating_add(1);
+            horde.spawned = 0;
+            horde.next_pack_at = now;
+            horde.boss = None;
+            self.game.next_wave_at = None;
+            self.game.waves_spawned = horde.wave;
+            let wave = Wave::new(horde.wave);
+            if let Some(kind) = wave.boss() {
+                let pos = self.map.layout.wave_spawn[0][Team::Red as usize];
+                let id = self.next_id();
+                let mut boss = crate::jungle::monster_unit(id, kind, 0, pos);
+                boss.team = Team::Red;
+                boss.brain = Some(Brain::Laner { lane: 0, next: 0 });
+                boss.stats = wave.boss_stats();
+                boss.state.health = boss.stats.max_health;
+                boss.state.move_speed = boss.stats.move_speed;
+                if let Some(attack) = &mut boss.attack {
+                    attack.attack_speed = if kind == crate::jungle::MonsterKind::Brute { 0.75 } else { 0.7 };
+                }
+                if kind == crate::jungle::MonsterKind::Brute {
+                    boss.collision_radius *= 1.5;
+                    boss.gameplay_radius *= 1.5;
+                }
+                self.units.push(boss);
+                horde.boss = Some(id);
+            }
+        }
+        let wave = Wave::new(horde.wave);
+        let active = self.game.next_wave_at.is_none() && horde.wave > horde.cleared;
+        if active && horde.spawned < wave.count() && horde.next_pack_at <= now {
+            let spawn = self.map.layout.wave_spawn[0][Team::Red as usize];
+            let ahead = (self.map.layout.lanes[0][Team::Red as usize][0] - spawn).normalize_or_zero();
+            let side = Vec2::new(-ahead.y, ahead.x);
+            let count = PACK_SIZE.min(wave.count() - horde.spawned);
+            for i in 0..count {
+                let pos = spawn - ahead * (i / 3) as f32 * 100.0 + side * (i % 3) as f32 * 110.0 - side * 110.0;
+                let kind = wave.kind(horde.spawned + i);
+                let id = self.spawn_minion(kind, Team::Red, pos, Some(Brain::Laner { lane: 0, next: 0 }));
+                let u = self.unit_mut(id).expect("spawned minion");
+                u.stats = wave.stats(kind);
+                u.state.health = u.stats.max_health;
+                u.state.move_speed = u.stats.move_speed;
+            }
+            horde.spawned += count;
+            horde.next_pack_at = now.plus(PACK_INTERVAL);
+        }
+        let enemies = self
+            .units
+            .iter()
+            .any(|u| u.team == Team::Red && u.state.alive() && matches!(u.kind, UnitKind::Minion | UnitKind::Monster));
+        if active && horde.spawned == wave.count() && !enemies {
+            horde.cleared = horde.wave;
+            self.game.next_wave_at = Some(now.plus(wave.break_after()));
+            for u in self.units.iter_mut().filter(|u| u.kind == UnitKind::Champion && u.team == Team::Blue) {
+                u.state.progress.gold += wave.clear_gold();
+                gain_xp(&mut u.state.progress, wave.clear_xp());
+                self.events.push(SimEvent::Reward {
+                    unit: u.id,
+                    gold: wave.clear_gold(),
+                    xp: wave.clear_xp(),
+                    at: now,
+                });
+            }
+            if horde.cleared == GOAL && horde.won_at.is_none() {
+                horde.won_at = Some(now);
+                self.events.push(SimEvent::HordeWon { at: now });
+            }
+        }
+        for u in self.units.iter_mut().filter(|u| u.kind == UnitKind::Champion) {
+            augments::update_draft_at(&mut u.state.progress, horde.drafts(), true);
+        }
+        self.game.horde = Some(horde);
     }
 
     /// One team's wave in one lane, in a column along the lane (melee in front).
@@ -1899,7 +2018,7 @@ impl World {
             }
         }
         for u in self.units.iter_mut() {
-            if self.rules.augments && u.kind == UnitKind::Champion {
+            if self.rules.augments && !self.rules.horde && u.kind == UnitKind::Champion {
                 augments::update_draft(&mut u.state.progress);
             }
             u.refresh_stats(); // level-ups, purchases and augments
@@ -1911,8 +2030,12 @@ impl World {
         let secs = self.match_secs(SimTime::end_of(self.tick));
         lane::update_structure_amp(&mut self.units, secs, self.map.layout.backdoor);
         lane::update_plating(&mut self.units, secs);
-        if !prediction && self.game.winner.is_none() && self.game.next_wave_at.is_some_and(|w| w <= s0) {
-            self.spawn_wave();
+        if !prediction && self.game.winner.is_none() {
+            if self.rules.horde {
+                self.update_horde(s0);
+            } else if self.game.next_wave_at.is_some_and(|w| w <= s0) {
+                self.spawn_wave();
+            }
         }
         if !prediction && self.game.winner.is_none() {
             self.update_camps(s0);
@@ -2770,7 +2893,9 @@ fn apply_command(
         }
         CommandKind::BuyAnvil => {}
         CommandKind::PickAugment(choice) if rules.augments => augments::pick(&mut st.progress, choice),
-        CommandKind::RerollAugment(choice) if rules.augments => augments::reroll(&mut st.progress, choice),
+        CommandKind::RerollAugment(choice) if rules.augments => {
+            augments::reroll_for(&mut st.progress, choice, rules.horde)
+        }
         CommandKind::PickAugment(_) | CommandKind::RerollAugment(_) => {}
     }
 }
@@ -3604,6 +3729,30 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
             .filter(|u| (u.state.pos - vpos).length() <= lane::XP_RANGE)
             .map(|u| u.id)
             .collect();
+        if game.horde.is_some() && vteam == Team::Red && matches!(victim.kind, UnitKind::Minion | UnitKind::Monster) {
+            let (gold, xp) = match victim.monster {
+                Some(kind) => (kind.def().gold, kind.def().xp),
+                None => lane::minion_reward(victim.attack.map_or(0.0, |a| a.range)),
+            };
+            let buff = victim.monster;
+            let team: Vec<UnitId> =
+                units.iter().filter(|u| u.kind == UnitKind::Champion && u.team == Team::Blue).map(|u| u.id).collect();
+            let share = lane::shared_xp(xp, team.len());
+            let each = gold / team.len().max(1) as f32;
+            pay.extend(team.iter().map(|id| (*id, each, share, at)));
+            for u in units.iter_mut().filter(|u| team.contains(&u.id)) {
+                if u.id == killer && u.kind == UnitKind::Champion {
+                    u.state.progress.cs = u.state.progress.cs.saturating_add(1);
+                }
+                let until = at.plus(crate::jungle::BUFF_DURATION);
+                match buff {
+                    Some(crate::jungle::MonsterKind::Warden) => u.state.progress.insight_until = until,
+                    Some(crate::jungle::MonsterKind::Brute) => u.state.progress.cinder_until = until,
+                    _ => {}
+                }
+            }
+            continue;
+        }
         match victim.kind {
             UnitKind::Minion => {
                 let (gold, xp) = lane::minion_reward(victim.attack.map_or(0.0, |a| a.range));

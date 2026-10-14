@@ -80,7 +80,9 @@ impl Match {
             // A custom map (checked when the server started).
             Some(text) => {
                 let spec = mftr_sim::mapspec::MapSpec::parse(text).expect("the map file reads");
-                world.set_map(std::sync::Arc::new(mftr_sim::mapspec::build(&spec, mftr_sim::map::MapId::Custom)));
+                let map = mftr_sim::mapspec::build(&spec, mftr_sim::map::MapId::Custom);
+                let map = if cfg.scenario == Scenario::Horde { mftr_sim::map::for_horde(map) } else { map };
+                world.set_map(std::sync::Arc::new(map));
             }
             None => world.set_map(cfg.scenario.map().shared()),
         }
@@ -89,6 +91,7 @@ impl Match {
             Scenario::Mayhem => world.set_rules(mftr_sim::world::Rules::MAYHEM),
             Scenario::Hyper => world.set_rules(mftr_sim::world::Rules::HYPER),
             Scenario::Classic => world.set_rules(mftr_sim::world::Rules::CLASSIC),
+            Scenario::Horde => world.set_rules(mftr_sim::world::Rules::HORDE),
             _ => {}
         }
         populate(&mut world, cfg.scenario);
@@ -105,7 +108,9 @@ impl Match {
 
     /// The lowest player id not in use.
     pub fn free_player(&self) -> Option<PlayerId> {
-        (0..=u8::MAX).map(PlayerId).find(|p| !self.players.contains(p))
+        (0..=u8::MAX)
+            .map(PlayerId)
+            .find(|p| !self.players.contains(p) && (self.cfg.scenario != Scenario::Horde || p.0.is_multiple_of(2)))
     }
 
     pub fn player_count(&self) -> usize {
@@ -118,10 +123,16 @@ impl Match {
         self.record(ReplayEntry::Join { tick: self.world.tick(), player, champion });
         self.players.insert(player);
         let scenario = self.cfg.scenario;
-        let team = if player.0.is_multiple_of(2) || scenario == Scenario::DodgeRig { Team::Blue } else { Team::Red };
+        let team = if player.0.is_multiple_of(2) || matches!(scenario, Scenario::DodgeRig | Scenario::Horde) {
+            Team::Blue
+        } else {
+            Team::Red
+        };
         // Without a preference: in a match, each of the six in turn; elsewhere alternate, so the
         // first duel is mage vs. marksman.
-        let champion = champion.unwrap_or(if scenario.is_match() {
+        let champion = champion.unwrap_or(if scenario == Scenario::Horde {
+            ChampionId::ALL[(player.0 / 2) as usize % ChampionId::ALL.len()]
+        } else if scenario.is_match() {
             ChampionId::ALL[player.0 as usize % ChampionId::ALL.len()]
         } else {
             ChampionId::ALL[((player.0 / 2) as usize % 2) ^ (team == Team::Red) as usize]

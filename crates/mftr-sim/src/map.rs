@@ -24,6 +24,8 @@ pub enum MapId {
     Crossroads = 3,
     /// A map built from a spec (12): never built by id (`mapspec::build`).
     Custom = 4,
+    /// The Mayhem map adapted for five champions defending against a horde.
+    HordeBridge = 5,
 }
 
 impl MapId {
@@ -34,6 +36,7 @@ impl MapId {
             2 => Some(MapId::Bridge),
             3 => Some(MapId::Crossroads),
             4 => Some(MapId::Custom),
+            5 => Some(MapId::HordeBridge),
             _ => None,
         }
     }
@@ -45,11 +48,13 @@ impl MapId {
         static ARENA: OnceLock<Arc<Map>> = OnceLock::new();
         static BRIDGE: OnceLock<Arc<Map>> = OnceLock::new();
         static CROSSROADS: OnceLock<Arc<Map>> = OnceLock::new();
+        static HORDE_BRIDGE: OnceLock<Arc<Map>> = OnceLock::new();
         let cell = match self {
             MapId::Open => &OPEN,
             MapId::Arena => &ARENA,
             MapId::Bridge => &BRIDGE,
             MapId::Crossroads => &CROSSROADS,
+            MapId::HordeBridge => &HORDE_BRIDGE,
             // Built from its spec, not by id: the open plane stands in.
             MapId::Custom => &OPEN,
         };
@@ -63,8 +68,22 @@ impl MapId {
             MapId::Bridge => bridge(),
             MapId::Crossroads => crossroads(),
             MapId::Custom => Map::new(MapId::Custom, Vec::new(), Vec::new(), None),
+            MapId::HordeBridge => {
+                let mut map = for_horde(bridge());
+                map.id = MapId::HordeBridge;
+                map
+            }
         }
     }
+}
+
+/// Keep the Mayhem terrain and blue defenses, remove the red structures and fountain, and
+/// let defenders recover at home between waves. Also applies to custom ARAM maps.
+pub fn for_horde(mut map: Map) -> Map {
+    map.layout.placements.retain(|p| p.team == Team::Blue || p.kind == UnitKind::Relic);
+    map.layout.fountains[Team::Red as usize] = None;
+    map.layout.fountain_heals = true;
+    map
 }
 
 /// Grid cell size for navigation.

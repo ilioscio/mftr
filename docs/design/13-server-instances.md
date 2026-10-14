@@ -18,6 +18,12 @@ offer a mode on one side only (`aram-coop`, `classic-versus`). The
 sandboxes (Duel, Minions, Dodge, Empty) aren't offered by hosted servers; `--scenario NAME`
 still runs a single-queue server of any scenario for development and tests.
 
+Mayhem: Horde adds one co-op-only queue on The Bridge (and on each hosted ARAM map). It
+has five blue champion seats, filled by humans or bots, against horde waves, with the
+existing champion-pick lobby. `horde` and `horde-coop` select it; `horde-versus` is rejected.
+Clearing wave 20 secures campaign victory and continues into endless, so the instance
+remains joinable until its Base falls. See [the Horde rules and balance](../horde.md).
+
 ## 2. Joining
 
 1. The client connects (the secure handshake, D40) and says hello without a queue. The server

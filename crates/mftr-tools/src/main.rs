@@ -92,7 +92,9 @@ fn main() {
             let cfg = mftr_server::ServerConfig {
                 seed: num("--seed", 1.0) as u64,
                 bots: num("--bots", 10.0) as u8,
-                scenario: if args.iter().any(|a| a == "--classic") {
+                scenario: if args.iter().any(|a| a == "--horde") {
+                    Scenario::Horde
+                } else if args.iter().any(|a| a == "--classic") {
                     Scenario::Classic
                 } else if args.iter().any(|a| a == "--hyper") {
                     Scenario::Hyper
@@ -104,12 +106,34 @@ fn main() {
                 ..Default::default()
             };
             let minutes = num("--minutes", 40.0);
+            let team: Vec<_> = get("--team")
+                .map(|names| {
+                    names
+                        .split(',')
+                        .map(|name| {
+                            mftr_sim::ChampionId::by_name(name.trim())
+                                .unwrap_or_else(|| panic!("unknown champion {name}"))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             let started = std::time::Instant::now();
-            let m = mftr_server::run_bot_match(cfg, (minutes * 60.0 * 30.0) as u32);
+            let m = mftr_server::run_bot_match_with_team(cfg, (minutes * 60.0 * 30.0) as u32, &team);
             let secs = m.ticks as f64 / 30.0;
-            match m.winner {
-                Some((team, _)) => println!("{team:?} won after {}:{:02}", secs as u32 / 60, secs as u32 % 60),
-                None => println!("no winner after {} minutes", minutes),
+            if args.iter().any(|a| a == "--horde") {
+                let cleared = m.horde_waves.last().map_or(0, |w| w.wave);
+                println!(
+                    "Horde: {} waves cleared; {} at {}:{:02}",
+                    cleared,
+                    if m.winner.is_some() { "Base fell" } else { "still defending" },
+                    secs as u32 / 60,
+                    secs as u32 % 60
+                );
+            } else {
+                match m.winner {
+                    Some((team, _)) => println!("{team:?} won after {}:{:02}", secs as u32 / 60, secs as u32 % 60),
+                    None => println!("no winner after {} minutes", minutes),
+                }
             }
             println!(
                 "champion deaths {}  structures destroyed {}  simulated in {:.1} s",
@@ -119,6 +143,30 @@ fn main() {
             );
             if m.monsters_killed != [0, 0] {
                 println!("jungle monsters killed: blue {}, red {}", m.monsters_killed[0], m.monsters_killed[1]);
+            }
+            if !m.horde_waves.is_empty() {
+                println!("Horde clears (wallet + inventory value, per champion):");
+                for w in &m.horde_waves {
+                    let s = w.tick.0 / 30;
+                    let gold: Vec<u32> = w.build_gold.iter().map(|g| g.round() as u32).collect();
+                    println!(
+                        "  wave {:>2}  {:>2}:{:02}  levels {:?}  gold {:?}  Base {:.0}",
+                        w.wave,
+                        s / 60,
+                        s % 60,
+                        w.levels,
+                        gold,
+                        w.base_health
+                    );
+                }
+                println!(
+                    "campaign {}",
+                    if m.horde_waves.iter().any(|w| w.wave >= mftr_sim::horde::GOAL) {
+                        "won; continued into endless"
+                    } else {
+                        "not cleared"
+                    }
+                );
             }
             for (t, team, kind, tier) in &m.falls {
                 let s = t.0 / 30;
@@ -138,6 +186,9 @@ fn main() {
                     Some((t, a, b)) => format!("MISMATCH at tick {}: {a:016x} vs {b:016x}", t.0),
                 }
             );
+            if check.mismatch.is_some() {
+                std::process::exit(1);
+            }
         }
         Some("loadtest") => {
             // 13 §8: many matches in one hub, in process; what a server spends per match.
@@ -301,6 +352,9 @@ fn main() {
        mftr-tools bot --server HOST:PORT [--queue MODE[-coop]] [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]"
             );
             eprintln!("       mftr-tools blind-report FILE.tsv...");
+            eprintln!(
+                "       mftr-tools botmatch [--horde|--mayhem|--hyper|--classic] [--team NAME,...] [--seed N] [--minutes N]"
+            );
             eprintln!("       mftr-tools pack validate FILE.glb|DIR...");
             eprintln!("       mftr-tools sfx build [sounds.ron|DIR...]");
             eprintln!("       mftr-tools map svg open|arena|bridge|crossroads");

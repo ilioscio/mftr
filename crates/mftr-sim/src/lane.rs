@@ -236,6 +236,8 @@ pub struct MatchState {
     pub winner: Option<(Team, SimTime)>,
     /// Per jungle camp (`Layout::camps`): when it spawns next, or 0 while it stands.
     pub camps: Vec<SimTime>,
+    /// Present only in Mayhem: Horde; ordinary lane matches retain their existing loop.
+    pub horde: Option<crate::horde::HordeState>,
 }
 
 impl MatchState {
@@ -259,6 +261,10 @@ impl MatchState {
         // Maps without a jungle hash as before.
         for t in &self.camps {
             h.write_u64(t.0);
+        }
+        if let Some(horde) = &self.horde {
+            h.write_u8(0x48);
+            horde.hash_into(h);
         }
     }
 

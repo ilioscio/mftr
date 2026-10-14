@@ -227,6 +227,21 @@ pub struct Scoreboard {
 /// Most rows a scoreboard carries.
 pub const MAX_SCORE_ROWS: usize = 16;
 
+/// Compact authoritative Horde progress. Repeated even when crowded packets defer the
+/// scoreboard or distant units, so a reconnect or lost packet can't hide a wave transition.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HordeStatus {
+    pub wave: u32,
+    pub cleared: u32,
+    pub enemies: u16,
+    pub incoming: u16,
+    pub next_wave_at: Option<SimTime>,
+    pub boss: Option<(UnitId, u16, u16)>,
+    pub base: (u16, u16),
+    pub won: bool,
+    pub ended: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Snapshot {
     pub tick: Tick,
@@ -248,6 +263,7 @@ pub struct Snapshot {
     pub events: Vec<(u32, SimEvent)>,
     /// The scoreboard, about once a second.
     pub scoreboard: Option<Box<Scoreboard>>,
+    pub horde: Option<HordeStatus>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -321,6 +337,7 @@ pub enum GameMode {
     Hyper = 6,
     /// M4: Classic 5v5 on Crossroads.
     Classic = 7,
+    Horde = 8,
 }
 
 impl GameMode {
@@ -334,6 +351,7 @@ impl GameMode {
             5 => GameMode::Mayhem,
             6 => GameMode::Hyper,
             7 => GameMode::Classic,
+            8 => GameMode::Horde,
             _ => return None,
         })
     }
@@ -349,6 +367,7 @@ impl GameMode {
             GameMode::Mayhem => "ARAM: Mayhem",
             GameMode::Hyper => "ARAM: Mayhem (Hyper)",
             GameMode::Classic => "Classic 5v5",
+            GameMode::Horde => "Mayhem: Horde",
         }
     }
 }
@@ -840,6 +859,10 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             write_team(w, *winner);
             write_time(w, *at);
         }
+        SimEvent::HordeWon { at } => {
+            w.write(18, 5);
+            write_time(w, *at);
+        }
         SimEvent::Reward { unit, gold, xp, at } => {
             w.write(16, 5);
             w.write_u32(unit.0);
@@ -924,6 +947,7 @@ fn read_event_of(kind: u64, r: &mut BitReader) -> Result<SimEvent, DecodeError> 
         15 => SimEvent::MatchEnded { winner: read_team(r)?, at: read_time(r)? },
         16 => SimEvent::Reward { unit: unit(r)?, gold: read_finite(r)?, xp: r.read_u32()?, at: read_time(r)? },
         17 => SimEvent::PlatesBroken { unit: unit(r)?, count: r.read(3)? as u8, at: read_time(r)? },
+        18 => SimEvent::HordeWon { at: read_time(r)? },
         _ => return Err(DecodeError::Invalid("event kind")),
     })
 }
@@ -1707,13 +1731,14 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             w.write_bool(rules.ranked);
             w.write_bool(rules.augments);
             w.write_bool(rules.hyper);
+            w.write_bool(rules.horde);
             w.write_u32(tick.0);
             w.write_u8(*tick_hz);
             w.write_u32(*since_tick_us);
             write_echo(&mut w, time_echo);
             w.write_u64(*token);
             w.write_bool(*spectator);
-            w.write(*mode as u64, 3);
+            w.write(*mode as u64, 4);
             w.write_bool(map_spec.is_some());
             if let Some((hash, len)) = map_spec {
                 w.write_u64(*hash);
@@ -1738,7 +1763,7 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             let n = queues.len().min(MAX_QUEUES);
             w.write_u8(n as u8);
             for q in &queues[..n] {
-                w.write(q.mode as u64, 3);
+                w.write(q.mode as u64, 4);
                 w.write_bool(q.coop);
                 let name = truncate_utf8(&q.map, MAX_QUEUE_NAME);
                 w.write_u8(name.len() as u8);
@@ -1819,6 +1844,24 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             if let Some(b) = &s.scoreboard {
                 write_scoreboard(&mut w, b);
             }
+            w.write_bool(s.horde.is_some());
+            if let Some(h) = &s.horde {
+                w.write_u32(h.wave);
+                w.write_u32(h.cleared);
+                w.write_u16(h.enemies);
+                w.write_u16(h.incoming);
+                write_opt_time(&mut w, h.next_wave_at);
+                w.write_bool(h.boss.is_some());
+                if let Some((id, health, max_health)) = h.boss {
+                    w.write_u32(id.0);
+                    w.write_u16(health);
+                    w.write_u16(max_health);
+                }
+                w.write_u16(h.base.0);
+                w.write_u16(h.base.1);
+                w.write_bool(h.won);
+                w.write_bool(h.ended);
+            }
             w.finish()
         }
         ServerMessage::Reject { reason } => {
@@ -1843,7 +1886,7 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
                 write_champion(&mut w, Some(*c));
             }
             w.write_u32(l.starts_in_ms);
-            w.write(l.mode as u64, 3);
+            w.write(l.mode as u64, 4);
             w.write_bool(l.pick);
             w.write_bool(l.midgame);
             let map = truncate_utf8(&l.map, MAX_QUEUE_NAME);
@@ -1873,6 +1916,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 ranked: r.read_bool()?,
                 augments: r.read_bool()?,
                 hyper: r.read_bool()?,
+                horde: r.read_bool()?,
             },
             tick: Tick(r.read_u32()?),
             tick_hz: r.read_u8()?,
@@ -1880,7 +1924,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             time_echo: read_echo(&mut r)?,
             token: r.read_u64()?,
             spectator: r.read_bool()?,
-            mode: GameMode::from_u8(r.read(3)? as u8).ok_or(DecodeError::Invalid("game mode"))?,
+            mode: GameMode::from_u8(r.read(4)? as u8).ok_or(DecodeError::Invalid("game mode"))?,
             map_spec: if r.read_bool()? { Some((r.read_u64()?, r.read_u32()?)) } else { None },
         },
         4 => {
@@ -1899,7 +1943,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             }
             let mut queues = Vec::with_capacity(n);
             for _ in 0..n {
-                let mode = GameMode::from_u8(r.read(3)? as u8).ok_or(DecodeError::Invalid("game mode"))?;
+                let mode = GameMode::from_u8(r.read(4)? as u8).ok_or(DecodeError::Invalid("game mode"))?;
                 let coop = r.read_bool()?;
                 let len = r.read_u8()? as usize;
                 if len > MAX_QUEUE_NAME {
@@ -1970,6 +2014,25 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 }
             }
             let scoreboard = if r.read_bool()? { Some(Box::new(read_scoreboard(&mut r)?)) } else { None };
+            let horde = if r.read_bool()? {
+                Some(HordeStatus {
+                    wave: r.read_u32()?,
+                    cleared: r.read_u32()?,
+                    enemies: r.read_u16()?,
+                    incoming: r.read_u16()?,
+                    next_wave_at: read_opt_time(&mut r)?,
+                    boss: if r.read_bool()? {
+                        Some((UnitId(r.read_u32()?), r.read_u16()?, r.read_u16()?))
+                    } else {
+                        None
+                    },
+                    base: (r.read_u16()?, r.read_u16()?),
+                    won: r.read_bool()?,
+                    ended: r.read_bool()?,
+                })
+            } else {
+                None
+            };
             ServerMessage::Snapshot(Box::new(Snapshot {
                 tick,
                 since_tick_us,
@@ -1982,6 +2045,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 removed,
                 events,
                 scoreboard,
+                horde,
             }))
         }
         2 => ServerMessage::Reject {
@@ -2012,7 +2076,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 .map(|_| read_champion(&mut r)?.ok_or(DecodeError::Invalid("champion")))
                 .collect::<Result<_, _>>()?;
             let starts_in_ms = r.read_u32()?;
-            let mode = GameMode::from_u8(r.read(3)? as u8).ok_or(DecodeError::Invalid("game mode"))?;
+            let mode = GameMode::from_u8(r.read(4)? as u8).ok_or(DecodeError::Invalid("game mode"))?;
             let (pick, midgame) = (r.read_bool()?, r.read_bool()?);
             let len = r.read_u8()? as usize;
             if len > MAX_QUEUE_NAME {
@@ -2377,8 +2441,20 @@ mod tests {
             SimEvent::Healed { unit: UnitId(4), amount: 150.0, at: SimTime(3) },
             SimEvent::MatchEnded { winner: Team::Red, at: SimTime(99_000) },
             SimEvent::Reward { unit: UnitId(3), gold: 21.5, xp: 60, at: SimTime(99_001) },
+            SimEvent::HordeWon { at: SimTime(99_002) },
         ];
         let snap = Snapshot {
+            horde: Some(HordeStatus {
+                wave: 20,
+                cleared: 19,
+                enemies: 74,
+                incoming: 0,
+                next_wave_at: None,
+                boss: Some((UnitId(99), 25_000, 32_000)),
+                base: (3200, 4000),
+                won: false,
+                ended: false,
+            }),
             tick: Tick(99),
             since_tick_us: 1500,
             time_echo: Some(TimeEcho { client_time_us: 5, hold_us: 1200 }),
@@ -2468,6 +2544,7 @@ mod tests {
             .chain([(104, SimEvent::MissileExpired { id: 20, at: SimTime(9) })])
             .collect();
         let snap = |events: Vec<(u32, SimEvent)>| Snapshot {
+            horde: None,
             tick: Tick(7),
             since_tick_us: 0,
             time_echo: None,

@@ -45,6 +45,8 @@ pub struct Lobby {
     max_players: u8,
     /// A pick instead of all random (Classic).
     pick: bool,
+    /// Horde has five blue seats and no opposing champion team.
+    blue_only: bool,
     /// When the match starts (wall clock); set when the first human joins.
     starts_at: Option<f64>,
 }
@@ -57,10 +59,20 @@ impl Lobby {
             rng: Pcg32::new(seed, 0x6c6f_6262),
             max_players,
             pick,
+            blue_only: false,
             starts_at: None,
         };
         for _ in 0..bots.min(max_players) {
             lobby.add(true);
+        }
+        lobby
+    }
+
+    pub fn blue_only(seed: u64, max_players: u8, bots: u8, pick: bool) -> Self {
+        let mut lobby = Self::new(seed, max_players, 0, pick);
+        lobby.blue_only = true;
+        for _ in 0..bots.min(max_players) {
+            lobby.add_to(Team::Blue, true);
         }
         lobby
     }
@@ -108,10 +120,16 @@ impl Lobby {
     /// Slots per team: blue gets the odd one out.
     fn team_size(&self, team: Team) -> usize {
         let n = self.max_players as usize;
+        if self.blue_only {
+            return if team == Team::Blue { n } else { 0 };
+        }
         if team == Team::Blue { n.div_ceil(2) } else { n / 2 }
     }
 
     fn add(&mut self, bot: bool) -> Option<PlayerId> {
+        if self.blue_only {
+            return self.add_to(Team::Blue, bot);
+        }
         // Fill the smaller team first.
         let blue = self.on_team(Team::Blue);
         let red = self.slots.len() - blue;

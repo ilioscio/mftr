@@ -793,6 +793,9 @@ impl MatchClient {
                     d.set("kind", "match_ended");
                     d.set("won", winner == self.session.team());
                 }
+                Notice::HordeWon => {
+                    d.set("kind", "horde_won");
+                }
                 Notice::Blinked { unit, from, to } => {
                     d.set("kind", "blinked");
                     d.set("unit", unit.0 as i64);
@@ -1411,6 +1414,7 @@ impl MatchClient {
                 d.set("monster_name", m.def().name);
                 d.set("big", m.def().big);
             }
+            d.set("boss", self.session.horde().and_then(|h| h.boss).is_some_and(|b| b.0 == u.id));
             d.set("neutral", u.team == Team::Neutral);
             if let Some(k) = u.ward {
                 d.set("ward", if k == mftr_sim::wards::WardKind::Control { "control" } else { "stealth" });
@@ -1479,6 +1483,33 @@ impl MatchClient {
     fn match_seconds(&self) -> f64 {
         let started = self.session.scoreboard().map_or(mftr_sim::SimTime(0), |b| b.started_at);
         self.session.input_sim_time(self.now()).map_or(0.0, |t| t.secs_since(started).max(0.0) as f64)
+    }
+
+    /// Horde objective and wave progress (empty in other modes), for players and spectators.
+    #[func]
+    fn horde_status(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let Some(h) = self.session.horde() else { return d };
+        d.set("wave", h.wave as i64);
+        d.set("cleared", h.cleared as i64);
+        d.set("goal", mftr_sim::horde::GOAL as i64);
+        d.set("enemies", h.enemies as i64);
+        d.set("incoming", h.incoming as i64);
+        d.set("preparing", h.next_wave_at.is_some());
+        let now = self.session.input_sim_time(self.now());
+        let next = h.next_wave_at.and_then(|at| now.map(|now| at.secs_since(now).max(0.0))).unwrap_or(0.0);
+        d.set("next_in", next);
+        d.set("won", h.won);
+        d.set("ended", h.ended);
+        d.set("base_health", h.base.0 as i64);
+        d.set("base_max_health", h.base.1 as i64);
+        if let Some((id, health, max)) = h.boss {
+            d.set("boss_id", id.0 as i64);
+            d.set("boss_health", health as i64);
+            d.set("boss_max_health", max as i64);
+            d.set("boss_name", if h.wave.is_multiple_of(20) { "Ember Brute" } else { "Azure Warden" });
+        }
+        d
     }
 
     /// Every champion's score (the Tab breakdown): `[{ unit, champion, team, ally, you, bot,

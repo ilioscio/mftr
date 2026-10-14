@@ -110,7 +110,7 @@ let
       };
 
       scenario = mkOption {
-        type = types.enum [ "duel" "minions" "dodge" "empty" "aram" "mayhem" "hyper" "classic" ];
+        type = types.enum [ "duel" "minions" "dodge" "empty" "aram" "mayhem" "hyper" "classic" "horde" ];
         default = "duel";
         description = ''
           The one scenario this server runs (`mftr-server --scenario`). `duel`: the Duel
@@ -208,15 +208,17 @@ in
     };
 
     modes = mkOption {
-      type = types.nonEmptyListOf (types.enum (fullModes ++ lib.concatMap (m: [ "${m}-versus" "${m}-coop" ]) fullModes));
-      default = fullModes;
+      type = types.nonEmptyListOf (types.enum (fullModes ++ lib.concatMap (m: [ "${m}-versus" "${m}-coop" ]) fullModes ++ [ "horde" "horde-coop" ]));
+      default = fullModes ++ [ "horde" ];
       example = [ "aram" "mayhem-coop" "classic-versus" ];
       description = ''
         What players can pick. A mode alone offers it Versus (humans on both teams, bots in
         the empty seats) and Co-op vs bots (humans on blue); `<mode>-versus` or `<mode>-coop`
         offers one side only. `aram`: The Bridge, a full match with a winner. `mayhem`: ARAM
         with augment drafts. `hyper`: Mayhem under Hyper rules. `classic`: Classic 5v5 on
-        Crossroads (and on each of `maps`). Every match has 10 seats and champion select.
+        Crossroads (and on each of `maps`). Those matches have 10 seats and champion select.
+        `horde` or `horde-coop`: Mayhem: Horde, five blue champions against 20 minion waves,
+        then endless survival. Horde is co-op only, with champion picks and bot-filled seats.
       '';
     };
 
@@ -226,7 +228,7 @@ in
       example = lib.literalExpression "[ ./maps/twin-rivers.mftrmap ]";
       description = ''
         Map files exported from the map editor: each adds its modes on that map (Classic on a
-        Classic map; ARAM, Mayhem and Hyper on an ARAM map), on the sides `modes` gives them. Players download a map as they join. The server refuses to
+        Classic map; ARAM, Mayhem, Hyper and Horde on an ARAM map), on the sides `modes` gives them. Players download a map as they join. The server refuses to
         start if a map breaks a rule.
       '';
     };
