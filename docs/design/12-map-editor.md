@@ -64,8 +64,8 @@ The editor shows every broken rule; a map that breaks one can be saved but not e
 - **Actual view:** the built map as the game draws it (the same code builds a match's world):
   cliffs, roads, the river, trees, rocks, tall grass, fountains, structures and camps, from
   straight above or from the game's camera angle.
-- **Files:** new, open, save, export (a validated copy to share). **Load default map** (at the
-  top) opens a built-in map, Crossroads or The Bridge, to edit or start from.
+- **Files:** new, open, save, export (a validated copy to share). **Load default map** (above
+  them) opens a built-in map, Crossroads or The Bridge, to edit or start from.
 - **Dev overlay** (development builds, or with `--dev-overlay FILE`): a reference image drawn
   under the canvas, see-through, with handles to align it. The image is the developer's own local
   file and is never shipped.

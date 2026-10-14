@@ -171,14 +171,6 @@ func _build_ui() -> void:
 	title_label.text = "Map editor"
 	title_label.theme_type_variation = "TitleLabel"
 	lv.add_child(title_label)
-	var defaults := MenuButton.new()
-	defaults.text = "Load default map ▾"
-	defaults.flat = false
-	defaults.tooltip_text = "Open one of the game's built-in maps to edit or start from. Save as… keeps your copy; the built-in map doesn't change."
-	for i in DEFAULT_MAPS.size():
-		defaults.get_popup().add_item(DEFAULT_MAPS[i][1], i)
-	defaults.get_popup().id_pressed.connect(func(i: int): open_map(DEFAULT_MAPS[i][0]))
-	lv.add_child(defaults)
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 8)
@@ -304,6 +296,14 @@ func _build_ui() -> void:
 	lv.add_child(align_button)
 
 	lv.add_child(_header("FILE"))
+	var defaults := MenuButton.new()
+	defaults.text = "Load default map ▾"
+	defaults.flat = false
+	defaults.tooltip_text = "Open one of the game's built-in maps to edit or start from. Save as… keeps your copy; the built-in map doesn't change."
+	for i in DEFAULT_MAPS.size():
+		defaults.get_popup().add_item(DEFAULT_MAPS[i][1], i)
+	defaults.get_popup().id_pressed.connect(func(i: int): open_map(DEFAULT_MAPS[i][0]))
+	lv.add_child(defaults)
 	var files := GridContainer.new()
 	files.columns = 2
 	for f in [["New", _new_map], ["Open…", _open_dialog], ["Save", _save], ["Save as…", _save_as], ["Export…", _export]]:
