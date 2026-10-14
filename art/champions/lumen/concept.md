@@ -21,7 +21,7 @@ Signature: **pale sun gold** (50°). The whites are darker than they look: the a
 | Slot | Colors |
 |---|---|
 | skin | fair (0.80, 0.62, 0.52) |
-| cloth | white robe (0.70, 0.68, 0.64), ivory panel, tier and mantle (0.60, 0.56, 0.48), sky trim, sash and cuffs (0.20, 0.32, 0.50), staff wood (0.36, 0.26, 0.16), golden hair |
+| cloth | white robe (0.58, 0.56, 0.52), ivory panel, tier and mantle (0.50, 0.46, 0.38), sky trim, sash and cuffs (0.20, 0.32, 0.50), staff wood (0.36, 0.26, 0.16), golden hair |
 | metal | gold hems, cage, circlet and clasps (0.70, 0.54, 0.22) |
 | emissive | sun gold (1.0, 0.86, 0.42) and sun white (1.0, 0.96, 0.78): the halo, the lantern, the brooch |
 | accent | a band at her waist |

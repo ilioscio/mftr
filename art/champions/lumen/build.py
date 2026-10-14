@@ -27,8 +27,8 @@ from mftr_blender.library import _clip  # noqa: E402
 from mftr_blender.mesh import box_part, path_part  # noqa: E402
 
 SKIN = (0.80, 0.62, 0.52)
-IVORY = (0.60, 0.56, 0.48)
-WHITE = (0.70, 0.68, 0.64)
+IVORY = (0.50, 0.46, 0.38)
+WHITE = (0.58, 0.56, 0.52)
 GOLD = (0.70, 0.54, 0.22)
 SKY = (0.20, 0.32, 0.50)
 HAIR = (0.78, 0.66, 0.40)
