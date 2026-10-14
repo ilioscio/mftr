@@ -779,6 +779,24 @@ objective pits.
 - **Replays** carry their custom map, so they still re-simulate.
 - A netlab test hosts a custom map for 4 clients over the MID link: every client builds the server's walls, nobody hard-resets, and the replay re-simulates exactly. A real client joined a hosted map file.
 
+### E slice 6 status (2026-10-13): ✅ done (ARAM maps)
+- **Map kinds:** a spec is Classic or ARAM (`kind aram`). ARAM maps have one lane whose start is
+  the base (fountain, Base, base turrets and wave spawn at The Bridge's distances along it, in
+  a round court), no camps or great objectives, health relics (`relic`), a fountain that doesn't
+  heal, ARAM pacing, no plating or wards; their own sizes (9,000, 10,607, 12,000).
+  **Rocks** (`rock`, any kind) are small walls added as exact octagons.
+- **The Bridge is a spec** (`maps/bridge.mftrmap`), drawn in its old lane coordinates: every
+  test that places units by them still passes; its walls are traced now, so ARAM's golden hash
+  changed (deliberately). ARAM bot matches still finish (14–27 minutes, replays exact).
+- **No platform trigonometry** in map building: rocks and camp facing use constant tables (03 §17).
+  A clippy rule now rejects the platform's transcendental functions in the sim, and a test pins
+  Crossroads' and The Bridge's built geometry bit for bit on every CI platform.
+- **Editor:** Kind beside Size, Rock and Health relic tools, The Bridge to open; ARAM bases,
+  relics, rocks and fountain sizes drawn; the Actual view shows relics. `--editor-map` opens a
+  map for captures. The headless test covers it (21 checks).
+- **Hosting:** an ARAM map file adds ARAM, Mayhem and Hyper (as offered) on it; a real client
+  joined a hosted bent ARAM map and played.
+
 ## S — One server, many matches (between E and M4 slice 5)
 The server plays whatever its players ask for ([13](13-server-instances.md), D57): one process
 on one port runs match instances of every full-match queue, created and stopped with their

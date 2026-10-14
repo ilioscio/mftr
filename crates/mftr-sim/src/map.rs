@@ -613,13 +613,6 @@ pub const BRIDGE_LANE: Vec2 = Vec2::new(12_000.0, 3_000.0);
 /// The square the lane is laid on: its bounding box, (12,000 + 3,000) / √2.
 pub const BRIDGE_SIZE: Vec2 = Vec2::new(10_607.0, 10_607.0);
 
-/// The point-symmetric image of `p` (lane coordinates) on The Bridge (red's side of blue's
-/// layout): the map is symmetric under a half turn about its center, so both teams play the
-/// same map.
-fn mirror(p: Vec2) -> Vec2 {
-    Vec2::new(BRIDGE_LANE.x - p.x, BRIDGE_LANE.y - p.y)
-}
-
 /// A point of The Bridge's lane coordinates on the map: a rotation by 45° about the centers,
 /// so the lane runs from the bottom left (blue) to the top right (red).
 pub fn bridge_point(p: Vec2) -> Vec2 {
@@ -635,116 +628,17 @@ pub fn bridge_lane_point(p: Vec2) -> Vec2 {
     Vec2::new(BRIDGE_LANE.x / 2.0 + (x - y) * k, BRIDGE_LANE.y / 2.0 + (x + y) * k)
 }
 
-/// The Bridge (ARAM, 06 §2): one straight lane from blue to red, cliffs along both sides with
-/// brush alcoves, two rocks for cover mid-lane, health relics, and each team's fountain, Base,
-/// two base turrets, Gatehouse, gatehouse turret, inner and outer turret. Point-symmetric, so
-/// neither side is favored by the layout. The lane is canted on the screen (D54): the camera's
-/// up/down asymmetry (D13) gives blue, looking up-screen, a little more view ahead, as in the
-/// reference game.
+/// The Bridge's spec (an ARAM map, 12 §1): one lane from blue to red with cliffs along both
+/// sides, brush alcoves, a rock for cover mid-lane, health relics, and each team's fountain,
+/// Base, two base turrets, Gatehouse, gatehouse turret, inner and outer turret. Point-symmetric,
+/// so neither side is favored by the layout. The lane is canted on the screen (D54): the
+/// camera's up/down asymmetry (D13) gives blue, looking up-screen, a little more view ahead, as
+/// in the reference game. Drawn in its lane coordinates (`bridge_point`).
+pub const BRIDGE_SPEC: &str = include_str!("../maps/bridge.mftrmap");
+
 fn bridge() -> Map {
-    // Everything past the lane's rectangle is cliff, out to well past the square's corners.
-    const E: f32 = 9000.0;
-    let (lx, ly) = (BRIDGE_LANE.x, BRIDGE_LANE.y);
-    let top = poly(&[
-        (-E, -E),
-        (lx + E, -E),
-        (lx + E, 0.0),
-        (9800.0, 0.0),
-        (9800.0, 450.0),
-        (9300.0, 700.0),
-        (7600.0, 650.0),
-        (6600.0, 760.0),
-        (6000.0, 700.0),
-        (5400.0, 760.0),
-        (4400.0, 650.0),
-        (2700.0, 700.0),
-        (2200.0, 450.0),
-        (2200.0, 0.0),
-        (-E, 0.0),
-    ]);
-    let bottom: Vec<Vec2> = top.iter().map(|&p| mirror(p)).collect();
-    let behind_blue = poly(&[(-E, 0.0), (0.0, 0.0), (0.0, ly), (-E, ly)]);
-    let behind_red: Vec<Vec2> = behind_blue.iter().map(|&p| mirror(p)).collect();
-    let rock = |c: Vec2| -> Vec<Vec2> {
-        // A hexagon of radius 120, axis-aligned so it mirrors exactly.
-        let (r, h) = (120.0, 120.0 * 0.866_025_4);
-        [(r, 0.0), (r * 0.5, h), (-r * 0.5, h), (-r, 0.0), (-r * 0.5, -h), (r * 0.5, -h)]
-            .iter()
-            .map(|&(x, y)| Vec2::new(c.x + x, c.y + y))
-            .collect()
-    };
-    let lay = |poly: Vec<Vec2>| -> Vec<Vec2> { poly.into_iter().map(bridge_point).collect() };
-    let walls = vec![
-        top,
-        bottom,
-        behind_blue,
-        behind_red,
-        rock(Vec2::new(5300.0, 1150.0)),
-        rock(mirror(Vec2::new(5300.0, 1150.0))),
-    ]
-    .into_iter()
-    .map(lay)
-    .collect();
-    let alcove = |x0: f32, y0: f32, x1: f32, y1: f32| rect(x0, y0, x1, y1);
-    let brush = vec![
-        alcove(4500.0, 780.0, 5000.0, 1050.0),
-        alcove(7000.0, 1950.0, 7500.0, 2220.0),
-        alcove(7000.0, 780.0, 7500.0, 1050.0),
-        alcove(4500.0, 1950.0, 5000.0, 2220.0),
-    ]
-    .into_iter()
-    .map(lay)
-    .collect();
-    let mut map = Map::new(MapId::Bridge, walls, brush, Some(BRIDGE_SIZE));
-    let blue = [
-        (UnitKind::Turret, Vec2::new(5000.0, 1350.0), 1),
-        (UnitKind::Turret, Vec2::new(3900.0, 1650.0), 2),
-        (UnitKind::Turret, Vec2::new(2700.0, 1350.0), 3),
-        (UnitKind::Gatehouse, Vec2::new(2200.0, 1500.0), 4),
-        (UnitKind::Turret, Vec2::new(1650.0, 1250.0), 5),
-        (UnitKind::Turret, Vec2::new(1650.0, 1750.0), 5),
-        (UnitKind::Base, Vec2::new(1250.0, 1500.0), 6),
-    ];
-    let mut placements = Vec::new();
-    for (kind, pos, tier) in blue {
-        placements.push(Placement { kind, team: Team::Blue, pos: bridge_point(pos), tier, lane: 0 });
-        placements.push(Placement { kind, team: Team::Red, pos: bridge_point(mirror(pos)), tier, lane: 0 });
-    }
-    for pos in [Vec2::new(5600.0, 950.0), Vec2::new(5600.0, 2050.0)] {
-        placements.push(Placement {
-            kind: UnitKind::Relic,
-            team: Team::Blue,
-            pos: bridge_point(pos),
-            tier: 0,
-            lane: 0,
-        });
-        placements.push(Placement {
-            kind: UnitKind::Relic,
-            team: Team::Blue,
-            pos: bridge_point(mirror(pos)),
-            tier: 0,
-            lane: 0,
-        });
-    }
-    let lane_blue = vec![Vec2::new(2900.0, 1500.0), Vec2::new(9100.0, 1500.0), Vec2::new(10_750.0, 1500.0)];
-    let lane_red: Vec<Vec2> = lane_blue.iter().map(|&p| bridge_point(mirror(p))).collect();
-    let lane_blue: Vec<Vec2> = lane_blue.into_iter().map(bridge_point).collect();
-    let (spawn, home, fountain) = (Vec2::new(1700.0, 1500.0), Vec2::new(450.0, 1500.0), Vec2::new(300.0, 1500.0));
-    map.layout = Layout {
-        lanes: vec![[lane_blue, lane_red]],
-        wave_spawn: vec![[bridge_point(spawn), bridge_point(mirror(spawn))]],
-        champion_spawn: [bridge_point(home), bridge_point(mirror(home))],
-        fountains: [Some((bridge_point(fountain), 600.0)), Some((bridge_point(mirror(fountain)), 600.0))],
-        fountain_heals: false,
-        placements,
-        pacing: crate::lane::Pacing::Aram,
-        river: Vec::new(),
-        plating: false,
-        backdoor: false,
-        camps: Vec::new(),
-        wards: false,
-    };
-    map
+    let spec = crate::mapspec::MapSpec::parse(BRIDGE_SPEC).expect("The Bridge's spec reads");
+    crate::mapspec::build(&spec, MapId::Bridge)
 }
 
 /// Crossroads (M4, the 5v5 map): built from its spec (`maps/crossroads.mftrmap`, 12): three
@@ -824,6 +718,69 @@ pub fn dist_segment_segment(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A built map's geometry, bit for bit: walls, brush, lane paths, spawns, fountains,
+    /// structures, relics and camps (with their facing). FNV-1a over every float's bits.
+    fn geometry_hash(m: &Map) -> u64 {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        let mut eat = |x: u64| {
+            for b in x.to_le_bytes() {
+                h = (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        };
+        let pt = |eat: &mut dyn FnMut(u64), p: Vec2| {
+            eat(p.x.to_bits() as u64);
+            eat(p.y.to_bits() as u64);
+        };
+        for poly in m.walls.iter().chain(&m.brush) {
+            eat(poly.len() as u64);
+            for p in poly {
+                pt(&mut eat, *p);
+            }
+        }
+        let l = &m.layout;
+        for pair in &l.lanes {
+            for path in pair {
+                eat(path.len() as u64);
+                for p in path {
+                    pt(&mut eat, *p);
+                }
+            }
+        }
+        for pair in &l.wave_spawn {
+            pt(&mut eat, pair[0]);
+            pt(&mut eat, pair[1]);
+        }
+        pt(&mut eat, l.champion_spawn[0]);
+        pt(&mut eat, l.champion_spawn[1]);
+        for (c, r) in l.fountains.iter().flatten() {
+            pt(&mut eat, *c);
+            eat(r.to_bits() as u64);
+        }
+        for p in &l.placements {
+            eat(((p.kind as u64) << 24) | ((p.team as u64) << 16) | ((p.tier as u64) << 8) | p.lane as u64);
+            pt(&mut eat, p.pos);
+        }
+        for c in &l.camps {
+            eat(c.kind as u64);
+            pt(&mut eat, c.pos);
+            pt(&mut eat, c.facing);
+        }
+        h
+    }
+
+    /// Cross-platform canary for map building (03 §17): the maps built from specs must come out
+    /// bit for bit the same on every OS (CI runs this on Linux, Windows and macOS), since each
+    /// client rebuilds the map the server plays. A change on one platform means map building
+    /// used platform math; a change everywhere means the build changed (update on purpose).
+    #[test]
+    fn built_maps_are_the_same_everywhere() {
+        let got = [MapId::Crossroads, MapId::Bridge].map(|id| geometry_hash(&id.shared()));
+        assert_eq!(got, [GEOMETRY_CROSSROADS, GEOMETRY_BRIDGE], "{got:#018x?}");
+    }
+
+    const GEOMETRY_CROSSROADS: u64 = 0x6277_b7c8_01c8_6368;
+    const GEOMETRY_BRIDGE: u64 = 0x0428_bc04_0f06_2fdc;
 
     #[test]
     fn geometry_basics() {

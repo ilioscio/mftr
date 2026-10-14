@@ -4,7 +4,7 @@
 use godot::prelude::*;
 use mftr_sim::Vec2;
 use mftr_sim::map::{Map, MapId};
-use mftr_sim::mapspec::{self, Line, MapSpec};
+use mftr_sim::mapspec::{self, Line, MapKind, MapSpec};
 
 #[derive(GodotClass)]
 #[class(base = RefCounted, no_init)]
@@ -47,16 +47,23 @@ impl MftrMaps {
         mftr_sim::map::CROSSROADS_SPEC.into()
     }
 
-    /// The map sizes there are (small, medium, large).
+    /// The built-in Bridge's text (ARAM).
     #[func]
-    fn sizes() -> PackedFloat32Array {
-        mapspec::SIZES.iter().copied().collect()
+    fn bridge() -> GString {
+        mftr_sim::map::BRIDGE_SPEC.into()
     }
 
-    /// Read map text: `{ ok, error }` and, when it reads, the spec as data: `name`, `size`,
-    /// `lane`/`river`/`jungle`/`grass` (each `[{ width, points }]`), `clearings`
-    /// (`[{ pos, radius }]`), `camps` (`[{ kind, pos }]`), `objectives` (points) and
-    /// `structures` (`[{ lane, tier, distance }]`).
+    /// The map sizes a kind ("classic" or "aram") can have (small, medium, large).
+    #[func]
+    fn sizes(kind: GString) -> PackedFloat32Array {
+        MapKind::from_key(&kind.to_string()).unwrap_or_default().sizes().iter().copied().collect()
+    }
+
+    /// Read map text: `{ ok, error }` and, when it reads, the spec as data: `name`, `kind`
+    /// ("classic" or "aram"), `size`, `lane`/`river`/`jungle`/`grass` (each
+    /// `[{ width, points }]`), `clearings` and `rocks` (`[{ pos, radius }]`), `camps`
+    /// (`[{ kind, pos }]`), `objectives` and `relics` (points) and `structures`
+    /// (`[{ lane, tier, distance }]`).
     #[func]
     fn parse(text: GString) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -70,6 +77,7 @@ impl MftrMaps {
         };
         d.set("ok", true);
         d.set("name", spec.name.as_str());
+        d.set("kind", spec.kind.key());
         d.set("size", spec.size);
         d.set("lane", &lines(&spec.lanes));
         d.set("river", &lines(&spec.river));
@@ -83,6 +91,16 @@ impl MftrMaps {
             clearings.push(&e.to_variant());
         }
         d.set("clearings", &clearings);
+        let mut rocks = VarArray::new();
+        for (c, r) in &spec.rocks {
+            let mut e = VarDictionary::new();
+            e.set("pos", v(*c));
+            e.set("radius", *r);
+            rocks.push(&e.to_variant());
+        }
+        d.set("rocks", &rocks);
+        let relics: PackedVector2Array = spec.relics.iter().map(|p| v(*p)).collect();
+        d.set("relics", &relics);
         let mut camps = VarArray::new();
         for (k, p) in &spec.camps {
             let mut e = VarDictionary::new();
@@ -115,11 +133,13 @@ impl MftrMaps {
         }
     }
 
-    /// The map the game builds from map text, for drawing: `walls` and `brush` (polygons),
-    /// `size`, `lanes` (blue's full paths, top first), `structures` (`[{ kind, team, tier, lane,
-    /// spec_lane, pos }]`),
-    /// `camps` (`[{ kind, pos }]`, both halves), `fountains` (centers), `river` (the river's
-    /// course) and `ok` (false when the text doesn't read).
+    /// The map the game builds from map text, for drawing: `kind`, `walls` and `brush`
+    /// (polygons), `size`, `lanes` (blue's full paths, top first), `structures` (`[{ kind,
+    /// team, tier, lane, spec_lane, pos }]`), `relics` (points, both halves), `camps`
+    /// (`[{ kind, pos }]`, both halves), `fountains` (centers) and `fountain_radius`, `river`
+    /// (the river's course), the base (`base_side`, a Classic base's corner square; or
+    /// `base_court`, an ARAM base's `[center, radius]`) and `ok` (false when the text doesn't
+    /// read).
     #[func]
     fn build(text: GString) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -129,6 +149,7 @@ impl MftrMaps {
         };
         let map: Map = mapspec::build(&spec, MapId::Custom);
         d.set("ok", true);
+        d.set("kind", spec.kind.key());
         d.set("size", spec.size);
         d.set("walls", &polygons(&map.walls));
         d.set("brush", &polygons(&map.brush));
@@ -140,7 +161,12 @@ impl MftrMaps {
         d.set("lanes", &lanes);
         let order = spec.lane_order();
         let mut structures = VarArray::new();
+        let mut relics = PackedVector2Array::new();
         for p in &l.placements {
+            if p.kind == mftr_sim::UnitKind::Relic {
+                relics.push(v(p.pos));
+                continue;
+            }
             let mut e = VarDictionary::new();
             e.set(
                 "kind",
@@ -159,6 +185,7 @@ impl MftrMaps {
             structures.push(&e.to_variant());
         }
         d.set("structures", &structures);
+        d.set("relics", &relics);
         let mut camps = VarArray::new();
         for c in &l.camps {
             let mut e = VarDictionary::new();
@@ -169,8 +196,18 @@ impl MftrMaps {
         d.set("camps", &camps);
         let fountains: PackedVector2Array = l.fountains.iter().flatten().map(|(c, _)| v(*c)).collect();
         d.set("fountains", &fountains);
+        d.set("fountain_radius", l.fountains[0].map_or(750.0, |(_, r)| r));
         d.set("river", &points(&l.river));
-        d.set("base_side", spec.base_side());
+        match spec.kind {
+            MapKind::Classic => d.set("base_side", spec.base_side()),
+            MapKind::Aram => {
+                let court = mapspec::ARAM_COURT;
+                let mut c = VarArray::new();
+                c.push(&v(spec.lane_point(court.0)).to_variant());
+                c.push(&court.1.to_variant());
+                d.set("base_court", &c);
+            }
+        }
         d
     }
 }

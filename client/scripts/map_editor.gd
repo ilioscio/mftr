@@ -15,14 +15,19 @@ const MAPS_DIR := "user://maps"
 const CONFIG := "user://map_editor.cfg"
 const TOOLS := [
 	["select", "Select / move", "Drag points, camps, objectives, clearings and turrets (along their lane). Delete removes; Ctrl+Z undoes."],
-	["lane", "Lane", "From inside the base out to the river line (the dashed diagonal). Click points; double-click, Enter or right-click to finish. 1–5 lanes; turrets place themselves. The top and bottom lanes pair up (each runs on into the other's turned half), so their ends snap to matching spots; a middle lane ends at the center."],
+	["lane", "Lane", "From inside the base out to the river line (the dashed diagonal). Click points; double-click, Enter or right-click to finish. 1–5 lanes; turrets place themselves. The top and bottom lanes pair up (each runs on into the other's turned half), so their ends snap to matching spots; a middle lane ends at the center. ARAM: one lane, from where the base should be (its first point is the back of the base) to the center."],
 	["river", "River", "Along the river line. Its turned copy makes the other bank."],
 	["jungle", "Jungle path", "Paths must join a lane, the river or the base."],
 	["grass", "Tall grass", "Brush: hides what's inside from outside."],
 	["clearing", "Clearing", "Open ground: click to place (radius from the slider)."],
 	["camp", "Camp", "Click to place the chosen camp (it carves its own clearing). Each side needs 3, with both buff camps. Red's copy is turned: blue's top-side camps are red's bottom side."],
 	["objective", "Great objective", "Click to place one and its twin across the center. Shift-click for a single one (1-lane maps only)."],
+	["rock", "Rock", "A small wall in the open, for cover: click to place (radius from the slider)."],
+	["relic", "Health relic", "ARAM: click to place a health relic (red's is its turned copy)."],
 ]
+## Tools a kind of map has no use for.
+const KIND_TOOLS_OFF := {"classic": ["relic"], "aram": ["camp", "objective"]}
+const KINDS := [["classic", "Classic"], ["aram", "ARAM"]]
 const LINE_KINDS := ["lane", "river", "jungle", "grass"]
 const LINE_COLORS := {
 	"lane": Color(0.86, 0.68, 0.42), "river": Color(0.35, 0.65, 0.92),
@@ -30,7 +35,7 @@ const LINE_COLORS := {
 }
 const WIDTHS := {
 	"lane": [1000.0, 700.0, 1400.0], "river": [900.0, 500.0, 1600.0], "jungle": [480.0, 300.0, 900.0],
-	"grass": [350.0, 200.0, 700.0], "clearing": [500.0, 250.0, 1200.0],
+	"grass": [350.0, 200.0, 700.0], "clearing": [500.0, 250.0, 1200.0], "rock": [120.0, 60.0, 400.0],
 }
 const CAMPS := [
 	["warden", "Azure Warden (buff: Insight)", "W", Color(0.35, 0.55, 0.95)],
@@ -77,6 +82,7 @@ var width_label: Label
 var camp_row: OptionButton
 var name_edit: LineEdit
 var size_pick: OptionButton
+var kind_pick: OptionButton
 var problems_label: RichTextLabel
 var help_label: Label
 var status_label: Label
@@ -111,6 +117,17 @@ func _ready() -> void:
 	_load_config()
 	await get_tree().process_frame
 	_fit_view()
+
+
+## Open a built-in map ("bridge", "crossroads") or a map file (`--editor-map`, for captures).
+func open_map(which: String) -> void:
+	match which:
+		"bridge":
+			_open_text(MftrMaps.bridge(), "")
+		"crossroads":
+			_open_text(MftrMaps.crossroads(), "")
+		_:
+			_open_text(FileAccess.get_file_as_string(which), which)
 
 
 ## Switch to the Actual view (`--editor-actual`, for captures).
@@ -155,13 +172,20 @@ func _build_ui() -> void:
 		spec["name"] = t
 		_changed(false))
 	grid.add_child(name_edit)
+	var kl := Label.new()
+	kl.text = "Kind"
+	grid.add_child(kl)
+	kind_pick = OptionButton.new()
+	for k in KINDS:
+		kind_pick.add_item(k[1])
+	kind_pick.tooltip_text = "Classic: 1–5 lanes, a jungle, the base in the corner. ARAM: one lane whose start is the base, no jungle, health relics, a fountain that doesn't heal."
+	kind_pick.item_selected.connect(func(i: int): _set_kind(KINDS[i][0]))
+	grid.add_child(kind_pick)
 	var sl := Label.new()
 	sl.text = "Size"
 	grid.add_child(sl)
 	size_pick = OptionButton.new()
-	var sizes: PackedFloat32Array = MftrMaps.sizes()
-	for i in sizes.size():
-		size_pick.add_item("%s  (%d u)" % [SIZE_NAMES[mini(i, 2)], int(sizes[i])])
+	_fill_sizes("classic")
 	size_pick.item_selected.connect(_resize_map)
 	grid.add_child(size_pick)
 	lv.add_child(grid)
@@ -263,7 +287,7 @@ func _build_ui() -> void:
 	lv.add_child(_header("FILE"))
 	var files := GridContainer.new()
 	files.columns = 2
-	for f in [["New", _new_map], ["Open…", _open_dialog], ["Save", _save], ["Save as…", _save_as], ["Export…", _export], ["Crossroads", func(): _open_text(MftrMaps.crossroads(), "")]]:
+	for f in [["New", _new_map], ["Open…", _open_dialog], ["Save", _save], ["Save as…", _save_as], ["Export…", _export], ["Crossroads", func(): _open_text(MftrMaps.crossroads(), "")], ["The Bridge", func(): _open_text(MftrMaps.bridge(), "")]]:
 		var b := Button.new()
 		b.text = f[0]
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -342,29 +366,73 @@ func _set_tool(id: String) -> void:
 		width_slider.min_value = w[1]
 		width_slider.max_value = w[2]
 		width_slider.set_value_no_signal(widths[id])
-		width_label.text = ("Radius %d" if id == "clearing" else "Width %d") % int(widths[id])
+		width_label.text = ("Radius %d" if id in ["clearing", "rock"] else "Width %d") % int(widths[id])
 	canvas.queue_redraw()
 
 
 func _width_changed(v: float) -> void:
 	if WIDTHS.has(tool):
 		widths[tool] = v
-		width_label.text = ("Radius %d" if tool == "clearing" else "Width %d") % int(v)
+		width_label.text = ("Radius %d" if tool in ["clearing", "rock"] else "Width %d") % int(v)
 	# The selected line or clearing takes it too.
 	if selected.get("what", "") == "line" and tool == "select":
 		var l: Dictionary = spec[selected.kind][selected.index]
 		l["width"] = v
 		_changed(false)
-	elif selected.get("what", "") == "clearing":
-		spec.clearings[selected.index]["radius"] = v
+	elif selected.get("what", "") in ["clearing", "rock"]:
+		spec[selected.what + "s"][selected.index]["radius"] = v
 		_changed(false)
+
+
+## The size picker's choices for a kind of map.
+func _fill_sizes(kind: String) -> void:
+	size_pick.clear()
+	var sizes: PackedFloat32Array = MftrMaps.sizes(kind)
+	for i in sizes.size():
+		size_pick.add_item("%s  (%d u)" % [SIZE_NAMES[mini(i, 2)], int(sizes[i])])
+
+
+## Show the kind and size in their pickers, and only the tools the kind uses.
+func _sync_kind_ui() -> void:
+	var kind: String = spec.get("kind", "classic")
+	for i in KINDS.size():
+		if KINDS[i][0] == kind:
+			kind_pick.select(i)
+	_fill_sizes(kind)
+	var sizes: PackedFloat32Array = MftrMaps.sizes(kind)
+	for i in sizes.size():
+		if is_equal_approx(sizes[i], float(spec.size)):
+			size_pick.select(i)
+	var off: Array = KIND_TOOLS_OFF.get(kind, [])
+	for id in tool_buttons:
+		(tool_buttons[id] as Button).disabled = id in off
+	if tool in off:
+		_set_tool("select")
+
+
+## Make the map Classic or ARAM: its size moves to the kind's nearest, everything scaling.
+func _set_kind(kind: String) -> void:
+	if spec.get("kind", "classic") == kind:
+		return
+	_snapshot()
+	spec["kind"] = kind
+	var sizes: PackedFloat32Array = MftrMaps.sizes(kind)
+	var best := 0
+	for i in sizes.size():
+		if absf(sizes[i] - float(spec.size)) < absf(sizes[best] - float(spec.size)):
+			best = i
+	_scale_spec(sizes[best])
+	_sync_kind_ui()
+	_changed(false)
+	_fit_view()
 
 
 # ---- the spec --------------------------------------------------------------------------------
 
-func _empty_spec(size: float) -> Dictionary:
-	return {"name": "Untitled", "size": size, "lane": [], "river": [], "jungle": [], "grass": [],
-		"clearings": [], "camps": [], "objectives": PackedVector2Array(), "structures": []}
+func _empty_spec(size: float, kind := "classic") -> Dictionary:
+	return {"name": "Untitled", "kind": kind, "size": size, "lane": [], "river": [], "jungle": [], "grass": [],
+		"clearings": [], "camps": [], "objectives": PackedVector2Array(), "structures": [],
+		"relics": PackedVector2Array(), "rocks": []}
 
 
 func _open_text(text: String, path: String) -> void:
@@ -380,10 +448,7 @@ func _open_text(text: String, path: String) -> void:
 	selected = {}
 	drawing = PackedVector2Array()
 	name_edit.text = spec.name
-	var sizes: PackedFloat32Array = MftrMaps.sizes()
-	for i in sizes.size():
-		if is_equal_approx(sizes[i], float(spec.size)):
-			size_pick.select(i)
+	_sync_kind_ui()
 	_rebuild_now()
 	_fit_view()
 	status_label.text = "Opened %s." % (path.get_file() if path != "" else spec.name)
@@ -391,7 +456,10 @@ func _open_text(text: String, path: String) -> void:
 
 func to_text() -> String:
 	var pt := func(p: Vector2) -> String: return "%d,%d" % [roundi(p.x), roundi(p.y)]
-	var s := "mftr-map 1\nname %s\nsize %d\n" % [str(spec.name).strip_edges() if str(spec.name).strip_edges() != "" else "Untitled", int(spec.size)]
+	var s := "mftr-map 1\nname %s\n" % (str(spec.name).strip_edges() if str(spec.name).strip_edges() != "" else "Untitled")
+	if spec.get("kind", "classic") != "classic":
+		s += "kind %s\n" % spec.kind
+	s += "size %d\n" % int(spec.size)
 	for kind in LINE_KINDS:
 		for l in spec[kind]:
 			var pts := PackedStringArray()
@@ -406,6 +474,10 @@ func to_text() -> String:
 		s += "objective %s\n" % pt.call(p)
 	for st in spec.structures:
 		s += "structure %d %d %d\n" % [int(st.lane), int(st.tier), roundi(st.distance)]
+	for p in (spec.get("relics", PackedVector2Array()) as PackedVector2Array):
+		s += "relic %s\n" % pt.call(p)
+	for r in spec.get("rocks", []):
+		s += "rock %s %d\n" % [pt.call(r.pos), roundi(r.radius)]
 	return s
 
 
@@ -422,6 +494,7 @@ func _undo() -> void:
 	spec = history.pop_back()
 	selected = {}
 	name_edit.text = spec.name
+	_sync_kind_ui()
 	_changed(false)
 
 
@@ -465,13 +538,19 @@ func _process(delta: float) -> void:
 
 
 func _resize_map(i: int) -> void:
-	var sizes: PackedFloat32Array = MftrMaps.sizes()
-	var old: float = spec.size
+	var sizes: PackedFloat32Array = MftrMaps.sizes(spec.get("kind", "classic"))
 	var size: float = sizes[i]
-	if is_equal_approx(old, size):
+	if is_equal_approx(float(spec.size), size):
 		return
 	_snapshot()
-	# Everything scales with the map.
+	_scale_spec(size)
+	_changed(false)
+	_fit_view()
+
+
+## Scale everything to a map of side `size`.
+func _scale_spec(size: float) -> void:
+	var old: float = spec.size
 	var k := size / old
 	for kind in LINE_KINDS:
 		for l in spec[kind]:
@@ -489,9 +568,13 @@ func _resize_map(i: int) -> void:
 	spec["objectives"] = obj
 	for st in spec.structures:
 		st["distance"] = float(st.distance) * k
+	var relics: PackedVector2Array = spec.get("relics", PackedVector2Array())
+	for j in relics.size():
+		relics[j] = relics[j] * k
+	spec["relics"] = relics
+	for r in spec.get("rocks", []):
+		r["pos"] = (r.pos as Vector2) * k
 	spec["size"] = size
-	_changed(false)
-	_fit_view()
 
 
 # ---- view ------------------------------------------------------------------------------------
@@ -542,9 +625,16 @@ func _draw_canvas() -> void:
 	# Red's half (blue's turned), shaded; the river line.
 	c.draw_colored_polygon(PackedVector2Array([to_screen(Vector2.ZERO), to_screen(Vector2(s, 0)), to_screen(Vector2(s, s))]), Color(0.6, 0.1, 0.1, 0.12))
 	_dashed(to_screen(Vector2.ZERO), to_screen(Vector2(s, s)), Color(0.6, 0.8, 1.0, 0.6))
-	var b: float = built.get("base_side", s * 0.27)
-	c.draw_rect(Rect2(to_screen(Vector2(0, s - b)), Vector2(b, b) * k), Color(0.4, 0.6, 1.0, 0.7), false, 2.0)
-	c.draw_rect(Rect2(to_screen(Vector2(s - b, 0)), Vector2(b, b) * k), Color(1.0, 0.45, 0.4, 0.5), false, 2.0)
+	# The bases: blue's corner square (Classic), or the court at the lane's start (ARAM).
+	if built.has("base_court"):
+		var court: Array = built.base_court
+		var cc: Vector2 = court[0]
+		c.draw_arc(to_screen(cc), float(court[1]) * k, 0, TAU, 48, Color(0.4, 0.6, 1.0, 0.7), 2.0)
+		c.draw_arc(to_screen(Vector2(s, s) - cc), float(court[1]) * k, 0, TAU, 48, Color(1.0, 0.45, 0.4, 0.5), 2.0)
+	else:
+		var b: float = built.get("base_side", s * 0.27)
+		c.draw_rect(Rect2(to_screen(Vector2(0, s - b)), Vector2(b, b) * k), Color(0.4, 0.6, 1.0, 0.7), false, 2.0)
+		c.draw_rect(Rect2(to_screen(Vector2(s - b, 0)), Vector2(b, b) * k), Color(1.0, 0.45, 0.4, 0.5), false, 2.0)
 	# The drawn lines: their mirror faint, blue's half with its points.
 	for kind in LINE_KINDS:
 		var col: Color = LINE_COLORS[kind]
@@ -583,6 +673,25 @@ func _draw_canvas() -> void:
 		c.draw_circle(to_screen(p), r + (3.0 if sel else 1.5), Color.WHITE if sel else Color.BLACK)
 		c.draw_circle(to_screen(p), r, info[3])
 		c.draw_string(font, to_screen(p) + Vector2(-r, r * 0.42), info[2], HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, int(maxf(10.0, r * 1.15)), Color.WHITE)
+	var rocks: Array = spec.get("rocks", [])
+	for i in rocks.size():
+		var rk: Dictionary = rocks[i]
+		var sel: bool = selected.get("what", "") == "rock" and selected.index == i
+		var r := maxf(4.0, float(rk.radius) * k)
+		c.draw_circle(to_screen(Vector2(s, s) - (rk.pos as Vector2)), r, Color(0.45, 0.42, 0.4, 0.5))
+		c.draw_circle(to_screen(rk.pos), r + (2.5 if sel else 1.0), Color.WHITE if sel else Color.BLACK)
+		c.draw_circle(to_screen(rk.pos), r, Color(0.55, 0.52, 0.48))
+	var relics: PackedVector2Array = spec.get("relics", PackedVector2Array())
+	for i in relics.size():
+		var sel: bool = selected.get("what", "") == "relic" and selected.index == i
+		var r := maxf(6.0, 130.0 * k)
+		for q in [Vector2(s, s) - relics[i], relics[i]]:
+			var mine: bool = q == relics[i]
+			var p := to_screen(q)
+			c.draw_circle(p, r + (2.5 if sel and mine else 1.0), Color.WHITE if sel and mine else Color.BLACK)
+			c.draw_circle(p, r, Color(0.35, 0.8, 0.45, 1.0 if mine else 0.45))
+			c.draw_line(p - Vector2(r * 0.55, 0), p + Vector2(r * 0.55, 0), Color.WHITE, 2.0)
+			c.draw_line(p - Vector2(0, r * 0.55), p + Vector2(0, r * 0.55), Color.WHITE, 2.0)
 	var objs: PackedVector2Array = spec.objectives
 	for i in objs.size():
 		var p := to_screen(objs[i])
@@ -616,7 +725,7 @@ func _draw_canvas() -> void:
 					if int(st.tier) <= 4:
 						c.draw_string(font, p + Vector2(-r, r * 0.45), str(st.tier), HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, int(maxf(9.0, r * 1.2)), Color.WHITE)
 		for f in (built.fountains as PackedVector2Array):
-			c.draw_arc(to_screen(f), 750.0 * k, 0, TAU, 40, Color(0.8, 0.9, 1.0, 0.6), 2.0)
+			c.draw_arc(to_screen(f), float(built.get("fountain_radius", 750.0)) * k, 0, TAU, 40, Color(0.8, 0.9, 1.0, 0.6), 2.0)
 	# The line being drawn.
 	if drawing.size() > 0:
 		var pts := PackedVector2Array()
@@ -760,6 +869,16 @@ func _press(p: Vector2, double: bool, shift: bool) -> void:
 				obj.append(Vector2(spec.size, spec.size) - p)
 			spec["objectives"] = obj
 			_changed(false)
+		"rock":
+			_snapshot()
+			spec.rocks.append({"pos": _blue(p), "radius": widths.rock})
+			_changed(false)
+		"relic":
+			_snapshot()
+			var relics: PackedVector2Array = spec.relics
+			relics.append(_blue(p))
+			spec["relics"] = relics
+			_changed(false)
 	canvas.queue_redraw()
 
 
@@ -812,6 +931,14 @@ func _pick(p: Vector2) -> Dictionary:
 	for i in spec.camps.size():
 		if _near(spec.camps[i].pos, p, 4.0):
 			return {"what": "camp", "index": i}
+	var relics: PackedVector2Array = spec.get("relics", PackedVector2Array())
+	for i in relics.size():
+		if _near(relics[i], p, 4.0):
+			return {"what": "relic", "index": i}
+	var rocks: Array = spec.get("rocks", [])
+	for i in rocks.size():
+		if _near(rocks[i].pos, p, 2.0):
+			return {"what": "rock", "index": i}
 	for i in spec.clearings.size():
 		if _near(spec.clearings[i].pos, p, 0.0):
 			return {"what": "clearing", "index": i}
@@ -856,12 +983,12 @@ func _sync_width_to_selection() -> void:
 		width_slider.max_value = w[2]
 		width_slider.set_value_no_signal(spec[selected.kind][selected.index].width)
 		width_label.text = "Width %d" % int(width_slider.value)
-	elif what == "clearing":
+	elif what in ["clearing", "rock"]:
 		width_row.visible = true
-		var w: Array = WIDTHS.clearing
+		var w: Array = WIDTHS[what]
 		width_slider.min_value = w[1]
 		width_slider.max_value = w[2]
-		width_slider.set_value_no_signal(spec.clearings[selected.index].radius)
+		width_slider.set_value_no_signal(spec[what + "s"][selected.index].radius)
 		width_label.text = "Radius %d" % int(width_slider.value)
 	else:
 		width_row.visible = WIDTHS.has(tool)
@@ -888,6 +1015,14 @@ func _drag_to(p: Vector2) -> void:
 			_changed(false)
 		"clearing":
 			spec.clearings[selected.index]["pos"] = _blue(p)
+			_changed(false)
+		"rock":
+			spec.rocks[selected.index]["pos"] = _blue(p)
+			_changed(false)
+		"relic":
+			var relics: PackedVector2Array = spec.relics
+			relics[selected.index] = _blue(p)
+			spec["relics"] = relics
 			_changed(false)
 		"objective":
 			var obj: PackedVector2Array = spec.objectives
@@ -952,6 +1087,12 @@ func _delete_selected(whole: bool) -> void:
 			spec.camps.remove_at(selected.index)
 		"clearing":
 			spec.clearings.remove_at(selected.index)
+		"rock":
+			spec.rocks.remove_at(selected.index)
+		"relic":
+			var relics: PackedVector2Array = spec.relics
+			relics.remove_at(selected.index)
+			spec["relics"] = relics
 		"objective":
 			var obj: PackedVector2Array = spec.objectives
 			var drop := [selected.index]
@@ -976,8 +1117,10 @@ func _delete_selected(whole: bool) -> void:
 # ---- files -----------------------------------------------------------------------------------
 
 func _new_map() -> void:
-	var sizes: PackedFloat32Array = MftrMaps.sizes()
-	spec = _empty_spec(sizes[mini(size_pick.selected, sizes.size() - 1)] if size_pick.selected >= 0 else sizes[1])
+	var kind: String = spec.get("kind", "classic") if not spec.is_empty() else "classic"
+	var sizes: PackedFloat32Array = MftrMaps.sizes(kind)
+	spec = _empty_spec(sizes[mini(size_pick.selected, sizes.size() - 1)] if size_pick.selected >= 0 else sizes[1], kind)
+	_sync_kind_ui()
 	file_path = ""
 	history.clear()
 	selected = {}
@@ -985,7 +1128,7 @@ func _new_map() -> void:
 	dirty = false
 	_rebuild_now()
 	_fit_view()
-	status_label.text = "A new map: draw lanes from the base to the river line, then the jungle."
+	status_label.text = "A new ARAM map: draw its lane from where the base should be to the center, then relics, rocks and brush." if kind == "aram" else "A new map: draw lanes from the base to the river line, then the jungle."
 
 
 func _maps_dir() -> String:
@@ -1115,7 +1258,7 @@ func _build_view() -> void:
 	var fountains: PackedVector2Array = built.fountains
 	var geo := {
 		"walls": built.walls, "brush": built.brush, "size": Vector2(s, s), "roads": built.lanes, "river": built.river,
-		"fountains": [{"center": fountains[0], "radius": 750.0, "ally": true}, {"center": fountains[1], "radius": 750.0, "ally": false}],
+		"fountains": [{"center": fountains[0], "radius": float(built.get("fountain_radius", 750.0)), "ally": true}, {"center": fountains[1], "radius": float(built.get("fountain_radius", 750.0)), "ally": false}],
 	}
 	var ground := MapView.make_ground()
 	view_root.add_child(ground)
@@ -1139,6 +1282,19 @@ func _build_view() -> void:
 			dir = -dir
 		node.rotation.y = atan2(dir.x, dir.y)
 		view_root.add_child(node)
+	for rp in (built.get("relics", PackedVector2Array()) as PackedVector2Array):
+		var orb := MeshInstance3D.new()
+		var sphere := SphereMesh.new()
+		sphere.radius = 0.45
+		sphere.height = 0.9
+		orb.mesh = sphere
+		var om := StandardMaterial3D.new()
+		om.albedo_color = Color(0.35, 0.85, 0.45)
+		om.emission_enabled = true
+		om.emission = Color(0.2, 0.6, 0.3)
+		orb.material_override = om
+		orb.position = Vector3(rp.x * MapView.U, 0.8, rp.y * MapView.U)
+		view_root.add_child(orb)
 	for cp in built.camps:
 		var info: Array = _camp_info(cp.kind)
 		var marker := MeshInstance3D.new()

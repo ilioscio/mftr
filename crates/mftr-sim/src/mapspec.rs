@@ -1,9 +1,13 @@
 //! Map specs (12, D56): a lane map as a map maker draws it. Lines with widths (lanes, the
-//! river, jungle paths, tall grass), clearings, camps and great-objective points, on blue's half
-//! of a square map (below the river line, the diagonal from the top-left corner to the bottom
-//! right). Red's half is blue's turned half a turn about the map's center (like the reference
-//! 5v5 map: blue's top-side jungle is red's bottom side), so both teams get the same map.
-//! Everything not drawn is wall.
+//! river, jungle paths, tall grass), clearings, rocks, camps, great-objective points and health
+//! relics, on blue's half of a square map (below the river line, the diagonal from the top-left
+//! corner to the bottom right). Red's half is blue's turned half a turn about the map's center
+//! (like the reference 5v5 map: blue's top-side jungle is red's bottom side), so both teams get
+//! the same map. Everything not drawn is wall.
+//!
+//! A map is one of two kinds (12 §1): **Classic** (1–5 lanes, a jungle, the base in blue's
+//! corner) or **ARAM** (one lane whose start is the base, no jungle, health relics, a fountain
+//! that doesn't heal). The Bridge is an ARAM map, Crossroads a Classic one.
 //!
 //! Building a map from a spec (`build`) is deterministic, so a server can send just the spec and
 //! every client builds the same map:
@@ -22,8 +26,10 @@ use crate::world::{Team, UnitKind};
 pub const CELL: f32 = 25.0;
 /// Wall outlines are traced in square tiles of this many cells.
 const TILE: usize = 32;
-/// The sizes a map can have (square, game units).
+/// The sizes a Classic map can have (square, game units).
 pub const SIZES: [f32; 3] = [10_000.0, 14_500.0, 16_000.0];
+/// The sizes an ARAM map can have (The Bridge is the middle one).
+pub const ARAM_SIZES: [f32; 3] = [9_000.0, 10_607.0, 12_000.0];
 pub const MAX_LANES: usize = 5;
 /// The base: blue's corner square, this share of the map's side.
 pub const BASE_SHARE: f32 = 0.27;
@@ -39,6 +45,57 @@ pub const MIN_JUNGLE_SHARE: f32 = 0.05;
 /// Default structure spots along a lane, as shares of its length from the base: the Gatehouse,
 /// the gatehouse turret, the inner turret, the outer turret.
 pub const STRUCTURE_SHARES: [f32; 4] = [0.08, 0.16, 0.45, 0.78];
+/// The same on an ARAM lane, measured from its start (the back of the base): The Bridge's.
+pub const ARAM_STRUCTURE_SHARES: [f32; 4] = [0.367, 0.45, 0.65, 0.833];
+/// An ARAM base is the start of its lane. Distances along it from its first point: the
+/// fountain (and its radius), where champions appear, the Base, its two turrets (side by side,
+/// this far either side of the lane) and where minion waves start. The Bridge's.
+pub const ARAM_FOUNTAIN: f32 = 300.0;
+pub const ARAM_FOUNTAIN_RADIUS: f32 = 600.0;
+pub const ARAM_HOME: f32 = 450.0;
+pub const ARAM_BASE: f32 = 1250.0;
+pub const ARAM_BASE_TURRETS: f32 = 1650.0;
+pub const ARAM_BASE_TURRET_SPREAD: f32 = 250.0;
+pub const ARAM_WAVE_SPAWN: f32 = 1700.0;
+/// The open court around an ARAM base: its center along the lane, and its radius.
+pub const ARAM_COURT: (f32, f32) = (1300.0, 1450.0);
+/// An ARAM lane runs at least this far (from its start to the center).
+pub const ARAM_MIN_LANE: f32 = 4000.0;
+
+/// What a map is played as (12 §1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MapKind {
+    /// 1–5 lanes, a jungle with camps, great objectives; the base in blue's corner.
+    #[default]
+    Classic,
+    /// One lane, its start the base; no jungle; health relics; the fountain doesn't heal.
+    Aram,
+}
+
+impl MapKind {
+    pub fn key(self) -> &'static str {
+        match self {
+            MapKind::Classic => "classic",
+            MapKind::Aram => "aram",
+        }
+    }
+
+    pub fn from_key(s: &str) -> Option<Self> {
+        match s {
+            "classic" => Some(MapKind::Classic),
+            "aram" => Some(MapKind::Aram),
+            _ => None,
+        }
+    }
+
+    /// The sizes a map of this kind can have.
+    pub fn sizes(self) -> &'static [f32] {
+        match self {
+            MapKind::Classic => &SIZES,
+            MapKind::Aram => &ARAM_SIZES,
+        }
+    }
+}
 
 /// A line with a width (a lane, river, jungle path or tall grass stroke).
 #[derive(Clone, Debug, PartialEq)]
@@ -51,6 +108,7 @@ pub struct Line {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MapSpec {
     pub name: String,
+    pub kind: MapKind,
     pub size: f32,
     /// From the base to the river line, in the order lanes are numbered (top, mid, bottom…).
     pub lanes: Vec<Line>,
@@ -64,12 +122,17 @@ pub struct MapSpec {
     pub objectives: Vec<Vec2>,
     /// Structures moved along their lane: (lane, tier 1–4, distance from the lane's start).
     pub structures: Vec<(u8, u8, f32)>,
+    /// Health relics (ARAM).
+    pub relics: Vec<Vec2>,
+    /// Rocks: walls in the open, center and radius.
+    pub rocks: Vec<(Vec2, f32)>,
 }
 
 impl MapSpec {
     pub fn new(name: &str, size: f32) -> Self {
         MapSpec {
             name: name.to_string(),
+            kind: MapKind::Classic,
             size,
             lanes: Vec::new(),
             river: Vec::new(),
@@ -79,6 +142,8 @@ impl MapSpec {
             camps: Vec::new(),
             objectives: Vec::new(),
             structures: Vec::new(),
+            relics: Vec::new(),
+            rocks: Vec::new(),
         }
     }
 
@@ -112,6 +177,44 @@ impl MapSpec {
         Vec2::new(dx, self.size - dy)
     }
 
+    /// The point `d` along the first lane from its start (ARAM: the back of the base).
+    pub fn lane_point(&self, d: f32) -> Vec2 {
+        self.lanes.first().map_or(Vec2::ZERO, |l| point_along(&l.points, d))
+    }
+
+    /// The first lane's direction at `d` along it.
+    pub fn lane_dir(&self, d: f32) -> Vec2 {
+        let (a, b) = (self.lane_point((d - 10.0).max(0.0)), self.lane_point(d + 10.0));
+        let v = b - a;
+        if v.length() > 0.0 { v * (1.0 / v.length()) } else { Vec2::new(1.0, -1.0) * std::f32::consts::FRAC_1_SQRT_2 }
+    }
+
+    /// Where blue's base is: (the Base, its two turrets, where champions appear, the fountain
+    /// and its radius). Red's is the same turned.
+    pub fn base_spots(&self) -> (Vec2, [Vec2; 2], Vec2, Vec2, f32) {
+        match self.kind {
+            MapKind::Classic => (
+                self.corner(1800.0, 1800.0),
+                [self.corner(2500.0, 2050.0), self.corner(2050.0, 2500.0)],
+                self.corner(800.0, 800.0),
+                self.corner(600.0, 600.0),
+                750.0,
+            ),
+            MapKind::Aram => {
+                let dir = self.lane_dir(ARAM_BASE_TURRETS);
+                let across = Vec2::new(-dir.y, dir.x) * ARAM_BASE_TURRET_SPREAD;
+                let t = self.lane_point(ARAM_BASE_TURRETS);
+                (
+                    self.lane_point(ARAM_BASE),
+                    [t - across, t + across],
+                    self.lane_point(ARAM_HOME),
+                    self.lane_point(ARAM_FOUNTAIN),
+                    ARAM_FOUNTAIN_RADIUS,
+                )
+            }
+        }
+    }
+
     // ---- text ---------------------------------------------------------------------------
 
     /// The spec as text (`*.mftrmap`): one item a line.
@@ -121,7 +224,11 @@ impl MapSpec {
             let pts: Vec<String> = l.points.iter().map(|p| pt(*p)).collect();
             format!("{kind} {} {}\n", l.width.round() as i64, pts.join(" "))
         };
-        let mut s = format!("mftr-map 1\nname {}\nsize {}\n", self.name, self.size.round() as i64);
+        let mut s = format!("mftr-map 1\nname {}\n", self.name);
+        if self.kind != MapKind::Classic {
+            s += &format!("kind {}\n", self.kind.key());
+        }
+        s += &format!("size {}\n", self.size.round() as i64);
         for l in &self.lanes {
             s += &line("lane", l);
         }
@@ -145,6 +252,12 @@ impl MapSpec {
         }
         for (lane, tier, d) in &self.structures {
             s += &format!("structure {lane} {tier} {}\n", d.round() as i64);
+        }
+        for p in &self.relics {
+            s += &format!("relic {}\n", pt(*p));
+        }
+        for (c, r) in &self.rocks {
+            s += &format!("rock {} {}\n", pt(*c), r.round() as i64);
         }
         s
     }
@@ -183,6 +296,10 @@ impl MapSpec {
                     header = true;
                 }
                 "name" => spec.name = rest.join(" "),
+                "kind" => {
+                    let k = rest.first().ok_or_else(|| at("a kind"))?;
+                    spec.kind = MapKind::from_key(k).ok_or_else(|| at(&format!("unknown kind: {k}")))?;
+                }
                 "size" => spec.size = num(rest.first().ok_or_else(|| at("a size"))?)?,
                 "lane" => spec.lanes.push(line()?),
                 "river" => spec.river.push(line()?),
@@ -198,6 +315,8 @@ impl MapSpec {
                     let (lane, tier) = (num(rest[0])? as u8, num(rest[1])? as u8);
                     spec.structures.push((lane, tier, num(rest[2])?));
                 }
+                "relic" if rest.len() == 1 => spec.relics.push(point(rest[0])?),
+                "rock" if rest.len() == 2 => spec.rocks.push((point(rest[0])?, num(rest[1])?)),
                 _ => return Err(at(&format!("can't read: {raw}"))),
             }
         }
@@ -246,7 +365,10 @@ impl MapSpec {
             .iter()
             .find(|(sl, st, _)| *sl as usize == lane && *st == tier)
             .map(|(_, _, d)| *d)
-            .unwrap_or(STRUCTURE_SHARES[(4 - tier.clamp(1, 4)) as usize] * length);
+            .unwrap_or_else(|| {
+                let shares = if self.kind == MapKind::Aram { ARAM_STRUCTURE_SHARES } else { STRUCTURE_SHARES };
+                shares[(4 - tier.clamp(1, 4)) as usize] * length
+            });
         Some(point_along(&l.points, d.clamp(0.0, length)))
     }
 
@@ -321,7 +443,44 @@ pub struct Grid {
     pub cut_off: usize,
     /// Jungle cells (paths, clearings, camps) on blue's half (validation).
     pub jungle_cells: usize,
+    /// Rocks on both halves (center, radius): walls added whole, not traced (a small traced
+    /// outline would be simplified away).
+    pub rocks: Vec<(Vec2, f32)>,
 }
+
+/// cos and sin of 22.5° (constants: no platform trigonometry in the simulation, 03 §17).
+const COS_22_5: f32 = 0.923_879_5;
+const SIN_22_5: f32 = 0.382_683_43;
+const COS_45: f32 = std::f32::consts::FRAC_1_SQRT_2;
+
+/// A rock's wall: an octagon of radius `r` about `c`, its corners at 22.5° + k × 45°.
+pub fn rock_polygon(c: Vec2, r: f32) -> Vec<Vec2> {
+    let (a, b) = (COS_22_5 * r, SIN_22_5 * r);
+    [(a, b), (b, a), (-b, a), (-a, b), (-a, -b), (-b, -a), (b, -a), (a, -b)]
+        .iter()
+        .map(|&(x, y)| Vec2::new(c.x + x, c.y + y))
+        .collect()
+}
+
+/// Sixteen directions, every 22.5° from +x, as unit vectors.
+const DIRECTIONS: [(f32, f32); 16] = [
+    (1.0, 0.0),
+    (COS_22_5, SIN_22_5),
+    (COS_45, COS_45),
+    (SIN_22_5, COS_22_5),
+    (0.0, 1.0),
+    (-SIN_22_5, COS_22_5),
+    (-COS_45, COS_45),
+    (-COS_22_5, SIN_22_5),
+    (-1.0, 0.0),
+    (-COS_22_5, -SIN_22_5),
+    (-COS_45, -COS_45),
+    (-SIN_22_5, -COS_22_5),
+    (0.0, -1.0),
+    (SIN_22_5, -COS_22_5),
+    (COS_45, -COS_45),
+    (COS_22_5, -SIN_22_5),
+];
 
 /// Smooth noise in [-1, 1] along a line (`t` in lengths of a wave), from a seed.
 fn wave(t: f32, seed: u32) -> f32 {
@@ -395,9 +554,17 @@ impl Grid {
     pub fn build(spec: &MapSpec) -> Grid {
         let n = (spec.size / CELL).ceil() as usize;
         let mut open = vec![false; n * n];
-        // The base.
-        let b = spec.base_side();
-        paint_rect(&mut open, n, Vec2::new(0.0, spec.size - b), Vec2::new(b, spec.size));
+        // The base: blue's corner (Classic), or a court around the lane's start (ARAM).
+        match spec.kind {
+            MapKind::Classic => {
+                let b = spec.base_side();
+                paint_rect(&mut open, n, Vec2::new(0.0, spec.size - b), Vec2::new(b, spec.size));
+            }
+            MapKind::Aram if !spec.lanes.is_empty() => {
+                paint_circle(&mut open, n, spec.lane_point(ARAM_COURT.0), ARAM_COURT.1);
+            }
+            MapKind::Aram => {}
+        }
         for (i, l) in spec.lanes.iter().enumerate() {
             paint_line(&mut open, n, l, 0.05, 100 + i as u32);
         }
@@ -418,7 +585,7 @@ impl Grid {
         turn_cells(&mut open, n);
         // Open ground cut off from the base is wall.
         let start = {
-            let f = spec.corner(600.0, 600.0);
+            let f = spec.base_spots().3;
             ((f.y / CELL) as usize).min(n - 1) * n + ((f.x / CELL) as usize).min(n - 1)
         };
         let mut reached = vec![false; n * n];
@@ -452,12 +619,14 @@ impl Grid {
         for (g, o) in grass.iter_mut().zip(&open) {
             *g &= *o;
         }
-        Grid { n, open, grass, cut_off, jungle_cells }
+        let rocks = spec.rocks.iter().flat_map(|&(c, r)| [(c, r), (spec.turn(c), r)]).collect();
+        Grid { n, open, grass, cut_off, jungle_cells, rocks }
     }
 
     pub fn open_at(&self, p: Vec2) -> bool {
         let (c, r) = ((p.x / CELL).floor(), (p.y / CELL).floor());
-        c >= 0.0
+        !self.rocks.iter().any(|(rc, rr)| p.distance(*rc) <= *rr)
+            && c >= 0.0
             && r >= 0.0
             && (c as usize) < self.n
             && (r as usize) < self.n
@@ -639,12 +808,16 @@ pub fn grass(grid: &Grid) -> Vec<Vec<Vec2>> {
 pub fn build(spec: &MapSpec, id: MapId) -> Map {
     let grid = Grid::build(spec);
     let size = Vec2::new(spec.size, spec.size);
-    let mut map = Map::new(id, walls(&grid), grass(&grid), Some(size));
+    let mut wall_polys = walls(&grid);
+    wall_polys.extend(grid.rocks.iter().map(|&(c, r)| rock_polygon(c, r)));
+    let mut map = Map::new(id, wall_polys, grass(&grid), Some(size));
     let red = |p: Vec2| spec.turn(p);
+    let aram = spec.kind == MapKind::Aram;
     let order = spec.lane_order();
     let n = order.len();
-    // Structures: per lane on blue's half (bases fixed in the corner); red's are blue's turned,
-    // on the partner lane.
+    let (base, base_turrets, home, fountain, fountain_radius) = spec.base_spots();
+    // Structures: per lane on blue's half (the base's fixed by the kind); red's are blue's
+    // turned, on the partner lane.
     let mut blue: Vec<(UnitKind, Vec2, u8, u8)> = Vec::new();
     for (li, &lane) in order.iter().enumerate() {
         for tier in 1..=GATEHOUSE_TIER {
@@ -655,27 +828,52 @@ pub fn build(spec: &MapSpec, id: MapId) -> Map {
         }
     }
     let mid = (n / 2) as u8;
-    blue.push((UnitKind::Turret, spec.corner(2500.0, 2050.0), BASE_TURRET_TIER, mid));
-    blue.push((UnitKind::Turret, spec.corner(2050.0, 2500.0), BASE_TURRET_TIER, mid));
-    blue.push((UnitKind::Base, spec.corner(1800.0, 1800.0), BASE_TURRET_TIER + 1, mid));
+    for t in base_turrets {
+        blue.push((UnitKind::Turret, t, BASE_TURRET_TIER, mid));
+    }
+    blue.push((UnitKind::Base, base, BASE_TURRET_TIER + 1, mid));
     let mut placements = Vec::new();
     for (kind, pos, tier, lane) in blue {
         let red_lane = if tier > GATEHOUSE_TIER { lane } else { (n - 1) as u8 - lane };
         placements.push(Placement { kind, team: Team::Blue, pos, tier, lane });
         placements.push(Placement { kind, team: Team::Red, pos: red(pos), tier, lane: red_lane });
     }
-    let red_base = red(spec.corner(1800.0, 1800.0));
+    // Health relics: neutral, both halves.
+    for &p in &spec.relics {
+        for pos in [p, red(p)] {
+            placements.push(Placement { kind: UnitKind::Relic, team: Team::Blue, pos, tier: 0, lane: 0 });
+        }
+    }
+    let red_base = red(base);
     let mut lanes = Vec::new();
     let mut wave_spawn = Vec::new();
     for li in 0..n {
         let mut path = spec.lane_path(li);
+        if aram {
+            // Waves start out of the base and walk to the enemy's Base.
+            let total = polyline_length(&path);
+            let mut walked = 0.0;
+            let mut blue_path = Vec::new();
+            for w in path.windows(2) {
+                walked += w[0].distance(w[1]);
+                if walked > ARAM_WAVE_SPAWN && walked < total - ARAM_BASE {
+                    blue_path.push(w[1]);
+                }
+            }
+            blue_path.push(red_base);
+            let red_path: Vec<Vec2> = blue_path.iter().map(|p| red(*p)).collect();
+            let start = spec.lane_point(ARAM_WAVE_SPAWN);
+            lanes.push([blue_path, red_path]);
+            wave_spawn.push([start, red(start)]);
+            continue;
+        }
         let start = path[0];
         let mut blue_path: Vec<Vec2> = path.iter().skip(1).copied().collect();
         blue_path.push(red_base);
         path.reverse();
         let red_start = path[0];
         let mut red_path: Vec<Vec2> = path.iter().skip(1).copied().collect();
-        red_path.push(spec.corner(1800.0, 1800.0));
+        red_path.push(base);
         lanes.push([blue_path, red_path]);
         wave_spawn.push([start, red_start]);
     }
@@ -686,7 +884,6 @@ pub fn build(spec: &MapSpec, id: MapId) -> Map {
             camps.push(Camp { kind, pos: p, facing: open_side(&grid, p) });
         }
     }
-    let (home, fountain) = (spec.corner(800.0, 800.0), spec.corner(600.0, 600.0));
     // The river's course for drawing: blue's bank line, then red's (the jump between them runs
     // along the river).
     let river = spec.river.first().map(|l| {
@@ -698,15 +895,15 @@ pub fn build(spec: &MapSpec, id: MapId) -> Map {
         lanes,
         wave_spawn,
         champion_spawn: [home, red(home)],
-        fountains: [Some((fountain, 750.0)), Some((red(fountain), 750.0))],
-        fountain_heals: true,
+        fountains: [Some((fountain, fountain_radius)), Some((red(fountain), fountain_radius))],
+        fountain_heals: !aram,
         placements,
-        pacing: Pacing::Classic,
+        pacing: if aram { Pacing::Aram } else { Pacing::Classic },
         river: river.unwrap_or_default(),
-        plating: true,
-        backdoor: true,
+        plating: !aram,
+        backdoor: !aram,
         camps,
-        wards: true,
+        wards: !aram,
     };
     map
 }
@@ -714,9 +911,8 @@ pub fn build(spec: &MapSpec, id: MapId) -> Map {
 /// The direction from `p` toward the most open ground around it (a camp's front).
 fn open_side(grid: &Grid, p: Vec2) -> Vec2 {
     let mut best = (0, Vec2::new(0.0, 1.0));
-    for i in 0..16 {
-        let a = i as f32 * std::f32::consts::TAU / 16.0;
-        let dir = Vec2::new(a.cos(), a.sin());
+    for &(x, y) in &DIRECTIONS {
+        let dir = Vec2::new(x, y);
         let reach = (1..=40).take_while(|s| grid.open_at(p + dir * (*s as f32 * CELL))).count();
         if reach > best.0 {
             best = (reach, dir);
@@ -728,17 +924,29 @@ fn open_side(grid: &Grid, p: Vec2) -> Vec2 {
 /// What's wrong with a spec, in words (empty: it can be exported and played).
 pub fn problems(spec: &MapSpec) -> Vec<String> {
     let mut out = Vec::new();
-    if !SIZES.contains(&spec.size) {
-        out.push(format!("The size must be one of {SIZES:?}."));
+    let aram = spec.kind == MapKind::Aram;
+    if !spec.kind.sizes().contains(&spec.size) {
+        out.push(format!("The size must be one of {:?}.", spec.kind.sizes()));
     }
-    if spec.lanes.is_empty() || spec.lanes.len() > MAX_LANES {
+    if aram && spec.lanes.len() != 1 {
+        out.push(format!("An ARAM map has exactly one lane (it has {}).", spec.lanes.len()));
+    } else if spec.lanes.is_empty() || spec.lanes.len() > MAX_LANES {
         out.push(format!("A map needs 1 to {MAX_LANES} lanes (it has {}).", spec.lanes.len()));
     }
     let b = spec.base_side();
     let in_base = |p: Vec2| p.x <= b && p.y >= spec.size - b;
     for (i, l) in spec.lanes.iter().enumerate() {
         let (first, last) = (l.points[0], *l.points.last().unwrap());
-        if !in_base(first) {
+        if aram {
+            if polyline_length(&l.points) < ARAM_MIN_LANE {
+                out.push(format!(
+                    "An ARAM lane must run at least {ARAM_MIN_LANE} from its start (its base) to the center."
+                ));
+            }
+            if !MapSpec::on_blue_half(first) {
+                out.push("The lane must start on blue's half (its start is blue's base).".into());
+            }
+        } else if !in_base(first) {
             out.push(format!("Lane {} must start in the base.", i + 1));
         }
         if (last.x - last.y).abs() / std::f32::consts::SQRT_2 > LANE_END_SLACK {
@@ -769,6 +977,45 @@ pub fn problems(spec: &MapSpec) -> Vec<String> {
         out.push(format!("Some drawn ground ({} cells) doesn't connect to the lanes or the base.", grid.cut_off));
     }
     let half = (grid.n * grid.n / 2) as f32;
+    if aram {
+        if !spec.camps.is_empty() || !spec.objectives.is_empty() {
+            out.push("ARAM maps have no jungle camps or great objectives.".into());
+        }
+        for (i, p) in spec.relics.iter().enumerate() {
+            if !MapSpec::on_blue_half(*p) {
+                out.push(format!("Health relic {} must be on blue's half (below the river line).", i + 1));
+            } else if !grid.open_at(*p) {
+                out.push(format!("Health relic {} is in a wall.", i + 1));
+            }
+        }
+        if !spec.lanes.is_empty() {
+            let (base, turrets, home, fountain, _) = spec.base_spots();
+            for (what, p) in [
+                ("The Base", base),
+                ("A base turret", turrets[0]),
+                ("A base turret", turrets[1]),
+                ("The fountain", fountain),
+                ("The spawn point", home),
+            ] {
+                if !grid.open_at(p) {
+                    out.push(format!("{what} is in a wall (a rock?)."));
+                }
+            }
+        }
+        for lane in 0..spec.lanes.len() {
+            for tier in 1..=GATEHOUSE_TIER {
+                if let Some(p) = spec.structure_spot(lane, tier)
+                    && !grid.open_at(p)
+                {
+                    out.push(format!("The tier-{tier} structure is in a wall."));
+                }
+            }
+        }
+        return out;
+    }
+    if !spec.relics.is_empty() {
+        out.push("Health relics are for ARAM maps.".into());
+    }
     if (grid.jungle_cells as f32) < MIN_JUNGLE_SHARE * half {
         out.push(format!(
             "The jungle is too small ({:.1}% of a half; at least {:.0}%).",
@@ -867,6 +1114,58 @@ mod tests {
         assert!(m.find_path(a, b).last().is_some_and(|p| p.distance(b) < 1.0));
         assert_eq!(m.layout.camps.len(), 6);
         assert_eq!(m.layout.lanes.len(), 1);
+    }
+
+    /// An ARAM map: one lane whose start is the base, no jungle, relics and rocks.
+    fn tiny_aram() -> MapSpec {
+        let mut s = MapSpec::new("Lane", ARAM_SIZES[0]);
+        s.kind = MapKind::Aram;
+        s.lanes.push(Line { width: 1400.0, points: vec![Vec2::new(900.0, 8100.0), Vec2::new(4500.0, 4500.0)] });
+        s.relics.push(Vec2::new(3300.0, 5900.0));
+        s.rocks.push((Vec2::new(3700.0, 5500.0), 110.0));
+        s
+    }
+
+    /// 12 §1: an ARAM map builds its base from its lane's start, with ARAM rules: relics on
+    /// both halves, rocks as walls, no healing fountain, no plating or wards, waves from out of
+    /// the base to the enemy's Base.
+    #[test]
+    fn aram_maps_build_from_their_lane() {
+        let s = tiny_aram();
+        assert_eq!(problems(&s), Vec::<String>::new());
+        let back = MapSpec::parse(&s.to_text()).unwrap();
+        assert_eq!(back, s);
+        let m = build(&s, MapId::Custom);
+        let l = &m.layout;
+        assert!(!l.fountain_heals && !l.plating && !l.wards && !l.backdoor);
+        assert_eq!(l.pacing, Pacing::Aram);
+        let relics: Vec<Vec2> = l.placements.iter().filter(|p| p.kind == UnitKind::Relic).map(|p| p.pos).collect();
+        assert_eq!(relics, vec![s.relics[0], s.turn(s.relics[0])]);
+        assert!(!m.walkable(s.rocks[0].0, 1.0) && !m.walkable(s.turn(s.rocks[0].0), 1.0), "rocks are walls");
+        let base = l.placements.iter().find(|p| p.kind == UnitKind::Base && p.team == Team::Blue).unwrap();
+        assert!(base.pos.distance(s.lane_point(ARAM_BASE)) < 1.0);
+        let (fountain, r) = l.fountains[0].unwrap();
+        assert!(fountain.distance(s.lane_point(ARAM_FOUNTAIN)) < 1.0 && r == ARAM_FOUNTAIN_RADIUS);
+        assert!(l.wave_spawn[0][0].distance(s.lane_point(ARAM_WAVE_SPAWN)) < 1.0);
+        let enemy_base = s.turn(base.pos);
+        assert!(l.lanes[0][0].last().unwrap().distance(enemy_base) < 1.0, "waves walk to the enemy's Base");
+        for p in &l.placements {
+            assert!(m.walkable(p.pos, 1.0), "{p:?}");
+        }
+        let (a, b) = (l.champion_spawn[0], l.champion_spawn[1]);
+        assert!(m.find_path(a, b).last().is_some_and(|p| p.distance(b) < 1.0));
+
+        let mut bad = tiny_aram();
+        bad.camps.push((CampKind::Warden, Vec2::new(3000.0, 6500.0)));
+        bad.lanes.push(bad.lanes[0].clone());
+        bad.size = SIZES[1];
+        let p = problems(&bad);
+        assert!(p.iter().any(|e| e.contains("exactly one lane")), "{p:?}");
+        assert!(p.iter().any(|e| e.contains("no jungle camps")), "{p:?}");
+        assert!(p.iter().any(|e| e.contains("size must be one of")), "{p:?}");
+        let mut classic = tiny();
+        classic.relics.push(Vec2::new(3000.0, 6500.0));
+        assert!(problems(&classic).iter().any(|e| e.contains("Health relics are for ARAM")));
     }
 
     #[test]

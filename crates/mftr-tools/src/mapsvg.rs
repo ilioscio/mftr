@@ -72,9 +72,10 @@ pub fn render(map: &Map) -> String {
             UnitKind::Turret => (110.0, format!("{}{}", ["T", "M", "B"].get(p.lane as usize).unwrap_or(&"?"), p.tier)),
             UnitKind::Gatehouse => (170.0, format!("G{}", p.lane)),
             UnitKind::Base => (300.0, "BASE".into()),
+            UnitKind::Relic => (90.0, "+".into()),
             _ => (80.0, String::new()),
         };
-        let color = team_color(p.team);
+        let color = if p.kind == UnitKind::Relic { "#4fc06a" } else { team_color(p.team) };
         let _ = writeln!(
             s,
             r##"<circle cx="{}" cy="{}" r="{r}" fill="{color}" stroke="#fff" stroke-width="15"/>"##,

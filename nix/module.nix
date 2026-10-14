@@ -225,8 +225,8 @@ in
       default = [ ];
       example = lib.literalExpression "[ ./maps/twin-rivers.mftrmap ]";
       description = ''
-        Map files exported from the map editor: each adds Classic on that map (on the sides
-        `modes` gives Classic). Players download a map as they join. The server refuses to
+        Map files exported from the map editor: each adds its modes on that map (Classic on a
+        Classic map; ARAM, Mayhem and Hyper on an ARAM map), on the sides `modes` gives them. Players download a map as they join. The server refuses to
         start if a map breaks a rule.
       '';
     };
