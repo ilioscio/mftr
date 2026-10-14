@@ -1,6 +1,6 @@
 # Marrow — concept
 
-Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an owner brief, from her kit (a battlemage who drains, roots and opens a pit of bone) and her name.
+Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** (awaiting the owner's approval). Designed without an owner brief, from her kit (a battlemage who drains, roots and opens a pit of bone) and her name.
 
 ## Identity
 
@@ -10,23 +10,26 @@ Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an 
   - **E Grave Pact:** a self heal (instant).
   - **R Ossuary:** a large delayed area that slows.
 - **Personality in three words:** sly, hungry, unhurried.
-- **Silhouette class:** *bone-witch*.
-  - A crown of bone spikes, tallest at the front. It reads from the gameplay camera.
-  - Skull-capped pauldrons with eye sockets.
-  - A corset of bone ribs over an ash-plum bodice, and a ragged skirt to the shins.
-  - A tattered shawl on an `extra_cloak` chain.
-  - Grave-green light at her wrists. She casts from clawed bare hands, with no staff.
-- **Head:** the shared sculpted head, feminine and gaunt, with long black hair and green eyes.
-- **Archetype:** `biped` v1, plus `extra_cloak`.
+- **Shape (14 §2):** *a hooded crone*. Bent proportions on the `biped` bones (`SHAPE` in `build.py`: ×0.95 wide, arms ×1.15, hands ×1.4), about 1.8 m, always hunched. A round, heavy plum hood whose peak droops forward over her face; a high collar of nine curved bone spikes fanning up behind it; a ribcage corset (a bone sternum and five pairs of ribs) over her robe; ragged sleeves with bone bangles over thin bare wrists; long bone claws on her fingertips; a robe to the shins with tattered strips hanging below; a grave-grey shawl on an `extra_cloak` chain (3 bones); a skull lantern with magenta eyes at her hip.
+- **Weapon:** her claws.
+- **Head:** the shared sculpted head, aged, grey-haired, magenta-eyed, mostly hidden by the hood.
+- **Gait (14 §3.5):** unhurried: a hunched, stalking stride, claws forward.
 
-## Palette (10 §2)
+## Palette (14 §4)
+
+Signature: **magenta** (320°).
 
 | Slot | Colors |
 |---|---|
-| skin | pale (0.82, 0.76, 0.74) |
-| cloth | ash-plum robes (0.2, 0.09, 0.19 / 0.11, 0.05, 0.11), shin wraps (0.3, 0.26, 0.24), bone (0.86, 0.82, 0.7 / 0.66, 0.62, 0.52), black hair |
-| emissive | the wrist light and the choker's bead (0.55, 1.0, 0.5) |
-| accent | the sash and the skirt's hem |
+| skin | grave-pale (0.56, 0.56, 0.50) |
+| cloth | plum robe and hood (0.24, 0.08, 0.20 / 0.12, 0.04, 0.11), grave grey shawl and rags (0.24, 0.24, 0.26), bone (0.64, 0.60, 0.50 / 0.42, 0.38, 0.30), grey hair |
+| metal | the lantern's iron chain (0.18, 0.18, 0.20) |
+| emissive | magenta (1.0, 0.24, 0.72): the lantern's eyes |
+| accent | a band at her belt |
+
+## Weight (14 §3)
+
+Bolts are flung with a clawed swipe: drawn back and cocked, one frame, held out with the claws spread. Siphon flings her arms wide, then drags the life in, fists pulled hard to her chest and held. Grasping Bones drives a claw into the ground and leaves it there. Ossuary raises both claws, cocks, sweeps them down and out and holds low while she cackles. Feet planted by IK.
 
 ## Clip checklist (10 §5)
 
@@ -45,12 +48,7 @@ Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an 
 
 ## Effects and sounds
 
-- **VFX** (`export/marrow.vfx.ron`):
-  - grave-green bolts;
-  - Siphon's ring;
-  - Grasping Bones' shards and snap;
-  - Grave Pact's green rush;
-  - Ossuary's pit of bone.
+- **VFX** (`export/marrow.vfx.ron`), all magenta (white → magenta → deep magenta) with bone: sickly orbs off her claw; Siphon rings her with a `slash` and a `shock` and draws motes in; Grasping Bones `crack`s the ground and flies as a bone shard; Grave Pact flares in her ribs; Ossuary opens a boneyard (`crack`s, a `shock`, a `pillar` of magenta and bone).
 - **SFX** (`sounds.ron`), 9 sounds:
   - a hollow hiss and a dry crack;
   - Siphon's inward drone;

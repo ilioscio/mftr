@@ -1,29 +1,38 @@
-// Marrow's VFX (A13): bone and grave-light. Grave-green bolts from her clawed hands, Siphon's
-// ring drawing inward on its true radius, Grasping Bones' line of bone shards and their snapping
-// catch, Grave Pact's green rush, and Ossuary's pit of bone opening on the area's delay.
-// Instances of the client's VFX kit (05 §5.1); hand-authored; validated by `pack validate`.
+// Marrow's VFX (A4b, 14 §4): magenta. Her bolts leave her claw with a magenta smear and fly as
+// sickly orbs; Siphon rings her and drains in; Grasping Bones cracks the ground as the bones
+// erupt down the line; Grave Pact flares in her ribs; Ossuary opens a boneyard: cracks, a shock
+// to its edge, a column of magenta and bone. Instances of the client's VFX kit (05 §5.1);
+// hand-authored next to the export; validated by `mftr-tools pack validate`.
 (
     effects: [
-        (event: "attack.release", kit: "flare", ramp: [(0.8, 1.0, 0.72), (0.46, 0.9, 0.42), (0.2, 0.46, 0.22)], count: 7, lifetime: 0.12),
-        (event: "attack.projectile", kit: "orb", ramp: [(0.84, 1.0, 0.76), (0.5, 0.94, 0.46), (0.22, 0.5, 0.24)]),
-        (event: "attack.impact", kit: "burst", ramp: [(0.84, 1.0, 0.76), (0.46, 0.86, 0.42), (0.18, 0.36, 0.2)], count: 12, speed: 3.0),
+        // Basic attack.
+        (event: "attack.release", kit: "flare", ramp: [(1.0, 0.86, 0.96), (1.0, 0.36, 0.78), (0.62, 0.06, 0.42)], count: 10, speed: 2.6),
+        (event: "attack.projectile", kit: "orb", ramp: [(1.0, 0.80, 0.94), (1.0, 0.30, 0.74), (0.56, 0.05, 0.38)]),
+        (event: "attack.impact", kit: "flash", ramp: [(1.0, 1.0, 1.0), (1.0, 0.56, 0.86), (0.72, 0.10, 0.50)], count: 5, size: 0.8),
+        (event: "attack.impact", kit: "burst", ramp: [(1.0, 0.86, 0.96), (1.0, 0.36, 0.78), (0.62, 0.06, 0.42)], count: 10, speed: 2.8),
 
-        // Q Siphon: a green ring on her radius and motes drawn in.
-        (event: "q.detonate", kit: "ring", ramp: [(0.8, 1.0, 0.7), (0.42, 0.86, 0.4), (0.18, 0.4, 0.2)], count: 28, speed: 1.0),
-        (event: "q.detonate", kit: "flare", ramp: [(0.86, 1.0, 0.76), (0.5, 0.9, 0.46), (0.22, 0.46, 0.24)], count: 16, speed: 2.0, lifetime: 0.4),
+        // Q Siphon: a magenta ring smear around her, a shock to its edge, motes drawn in.
+        (event: "q.fire", kit: "slash", ramp: [(1.0, 0.90, 0.98), (1.0, 0.36, 0.78), (0.62, 0.06, 0.42), (0.30, 0.04, 0.22)], count: 40, size: 1.0),
+        (event: "q.fire", kit: "shock", ramp: [(1.0, 0.86, 0.96), (1.0, 0.36, 0.78), (0.62, 0.06, 0.42)]),
+        (event: "q.detonate", kit: "ring", ramp: [(1.0, 0.86, 0.96), (1.0, 0.36, 0.78), (0.62, 0.06, 0.42)], speed: 1.2),
+        (event: "q.detonate", kit: "flare", ramp: [(1.0, 0.86, 0.96), (1.0, 0.36, 0.78), (0.62, 0.06, 0.42)], count: 16, speed: 2.4),
 
-        // W Grasping Bones: bone shards along the line, snapping shut on a hit.
-        (event: "w.release", kit: "dust", ramp: [(0.5, 0.48, 0.44), (0.38, 0.37, 0.34), (0.27, 0.26, 0.24)], count: 10, speed: 1.2),
-        (event: "w.projectile", kit: "arrow", ramp: [(0.92, 0.9, 0.8), (0.7, 0.68, 0.58), (0.44, 0.42, 0.36)]),
-        (event: "w.impact", kit: "burst", ramp: [(0.94, 0.92, 0.84), (0.72, 0.7, 0.6), (0.44, 0.42, 0.36), (0.3, 0.5, 0.3)], count: 18, speed: 3.6),
+        // W Grasping Bones: cracks where her claw goes in, a bone shard down the line, a burst.
+        (event: "w.fire", kit: "crack", ramp: [(1.0, 0.70, 0.90), (0.90, 0.20, 0.62), (0.46, 0.05, 0.30), (0.22, 0.18, 0.18)], count: 6, lifetime: 0.9),
+        (event: "w.release", kit: "dust", ramp: [(0.56, 0.52, 0.48), (0.44, 0.41, 0.38), (0.32, 0.30, 0.29)], count: 10, speed: 1.6),
+        (event: "w.projectile", kit: "arrow", ramp: [(0.96, 0.92, 0.84), (1.0, 0.36, 0.78), (0.56, 0.05, 0.38)]),
+        (event: "w.impact", kit: "burst", ramp: [(0.96, 0.92, 0.84), (1.0, 0.36, 0.78), (0.62, 0.06, 0.42)], count: 14, speed: 3.2),
 
-        // E Grave Pact: a green rush rising through her.
-        (event: "e.fire", kit: "flare", ramp: [(0.84, 1.0, 0.74), (0.46, 0.9, 0.42), (0.2, 0.46, 0.22)], count: 18, speed: 2.4, lifetime: 0.5),
+        // E Grave Pact.
+        (event: "e.fire", kit: "flare", ramp: [(1.0, 0.86, 0.96), (1.0, 0.36, 0.78), (0.62, 0.06, 0.42)], count: 16, speed: 1.8, lifetime: 0.5),
+        (event: "e.fire", kit: "pillar", ramp: [(1.0, 0.86, 0.96), (1.0, 0.36, 0.78), (0.62, 0.06, 0.42)], count: 16, speed: 1.6, lifetime: 0.4),
 
-        // R Ossuary: her hands call it; the pit of bone opens on the area's delay.
-        (event: "r.fire", kit: "flare", ramp: [(0.84, 1.0, 0.74), (0.46, 0.9, 0.42), (0.2, 0.46, 0.22)], count: 12, speed: 1.6),
-        (event: "r.detonate", kit: "ring", ramp: [(0.8, 1.0, 0.7), (0.4, 0.84, 0.4), (0.16, 0.36, 0.18)]),
-        (event: "r.detonate", kit: "burst", ramp: [(0.94, 0.92, 0.84), (0.74, 0.72, 0.62), (0.46, 0.44, 0.38), (0.24, 0.4, 0.24)], count: 36, speed: 5.0, lifetime: 0.55),
-        (event: "r.detonate", kit: "dust", ramp: [(0.36, 0.44, 0.34), (0.26, 0.32, 0.25), (0.18, 0.2, 0.17)], count: 16, speed: 2.0, size: 1.5),
+        // R Ossuary: cracks as she sweeps; then the boneyard rises.
+        (event: "r.fire", kit: "crack", ramp: [(1.0, 0.70, 0.90), (0.90, 0.20, 0.62), (0.46, 0.05, 0.30), (0.22, 0.18, 0.18)], count: 8, size: 1.6, lifetime: 1.2),
+        (event: "r.fire", kit: "flare", ramp: [(1.0, 0.86, 0.96), (1.0, 0.36, 0.78), (0.62, 0.06, 0.42)], count: 14, speed: 2.4),
+        (event: "r.detonate", kit: "pillar", ramp: [(1.0, 0.90, 0.98), (1.0, 0.36, 0.78), (0.62, 0.06, 0.42), (0.30, 0.04, 0.22)], count: 40),
+        (event: "r.detonate", kit: "shock", ramp: [(1.0, 0.86, 0.96), (1.0, 0.36, 0.78), (0.62, 0.06, 0.42)]),
+        (event: "r.detonate", kit: "burst", ramp: [(0.96, 0.92, 0.84), (0.70, 0.66, 0.58), (1.0, 0.36, 0.78), (0.42, 0.40, 0.36)], count: 26, speed: 4.4, lifetime: 0.5),
+        (event: "r.detonate", kit: "dust", ramp: [(0.50, 0.46, 0.48), (0.40, 0.36, 0.38), (0.30, 0.27, 0.29)], count: 16, speed: 2.0, size: 1.3),
     ],
 )
