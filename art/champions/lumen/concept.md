@@ -1,6 +1,6 @@
 # Lumen — concept
 
-Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an owner brief, from the placeholder's "slender, with a glowing halo".
+Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** (awaiting the owner's approval). Designed without an owner brief, from the placeholder's "slender, with a glowing halo".
 
 ## Identity
 
@@ -10,23 +10,25 @@ Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an 
   - **E Lull:** a slowing line.
   - **R Binding Halo:** a delayed area that roots (ultimate, hard CC).
 - **Personality in three words:** serene, warm, unshakable.
-- **Silhouette class:** *light-priestess*.
-  - A floor-length ivory robe flaring to a gold hem (a bell shape no one else has) and a short capelet.
-  - Wide bell sleeves with gold cuffs.
-  - A ring of gold light floating behind her head: a halo of twelve glowing segments.
-  - She works from open hands; no staff.
-- **Head:** the shared sculpted head, feminine and calm, with pale gold hair in a ponytail and pale blue eyes.
-- **Archetype:** `biped` v1. The legs move under the robe, which is skinned to the pelvis; the shins and slippers show at the hem.
+- **Shape (14 §2):** *a bell*. Serene proportions on the `biped` bones (`SHAPE` in `build.py`: ×0.96, hands ×1.3), about 1.8 m. A long white robe flaring from her waist to the ground in two gold-hemmed tiers, a sky-edged ivory front panel and sash tails; a gold-edged mantle and a sun brooch; wide sleeves; a great sun-gold halo ring standing behind her head; a gold circlet; a tall lantern-staff in her left hand, its sun-bright core in a gold cage crowned by a crescent.
+- **Weapon:** the lantern-staff, skinned to her left hand and held upright by IK (`staff()` in `build.py`).
+- **Gait (14 §3.5):** floating: she hovers 10 cm up and glides, no footfalls, a slow bob, the staff and her free arm trailing.
 
-## Palette (10 §2)
+## Palette (14 §4)
+
+Signature: **pale sun gold** (50°). The whites are darker than they look: the arena's sun lifts them.
 
 | Slot | Colors |
 |---|---|
-| skin | (0.88, 0.72, 0.62) |
-| cloth | ivory robe (0.86, 0.83, 0.74) with a shaded lower tier (0.72, 0.69, 0.62), pale gold hair (0.86, 0.76, 0.52), slippers (0.62, 0.52, 0.38) |
-| metal | gold hem, belt and cuffs (0.86, 0.68, 0.30) |
-| emissive | the halo and a gem at her throat (1.0, 0.88, 0.55) |
-| accent | the stole: two bands from her shoulders down the front of the robe |
+| skin | fair (0.80, 0.62, 0.52) |
+| cloth | white robe (0.70, 0.68, 0.64), ivory panel, tier and mantle (0.60, 0.56, 0.48), sky trim, sash and cuffs (0.20, 0.32, 0.50), staff wood (0.36, 0.26, 0.16), golden hair |
+| metal | gold hems, cage, circlet and clasps (0.70, 0.54, 0.22) |
+| emissive | sun gold (1.0, 0.86, 0.42) and sun white (1.0, 0.96, 0.78): the halo, the lantern, the brooch |
+| accent | a band at her waist |
+
+## Weight (14 §3)
+
+Her weight is in the staff: held upright by IK at rest, swung forward to point the lantern, planted with its foot on the ground for Binding Halo and held there. Gestures are slow in, quick out, and held a beat.
 
 ## Clip checklist (10 §5)
 
@@ -44,11 +46,7 @@ Status: **draft** (awaiting the owner's approval, 10 §10). Designed without an 
 
 ## Effects and sounds
 
-- **VFX** (`export/lumen.vfx.ron`):
-  - gold motes;
-  - a rising golden glow for Mending Light and a pale blue one for Aegis;
-  - a lilac orb for Lull;
-  - Binding Halo's ring of gold on its true radius.
+- **VFX** (`export/lumen.vfx.ron`), all sun gold (white → gold → deep gold): soft golden orbs and a gentle star for her motes; Mending Light rises in a `pillar`; Aegis presses out a `shock` of gold; Lull sweeps a soft `slash` and drifts as an orb; Binding Halo flares (`flash`) as the staff is planted and closes on the area in `pillar`s, a `shock` and a ring.
 - **SFX** (`sounds.ron`), 9 sounds, bell-like and soft:
   - chimes for her motes;
   - a rising arpeggio for Mending Light;
