@@ -8,17 +8,15 @@ shader_type spatial;
 render_mode diffuse_lambert, specular_disabled;
 #include "res://shaders/clouds.gdshaderinc"
 #include "res://shaders/world.gdshaderinc"
+#include "res://shaders/grass.gdshaderinc"
 
-// The ground control map: R dirt, G paving, B water, A wall distance (0..1 = 0..10 m).
+// The ground control map: R dirt, G paving, B water, A signed wall distance (0.5 at a wall's
+// edge, 1 at 10 m out from one, 0 at 10 m inside one).
 uniform sampler2D control : filter_linear, repeat_disable;
 uniform bool control_on = false;
 uniform vec2 map_size = vec2(100.0);     // meters, what the control map covers
 
 // The season's palette.
-uniform vec3 grass_dark : source_color = vec3(0.14, 0.25, 0.12);
-uniform vec3 grass_mid : source_color = vec3(0.20, 0.32, 0.14);
-uniform vec3 grass_light : source_color = vec3(0.30, 0.41, 0.17);
-uniform vec3 grass_gloom : source_color = vec3(0.10, 0.19, 0.15);   // under the canopy, by walls
 uniform vec3 dirt : source_color = vec3(0.42, 0.32, 0.22);
 uniform vec3 dirt_dark : source_color = vec3(0.31, 0.23, 0.16);
 uniform vec3 paving : source_color = vec3(0.42, 0.45, 0.47);
@@ -27,9 +25,12 @@ uniform vec3 water_shallow : source_color = vec3(0.24, 0.45, 0.42);
 uniform vec3 water_deep : source_color = vec3(0.10, 0.27, 0.33);
 uniform vec3 foam : source_color = vec3(0.62, 0.74, 0.70);
 uniform vec3 mud : source_color = vec3(0.24, 0.21, 0.15);
-uniform vec3 flower_a : source_color = vec3(0.40, 0.24, 0.55);
-uniform vec3 flower_b : source_color = vec3(0.30, 0.42, 0.68);
-uniform vec3 flower_c : source_color = vec3(0.70, 0.62, 0.22);
+
+// Local lights (15 §7, `map_view.gd`): the nearest lamps as (x, z, reach, strength) in meters,
+// and (r, g, b, flicker phase); fires flicker, crystals hardly.
+uniform vec4 lamps[16];
+uniform vec4 lamp_colors[16];
+uniform int lamp_count = 0;
 
 // Sandboxes without a control map: 0, a diagonal lane (the M1 arena) and a 1 m grid.
 uniform float lane_mode = 0.0;
@@ -41,23 +42,6 @@ varying vec3 world_pos;
 
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-}
-
-vec3 grass_color(vec2 p, vec2 q, float grain, float gloom) {
-	float large = w_fbm(p * 0.05);
-	float patch = w_fbm(p * 0.16 + 3.0);
-	vec3 g = mix(grass_dark, grass_mid, smoothstep(0.3, 0.6, large));
-	g = mix(g, grass_light, smoothstep(0.55, 0.75, patch) * 0.8);
-	g *= 0.9 + 0.16 * w_fbm(q * 0.9) + 0.07 * (grain - 0.5);
-	// Blades: a fine streak pattern in chunky texels.
-	g *= 0.95 + 0.08 * step(0.55, w_hash(floor(q * vec2(1.0, 0.35)) + 7.0));
-	g = mix(g, grass_gloom, gloom);
-	// Flowers: small clusters of specks where a patch noise is high, never evenly sprinkled.
-	float cluster = smoothstep(0.66, 0.74, w_fbm(p * 0.22 + 41.0)) * (1.0 - gloom * 0.6);
-	float speck = step(0.93, w_hash(q + 5.0)) * cluster;
-	float pick = w_hash(floor(p * 0.4) + 3.0);
-	vec3 bloom = pick < 0.4 ? flower_a : (pick < 0.75 ? flower_b : flower_c);
-	return mix(g, bloom, speck * 0.85);
 }
 
 vec3 dirt_color(vec2 p, vec2 q, float grain) {
@@ -104,7 +88,7 @@ void fragment() {
 		vec2 warp = vec2(w_fbm(p * 0.3) - 0.5, w_fbm(p * 0.3 + 9.0) - 0.5) * 1.6;
 		vec4 c = texture(control, (p + warp) / map_size);
 		vec4 c0 = texture(control, p / map_size);
-		float wall = c0.a;                         // 0 inside walls, 1 at 10 m from one
+		float wall = clamp(c0.a * 2.0 - 1.0, 0.0, 1.0);   // 0 at (and in) a wall, 1 at 10 m from one
 		float gloom = (1.0 - smoothstep(0.05, 0.4, wall)) * 0.55;
 		ground = grass_color(p, q, grain, gloom);
 		// Dirt with grass tongues.
@@ -155,6 +139,16 @@ void fragment() {
 	}
 	ALBEDO = w_fogged(ground, world_pos);
 	ROUGHNESS = 1.0;
+	// The lamps' pools: light falling off with the square of the distance's share of the reach.
+	vec3 lit = vec3(0.0);
+	for (int i = 0; i < lamp_count; i++) {
+		vec4 l = lamps[i];
+		float f = 1.0 - clamp(distance(p, l.xy) / max(l.z, 0.01), 0.0, 1.0);
+		float ph = lamp_colors[i].a;
+		float flicker = 0.88 + 0.12 * sin(TIME * 11.0 + ph) * sin(TIME * 6.7 + ph * 2.3);
+		lit += lamp_colors[i].rgb * (f * f * l.w * flicker);
+	}
+	EMISSION = ALBEDO * lit * 2.0;
 }
 
 void light() {

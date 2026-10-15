@@ -6,8 +6,10 @@
 //!   objectives' clearings.
 //! - **G, paving:** plinths under the structures and relic pads, the fountains' plazas.
 //! - **B, water:** the river.
-//! - **A, wall distance:** how far open ground is from the nearest wall, 0 inside walls,
-//!   saturating at [`WALL_REACH_U`] (the cliffs' foot occlusion and the jungle's gloom).
+//! - **A, signed wall distance:** 0.5 on a wall's edge; above it, how far open ground is from
+//!   the nearest wall (the cliffs' foot occlusion and the jungle's gloom); below it, how far a
+//!   cliff's top is from its edge (the grassy lip, the forest's gloom), each saturating at
+//!   [`WALL_REACH_U`]. See [`signed_alpha`].
 //!
 //! Built from the map's walls, strokes and placements only (`Layout::strokes`), in well under a
 //! frame for the largest map.
@@ -17,7 +19,7 @@ use mftr_sim::{UnitKind, Vec2};
 
 /// Game units per texel (the pathing grid's cell).
 pub const TEXEL_U: f32 = 25.0;
-/// Wall distance saturates here (A = 255).
+/// Wall distance saturates here (A = 255 out in the open, 0 deep inside a wall).
 pub const WALL_REACH_U: f32 = 1000.0;
 
 pub struct GroundControl {
@@ -44,6 +46,8 @@ pub fn control_map(map: &Map) -> GroundControl {
     let h = (map.size.y / TEXEL_U).ceil().max(1.0) as usize;
     let blocked = rasterize_walls(map, w, h);
     let dist = wall_distance(&blocked, w, h);
+    let open: Vec<bool> = blocked.iter().map(|b| !b).collect();
+    let depth = wall_distance(&open, w, h);
     let mut dirt = vec![0.0f32; w * h];
     let mut paving = vec![0.0f32; w * h];
     let mut water = vec![0.0f32; w * h];
@@ -75,9 +79,16 @@ pub fn control_map(map: &Map) -> GroundControl {
         rgba[i * 4] = byte(dirt[i]);
         rgba[i * 4 + 1] = byte(paving[i]);
         rgba[i * 4 + 2] = byte(water[i]);
-        rgba[i * 4 + 3] = byte(dist[i] / WALL_REACH_U);
+        rgba[i * 4 + 3] = signed_alpha(if blocked[i] { -depth[i] } else { dist[i] });
     }
     GroundControl { width: w, height: h, rgba }
+}
+
+/// The alpha for a signed wall distance (u; negative inside a wall): 128..=255 out in the open,
+/// 0..=127 inside, so a shader's linear filtering crosses a wall's edge smoothly at 0.5.
+pub fn signed_alpha(d: f32) -> u8 {
+    let t = (d.abs() / WALL_REACH_U).min(1.0);
+    if d > 0.0 { 128 + (t * 127.0).round() as u8 } else { 127 - (t * 127.0).round() as u8 }
 }
 
 /// Max-blend `f(distance)` into `layer` for every texel within `reach` of the polyline `pts` (a
@@ -157,7 +168,8 @@ fn rasterize_walls(map: &Map, w: usize, h: usize) -> Vec<bool> {
     blocked
 }
 
-/// Distance (game units) from each open texel to the nearest blocked one; 0 for blocked texels.
+/// Distance (game units) from each open texel to the nearest blocked one; 0 for blocked texels
+/// (and [`WALL_REACH_U`] where nothing is blocked).
 /// A two-pass chamfer (3-4) transform: within a few percent of Euclidean, which a shader's
 /// shading can't tell apart.
 fn wall_distance(blocked: &[bool], w: usize, h: usize) -> Vec<f32> {
@@ -213,12 +225,20 @@ mod tests {
         assert!(px(turret)[1] > 200);
         let river_mid = l.river[l.river.len() / 4];
         assert!(px(river_mid)[2] > 200, "{:?}", px(river_mid));
-        // Inside a wall the distance is 0; open ground has some.
+        // Inside a wall the alpha is under the half; open ground is over it.
         let wall_p = map.walls[0][0] + (map.walls[0][1] - map.walls[0][0]) * 0.5;
         let probe = [Vec2::new(10.0, 10.0), wall_p];
-        assert!(probe.iter().any(|p| px(*p)[3] == 0));
-        assert!(px(lane_mid)[3] > 0);
+        assert!(probe.iter().any(|p| px(*p)[3] < 128));
+        assert!(px(lane_mid)[3] > 128);
         assert_eq!(g.rgba.len(), g.width * g.height * 4);
+    }
+
+    #[test]
+    fn signed_alpha_crosses_the_half_at_a_walls_edge() {
+        assert_eq!(signed_alpha(WALL_REACH_U * 2.0), 255);
+        assert_eq!(signed_alpha(-WALL_REACH_U * 2.0), 0);
+        assert!(signed_alpha(25.0) > 128 && signed_alpha(-25.0) < 128);
+        assert!(signed_alpha(-25.0) > signed_alpha(-500.0));
     }
 
     #[test]

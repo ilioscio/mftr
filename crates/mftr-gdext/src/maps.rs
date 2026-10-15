@@ -88,6 +88,7 @@ impl MftrMaps {
         d.set("name", spec.name.as_str());
         d.set("kind", spec.kind.key());
         d.set("size", spec.size);
+        d.set("season", spec.season.key());
         d.set("lane", &lines(&spec.lanes));
         d.set("river", &lines(&spec.river));
         d.set("jungle", &lines(&spec.jungle));
@@ -160,6 +161,7 @@ impl MftrMaps {
         d.set("ok", true);
         d.set("kind", spec.kind.key());
         d.set("size", spec.size);
+        d.set("season", spec.season.key());
         d.set("walls", &polygons(&map.walls));
         d.set("brush", &polygons(&map.brush));
         d.set("ground", &ground_image(&map));

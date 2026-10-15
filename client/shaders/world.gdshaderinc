@@ -88,5 +88,7 @@ vec3 w_fogged(vec3 c, vec3 wp) {
 }
 
 // The shared light() body: a wrapped Lambert (the shadowed side falls off softly), cloud
-// shadows on the sun only. The shade's coolness is the environment's sky fill (the season's).
-#define WORLD_LIGHT 	float ndl = clamp((dot(NORMAL, LIGHT) + 0.3) / 1.3, 0.0, 1.0); 	DIFFUSE_LIGHT += LIGHT_COLOR / PI * ndl * ATTENUATION * (LIGHT_IS_DIRECTIONAL ? cloud_sun : 1.0);
+// shadows on the sun only, and a little of the sun bounced back off the ground into the faces
+// turned from it, so a shaded cliff reads as warm stone rather than the sky's blue. The shade's
+// coolness is the environment's sky fill (the season's).
+#define WORLD_LIGHT 	float ndl = clamp((dot(NORMAL, LIGHT) + 0.3) / 1.3, 0.0, 1.0); 	DIFFUSE_LIGHT += LIGHT_COLOR / PI * (ndl * ATTENUATION * (LIGHT_IS_DIRECTIONAL ? cloud_sun : 1.0) + (LIGHT_IS_DIRECTIONAL ? 0.2 * (1.0 - ndl) : 0.0));

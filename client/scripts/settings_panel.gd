@@ -146,6 +146,16 @@ func _graphics_tab() -> Control:
 	_row(g, "Shadows", _check(settings.shadows, func(v): settings.shadows = v), "The sun's shadows. Off is faster on older graphics cards.")
 	_row(g, "Bloom", _check(settings.bloom, func(v): settings.bloom = v), "A soft glow around bright things: crystals, fire, spells.")
 	_row(g, "Clouds and motes", _check(settings.atmosphere, func(v): settings.atmosphere = v), "Cloud shadows drifting over the map, and motes floating in the light.")
+	var seasons := OptionButton.new()
+	seasons.focus_mode = Control.FOCUS_NONE
+	var keys := ["", "summer", "autumn", "winter"]
+	for k in keys:
+		seasons.add_item("The map's own" if k == "" else str(k).capitalize())
+	seasons.select(maxi(keys.find(settings.season), 0))
+	seasons.item_selected.connect(func(i: int):
+		settings.season = keys[i]
+		settings.save())
+	_row(g, "Season", seasons, "How the map is dressed: its ground, cliffs, light, flora and fauna. Its maker picks one; you can choose another. Looks only, and from the next match on.")
 	return g
 
 

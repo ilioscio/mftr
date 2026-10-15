@@ -934,6 +934,7 @@ impl MatchClient {
         d.set("roads", &to_arrays(&roads).to_variant());
         let river: PackedVector2Array = layout.river.iter().map(|v| Vector2::new(v.x, v.y)).collect();
         d.set("river", &river);
+        d.set("season", layout.season.key());
         d
     }
 

@@ -194,6 +194,9 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-tab":
 			_shot_tab = true
+		elif args[i] == "--season" and i + 1 < args.size():
+			settings.season = args[i + 1]  # for this run (not saved): captures of each season
+			i += 1
 		elif args[i] == "--tab-hover" and i + 1 < args.size():
 			_shot_tab_hover = args[i + 1]
 			i += 1
@@ -1780,14 +1783,16 @@ func _build_map() -> void:
 	_map_built = true
 	var geo: Dictionary = client.map_geometry()
 	geo["ground"] = client.map_ground()
-	geo["season"] = "summer"
+	# The map's own season unless the player picked one (15 §9).
+	if settings.season in Seasons.NAMES:
+		geo["season"] = settings.season
 	Seasons.apply_light(Seasons.get_season(geo.season), world_env, sun)
 	vignette.visible = true
 	var size: Vector2 = geo.size
 	_build_minimap(geo)
 	atmosphere = preload("res://scripts/atmosphere.gd").new()
 	add_child(atmosphere)
-	atmosphere.setup(size / 2.0 * UNITS_TO_METERS)
+	atmosphere.setup(size / 2.0 * UNITS_TO_METERS, Seasons.get_season(geo.season).get("motes", "pollen"))
 	# The world: ground, roads, river, cliffs, brush, scenery, fountains (shared with the map
 	# editor's Actual view).
 	var view: Node3D = MapView.new()
@@ -1834,6 +1839,9 @@ func _structure_prop(id: String, color: Color, dome_radius: float, dome_lift: fl
 	model.name = "Model"
 	root.add_child(model)
 	root.set_meta("team_color", color)
+	var view := get_node_or_null("MapView")
+	if view != null:
+		view.add_glows(model, id, color)
 	# Protected (an earlier structure in its lane stands): a pale ward ring on the ground and a
 	# cold sheen on the stone, instead of a dome hiding the model.
 	var ward := MeshInstance3D.new()
@@ -1883,6 +1891,9 @@ const STONE_CHIPS := [Color(0.58, 0.6, 0.63), Color(0.42, 0.44, 0.47), Color(0.2
 func _collapse(body: Node3D) -> void:
 	if body.has_node("Protected"):
 		body.get_node("Protected").visible = false
+	# The crystal's light goes out with it.
+	for lamp in body.find_children("Lamp_crystal*", "", true, false):
+		lamp.visible = false
 	var skel: Skeleton3D = body.get_node_or_null("Model/Skeleton")
 	if skel == null:
 		_leave_rubble(body)

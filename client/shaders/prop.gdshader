@@ -17,6 +17,9 @@ uniform bool instance_tint = false;
 uniform float sway = 0.0;
 // 1 while a structure is protected (an earlier one in its lane stands): a faint cold sheen.
 uniform float protected_glow = 0.0;
+// The season's snow (15 §9): how much of every upward facet is covered, and its color.
+uniform float snow = 0.0;
+uniform vec3 snow_color : source_color = vec3(0.86, 0.9, 0.96);
 
 global uniform sampler2D fog_map : filter_linear;
 global uniform vec2 fog_size;
@@ -70,6 +73,12 @@ void fragment() {
 	if (slot < 3) {
 		// Grain: chunky world-space speckle (≈ 6 cm cells), like a low-resolution texture.
 		float g = hash(floor(world_pos * 16.0));
+		if (snow > 0.0) {
+			// Snow settles on the facets that look up, ragged at its edge.
+			float up = (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).y;
+			float cover = smoothstep(0.42, 0.62, up + (g - 0.5) * 0.25) * snow;
+			c = mix(c, snow_color * (0.92 + 0.1 * g) * tint, cover);
+		}
 		c *= 0.9 + 0.16 * g;
 	}
 	vec3 lit = c * mix(0.58, 1.0, COLOR.a) * exposure;

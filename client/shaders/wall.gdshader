@@ -1,18 +1,22 @@
 // Cliffs (15 §4): the walls' stepped faces in the season's stone, with strata, dark crevices and
-// moss creeping down from the top and over the ledge, and a grassy top like the ground's. Each
-// face is shaded flat (screen-space derivatives), so the low-poly cliff looks cut, not smoothed.
+// moss creeping down from the top and over the ledge, and a top of the ground's own grass: a
+// lighter lip where it rolls over the drop, the forest's gloom deeper in (from the ground control
+// map's signed wall distance, 15 §3). Each face is shaded flat (screen-space derivatives), so the
+// low-poly cliff looks cut, not smoothed.
 shader_type spatial;
 render_mode diffuse_lambert, specular_disabled;
 #include "res://shaders/clouds.gdshaderinc"
 #include "res://shaders/world.gdshaderinc"
+#include "res://shaders/grass.gdshaderinc"
 
 uniform vec3 rock : source_color = vec3(0.40, 0.42, 0.44);
 uniform vec3 rock_dark : source_color = vec3(0.24, 0.26, 0.29);
 uniform vec3 moss : source_color = vec3(0.22, 0.32, 0.17);
-// The cliff top's grass, matching the ground's.
-uniform vec3 top_a : source_color = vec3(0.14, 0.25, 0.12);
-uniform vec3 top_b : source_color = vec3(0.20, 0.32, 0.14);
 uniform float height = 1.4;
+// The ground control map (as the ground's): its alpha tells how far a top is from its edge.
+uniform sampler2D control : filter_linear, repeat_disable;
+uniform bool control_on = false;
+uniform vec2 map_size = vec2(100.0);
 
 varying vec3 world_pos;
 
@@ -45,9 +49,19 @@ void fragment() {
 	float ledge = smoothstep(0.45, 0.8, wn.y) * step(world_pos.y, height - 0.05);
 	c = mix(c, moss * (0.85 + 0.3 * w_fbm(q * 3.0)), clamp(top_moss * 0.75 + ledge * 0.85, 0.0, 1.0));
 	if (wn.y > 0.85 && world_pos.y > height - 0.02) {
-		// The top is grassland, like the ground: the forest stands on it.
-		float g = w_fbm(world_pos.xz * 0.16 + 3.0);
-		c = mix(top_a, top_b, smoothstep(0.35, 0.65, g)) * (0.9 + 0.12 * w_hash(q));
+		// The top is the ground's grass: the forest stands on it. Meters in from the edge decide
+		// the lip and the gloom.
+		vec2 pt = world_pos.xz;
+		vec2 qt = floor(pt * 16.0) / 16.0;
+		float inside = 3.0;
+		if (control_on) {
+			vec2 warp = vec2(w_fbm(pt * 0.3) - 0.5, w_fbm(pt * 0.3 + 9.0) - 0.5) * 1.6;
+			inside = clamp(1.0 - texture(control, (pt + warp) / map_size).a * 2.0, 0.0, 1.0) * 10.0;
+		}
+		float gloom = smoothstep(0.6, 3.0, inside) * 0.85;
+		c = grass_color(pt, qt, w_hash(qt), gloom);
+		float lip = 1.0 - smoothstep(0.35, 0.9, inside + (w_fbm(qt * 2.0) - 0.5) * 0.4);
+		c *= 1.0 + lip * 0.12;
 	}
 	ALBEDO = w_fogged(c, world_pos);
 	ROUGHNESS = 1.0;

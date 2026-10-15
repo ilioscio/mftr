@@ -29,17 +29,31 @@ var _across := Vector2.ZERO
 var _probe_camera_side := false
 var _batches := {}                        # prop id -> [Transform3D, Color]
 var _rng := RandomNumberGenerator.new()
+## The season (15 §9): a tint over every prop, and props swapped for their seasonal variants.
+var _tint := Color.WHITE
+var _substitute := {}
 
 
 ## `geo` is `map_geometry()`; `materials_for(id)` returns [mesh, materials] for a prop, or null.
 func build(geo: Dictionary, materials_for: Callable) -> void:
 	_rng.seed = 1971
+	var season: Dictionary = preload("res://scripts/seasons.gd").get_season(geo.get("season", "summer"))
+	_tint = season.get("tint", Color.WHITE)
+	_substitute = season.get("substitute", {})
 	var size: Vector2 = geo.size
 	var walls: Array = geo.walls
 	_walls = walls
 	_index_walls(walls, size)
 	_size = size
 	var brush: Array = geo.brush
+	# The ground control map (15 §3), when there is one: nothing small stands in the river.
+	var ctl = geo.get("ground")
+	var wet := func(p: Vector2) -> bool:
+		if not (ctl is Image):
+			return false
+		var x := clampi(int(p.x / 25.0), 0, ctl.get_width() - 1)
+		var y := clampi(int(p.y / 25.0), 0, ctl.get_height() - 1)
+		return ctl.get_pixel(x, y).b > 0.1
 	var fountains: Array = geo.get("fountains", [])
 	var lane_map := fountains.size() == 2
 	# Several lanes (Crossroads): whether a spot is on the camera's side of the ground it
@@ -105,7 +119,36 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 				var scale := _rng.randf_range(1.1, 1.6)
 				var reach := 0.5 * 95.0 * scale      # half the rock's half-width (u): it leans on the face
 				_add_at(id, q + into * reach, scale, 0.0)
-	# Tall grass filling the brush.	# Tall grass filling the brush.
+	# The cliffs' tops along their edges: tufts of grass near the lip, a bush set back from it,
+	# so the edge reads as a meadow's rim rather than a cut (each set back past its own radius).
+	for poly in walls:
+		if is_outcrop(poly):
+			continue
+		var n: int = poly.size()
+		for i in n:
+			var a: Vector2 = poly[i]
+			var b: Vector2 = poly[(i + 1) % n]
+			var len := a.distance_to(b)
+			var t := _rng.randf_range(0.0, 300.0)
+			while t < len:
+				var q := a.lerp(b, t / len)
+				t += _rng.randf_range(160.0, 380.0)
+				if q.x <= 0 or q.x >= size.x or q.y <= 0 or q.y >= size.y:
+					continue
+				var normal := (b - a).orthogonal().normalized()
+				var into := normal if _inside_wall(q + normal * 30.0) else -normal
+				if _inside_wall(q - into * 30.0):
+					continue
+				if _rng.randf() < 0.7:
+					var g := q + into * _rng.randf_range(55.0, 140.0)
+					if _edge_distance(g, walls, size) > 50.0:
+						_add("grass_1", g, _rng.randf_range(1.0, 1.5))
+				else:
+					var scale := _rng.randf_range(0.7, 1.0)
+					var g := q + into * (105.0 * scale + _rng.randf_range(30.0, 90.0))
+					if _edge_distance(g, walls, size) > 105.0 * scale:
+						_add("bush_1", g, scale)
+	# Tall grass filling the brush.
 	for poly in brush:
 		var r := _bounds(poly)
 		var gy := r.position.y
@@ -121,12 +164,12 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 	for i in int(size.x * size.y / 900000.0):
 		var p := Vector2(_rng.randf_range(0, size.x), _rng.randf_range(0, size.y))
 		var e := _wall_near(p, 260.0)
-		if e and not _inside_wall(p):
+		if e and not _inside_wall(p) and not wet.call(p):
 			_add("stones_1", p, _rng.randf_range(0.7, 1.2))
 	# Tufts scattered over the walkable grass, sparse in the middle of the lane.
 	for i in int(size.x * size.y / 90000.0):
 		var p := Vector2(_rng.randf_range(0, size.x), _rng.randf_range(0, size.y))
-		if _edge_distance(p, walls, size) > 0.0:
+		if _edge_distance(p, walls, size) > 0.0 or wet.call(p):
 			continue
 		var from_mid := clampf(absf((p - _lane_mid).dot(_across)) / 1500.0, 0.0, 1.0) if lane_map else 1.0
 		if _rng.randf() < from_mid * 0.9:
@@ -137,8 +180,10 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 ## Trees where there's room, low props near the lane on the camera's side.
 func _forest_at(p: Vector2, edge: float, near_camera: bool, lane_map: bool) -> void:
 	if near_camera and edge < 520.0:
-		if _rng.randf() < 0.55:
-			_add(["bush_1", "bush_1", "rock_1", "rock_2"][_rng.randi() % 4], p, _rng.randf_range(0.9, 1.5))
+		var scale := _rng.randf_range(0.9, 1.5)
+		# Set back from the edge by at least its own radius: nothing hangs over the drop.
+		if _rng.randf() < 0.55 and edge > 105.0 * scale:
+			_add(["bush_1", "bush_1", "rock_1", "rock_2"][_rng.randi() % 4], p, scale)
 		return
 	if edge < 160.0:
 		return  # the cliff's edge: nothing that could hang over the drop
@@ -272,13 +317,16 @@ func _add_at(id: String, p: Vector2, scale: float, height: float) -> void:
 	var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU)).scaled(Vector3.ONE * scale)
 	var t := Transform3D(basis, Vector3(p.x * U, height, p.y * U))
 	var k := _rng.randf_range(0.88, 1.1) * (0.82 if id.begins_with("pine") else 1.0)
-	var tint := Color(k * _rng.randf_range(0.96, 1.04), k, k * _rng.randf_range(0.94, 1.04)) * 0.5
+	var tint := Color(k * _rng.randf_range(0.96, 1.04) * _tint.r, k * _tint.g, k * _rng.randf_range(0.94, 1.04) * _tint.b) * 0.5
 	_batches[id].append([t, tint])
 
 
 func _flush(materials_for: Callable) -> void:
 	for id in _batches:
-		var made = materials_for.call(id)
+		# The season's variant of the prop, when it has one.
+		var made = materials_for.call(_substitute[id]) if _substitute.has(id) else null
+		if made == null:
+			made = materials_for.call(id)
 		if made == null:
 			continue
 		var list: Array = _batches[id]
