@@ -144,16 +144,25 @@ impl Bot {
         let visible = |u: &&Unit| u.state.alive() && !hidden.contains(&u.id);
         let fountain = world.map().layout.fountains[team as usize].map(|(c, _)| c);
         let heals_home = fountain.is_some() && world.map().layout.fountain_heals;
-        // Horde has no allied wave to push with. Use the break to recall, recover and shop;
-        // during combat the same existing kits target the approaching minions and bosses.
+        // Horde has no allied wave to push with. In the break between waves, go home only to heal
+        // or to buy the next item, then wait under the furthest turret for the horde.
         if world.rules().horde && world.game().next_wave_at.is_some() {
             if st.recalling() {
                 return None;
             }
-            if fountain.is_some_and(|home| st.pos.distance(home) > 500.0) {
-                return Some(CommandKind::Recall);
+            let path = mftr_sim::items::build_path(champ);
+            let shopping = p.items.contains(&0)
+                && path.get(self.build).is_some_and(|&next| {
+                    mftr_sim::items::price(next, &p.items).is_some_and(|(cost, _)| cost <= p.gold)
+                });
+            if hp < HEALED || shopping {
+                if fountain.is_some_and(|home| st.pos.distance(home) > 500.0) {
+                    return Some(CommandKind::Recall);
+                }
+                if hp < HEALED {
+                    return None; // healing in the fountain
+                }
             }
-            return None;
         }
 
         // Low: take a safe health relic, else go home where the fountain heals. ARAM's doesn't
@@ -312,33 +321,27 @@ impl Bot {
             .filter(|u| matches!(u.brain, Some(mftr_sim::world::Brain::Laner { lane: l, .. }) if l as usize == lane))
             .max_by(|a, b| progress(a.state.pos).total_cmp(&progress(b.state.pos)));
         let behind = if cautious { 550.0 } else { 150.0 };
-        // Horde: no allied wave. Meet the visible enemy nearest our base along the lane.
-        let horde_front = world
-            .rules()
-            .horde
-            .then(|| {
-                world
-                    .units()
-                    .iter()
-                    .filter(visible)
-                    .filter(|u| {
-                        u.team != team && u.targetable() && matches!(u.kind, UnitKind::Minion | UnitKind::Monster)
-                    })
-                    .min_by(|a, b| progress(a.state.pos).total_cmp(&progress(b.state.pos)))
-                    .map(|u| u.state.pos)
-            })
-            .flatten();
-        let mut goal = match (front, horde_front) {
-            (Some(m), _) => m.state.pos - along(path, m.state.pos).1 * behind,
-            (None, Some(e)) => e,
-            // No wave: wait in front of the frontmost allied turret of this lane, not on it
-            // (a turret is solid: walking to its center pins a bot against it).
-            (None, None) => world
+        // No wave (Horde has none): wait under the frontmost allied turret of this lane, just
+        // behind it rather than on it (a turret is solid: walking to its center pins a bot against
+        // it). Enemies that come into reach get fought above. Frontmost means farthest from home:
+        // a lane path may start mid-map (The Bridge's does), so every turret behind its start
+        // would measure 0 along it.
+        let home = layout.champion_spawn[team as usize];
+        let turret = || {
+            world
                 .units()
                 .iter()
                 .filter(|u| u.team == team && u.kind == UnitKind::Turret && u.state.alive() && u.lane as usize == lane)
-                .max_by(|a, b| progress(a.state.pos).total_cmp(&progress(b.state.pos)))
-                .map_or(path[0], |u| u.state.pos + along(path, u.state.pos).1 * 400.0),
+                .max_by(|a, b| a.state.pos.distance(home).total_cmp(&b.state.pos.distance(home)))
+                .map(|u| u.state.pos)
+        };
+        let (mut goal, dir) = match (front, turret()) {
+            (Some(m), _) => (m.state.pos - along(path, m.state.pos).1 * behind, along(path, m.state.pos).1),
+            (None, Some(t)) => {
+                let ahead = (t - home).normalize_or_zero();
+                (t - ahead * 250.0, ahead)
+            }
+            (None, None) => (path[0], along(path, path[0]).1),
         };
         // Back off along the lane while the spot is in an unsafe turret's range.
         for _ in 0..20 {
@@ -347,7 +350,6 @@ impl Bot {
             }
             goal -= along(path, goal).1 * 100.0;
         }
-        let dir = along(path, goal).1;
         // A little spread across the lane, so bots don't stack on one line.
         let goal = goal + Vec2::new(-dir.y, dir.x) * self.rng.range_f32(-120.0, 120.0);
         self.go_to(CommandKind::AttackMove(QPoint::from_vec2(goal)))
@@ -567,4 +569,43 @@ fn along(path: &[Vec2], p: Vec2) -> (f32, Vec2) {
         walked += len;
     }
     (best.1, best.2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mftr_sim::ChampionId;
+    use mftr_sim::map::MapId;
+    use mftr_sim::world::Rules;
+
+    /// Horde: bots leave the fountain during the first break and wait under the furthest turret,
+    /// so they're there when the horde arrives instead of walking out late.
+    #[test]
+    fn horde_bots_wait_under_the_furthest_turret_before_the_first_wave() {
+        let mut w = World::new(7);
+        w.set_map(MapId::HordeBridge.shared());
+        w.set_rules(Rules::HORDE);
+        w.start_match();
+        let mut bots = Vec::new();
+        for (i, champion) in ChampionId::ALL[..5].iter().enumerate() {
+            let player = PlayerId(i as u8);
+            w.spawn_champion(player, Team::Blue, *champion, w.map().layout.champion_spawn[0]);
+            bots.push(Bot::new(player, 7));
+        }
+        while w.game().next_wave_at.is_some() {
+            let k = Tick(w.tick().0 + 1);
+            let cmds: Vec<Command> = bots.iter_mut().flat_map(|b| b.think(&w, k)).collect();
+            w.step(&cmds);
+        }
+        let first = w
+            .units()
+            .iter()
+            .find(|u| u.team == Team::Blue && u.kind == UnitKind::Turret && u.tier == 1)
+            .map(|u| u.state.pos)
+            .unwrap();
+        for u in w.units().iter().filter(|u| u.kind == UnitKind::Champion) {
+            let d = u.state.pos.distance(first);
+            assert!(d < 600.0, "{:?} waits {d:.0} u from the furthest turret", u.champion);
+        }
+    }
 }
