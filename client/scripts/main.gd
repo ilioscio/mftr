@@ -1884,7 +1884,6 @@ func _relic_pad(at: Vector2) -> void:
 
 var collapses := []
 const COLLAPSE_SECONDS := 3.4
-const STONE_DUST := [Color(0.42, 0.42, 0.42), Color(0.33, 0.34, 0.35), Color(0.24, 0.25, 0.26)]
 const STONE_CHIPS := [Color(0.58, 0.6, 0.63), Color(0.42, 0.44, 0.47), Color(0.28, 0.29, 0.32)]
 
 
@@ -1945,7 +1944,7 @@ func _update_collapses(delta: float) -> void:
 					pt.landed = true
 					var at: Vector3 = skel.global_transform * skel.get_bone_global_pose(b).origin + Vector3(0, 0.4, 0)
 					var color: Color = c.body.get_meta("team_color", Color.WHITE)
-					vfx.play({"kit": "flash", "ramp": PackedColorArray([Color.WHITE, color.lightened(0.4), color]), "count": 12, "size": 2.0}, at)
+					vfx.play({"kit": "flash", "ramp": PackedColorArray([color.lightened(0.6), color.lightened(0.3), color]), "count": 10, "size": 0.7}, at)
 					vfx.play({"kit": "burst", "ramp": PackedColorArray([color.lightened(0.5), color, color.darkened(0.4)]), "count": 36, "speed": 5.5, "lifetime": 0.9, "size": 1.4}, at)
 					skel.set_bone_pose_scale(b, Vector3.ZERO)
 				continue
@@ -1979,10 +1978,76 @@ func _update_collapses(delta: float) -> void:
 			collapses.erase(c)
 
 
+## A heavy cloud of stone dust (15 §5): soft billows, lit like the world, thrown out low and fast,
+## then slowing, swelling and settling as they fade. `size` 1 for a falling part.
+func _dust_cloud(at: Vector3, size: float) -> void:
+	if _dust_mat == null:
+		_dust_mat = ParticleProcessMaterial.new()
+		_dust_mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+		_dust_mat.emission_sphere_radius = 0.4
+		_dust_mat.direction = Vector3(0, 0.3, 0)
+		_dust_mat.spread = 180.0
+		_dust_mat.flatness = 0.65
+		_dust_mat.initial_velocity_min = 1.0
+		_dust_mat.initial_velocity_max = 2.6
+		_dust_mat.damping_min = 1.8
+		_dust_mat.damping_max = 2.8
+		_dust_mat.gravity = Vector3(0, 0.15, 0)
+		_dust_mat.angle_min = -180.0
+		_dust_mat.angle_max = 180.0
+		_dust_mat.angular_velocity_min = -25.0
+		_dust_mat.angular_velocity_max = 25.0
+		_dust_mat.scale_min = 0.8
+		_dust_mat.scale_max = 1.4
+		var grow := Curve.new()
+		grow.add_point(Vector2(0, 0.35))
+		grow.add_point(Vector2(0.3, 0.85))
+		grow.add_point(Vector2(1, 1.0))
+		var gt := CurveTexture.new()
+		gt.curve = grow
+		_dust_mat.scale_curve = gt
+		var g := Gradient.new()
+		g.colors = PackedColorArray([Color(0.5, 0.49, 0.47, 0.0), Color(0.5, 0.49, 0.47, 0.62), Color(0.46, 0.45, 0.44, 0.4), Color(0.44, 0.43, 0.42, 0.0)])
+		g.offsets = PackedFloat32Array([0.0, 0.08, 0.5, 1.0])
+		var ct := GradientTexture1D.new()
+		ct.gradient = g
+		_dust_mat.color_ramp = ct
+		_dust_mesh = QuadMesh.new()
+		_dust_mesh.size = Vector2(1.5, 1.5)
+		var m := StandardMaterial3D.new()
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+		m.vertex_color_use_as_albedo = true
+		m.albedo_texture = MapView.soft_dot()
+		m.roughness = 1.0
+		m.disable_receive_shadows = true
+		_dust_mesh.material = m
+	var p := GPUParticles3D.new()
+	p.one_shot = true
+	p.explosiveness = 0.9
+	p.amount = int(16 * size)
+	p.lifetime = 2.6
+	p.speed_scale = 1.0
+	p.local_coords = false
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.visibility_aabb = AABB(Vector3(-8, -1, -8), Vector3(16, 6, 16))
+	p.process_material = _dust_mat
+	p.draw_pass_1 = _dust_mesh
+	p.scale = Vector3.ONE * size
+	add_child(p)
+	p.global_position = at + Vector3(0, 0.3 * size, 0)
+	p.emitting = true
+	get_tree().create_timer(p.lifetime + 0.5).timeout.connect(p.queue_free)
+
+
+var _dust_mat: ParticleProcessMaterial
+var _dust_mesh: QuadMesh
+
+
 ## Where a falling part hits: a cloud of stone dust, chips flying, cracks in the ground.
 func _stone_impact(at: Vector3, size: float) -> void:
 	var ground := Vector3(at.x, 0.05, at.z)
-	vfx.play({"kit": "dust", "ramp": PackedColorArray(STONE_DUST), "count": int(16 * size), "size": 1.3 * size, "speed": 2.0 * size, "lifetime": 1.2}, ground)
+	_dust_cloud(ground, size)
 	vfx.play({"kit": "burst", "ramp": PackedColorArray(STONE_CHIPS), "count": int(22 * size), "size": 1.3, "speed": 4.5 * size, "lifetime": 0.7}, ground + Vector3(0, 0.3, 0))
 	vfx.play({"kit": "crack", "ramp": PackedColorArray([Color(0.3, 0.3, 0.32), Color(0.2, 0.2, 0.22), Color(0.14, 0.14, 0.15)]), "count": 5, "size": size, "lifetime": 1.5}, ground)
 
@@ -1996,9 +2061,7 @@ func _leave_rubble(gone: Node3D) -> void:
 		pile.scale = Vector3.ONE * {"turret": 1.0, "gatehouse": 1.5, "base": 2.0}.get(kind, 1.0)
 		add_child(pile)
 	# A cloud of stone dust where it fell.
-	var dust := {"kit": "dust", "ramp": PackedColorArray([Color(0.62, 0.6, 0.55), Color(0.5, 0.48, 0.45), Color(0.36, 0.35, 0.33)]),
-		"count": 40, "size": 2.2, "speed": 3.0, "lifetime": 1.4}
-	vfx.play(dust, Vector3(gone.position.x, 0.0, gone.position.z))
+	_dust_cloud(Vector3(gone.position.x, 0.05, gone.position.z), 1.8)
 
 
 func _make_turret(color: Color, collision_radius_u: float) -> Node3D:

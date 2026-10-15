@@ -86,7 +86,14 @@ def shaft(p):
         c = Vector((math.cos(a), math.sin(a), 0)) * 0.67
         p.box((c.x, c.y, 2.65), (0.08, 0.1, 0.3), "cloth", SLIT, rot_z=a)
     # Corbel: the wall flares out under the parapet on carved brackets.
-    p.prism((0, 0), [(3.38, 0.68), (3.52, 0.82), (3.68, 0.98), (3.76, 1.0)], 14, "cloth", TRIM, var=0.1)
+    p.prism((0, 0), [(3.38, 0.68), (3.52, 0.82), (3.68, 0.98), (3.76, 1.0)], 14, "cloth", TRIM, var=0.1, cap_top=False)
+    # Under the parapet, dark charred timber and a ring of broken masonry stubs: hidden inside the
+    # parapet's wall while it stands, the torn top of the shaft once it has fallen.
+    p.prism((0, 0), [(3.62, 0.96), (3.7, 0.96)], 14, "cloth", (0.025, 0.017, 0.012), var=0.15)
+    for i in range(13):
+        a = 2 * math.pi * (i + p.rng.uniform(-0.2, 0.2)) / 13
+        c = Vector((math.cos(a), math.sin(a), 0)) * 0.94
+        p.box((c.x, c.y, 3.68), (0.2, 0.08, p.rng.uniform(0.06, 0.26)), "cloth", p.rng.choice(STONE), var=0.14, rot_z=a + math.pi / 2)
     for i in range(14):
         a = 2 * math.pi * (i + 0.5) / 14
         c = Vector((math.cos(a), math.sin(a), 0)) * 0.8
@@ -106,7 +113,8 @@ def top(p):
         a = 2 * math.pi * i / 9
         c = Vector((math.cos(a), math.sin(a), 0)) * 0.95
         p.box((c.x, c.y, 4.02), (0.32, 0.16, 0.34), "cloth", p.rng.choice(STONE), var=0.12, rot_z=a + math.pi / 2)
-    p.prism((0, 0), [(3.74, 0.9), (3.8, 0.9)], 12, "cloth", STONE_DARK)
+    # The parapet's floor: dark timber, seen only when the roof has come off (a hollow, not a lid).
+    p.prism((0, 0), [(3.74, 0.9), (3.8, 0.9)], 12, "cloth", (0.045, 0.028, 0.018), var=0.1)
     # Two short team banners on the lane side, swallow-tailed, on bronze poles.
     for a in (-math.pi / 2 - 0.55, -math.pi / 2 + 0.55):
         out = Vector((math.cos(a), math.sin(a), 0))
