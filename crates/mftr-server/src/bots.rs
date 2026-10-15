@@ -312,15 +312,33 @@ impl Bot {
             .filter(|u| matches!(u.brain, Some(mftr_sim::world::Brain::Laner { lane: l, .. }) if l as usize == lane))
             .max_by(|a, b| progress(a.state.pos).total_cmp(&progress(b.state.pos)));
         let behind = if cautious { 550.0 } else { 150.0 };
-        let mut goal = match front {
-            Some(m) => m.state.pos - along(path, m.state.pos).1 * behind,
-            // No wave: wait by the frontmost allied turret of this lane.
-            None => world
+        // Horde: no allied wave. Meet the visible enemy nearest our base along the lane.
+        let horde_front = world
+            .rules()
+            .horde
+            .then(|| {
+                world
+                    .units()
+                    .iter()
+                    .filter(visible)
+                    .filter(|u| {
+                        u.team != team && u.targetable() && matches!(u.kind, UnitKind::Minion | UnitKind::Monster)
+                    })
+                    .min_by(|a, b| progress(a.state.pos).total_cmp(&progress(b.state.pos)))
+                    .map(|u| u.state.pos)
+            })
+            .flatten();
+        let mut goal = match (front, horde_front) {
+            (Some(m), _) => m.state.pos - along(path, m.state.pos).1 * behind,
+            (None, Some(e)) => e,
+            // No wave: wait in front of the frontmost allied turret of this lane, not on it
+            // (a turret is solid: walking to its center pins a bot against it).
+            (None, None) => world
                 .units()
                 .iter()
                 .filter(|u| u.team == team && u.kind == UnitKind::Turret && u.state.alive() && u.lane as usize == lane)
                 .max_by(|a, b| progress(a.state.pos).total_cmp(&progress(b.state.pos)))
-                .map_or(path[0], |u| u.state.pos),
+                .map_or(path[0], |u| u.state.pos + along(path, u.state.pos).1 * 400.0),
         };
         // Back off along the lane while the spot is in an unsafe turret's range.
         for _ in 0..20 {

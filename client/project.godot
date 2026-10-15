@@ -9,6 +9,8 @@ config_version=5
 config/name="MFTR"
 config/description="Moba For The Rest (of us): M1 Duel Sandbox"
 run/main_scene="res://scenes/main.tscn"
+config/icon="res://icon.svg"
+config/windows_native_icon="res://icon.ico"
 config/features=PackedStringArray("4.5", "Mobile")
 
 [display]
