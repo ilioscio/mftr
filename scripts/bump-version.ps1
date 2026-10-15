@@ -25,4 +25,4 @@ Set-InFile 'client/export_presets.cfg' '^(application/(short_)?version)="[^"]*"'
 cargo update --workspace --offline
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "Version $Version. Commit, merge to main, then tag that merge: git tag v$Version; git push origin v$Version"
+Write-Host "Version $Version. Commit, merge to main, then run scripts/tag-release.sh (Git Bash)"

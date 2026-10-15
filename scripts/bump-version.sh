@@ -14,4 +14,4 @@ rm -f Cargo.toml.bak client/export_presets.cfg.bak
 # Rewrites only our own crates' entries; dependencies stay pinned.
 cargo update --workspace --offline
 
-echo "Version $version. Commit, merge to main, then tag that merge: git tag v$version && git push origin v$version"
+echo "Version $version. Commit, merge to main, then run scripts/tag-release.sh"
