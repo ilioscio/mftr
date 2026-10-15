@@ -136,6 +136,56 @@ pub struct Layout {
     pub camps: Vec<crate::jungle::Camp>,
     /// Champions carry a trinket and can place wards (01 §8).
     pub wards: bool,
+    /// The map's drawn features as they were drawn, both halves (for the client's ground and
+    /// dressing, 15 §3; the simulation never reads them).
+    pub strokes: Vec<Stroke>,
+    /// The season the map is dressed for by default (15 §9; the client may override it).
+    pub season: Season,
+}
+
+/// A map's season (15 §9): which palette, light, life and particles the client dresses it in.
+/// Purely visual.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Season {
+    #[default]
+    Summer,
+    Autumn,
+    Winter,
+}
+
+impl Season {
+    pub const ALL: [Season; 3] = [Season::Summer, Season::Autumn, Season::Winter];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Season::Summer => "summer",
+            Season::Autumn => "autumn",
+            Season::Winter => "winter",
+        }
+    }
+
+    pub fn from_key(s: &str) -> Option<Self> {
+        Season::ALL.into_iter().find(|x| x.key() == s)
+    }
+}
+
+/// One of a map's drawn features (15 §3): a line with a width, or a circle (one point, `width`
+/// its diameter).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Stroke {
+    pub kind: StrokeKind,
+    pub width: f32,
+    pub points: Vec<Vec2>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StrokeKind {
+    Lane,
+    River,
+    Jungle,
+    Grass,
+    /// Open ground carved for a camp, an objective or by hand.
+    Clearing,
 }
 
 #[derive(Clone, Debug)]

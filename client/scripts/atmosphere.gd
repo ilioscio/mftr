@@ -1,6 +1,7 @@
 extends Node3D
-## Atmosphere over the map (05 §5): cloud shadows drifting across the terrain and pollen motes
-## floating in the light around the camera. Generated at runtime: no texture files.
+## Atmosphere over the map (05 §5): cloud shadows drifting across the terrain and the season's
+## motes around the camera (15 §9): pollen floating in the light in summer, leaves tumbling down
+## in autumn, snow falling in winter. Generated at runtime: no texture files.
 ##
 ## The cloud shadows live in the map's shaders (clouds.gdshaderinc): they dim the sun on
 ## terrain, props and champions alike; this node only moves the wind and sets their strength.
@@ -13,7 +14,8 @@ var _clouds := true
 var _motes: GPUParticles3D
 
 
-func setup(_map_center_m: Vector2) -> void:
+## `motes`: the season's ("pollen", "leaves", "snow").
+func setup(_map_center_m: Vector2, motes := "pollen") -> void:
 	RenderingServer.global_shader_parameter_set("cloud_strength", CLOUD_STRENGTH)
 	_motes = GPUParticles3D.new()
 	_motes.amount = 90
@@ -56,8 +58,51 @@ func setup(_map_center_m: Vector2) -> void:
 	m.emission = Color(1.0, 0.85, 0.55)
 	m.emission_energy_multiplier = 0.6
 	quad.material = m
+	match motes:
+		"leaves":
+			# Fewer, bigger, falling and turning as they go; warm, not glowing.
+			_motes.amount = 46
+			pm.emission_box_extents = Vector3(22, 3.0, 16)
+			pm.gravity = Vector3(0, -0.35, 0)
+			pm.initial_velocity_min = 0.3
+			pm.initial_velocity_max = 0.8
+			pm.turbulence_noise_strength = 1.4
+			pm.angle_min = -180.0
+			pm.angle_max = 180.0
+			pm.angular_velocity_min = -160.0
+			pm.angular_velocity_max = 160.0
+			pm.color_initial_ramp = _ramp([Color(0.85, 0.42, 0.12), Color(0.7, 0.22, 0.08), Color(0.9, 0.68, 0.2)])
+			quad.size = Vector2(0.16, 0.11)
+			m.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+			m.billboard_keep_scale = true
+			m.albedo_color = Color(1, 1, 1, 0.95)
+			m.emission_enabled = false
+		"snow":
+			# Many, small, white, drifting down.
+			_motes.amount = 260
+			_motes.lifetime = 7.0
+			_motes.preprocess = 7.0
+			pm.emission_box_extents = Vector3(24, 4.0, 18)
+			pm.gravity = Vector3(0, -0.5, 0)
+			pm.initial_velocity_min = 0.2
+			pm.initial_velocity_max = 0.5
+			pm.direction = Vector3(WIND.x, -1.0, WIND.y)
+			quad.size = Vector2(0.06, 0.06)
+			m.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+			m.albedo_color = Color(0.96, 0.98, 1.0, 0.85)
+			m.emission = Color(0.85, 0.9, 1.0)
+			m.emission_energy_multiplier = 0.3
 	_motes.draw_pass_1 = quad
 	add_child(_motes)
+
+
+static func _ramp(colors: Array) -> GradientTexture1D:
+	var g := Gradient.new()
+	g.colors = PackedColorArray(colors)
+	g.offsets = PackedFloat32Array(range(colors.size()).map(func(i): return float(i) / (colors.size() - 1)))
+	var t := GradientTexture1D.new()
+	t.gradient = g
+	return t
 
 
 ## Each frame: drift the clouds, keep the motes around what the camera looks at (meters).

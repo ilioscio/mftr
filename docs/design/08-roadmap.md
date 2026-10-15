@@ -849,6 +849,38 @@ Measured against the reference's Wukong (R05), the rules are [14](14-champion-ar
 - **Still waiting:** Shade's R rebalance with the game-AI pass; Marrow's kit, on the owner's
   direction.
 
+## P — Map, structure and minion art (after C)
+
+The owner's call: the map, its structures and the minions next, measured against the reference
+map's visual update (R06), with editor maps first-class and seasons planned for. The rules are
+[15](15-map-art-direction.md) (D60, Proposed).
+
+### Status (2026-10-14): ✅ built (awaiting the owner's review)
+- **Budget:** ×1.5: minions 900–3,900 triangles (they land at 1,710–2,214), map props up to
+  12,000 (cap 18,000; structures 2,450–3,624, rocks 228–450).
+- **Ground:** one shader over grass, dirt, paving and water, from a ground control map baked in
+  Rust from each map's walls, strokes and placements (19 ms for Crossroads in release), in the
+  match and the editor's Actual view alike: plinths of paving under every structure, worn
+  lanes, ragged river banks with foam, occlusion at every cliff's foot.
+- **Cliffs and rocks:** stepped, mossy faces with ledges; tops of the ground's grass with a lip
+  and the forest's gloom; boulders at the cliffs' feet leaning on the face, nothing over a drop;
+  rocks rebuilt (several shapes, cut facets, moss caps).
+- **Structures:** rebuilt in the paving's stone, team color in accents; each falls in stages
+  (crystal shatter, parts tipping and dropping with gravity, dust and chips on impact) into its
+  rubble; braziers burn and light the ground; the crystal lights its plinth.
+- **Minions:** squatter (shorter legs and hood, wider body).
+- **Light:** one wrapped-diffuse lighting model with a little bounce for ground, cliffs and
+  props, a vignette, flickering ground lamps.
+- **Life:** flowers, butterflies, lily pads, hopping frogs and jungle spores, from the control
+  map, sparse.
+- **Seasons:** summer, autumn and winter, as data; a map's season in its file and the editor; a
+  player setting to override it; winter snow on props.
+- **Checked:** captures at the gameplay camera on Crossroads and The Bridge, each season, a
+  structure falling frame by frame, the editor's Actual view of an autumn map; `pack validate`
+  clean; a season round-trip test.
+- **Later:** seasonal prop variants (snowy pines, bare trees, winter grass); butterflies that
+  scatter from units; reeds.
+
 ## S — One server, many matches (between E and M4 slice 5)
 The server plays whatever its players ask for ([13](13-server-instances.md), D57): one process
 on one port runs match instances of every full-match queue, created and stopped with their

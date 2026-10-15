@@ -14,6 +14,8 @@ extends Node3D
 ## options `--blind [seed]`, `--blind-rounds N`, `--blind-seconds S`, `--blind-auto`. `--menu-join`
 ## (scripted checks) opens the menu and joins the first remembered server through it.
 
+const Seasons = preload("res://scripts/seasons.gd")
+
 const UNITS_TO_METERS := 0.01           # 1 game unit = 1 cm
 const CAMERA_PITCH_DEG := 56.0          # D13 / R01 §1
 const CAMERA_VFOV_DEG := 45.0
@@ -43,6 +45,7 @@ var overlay: Control
 var world_env: Environment
 var portraits                             # champion portraits from their models (portraits.gd)
 var sun: DirectionalLight3D
+var vignette: ColorRect                  # shown while a match is on (15 §7)
 var atmosphere                            # cloud shadows and motes (atmosphere.gd), per map
 var _look_point := Vector3.ZERO           # where the camera looks, on the ground
 var _graphics_applied := []
@@ -164,6 +167,16 @@ func _ready() -> void:
 		elif args[i] == "--zoom" and i + 1 < args.size():
 			camera_zoom = maxf(0.05, float(args[i + 1]))
 			i += 1
+		elif args[i] == "--shot-seq-every" and i + 1 < args.size():
+			_shot_seq_every = float(args[i + 1])
+			i += 1
+		elif args[i] == "--shot-collapse":
+			_shot_collapse = true
+		elif args[i] == "--shot-tour" and i + 1 < args.size():
+			for xy in args[i + 1].split(";"):
+				var v := xy.split(",")
+				_shot_tour.append(Vector2(float(v[0]), float(v[1])))
+			i += 1
 		elif args[i] == "--look" and i + 1 < args.size():
 			var xy := args[i + 1].split(",")
 			_shot_look = Vector2(float(xy[0]), float(xy[1]))
@@ -181,6 +194,9 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-tab":
 			_shot_tab = true
+		elif args[i] == "--season" and i + 1 < args.size():
+			settings.season = args[i + 1]  # for this run (not saved): captures of each season
+			i += 1
 		elif args[i] == "--tab-hover" and i + 1 < args.size():
 			_shot_tab_hover = args[i + 1]
 			i += 1
@@ -362,6 +378,13 @@ var _shot_loading := false                # `--shot-loading`: ready up, capture 
 var _menu_auto_join := false             # `--menu-join`: join the first remembered server from the menu
 var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
 var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
+var _shot_tour: Array = []                # `--shot-tour "X,Y;X,Y;..."`: one shot at each point
+var _shot_seq_every := 0.0               # `--shot-seq-every S`: a sequence's frames S seconds apart
+var _shot_seq_last := -1.0
+var _shot_collapse := false
+var _shot_collapse_body = null               # `--shot-collapse`: bring down the structure nearest the look point
+var _shot_tour_i := 0
+var _shot_tour_at := 0.0
 var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
 var _shot_settings := -1                  # `--shot-settings N`: open Settings on tab N
 var _shot_tab_hover := ""                 # `--tab-hover augment|item`: show one's tooltip in it
@@ -470,13 +493,46 @@ func _update_shot(delta: float) -> void:
 	elif _shot_settings >= 0 and _shot_moved and settings_panel == null:
 		_open_settings()
 		settings_panel.tabs.current_tab = _shot_settings
+	elif _shot_collapse and _shot_moved and _shot_timer > _shot_at - 2.0 and _shot_timer - delta <= _shot_at - 2.0:
+		# Structure collapse review (15 §5): look at the turret nearest the look point...
+		var look: Vector2 = _shot_look if _shot_look != null else client.own_position()
+		var best = null
+		for id in remote_bodies:
+			var b: Node3D = remote_bodies[id]
+			if b.get_meta("prop", "") == "turret" and (best == null or Vector2(b.position.x, b.position.z).distance_to(look * UNITS_TO_METERS) < Vector2(best.position.x, best.position.z).distance_to(look * UNITS_TO_METERS)):
+				best = b
+		if best != null:
+			_shot_look = Vector2(best.position.x, best.position.z) / UNITS_TO_METERS
+			_shot_collapse_body = best
+	elif _shot_collapse and _shot_moved and _shot_timer > _shot_at - 0.2 and _shot_timer - delta <= _shot_at - 0.2:
+		# ...and bring it down (client only).
+		if _shot_collapse_body != null:
+			_collapse(_shot_collapse_body)
+	elif _shot_moved and _shot_timer > _shot_at and _shot_seq > 0 and _shot_timer - _shot_seq_last < _shot_seq_every:
+		pass
 	elif _shot_moved and _shot_timer > _shot_at and _shot_seq > 0:
 		# A frame sequence (14 §6 reviews): <path>_000.png, _001, ...
+		_shot_seq_last = _shot_timer
 		get_viewport().get_texture().get_image().save_png(_shot_path.get_basename() + "_%03d.png" % _shot_seq_i)
 		_shot_seq_i += 1
 		if _shot_seq_i >= _shot_seq:
 			print("MFTR: saved %d frames to " % _shot_seq, _shot_path.get_basename(), "_*.png")
 			get_tree().quit()
+	elif _shot_moved and _shot_timer > _shot_at and not _shot_tour.is_empty():
+		# A tour (map art reviews): look at each point, let the camera settle, save
+		# <path>_<i>.png.
+		if _shot_tour_at == 0.0:
+			_shot_look = _shot_tour[0]
+			_shot_tour_at = _shot_timer
+		elif _shot_timer - _shot_tour_at > 1.2:
+			get_viewport().get_texture().get_image().save_png(_shot_path.get_basename() + "_%d.png" % _shot_tour_i)
+			_shot_tour_i += 1
+			if _shot_tour_i >= _shot_tour.size():
+				print("MFTR: saved %d tour shots to " % _shot_tour.size(), _shot_path.get_basename(), "_*.png")
+				get_tree().quit()
+			else:
+				_shot_look = _shot_tour[_shot_tour_i]
+				_shot_tour_at = _shot_timer
 	elif _shot_moved and _shot_timer > _shot_at:
 		get_viewport().get_texture().get_image().save_png(_shot_path)
 		print("MFTR: saved screenshot to ", _shot_path)
@@ -536,6 +592,21 @@ func _build_world() -> void:
 	sun.directional_shadow_max_distance = 45.0
 	sun.directional_shadow_split_1 = 0.4
 	add_child(sun)
+	Seasons.apply_light(Seasons.SUMMER, e, sun)
+	sun.shadow_opacity = 0.8
+
+	# A soft vignette over the view (15 §7): the corners darker, the fight brighter.
+	var vig_layer := CanvasLayer.new()
+	vig_layer.layer = 0
+	add_child(vig_layer)
+	vignette = ColorRect.new()
+	vignette.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var vm := ShaderMaterial.new()
+	vm.shader = load("res://shaders/vignette.gdshader")
+	vignette.material = vm
+	vignette.visible = false
+	vig_layer.add_child(vignette)
 
 	ground = MeshInstance3D.new()
 	_size_ground(Vector2(ARENA_U, ARENA_U))
@@ -1535,9 +1606,11 @@ func _update_remotes(delta: float) -> void:
 		if not seen.has(id):
 			var gone: Node3D = remote_bodies[id]
 			remote_bodies.erase(id)
-			# Structures are always visible: one that's gone fell. It leaves rubble.
+			# Structures are always visible: one that's gone fell. It collapses (15 §5): the
+			# plinth and the stump stay, under rubble.
 			if gone.has_meta("prop"):
-				_leave_rubble(gone)
+				_collapse(gone)
+				continue
 			# A minion last seen at 0 health died (rather than leaving our vision): it plays its
 			# death where it fell, then sinks away (A5).
 			if _models_shown(gone) and float(gone.get_meta("last_health", 1.0)) <= 0.0:
@@ -1546,6 +1619,7 @@ func _update_remotes(delta: float) -> void:
 				corpses.append({ "body": gone, "t": 0.0 })
 			else:
 				gone.queue_free()
+	_update_collapses(delta)
 	for c in corpses.duplicate():
 		c.t += delta
 		var rig: Dictionary = c.body.get_meta("rig")
@@ -1708,11 +1782,18 @@ func _size_ground(size_u: Vector2, margin_u := 0.0) -> void:
 func _build_map() -> void:
 	_map_built = true
 	var geo: Dictionary = client.map_geometry()
+	geo["ground"] = client.map_ground()
+	geo["cliffs"] = client.map_cliffs()
+	# The map's own season unless the player picked one (15 §9).
+	if settings.season in Seasons.NAMES:
+		geo["season"] = settings.season
+	Seasons.apply_light(Seasons.get_season(geo.season), world_env, sun)
+	vignette.visible = true
 	var size: Vector2 = geo.size
 	_build_minimap(geo)
 	atmosphere = preload("res://scripts/atmosphere.gd").new()
 	add_child(atmosphere)
-	atmosphere.setup(size / 2.0 * UNITS_TO_METERS)
+	atmosphere.setup(size / 2.0 * UNITS_TO_METERS, Seasons.get_season(geo.season).get("motes", "pollen"))
 	# The world: ground, roads, river, cliffs, brush, scenery, fountains (shared with the map
 	# editor's Actual view).
 	var view: Node3D = MapView.new()
@@ -1745,12 +1826,23 @@ func _prop_node(id: String, team: Color) -> MeshInstance3D:
 
 ## A structure from its prop (turned to face down the lane when placed); null without one.
 func _structure_prop(id: String, color: Color, dome_radius: float, dome_lift: float) -> Node3D:
-	var model := _prop_node(id, color)
-	if model == null:
+	var source := _prop_model(id)
+	if source == null:
 		return null
+	# Skinned (not a static copy): its part bones fall when it's destroyed (15 §5).
+	var model: Node3D = source.instantiate()
+	var mesh: MeshInstance3D = model.get_node("Skeleton/Mesh")
+	var mats := _prop_materials(source, color)
+	for i in mats.size():
+		mesh.set_surface_override_material(i, mats[i])
+	model.set_meta("prop_mats", mats)
 	var root := Node3D.new()
 	model.name = "Model"
 	root.add_child(model)
+	root.set_meta("team_color", color)
+	var view := get_node_or_null("MapView")
+	if view != null:
+		view.add_glows(model, id, color)
 	# Protected (an earlier structure in its lane stands): a pale ward ring on the ground and a
 	# cold sheen on the stone, instead of a dome hiding the model.
 	var ward := MeshInstance3D.new()
@@ -1784,6 +1876,183 @@ func _relic_pad(at: Vector2) -> void:
 		add_child(pad)
 
 
+## ---- Structures falling (15 §5) --------------------------------------------------------------
+## A destroyed structure comes down in stages, heavy: its crystal shatters first, then each part
+## above the stump, top first, shudders, tips about its foot and drops with gravity onto the
+## plinth, throwing up dust and stone chips where it lands, and sinks into its own rubble. The
+## plinth and the stump stay. The motion is computed here from the model's part bones
+## (`part_*`, each pivoting at its foot), so every structure that has them falls the same way.
+
+var collapses := []
+const COLLAPSE_SECONDS := 3.4
+const STONE_CHIPS := [Color(0.58, 0.6, 0.63), Color(0.42, 0.44, 0.47), Color(0.28, 0.29, 0.32)]
+
+
+func _collapse(body: Node3D) -> void:
+	if body.has_node("Protected"):
+		body.get_node("Protected").visible = false
+	# The crystal's light goes out with it.
+	for lamp in body.find_children("Lamp_crystal*", "", true, false):
+		lamp.visible = false
+	var skel: Skeleton3D = body.get_node_or_null("Model/Skeleton")
+	if skel == null:
+		_leave_rubble(body)
+		return
+	# Which way it falls: away from its own side, a little to one side, from where it stands.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(Vector2i(roundi(body.position.x * 10.0), roundi(body.position.z * 10.0)))
+	var parts := []
+	for b in skel.get_bone_count():
+		var bone_name := skel.get_bone_name(b)
+		if not bone_name.begins_with("part_"):
+			continue
+		var foot: float = skel.get_bone_rest(b).origin.y
+		parts.append({"bone": b, "name": bone_name, "foot": foot})
+	parts.sort_custom(func(a, b): return a.foot > b.foot)
+	var lean := Vector3(rng.randf_range(-1.0, 1.0), 0.0, rng.randf_range(-1.0, 1.0)).normalized()
+	for i in parts.size():
+		var pt: Dictionary = parts[i]
+		pt.delay = 0.12 + 0.3 * i
+		# Higher parts tip further and slide out; lower ones mostly drop where they stand.
+		var height_share: float = clampf(pt.foot / 5.0, 0.2, 1.0)
+		pt.tilt = deg_to_rad(rng.randf_range(35.0, 80.0) * height_share)
+		pt.axis = lean.cross(Vector3.UP).rotated(Vector3.UP, rng.randf_range(-0.5, 0.5)).normalized()
+		pt.slide = lean * pt.foot * rng.randf_range(0.35, 0.6) * height_share
+		pt.drop = pt.foot * 0.92
+		pt.landed = false
+	collapses.append({"body": body, "skel": skel, "parts": parts, "t": 0.0, "rubble": false})
+	_sfx_play("", ["structure.fall"], body.global_position)
+
+
+func _update_collapses(delta: float) -> void:
+	const G := 9.8
+	for c in collapses.duplicate():
+		c.t += delta
+		var skel: Skeleton3D = c.skel
+		if not is_instance_valid(skel):
+			collapses.erase(c)
+			continue
+		for pt in c.parts:
+			var t: float = c.t - pt.delay
+			if t < 0.0:
+				continue
+			var b: int = pt.bone
+			if pt.name.begins_with("part_crystal"):
+				# The eye cracks, flares and bursts into shards.
+				if t < 0.35:
+					skel.set_bone_pose_scale(b, Vector3.ONE * (1.0 + 0.06 * sin(t * 90.0)))
+				elif not pt.landed:
+					pt.landed = true
+					var at: Vector3 = skel.global_transform * skel.get_bone_global_pose(b).origin + Vector3(0, 0.4, 0)
+					var color: Color = c.body.get_meta("team_color", Color.WHITE)
+					vfx.play({"kit": "flash", "ramp": PackedColorArray([color.lightened(0.6), color.lightened(0.3), color]), "count": 10, "size": 0.7}, at)
+					vfx.play({"kit": "burst", "ramp": PackedColorArray([color.lightened(0.5), color, color.darkened(0.4)]), "count": 36, "speed": 5.5, "lifetime": 0.9, "size": 1.4}, at)
+					skel.set_bone_pose_scale(b, Vector3.ZERO)
+				continue
+			var rest: Transform3D = skel.get_bone_rest(b)
+			var shake := 0.28
+			if t < shake:
+				# A shudder before it goes.
+				var j := sin(t * 70.0 + float(b)) * 0.02 * (t / shake)
+				skel.set_bone_pose_rotation(b, rest.basis.get_rotation_quaternion() * Quaternion(pt.axis, j))
+				continue
+			var tf: float = sqrt(2.0 * pt.drop / G)
+			var s := clampf((t - shake) / tf, 0.0, 1.0)
+			var tip: float = pt.tilt * pow(s, 1.6)
+			var fall: Vector3 = Vector3(0, -pt.drop * s * s, 0) + pt.slide * s * s
+			if s >= 1.0:
+				if not pt.landed:
+					pt.landed = true
+					var at: Vector3 = skel.global_transform * (rest.origin + fall)
+					_stone_impact(at, clampf(pt.drop / 2.0, 0.6, 1.6))
+				# Settling into the rubble: sinks slowly.
+				var sink: float = minf((t - shake - tf) * 0.35, 0.9)
+				fall.y -= sink
+			skel.set_bone_pose_rotation(b, Quaternion(pt.axis, tip) * rest.basis.get_rotation_quaternion())
+			skel.set_bone_pose_position(b, rest.origin + fall)
+		if not c.rubble and c.t > COLLAPSE_SECONDS - 0.9:
+			c.rubble = true
+			_leave_rubble(c.body)
+		if c.t > COLLAPSE_SECONDS:
+			for pt in c.parts:
+				skel.set_bone_pose_scale(pt.bone, Vector3.ZERO)
+			collapses.erase(c)
+
+
+## A heavy cloud of stone dust (15 §5): soft billows, lit like the world, thrown out low and fast,
+## then slowing, swelling and settling as they fade. `size` 1 for a falling part.
+func _dust_cloud(at: Vector3, size: float) -> void:
+	if _dust_mat == null:
+		_dust_mat = ParticleProcessMaterial.new()
+		_dust_mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+		_dust_mat.emission_sphere_radius = 0.4
+		_dust_mat.direction = Vector3(0, 0.3, 0)
+		_dust_mat.spread = 180.0
+		_dust_mat.flatness = 0.65
+		_dust_mat.initial_velocity_min = 1.0
+		_dust_mat.initial_velocity_max = 2.6
+		_dust_mat.damping_min = 1.8
+		_dust_mat.damping_max = 2.8
+		_dust_mat.gravity = Vector3(0, 0.15, 0)
+		_dust_mat.angle_min = -180.0
+		_dust_mat.angle_max = 180.0
+		_dust_mat.angular_velocity_min = -25.0
+		_dust_mat.angular_velocity_max = 25.0
+		_dust_mat.scale_min = 0.8
+		_dust_mat.scale_max = 1.4
+		var grow := Curve.new()
+		grow.add_point(Vector2(0, 0.35))
+		grow.add_point(Vector2(0.3, 0.85))
+		grow.add_point(Vector2(1, 1.0))
+		var gt := CurveTexture.new()
+		gt.curve = grow
+		_dust_mat.scale_curve = gt
+		var g := Gradient.new()
+		g.colors = PackedColorArray([Color(0.5, 0.49, 0.47, 0.0), Color(0.5, 0.49, 0.47, 0.62), Color(0.46, 0.45, 0.44, 0.4), Color(0.44, 0.43, 0.42, 0.0)])
+		g.offsets = PackedFloat32Array([0.0, 0.08, 0.5, 1.0])
+		var ct := GradientTexture1D.new()
+		ct.gradient = g
+		_dust_mat.color_ramp = ct
+		_dust_mesh = QuadMesh.new()
+		_dust_mesh.size = Vector2(1.5, 1.5)
+		var m := StandardMaterial3D.new()
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+		m.vertex_color_use_as_albedo = true
+		m.albedo_texture = MapView.soft_dot()
+		m.roughness = 1.0
+		m.disable_receive_shadows = true
+		_dust_mesh.material = m
+	var p := GPUParticles3D.new()
+	p.one_shot = true
+	p.explosiveness = 0.9
+	p.amount = int(16 * size)
+	p.lifetime = 2.6
+	p.speed_scale = 1.0
+	p.local_coords = false
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.visibility_aabb = AABB(Vector3(-8, -1, -8), Vector3(16, 6, 16))
+	p.process_material = _dust_mat
+	p.draw_pass_1 = _dust_mesh
+	p.scale = Vector3.ONE * size
+	add_child(p)
+	p.global_position = at + Vector3(0, 0.3 * size, 0)
+	p.emitting = true
+	get_tree().create_timer(p.lifetime + 0.5).timeout.connect(p.queue_free)
+
+
+var _dust_mat: ParticleProcessMaterial
+var _dust_mesh: QuadMesh
+
+
+## Where a falling part hits: a cloud of stone dust, chips flying, cracks in the ground.
+func _stone_impact(at: Vector3, size: float) -> void:
+	var ground := Vector3(at.x, 0.05, at.z)
+	_dust_cloud(ground, size)
+	vfx.play({"kit": "burst", "ramp": PackedColorArray(STONE_CHIPS), "count": int(22 * size), "size": 1.3, "speed": 4.5 * size, "lifetime": 0.7}, ground + Vector3(0, 0.3, 0))
+	vfx.play({"kit": "crack", "ramp": PackedColorArray([Color(0.3, 0.3, 0.32), Color(0.2, 0.2, 0.22), Color(0.14, 0.14, 0.15)]), "count": 5, "size": size, "lifetime": 1.5}, ground)
+
+
 func _leave_rubble(gone: Node3D) -> void:
 	var kind: String = gone.get_meta("prop")
 	var pile := _prop_node("rubble", Color.WHITE)
@@ -1793,9 +2062,7 @@ func _leave_rubble(gone: Node3D) -> void:
 		pile.scale = Vector3.ONE * {"turret": 1.0, "gatehouse": 1.5, "base": 2.0}.get(kind, 1.0)
 		add_child(pile)
 	# A cloud of stone dust where it fell.
-	var dust := {"kit": "dust", "ramp": PackedColorArray([Color(0.62, 0.6, 0.55), Color(0.5, 0.48, 0.45), Color(0.36, 0.35, 0.33)]),
-		"count": 40, "size": 2.2, "speed": 3.0, "lifetime": 1.4}
-	vfx.play(dust, Vector3(gone.position.x, 0.0, gone.position.z))
+	_dust_cloud(Vector3(gone.position.x, 0.05, gone.position.z), 1.8)
 
 
 func _make_turret(color: Color, collision_radius_u: float) -> Node3D:

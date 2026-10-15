@@ -9,6 +9,8 @@ extends Control
 ## objectives, clearings and turrets (along their lane); Delete removes; Ctrl+Z undoes; Ctrl+S
 ## saves.
 
+const Seasons = preload("res://scripts/seasons.gd")
+
 signal closed
 
 const MAPS_DIR := "user://maps"
@@ -86,6 +88,9 @@ var camp_row: OptionButton
 var name_edit: LineEdit
 var size_pick: OptionButton
 var kind_pick: OptionButton
+var season_pick: OptionButton
+var view_env: Environment
+var view_sun: DirectionalLight3D
 var problems_label: RichTextLabel
 var help_label: Label
 var status_label: Label
@@ -199,6 +204,19 @@ func _build_ui() -> void:
 	_fill_sizes("classic")
 	size_pick.item_selected.connect(_resize_map)
 	grid.add_child(size_pick)
+	var sel := Label.new()
+	sel.text = "Season"
+	grid.add_child(sel)
+	season_pick = OptionButton.new()
+	for n in Seasons.NAMES:
+		season_pick.add_item(str(n).capitalize())
+	season_pick.tooltip_text = "How the map is dressed by default: its ground, cliffs, light, flora and fauna. Players can choose another in their settings. Looks only: it never changes play."
+	season_pick.item_selected.connect(func(i: int):
+		_snapshot()
+		spec["season"] = Seasons.NAMES[i]
+		view_stale = true
+		_changed(false))
+	grid.add_child(season_pick)
 	lv.add_child(grid)
 
 	lv.add_child(_header("TOOLS"))
@@ -411,9 +429,10 @@ func _fill_sizes(kind: String) -> void:
 		size_pick.add_item("%s  (%d u)" % [SIZE_NAMES[mini(i, 2)], int(sizes[i])])
 
 
-## Show the kind and size in their pickers, and only the tools the kind uses.
+## Show the kind, size and season in their pickers, and only the tools the kind uses.
 func _sync_kind_ui() -> void:
 	var kind: String = spec.get("kind", "classic")
+	season_pick.select(maxi(Seasons.NAMES.find(spec.get("season", "summer")), 0))
 	for i in KINDS.size():
 		if KINDS[i][0] == kind:
 			kind_pick.select(i)
@@ -479,6 +498,8 @@ func to_text() -> String:
 	if spec.get("kind", "classic") != "classic":
 		s += "kind %s\n" % spec.kind
 	s += "size %d\n" % int(spec.size)
+	if spec.get("season", "summer") != "summer":
+		s += "season %s\n" % spec.season
 	for kind in LINE_KINDS:
 		for l in spec[kind]:
 			var pts := PackedStringArray()
@@ -1248,6 +1269,8 @@ func _show_actual(on: bool) -> void:
 		sun.shadow_opacity = 0.72
 		sun.directional_shadow_max_distance = 200.0
 		view_port.add_child(sun)
+		view_env = e
+		view_sun = sun
 		view_cam = Camera3D.new()
 		view_cam.far = 400.0
 		view_port.add_child(view_cam)
@@ -1275,8 +1298,11 @@ func _build_view() -> void:
 	view_port.add_child(view_root)
 	var s := float(spec.size)
 	var fountains: PackedVector2Array = built.fountains
+	var season: String = built.get("season", "summer")
+	Seasons.apply_light(Seasons.get_season(season), view_env, view_sun)
 	var geo := {
-		"walls": built.walls, "brush": built.brush, "size": Vector2(s, s), "roads": built.lanes, "river": built.river,
+		"walls": built.walls, "brush": built.brush, "size": Vector2(s, s), "roads": built.lanes, "river": built.river, "ground": built.get("ground"),
+		"season": season, "cliffs": built.get("cliffs", {}),
 		"fountains": [{"center": fountains[0], "radius": float(built.get("fountain_radius", 750.0)), "ally": true}, {"center": fountains[1], "radius": float(built.get("fountain_radius", 750.0)), "ally": false}],
 	}
 	var ground := MapView.make_ground()
@@ -1301,6 +1327,7 @@ func _build_view() -> void:
 			dir = -dir
 		node.rotation.y = atan2(dir.x, dir.y)
 		view_root.add_child(node)
+		world.add_glows(node, kind, color)
 	for rp in (built.get("relics", PackedVector2Array()) as PackedVector2Array):
 		var orb := MeshInstance3D.new()
 		var sphere := SphereMesh.new()

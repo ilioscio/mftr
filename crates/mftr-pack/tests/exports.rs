@@ -95,9 +95,15 @@ const MAP_PROPS: [&str; 14] = [
 /// be a prop while carrying a biped skeleton and clips is refused.
 #[test]
 fn props_are_static_models_on_a_root_bone() {
+    let rock = mftr_pack::load_file(&art("props/rock_1/export/rock_1.glb")).unwrap();
+    assert_eq!(rock.kind, "prop");
+    assert_eq!(rock.library.rig.names, vec!["root".to_string()]);
+    assert!(rock.library.clips.is_empty());
+    // A structure adds the part bones its collapse moves (15 §5), and still no clips.
     let loaded = mftr_pack::load_file(&art("props/turret/export/turret.glb")).unwrap();
-    assert_eq!(loaded.kind, "prop");
-    assert_eq!(loaded.library.rig.names, vec!["root".to_string()]);
+    let names = &loaded.library.rig.names;
+    assert_eq!(names[0], "root");
+    assert!(names.len() > 1 && names[1..].iter().all(|n| n.starts_with("part_")), "{names:?}");
     assert!(loaded.library.clips.is_empty());
     let glb = std::fs::read(art("minions/melee/export/melee.glb")).unwrap();
     let side = std::fs::read_to_string(art("minions/melee/export/melee.anims.ron")).unwrap();

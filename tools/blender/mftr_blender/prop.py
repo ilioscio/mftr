@@ -57,6 +57,31 @@ class Prop:
         self.deform = self.bm.verts.layers.deform.verify()
         self.col = self.bm.verts.layers.float_color.new("Col")
         self.tris = 0
+        # Part bones (15 §5): faces made after `part(name, at)` go on `part_<name>`, a bone the
+        # client moves on its own (a structure's collapse); else on `root`.
+        self.groups = ["root"]
+        self.group = 0
+
+    def part(self, name, at=(0.0, 0.0, 0.0)):
+        """Put the faces that follow on the bone `part_<name>`, its head at `at` (the point it
+        pivots about when it falls: its foot). `part(None)` goes back to `root`."""
+        if name is None:
+            self.group = 0
+            return
+        bone = f"part_{name}"
+        if bone not in self.groups:
+            prev = bpy.context.view_layer.objects.active
+            bpy.context.view_layer.objects.active = self.arm
+            bpy.ops.object.mode_set(mode="EDIT")
+            b = self.arm.data.edit_bones.new(bone)
+            b.head = Vector(at)
+            b.tail = Vector(at) + Vector((0, 0, 0.5))
+            b.parent = self.arm.data.edit_bones["root"]
+            b.use_deform = True
+            bpy.ops.object.mode_set(mode="OBJECT")
+            bpy.context.view_layer.objects.active = prev
+            self.groups.append(bone)
+        self.group = self.groups.index(bone)
 
     # --- faces ----------------------------------------------------------------------------
 
@@ -81,7 +106,7 @@ class Prop:
         vs = []
         for p in pts:
             v = self.bm.verts.new(p)
-            v[self.deform][0] = 1.0
+            v[self.deform][self.group] = 1.0
             a = ao if ao is not None else max(0.5, min(1.0, 0.5 + 0.5 * p[2] / self.ao_height))
             v[self.col] = (*c, a)
             vs.append(v)
@@ -206,6 +231,50 @@ class Prop:
             self.face(pts, slot, tuple(min(1.0, x * k) for x in color), var, out=out)
         tmp.free()
 
+    def boulder(self, center, size, color, moss=None, slot="cloth", var=0.08, rough=0.16, cuts=4, subdiv=3,
+                sink=0.12, tilt=(0.0, 0.0)):
+        """A weathered boulder (15 §4): a finer sphere, roughened, then chipped flat by `cuts`
+        random planes so it reads as broken stone; up-facing faces mossy (`moss`), undersides
+        darker; its foot sunk `sink` of its height below the ground, so it never floats."""
+        tmp = bmesh.new()
+        bmesh.ops.create_icosphere(tmp, subdivisions=subdiv, radius=1.0)
+        # Low-frequency roughness: a few random bumps, not per-vertex noise.
+        bumps = [(Vector((self.rng.uniform(-1, 1), self.rng.uniform(-1, 1), self.rng.uniform(-0.3, 1))).normalized(),
+                  self.rng.uniform(-rough, rough)) for _ in range(6)]
+        for v in tmp.verts:
+            d = v.co.normalized()
+            k = 1.0 + sum(a * max(0.0, d.dot(b)) ** 2 for b, a in bumps) + self.rng.uniform(-rough, rough) * 0.25
+            v.co = d * k
+        # Chips: flatten everything past a plane.
+        for _ in range(cuts):
+            n = Vector((self.rng.uniform(-1, 1), self.rng.uniform(-1, 1), self.rng.uniform(-0.2, 0.9))).normalized()
+            off = self.rng.uniform(0.42, 0.72)
+            for v in tmp.verts:
+                over = v.co.dot(n) - off
+                if over > 0:
+                    v.co -= n * over
+        rot = Matrix.Rotation(tilt[0], 3, "X") @ Matrix.Rotation(tilt[1], 3, "Y")
+        lift = size[2] * (0.5 - sink)
+        for v in tmp.verts:
+            q = rot @ Vector((v.co.x * size[0] / 2, v.co.y * size[1] / 2, v.co.z * size[2] / 2))
+            v.co = q + Vector(center) + Vector((0, 0, lift))
+        mid = Vector(center) + Vector((0, 0, lift))
+        for f in tmp.faces:
+            pts = [v.co.copy() for v in f.verts]
+            if max(p.z for p in pts) < Vector(center).z - 1e-4:
+                continue  # wholly under the ground: never seen
+            for q in pts:
+                q.z = max(q.z, Vector(center).z - 0.02)
+            out = sum(pts, Vector()) / len(pts) - mid
+            nz = f.normal.z if f.normal.length > 0 else out.normalized().z
+            nz = (rot @ f.normal).z if f.normal.length > 0 else nz
+            c = color
+            if moss is not None and nz > 0.72 and self.rng.random() < 0.85:
+                c = moss
+            k = 1.0 + 0.16 * max(-1.0, min(1.0, nz)) if c is color else 1.0
+            self.face(pts, slot, tuple(min(1.0, x * k) for x in c), var, out=out)
+        tmp.free()
+
     def star_tier(self, c, z, r, h, points, slot, color, var=0.1, inner=0.62, droop=0.12, rot=0.0):
         """A jagged cone (a pine's tier): a star-shaped skirt rising to a point."""
         ring = []
@@ -280,7 +349,8 @@ class Prop:
         bpy.context.scene.collection.objects.link(obj)
         for slot in mesh.MATERIAL_SLOTS:
             me.materials.append(mesh.material(slot))
-        obj.vertex_groups.new(name="root")
+        for g in self.groups:
+            obj.vertex_groups.new(name=g)
         self.bm.to_mesh(me)
         self.bm.free()
         me.color_attributes.active_color = me.color_attributes["Col"]

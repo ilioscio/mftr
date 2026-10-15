@@ -68,10 +68,12 @@ def _mirror(entry):
 # then scales the whole thing. Minions are chibi: a big head, short legs, about 1.05 m tall.
 SHAPES = {
     "standard": None,
+    # Squat (15 §6, R06 §6): short legs, a wide body, the hooded head about a third of the
+    # height; ~0.95 m to the hood's tip.
     "minion": {
-        "heights": [(0.0, 0.0), (0.03, 0.02), (0.09, 0.05), (0.54, 0.22), (1.00, 0.40), (1.12, 0.46),
-                    (1.40, 0.60), (1.56, 0.68), (1.64, 0.71), (1.88, 0.98), (2.15, 1.20)],
-        "x": 0.72, "y": 0.75, "scale": 1.0,
+        "heights": [(0.0, 0.0), (0.03, 0.02), (0.09, 0.045), (0.54, 0.17), (1.00, 0.32), (1.12, 0.38),
+                    (1.40, 0.53), (1.56, 0.62), (1.64, 0.66), (1.88, 0.90), (2.15, 1.08)],
+        "x": 0.84, "y": 0.84, "scale": 1.0,
     },
     # `biped_large` (10 §7.1): brutes. Taller (~2.05 m), much broader and deeper; the same bones.
     "large": {

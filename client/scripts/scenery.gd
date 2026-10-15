@@ -15,6 +15,8 @@ const OUTSIDE_U := 1700.0                 # how far the forest reaches past the 
 const CLIFF_M := 1.4
 
 var _walls: Array = []
+## Which walls are outcrops: boulders in the field, drawn as rock clusters (from the built cliffs).
+var _outcrop := {}
 var _boxes: Array = []                    # each wall's bounding box
 ## Wall edges that face open ground (not seams inside rock), bucketed by EDGE_CELL.
 const EDGE_CELL := 600.0
@@ -29,17 +31,33 @@ var _across := Vector2.ZERO
 var _probe_camera_side := false
 var _batches := {}                        # prop id -> [Transform3D, Color]
 var _rng := RandomNumberGenerator.new()
+## The season (15 §9): a tint over every prop, and props swapped for their seasonal variants.
+var _tint := Color.WHITE
+var _substitute := {}
 
 
 ## `geo` is `map_geometry()`; `materials_for(id)` returns [mesh, materials] for a prop, or null.
 func build(geo: Dictionary, materials_for: Callable) -> void:
 	_rng.seed = 1971
+	var season: Dictionary = preload("res://scripts/seasons.gd").get_season(geo.get("season", "summer"))
+	_tint = season.get("tint", Color.WHITE)
+	_substitute = season.get("substitute", {})
 	var size: Vector2 = geo.size
 	var walls: Array = geo.walls
 	_walls = walls
+	for i in (geo.get("cliffs", {}) as Dictionary).get("outcrops", PackedInt32Array()):
+		_outcrop[i] = true
 	_index_walls(walls, size)
 	_size = size
 	var brush: Array = geo.brush
+	# The ground control map (15 §3), when there is one: nothing small stands in the river.
+	var ctl = geo.get("ground")
+	var wet := func(p: Vector2) -> bool:
+		if not (ctl is Image):
+			return false
+		var x := clampi(int(p.x / 25.0), 0, ctl.get_width() - 1)
+		var y := clampi(int(p.y / 25.0), 0, ctl.get_height() - 1)
+		return ctl.get_pixel(x, y).b > 0.1
 	var fountains: Array = geo.get("fountains", [])
 	var lane_map := fountains.size() == 2
 	# Several lanes (Crossroads): whether a spot is on the camera's side of the ground it
@@ -70,9 +88,10 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 				_forest_at(p, edge, _near_camera(p, edge), lane_map)
 			x += step
 		y += step
-	# Small walls (outcrops in the lane) are drawn as rock clusters (`is_outcrop`).
-	for poly in walls:
-		if is_outcrop(poly):
+	# Outcrops (small walls on their own, in the lane) are drawn as rock clusters.
+	for wi in walls.size():
+		var poly: PackedVector2Array = walls[wi]
+		if _outcrop.has(wi):
 			var r := _bounds(poly)
 			var c := r.get_center()
 			var rad := maxf(r.size.x, r.size.y) / 2.0
@@ -80,22 +99,62 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 			for k in 3:
 				var a := _rng.randf_range(0.0, TAU)
 				_add(["rock_2", "bush_1", "rock_1"][k], c + Vector2.from_angle(a) * rad * 0.9, rad / 190.0)
-	# Rocks along the walls' inner edges, half sunk into the cliff.
-	for poly in walls:
-		if is_outcrop(poly):
+	# Boulders at the foot of the cliffs (15 §4, R06 §3): on the ground, their centers pushed into
+	# the wall so they lean against its face and rise up it; never on the cliff's edge, where
+	# half a rock would hang over the drop. Only along edges that face open ground.
+	for wi in walls.size():
+		var poly: PackedVector2Array = walls[wi]
+		if _outcrop.has(wi):
 			continue
 		var n: int = poly.size()
 		for i in n:
 			var a: Vector2 = poly[i]
 			var b: Vector2 = poly[(i + 1) % n]
 			var len := a.distance_to(b)
-			var t := _rng.randf_range(0.0, 400.0)
+			var t := _rng.randf_range(0.0, 500.0)
 			while t < len:
 				var q := a.lerp(b, t / len)
-				if q.x > 0 and q.x < size.x and q.y > 0 and q.y < size.y:
-					var id: String = ["rock_1", "rock_2", "bush_1", "bush_1", "rock_1", "rock_3"][_rng.randi() % 6]
-					_add(id, q, _rng.randf_range(0.9, 1.6))
-				t += _rng.randf_range(350.0, 800.0)
+				t += _rng.randf_range(420.0, 900.0)
+				if q.x <= 0 or q.x >= size.x or q.y <= 0 or q.y >= size.y:
+					continue
+				var normal := (b - a).orthogonal().normalized()
+				var into := normal if _inside_wall(q + normal * 30.0) else -normal
+				if _inside_wall(q - into * 30.0):
+					continue  # a seam between two pieces of rock, not a cliff face
+				var id: String = ["rock_4", "rock_1", "rock_4", "rock_3", "bush_1"][_rng.randi() % 5]
+				var scale := _rng.randf_range(1.1, 1.6)
+				var reach := 0.5 * 95.0 * scale      # half the rock's half-width (u): it leans on the face
+				_add_at(id, q + into * reach, scale, 0.0)
+	# The cliffs' tops along their edges: tufts of grass near the lip, a bush set back from it,
+	# so the edge reads as a meadow's rim rather than a cut (each set back past its own radius).
+	for wi in walls.size():
+		var poly: PackedVector2Array = walls[wi]
+		if _outcrop.has(wi):
+			continue
+		var n: int = poly.size()
+		for i in n:
+			var a: Vector2 = poly[i]
+			var b: Vector2 = poly[(i + 1) % n]
+			var len := a.distance_to(b)
+			var t := _rng.randf_range(0.0, 300.0)
+			while t < len:
+				var q := a.lerp(b, t / len)
+				t += _rng.randf_range(160.0, 380.0)
+				if q.x <= 0 or q.x >= size.x or q.y <= 0 or q.y >= size.y:
+					continue
+				var normal := (b - a).orthogonal().normalized()
+				var into := normal if _inside_wall(q + normal * 30.0) else -normal
+				if _inside_wall(q - into * 30.0):
+					continue
+				if _rng.randf() < 0.7:
+					var g := q + into * _rng.randf_range(55.0, 140.0)
+					if _edge_distance(g, walls, size) > 50.0:
+						_add("grass_1", g, _rng.randf_range(1.0, 1.5))
+				else:
+					var scale := _rng.randf_range(0.7, 1.0)
+					var g := q + into * (105.0 * scale + _rng.randf_range(30.0, 90.0))
+					if _edge_distance(g, walls, size) > 105.0 * scale:
+						_add("bush_1", g, scale)
 	# Tall grass filling the brush.
 	for poly in brush:
 		var r := _bounds(poly)
@@ -108,10 +167,16 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 					_add("grass_1", p, _rng.randf_range(1.3, 1.9))
 				gx += 55.0
 			gy += 55.0
+	# Small stones in the grass near the walls (ankle high: they never read as blocking).
+	for i in int(size.x * size.y / 900000.0):
+		var p := Vector2(_rng.randf_range(0, size.x), _rng.randf_range(0, size.y))
+		var e := _wall_near(p, 260.0)
+		if e and not _inside_wall(p) and not wet.call(p):
+			_add("stones_1", p, _rng.randf_range(0.7, 1.2))
 	# Tufts scattered over the walkable grass, sparse in the middle of the lane.
 	for i in int(size.x * size.y / 90000.0):
 		var p := Vector2(_rng.randf_range(0, size.x), _rng.randf_range(0, size.y))
-		if _edge_distance(p, walls, size) > 0.0:
+		if _edge_distance(p, walls, size) > 0.0 or wet.call(p):
 			continue
 		var from_mid := clampf(absf((p - _lane_mid).dot(_across)) / 1500.0, 0.0, 1.0) if lane_map else 1.0
 		if _rng.randf() < from_mid * 0.9:
@@ -122,18 +187,18 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 ## Trees where there's room, low props near the lane on the camera's side.
 func _forest_at(p: Vector2, edge: float, near_camera: bool, lane_map: bool) -> void:
 	if near_camera and edge < 520.0:
-		if _rng.randf() < 0.55:
-			_add(["bush_1", "bush_1", "rock_1", "rock_2"][_rng.randi() % 4], p, _rng.randf_range(0.9, 1.5))
+		var scale := _rng.randf_range(0.9, 1.5)
+		# Set back from the edge by at least its own radius: nothing hangs over the drop.
+		if _rng.randf() < 0.55 and edge > 105.0 * scale:
+			_add(["bush_1", "bush_1", "rock_1", "rock_2"][_rng.randi() % 4], p, scale)
 		return
-	if edge < 120.0:
-		if _rng.randf() < 0.5:
-			_add("bush_1", p, _rng.randf_range(0.8, 1.3))
-		return
+	if edge < 160.0:
+		return  # the cliff's edge: nothing that could hang over the drop
 	if _rng.randf() < 0.9:
 		var id: String = ["pine_1", "pine_2", "pine_3"][_rng.randi() % 3]
 		_add(id, p, _rng.randf_range(0.85, 1.35))
-	elif _rng.randf() < 0.5:
-		_add(["rock_1", "rock_3"][_rng.randi() % 2], p, _rng.randf_range(1.0, 1.8))
+	elif _rng.randf() < 0.5 and edge > 260.0:
+		_add(["rock_1", "rock_2", "rock_2"][_rng.randi() % 3], p, _rng.randf_range(1.0, 1.8))
 
 
 ## Whether `p` (unwalkable, `edge` from walkable ground) stands between the camera and the
@@ -145,15 +210,6 @@ func _near_camera(p: Vector2, edge: float) -> bool:
 	if edge >= 520.0:
 		return false
 	return _edge_distance(p + Vector2(0, -(edge * 1.5 + 80.0)), _walls, _size) == 0.0
-
-
-## A wall small enough to be a boulder in the field rather than a cliff (the client draws it
-## with rock props when they're present).
-static func is_outcrop(poly: PackedVector2Array) -> bool:
-	var r := Rect2(poly[0], Vector2.ZERO)
-	for q in poly:
-		r = r.expand(q)
-	return r.size.x < 500.0 and r.size.y < 500.0
 
 
 ## Index the walls: bounding boxes, and their edges that face open ground (both sides of a seam
@@ -182,6 +238,17 @@ func _index_walls(walls: Array, size: Vector2) -> void:
 					if not _edge_cells.has(key):
 						_edge_cells[key] = []
 					_edge_cells[key].append([a, b])
+
+
+## Whether a wall edge facing open ground lies within `reach` of `p`.
+func _wall_near(p: Vector2, reach: float) -> bool:
+	var c := Vector2i(floori(p.x / EDGE_CELL), floori(p.y / EDGE_CELL))
+	for cy in range(c.y - 1, c.y + 2):
+		for cx in range(c.x - 1, c.x + 2):
+			for e in _edge_cells.get(Vector2i(cx, cy), []):
+				if p.distance_to(Geometry2D.get_closest_point_to_segment(p, e[0], e[1])) < reach:
+					return true
+	return false
 
 
 func _inside_wall(p: Vector2) -> bool:
@@ -221,11 +288,13 @@ func _out_distance(p: Vector2, size: Vector2) -> float:
 
 
 ## The ground's height under `p`: cliff tops (inside a wall, not an outcrop) stand CLIFF_M high.
-## A lane map's walls reach well past its edges, so the land beyond is cliff too.
+## The land past the map's edges is cliff too (the cliffs' frame, 15 §4).
 func _height_at(p: Vector2) -> float:
+	if p.x < 0.0 or p.y < 0.0 or p.x > _size.x or p.y > _size.y:
+		return CLIFF_M
 	for i in _walls.size():
 		var box: Rect2 = _boxes[i]
-		if box.has_point(p) and not is_outcrop(_walls[i]) and Geometry2D.is_point_in_polygon(p, _walls[i]):
+		if box.has_point(p) and not _outcrop.has(i) and Geometry2D.is_point_in_polygon(p, _walls[i]):
 			return CLIFF_M
 	return 0.0
 
@@ -238,18 +307,26 @@ func _bounds(poly: PackedVector2Array) -> Rect2:
 
 
 func _add(id: String, p: Vector2, scale: float) -> void:
+	_add_at(id, p, scale, _height_at(p))
+
+
+## A prop at `p` standing at `height` (m).
+func _add_at(id: String, p: Vector2, scale: float, height: float) -> void:
 	if not _batches.has(id):
 		_batches[id] = []
 	var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU)).scaled(Vector3.ONE * scale)
-	var t := Transform3D(basis, Vector3(p.x * U, _height_at(p), p.y * U))
+	var t := Transform3D(basis, Vector3(p.x * U, height, p.y * U))
 	var k := _rng.randf_range(0.88, 1.1) * (0.82 if id.begins_with("pine") else 1.0)
-	var tint := Color(k * _rng.randf_range(0.96, 1.04), k, k * _rng.randf_range(0.94, 1.04)) * 0.5
+	var tint := Color(k * _rng.randf_range(0.96, 1.04) * _tint.r, k * _tint.g, k * _rng.randf_range(0.94, 1.04) * _tint.b) * 0.5
 	_batches[id].append([t, tint])
 
 
 func _flush(materials_for: Callable) -> void:
 	for id in _batches:
-		var made = materials_for.call(id)
+		# The season's variant of the prop, when it has one.
+		var made = materials_for.call(_substitute[id]) if _substitute.has(id) else null
+		if made == null:
+			made = materials_for.call(id)
 		if made == null:
 			continue
 		var list: Array = _batches[id]

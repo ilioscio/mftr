@@ -18,7 +18,7 @@
 
 use crate::jungle::{Camp, CampKind};
 use crate::lane::{BASE_TURRET_TIER, GATEHOUSE_TIER, Pacing};
-use crate::map::{Layout, Map, MapId, Placement};
+use crate::map::{Layout, Map, MapId, Placement, Season, Stroke, StrokeKind};
 use crate::math::Vec2;
 use crate::world::{Team, UnitKind};
 
@@ -126,6 +126,8 @@ pub struct MapSpec {
     pub relics: Vec<Vec2>,
     /// Rocks: walls in the open, center and radius.
     pub rocks: Vec<(Vec2, f32)>,
+    /// The season it's dressed for by default (15 §9).
+    pub season: Season,
 }
 
 impl MapSpec {
@@ -144,6 +146,7 @@ impl MapSpec {
             structures: Vec::new(),
             relics: Vec::new(),
             rocks: Vec::new(),
+            season: Season::Summer,
         }
     }
 
@@ -229,6 +232,9 @@ impl MapSpec {
             s += &format!("kind {}\n", self.kind.key());
         }
         s += &format!("size {}\n", self.size.round() as i64);
+        if self.season != Season::Summer {
+            s += &format!("season {}\n", self.season.key());
+        }
         for l in &self.lanes {
             s += &line("lane", l);
         }
@@ -301,6 +307,10 @@ impl MapSpec {
                     spec.kind = MapKind::from_key(k).ok_or_else(|| at(&format!("unknown kind: {k}")))?;
                 }
                 "size" => spec.size = num(rest.first().ok_or_else(|| at("a size"))?)?,
+                "season" => {
+                    let k = rest.first().ok_or_else(|| at("a season"))?;
+                    spec.season = Season::from_key(k).ok_or_else(|| at(&format!("unknown season: {k}")))?;
+                }
                 "lane" => spec.lanes.push(line()?),
                 "river" => spec.river.push(line()?),
                 "jungle" => spec.jungle.push(line()?),
@@ -891,6 +901,24 @@ pub fn build(spec: &MapSpec, id: MapId) -> Map {
         pts.extend(l.points.iter().map(|p| red(*p)));
         pts
     });
+    // The drawn features, both halves, for the client's ground (15 §3).
+    let mut strokes = Vec::new();
+    for (kind, lines) in [
+        (StrokeKind::Lane, &spec.lanes),
+        (StrokeKind::River, &spec.river),
+        (StrokeKind::Jungle, &spec.jungle),
+        (StrokeKind::Grass, &spec.grass),
+    ] {
+        for l in lines {
+            strokes.push(Stroke { kind, width: l.width, points: l.points.clone() });
+            strokes.push(Stroke { kind, width: l.width, points: l.points.iter().map(|p| red(*p)).collect() });
+        }
+    }
+    for (c, r) in spec.all_clearings() {
+        for p in [c, red(c)] {
+            strokes.push(Stroke { kind: StrokeKind::Clearing, width: r * 2.0, points: vec![p] });
+        }
+    }
     map.layout = Layout {
         lanes,
         wave_spawn,
@@ -904,6 +932,8 @@ pub fn build(spec: &MapSpec, id: MapId) -> Map {
         backdoor: !aram,
         camps,
         wards: !aram,
+        strokes,
+        season: spec.season,
     };
     map
 }
@@ -1093,6 +1123,14 @@ mod tests {
         assert_eq!(back, s);
         assert!(MapSpec::parse("lane 100 1,2 3,4").is_err(), "no header");
         assert!(MapSpec::parse("mftr-map 1\ncamp dragon 1,2").is_err());
+        // A season other than summer is written, read back and given to the built map.
+        let mut s = tiny();
+        assert!(!s.to_text().contains("season"));
+        s.season = Season::Winter;
+        let back = MapSpec::parse(&s.to_text()).unwrap();
+        assert_eq!(back.season, Season::Winter);
+        assert_eq!(build(&back, MapId::Custom).layout.season, Season::Winter);
+        assert!(MapSpec::parse("mftr-map 1\nseason monsoon").is_err());
     }
 
     #[test]
