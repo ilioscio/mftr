@@ -47,14 +47,24 @@ def body():
     ua, fa, th, ca = "upperarm_l", "forearm_l", "thigh_l", "calf_l"
     p = [
         # Pelvis and belly: stacked blocks, wider as they rise.
-        mesh.box_part("pelvis", B("pelvis", 0.2), (0.72, 0.52, 0.42), "cloth", STONE_D, bevel=0.3),
-        mesh.box_part("spine_01", B("spine_01", 0.5), (0.80, 0.58, 0.36), "cloth", STONE, taper=1.06, bevel=0.25),
-        mesh.box_part("spine_02", B("spine_02", 0.5), (0.98, 0.66, 0.38), "cloth", STONE, taper=1.1, bevel=0.2),
+        mesh.rock_part("pelvis", B("pelvis", 0.2), (0.82, 0.6, 0.5), STONE_D, seed=51, cuts=4, subdiv=2),
+        mesh.rock_part("spine_01", B("spine_01", 0.5), (0.9, 0.66, 0.44), STONE, seed=52, cuts=4, subdiv=2),
+        mesh.rock_part("spine_02", B("spine_02", 0.5), (1.08, 0.74, 0.46), STONE, seed=53, cuts=4, subdiv=2),
+        # Loose stones and moss over the belly and hips.
+        mesh.rock_part("spine_01", B("spine_01", 0.4, (0.3, -0.2, 0.05)), (0.3, 0.26, 0.24), STONE_L, moss=MOSS, seed=54, cuts=3, subdiv=2),
+        mesh.rock_part("spine_02", B("spine_02", 0.5, (-0.36, -0.18, 0.06)), (0.32, 0.28, 0.26), STONE_L, moss=MOSS, seed=55, cuts=3, subdiv=2),
+        mesh.rock_part("pelvis", B("pelvis", 0.3, (0.0, -0.26, -0.06)), (0.38, 0.22, 0.24), STONE, seed=56, cuts=3, subdiv=2),
         # The chest: an inverted trapezoid; on its back a great mossy boulder, the azure crystals
         # growing out of it (what reads from the gameplay camera, which sees tops).
         mesh.box_part("chest", B("chest", 0.45), (1.2, 0.74, 0.58), "cloth", STONE, taper=1.14, bevel=0.15),
         mesh.rock_part("chest", B("chest", 0.75, (0, 0.2, 0.08)), (1.5, 1.0, 0.78), STONE_L, moss=MOSS, seed=3, cuts=5, subdiv=3),
-        mesh.rock_part("chest", B("chest", 0.3, (0, 0.34, -0.05)), (0.9, 0.6, 0.5), STONE, moss=MOSS, seed=8, cuts=4, subdiv=2),
+        mesh.rock_part("chest", B("chest", 0.3, (0, 0.34, -0.05)), (0.9, 0.6, 0.5), STONE, moss=MOSS, seed=8, cuts=4, subdiv=3),
+        mesh.rock_part("chest", B("chest", 0.95, (0.3, 0.05, 0.42)), (0.4, 0.4, 0.22), STONE_L, moss=MOSS, seed=57, cuts=3, subdiv=2),
+        mesh.rock_part("chest", B("chest", 0.95, (-0.34, 0.12, 0.4)), (0.36, 0.42, 0.2), STONE_L, moss=MOSS, seed=58, cuts=3, subdiv=2),
+        # More shards in the cluster, small ones at the spires' feet.
+        mesh.path_part("chest", [B("chest", 0.9, (0.12, 0.62, 0.2)), B("chest", 0.9, (0.2, 0.86, 0.55))], 5, [(0.06, 0.055), (0, 0)], "accent_glow", GLOW),
+        mesh.path_part("chest", [B("chest", 0.9, (-0.14, 0.58, 0.22)), B("chest", 0.9, (-0.28, 0.8, 0.6))], 5, [(0.07, 0.065), (0, 0)], "accent_glow", GLOW),
+        mesh.path_part("chest", [B("chest", 0.9, (-0.06, 0.18, 0.3)), B("chest", 0.9, (-0.12, 0.1, 0.72))], 5, [(0.08, 0.075), (0, 0)], "accent_glow", GLOW),
         # The crack and the azure heart showing through it.
         mesh.path_part("chest", [B("chest", 0.0, (0, -0.33, 0)), B("chest", 0.42, (0, -0.48, 0)), B("chest", 0.88, (0, -0.35, 0))],
                        6, [(0, 0), (0.19, 0.13), (0, 0)], "accent_glow", GLOW),
@@ -62,7 +72,7 @@ def body():
         mesh.path_part("chest", [B("chest", 0.9, (0, 0.28, 0.25)), B("chest", 0.9, (0, 0.48, 1.25))], 6, [(0.17, 0.15), (0, 0)], "accent_glow", GLOW),
         mesh.path_part("chest", [B("chest", 0.9, (0, 0.5, 0.15)), B("chest", 0.9, (0, 0.95, 0.75))], 5, [(0.11, 0.1), (0, 0)], "accent_glow", GLOW),
         # The head: a block sunk before the boulder, a heavy brow, two azure slits.
-        mesh.box_part("head", B("head", 0.3), (0.40, 0.42, 0.36), "cloth", STONE, bevel=0.3),
+        mesh.rock_part("head", B("head", 0.3), (0.46, 0.48, 0.42), STONE, seed=59, cuts=4, subdiv=2),
         mesh.box_part("head", B("head", 0.6, (0, -0.12, 0)), (0.5, 0.22, 0.13), "cloth", STONE_D, rot=(-12, 0, 0)),
         mesh.rock_part("head", B("head", 0.85, (0, 0.03, 0)), (0.42, 0.42, 0.22), STONE_L, moss=MOSS, seed=21, cuts=3, subdiv=1),
     ]
@@ -74,17 +84,22 @@ def body():
         mesh.box_part("head", B("head", 0.38, (0.095, -0.215, 0)), (0.1, 0.04, 0.04), "accent_glow", GLOW),
         # Arms: a boulder pauldron crusted with small crystals, the upper arm, a pillar forearm
         # banded with azure runes, a block fist.
-        mesh.rock_part(ua, B(ua, 0.12, (0.08, 0, 0.16)), (0.8, 0.78, 0.6), STONE_L, moss=MOSS, seed=5, cuts=4, subdiv=2, rot=(0, -15, 0)),
+        mesh.rock_part(ua, B(ua, 0.12, (0.08, 0, 0.16)), (0.8, 0.78, 0.6), STONE_L, moss=MOSS, seed=5, cuts=4, subdiv=3, rot=(0, -15, 0)),
+        mesh.rock_part(ua, B(ua, 0.2, (0.3, 0.12, 0.08)), (0.32, 0.3, 0.28), STONE, moss=MOSS, seed=6, cuts=3, subdiv=2),
+        mesh.rock_part(fa, B(fa, 0.05, (0.0, 0.1, 0.0)), (0.3, 0.3, 0.26), STONE_L, seed=7, cuts=3, subdiv=2),
+        mesh.path_part(fa, [B(fa, 0.3, (0.12, 0.12, 0.0)), B(fa, 0.25, (0.3, 0.26, 0.08))], 5, [(0.05, 0.045), (0, 0)], "accent_glow", GLOW),
         mesh.path_part(ua, [B(ua, 0.1, (0.25, -0.05, 0.4)), B(ua, 0.1, (0.42, -0.1, 0.72))], 5, [(0.07, 0.065), (0, 0)], "accent_glow", GLOW),
         mesh.path_part(ua, [B(ua, 0.1, (0.1, 0.18, 0.42)), B(ua, 0.1, (0.18, 0.36, 0.66))], 5, [(0.05, 0.05), (0, 0)], "accent_glow", GLOW),
         mesh.path_part(ua, [B(ua, 0), B(ua, 0.5), B(ua, 1)], 7, [(0.2, 0.2), (0.22, 0.22), (0.19, 0.19)], "cloth", STONE),
-        mesh.path_part(fa, [B(fa, -0.05), B(fa, 0.5), B(fa, 1.0)], 6, [(0.2, 0.2), (0.25, 0.24), (0.27, 0.26)], "cloth", STONE),
+        mesh.path_part(fa, [B(fa, -0.05), B(fa, 0.5), B(fa, 1.0)], 8, [(0.2, 0.2), (0.25, 0.24), (0.27, 0.26)], "cloth", STONE),
         mesh.path_part(fa, [B(fa, 0.55), B(fa, 0.68)], 6, [(0.265, 0.255), (0.27, 0.26)], "accent", RUNE),
-        mesh.rock_part("hand_l", B("hand_l", 0.5), (0.44, 0.46, 0.48), STONE_D, seed=11, cuts=4, subdiv=2),
+        mesh.rock_part("hand_l", B("hand_l", 0.5), (0.44, 0.46, 0.48), STONE_D, seed=11, cuts=4, subdiv=3),
         mesh.box_part("fingers_l", B("fingers_l", 0.35), (0.34, 0.32, 0.26), "cloth", STONE_D, bevel=0.2),
         # Stumps for legs, block feet.
-        mesh.path_part(th, [B(th, 0), B(th, 1)], 6, [(0.24, 0.24), (0.21, 0.21)], "cloth", STONE_D),
-        mesh.path_part(ca, [B(ca, 0), B(ca, 0.6), B(ca, 1)], 6, [(0.22, 0.22), (0.25, 0.25), (0.27, 0.27)], "cloth", STONE),
+        mesh.path_part(th, [B(th, 0), B(th, 1)], 8, [(0.24, 0.24), (0.21, 0.21)], "cloth", STONE_D),
+        mesh.path_part(ca, [B(ca, 0), B(ca, 0.6), B(ca, 1)], 8, [(0.22, 0.22), (0.25, 0.25), (0.27, 0.27)], "cloth", STONE),
+        mesh.rock_part(ca, B(ca, 0.05, (0, -0.12, 0)), (0.3, 0.24, 0.28), STONE_L, moss=MOSS, seed=12, cuts=3, subdiv=2),
+        mesh.rock_part(th, B(th, 0.3, (0.12, 0, 0)), (0.26, 0.3, 0.3), STONE, seed=13, cuts=3, subdiv=2),
         mesh.box_part("foot_l", B("foot_l", 0.2, (0, 0, 0.0)), (0.40, 0.52, 0.18), "cloth", STONE_D, bevel=0.3),
         mesh.box_part("toe_l", B("toe_l", 0.3, (0, 0, 0.04)), (0.36, 0.2, 0.14), "cloth", STONE_D, bevel=0.3),
     ]
@@ -93,7 +108,7 @@ def body():
     for k, (x, y, z) in RUNES.items():
         bone = f"extra_rune_{k}_1"
         turn = math.degrees(math.atan2(x, -y))
-        out.append(mesh.rock_part(bone, (x, y, z + 0.08), (0.24, 0.14, 0.36), STONE_L, seed=31 + len(out), cuts=4, subdiv=1, rot=(0, 0, turn)))
+        out.append(mesh.rock_part(bone, (x, y, z + 0.08), (0.24, 0.14, 0.36), STONE_L, seed=31 + len(out), cuts=4, subdiv=2, rot=(0, 0, turn)))
         out.append(mesh.box_part(bone, (x * 1.08, y - 0.06, z + 0.08), (0.09, 0.04, 0.18), "accent_glow", GLOW, rot=(0, 0, turn)))
     return out
 

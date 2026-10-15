@@ -62,34 +62,56 @@ def body(matriarch):
         return tuple(x * S for x in v)
 
     p = [
-        mesh.path_part("body", [B("body", -0.1), B("body", 0.5, (0, 0, -0.01)), B("body", 1.05)], 9, [r(0.13, 0.15), r(0.17, 0.19), r(0.16, 0.18)], "cloth", FEATHER),
-        mesh.path_part("chest", [B("chest", -0.1), B("chest", 0.6), B("chest", 1.05)], 9, [r(0.16, 0.17), r(0.15, 0.16), r(0.1, 0.1)], "cloth", FEATHER_L),
-        mesh.path_part("neck", [B("neck", -0.1), B("neck", 1.05)], 8, [r(0.09, 0.09), r(0.075, 0.075)], "cloth", FEATHER),
-        mesh.path_part("head", [B("head", -0.05), B("head", 0.5), B("head", 0.85)], 8, [r(0.085, 0.09), r(0.08, 0.08), r(0.05, 0.05)], "cloth", FEATHER),
+        mesh.path_part("body", [B("body", -0.1), B("body", 0.5, (0, 0, -0.01)), B("body", 1.05)], 12, [r(0.13, 0.15), r(0.17, 0.19), r(0.16, 0.18)], "cloth", FEATHER),
+        mesh.path_part("chest", [B("chest", -0.1), B("chest", 0.6), B("chest", 1.05)], 12, [r(0.16, 0.17), r(0.15, 0.16), r(0.1, 0.1)], "cloth", FEATHER_L),
+        mesh.path_part("neck", [B("neck", -0.1), B("neck", 1.05)], 10, [r(0.09, 0.09), r(0.075, 0.075)], "cloth", FEATHER),
+        mesh.path_part("head", [B("head", -0.05), B("head", 0.5), B("head", 0.85)], 10, [r(0.085, 0.09), r(0.08, 0.08), r(0.05, 0.05)], "cloth", FEATHER),
         # The pale mask around the eyes; the hooked beak.
-        mesh.path_part("head", [B("head", 0.45, (0, 0, 0.0)), B("head", 0.75, (0, 0, -0.005))], 8, [r(0.088, 0.07), r(0.06, 0.05)], "cloth", MASK),
+        mesh.path_part("head", [B("head", 0.45, (0, 0, 0.0)), B("head", 0.75, (0, 0, -0.005))], 10, [r(0.088, 0.07), r(0.06, 0.05)], "cloth", MASK),
         mesh.path_part("beak", [B("beak", -0.2, (0, 0, 0.03)), B("beak", 0.6, (0, 0, 0.015)), B("beak", 1.0, (0, 0, -0.03))], 6,
                        [r(0.045, 0.04), r(0.03, 0.03), (0, 0)], "cloth", BEAK),
         # The crest: a fan of plumes, edged in violet.
         mesh.path_part("crest", [B("crest", -0.1), B("crest", 1.0)], 4, [r(0.03, 0.012), (0, 0)], "accent", EDGE),
         # The tail: a long fan of feathers, quill tips glowing.
-        mesh.path_part("tail", [B("tail", 0.0), B("tail", 0.9)], 6, [r(0.07, 0.03), r(0.13, 0.025)], "cloth", FEATHER),
-        mesh.path_part("tail", [B("tail", 0.9), B("tail", 1.05)], 6, [r(0.13, 0.025), r(0.12, 0.02)], "accent_glow", GLOW),
+        mesh.path_part("tail", [B("tail", 0.0), B("tail", 0.9)], 8, [r(0.07, 0.03), r(0.13, 0.025)], "cloth", FEATHER),
+        mesh.path_part("tail", [B("tail", 0.9), B("tail", 1.05)], 8, [r(0.13, 0.025), r(0.12, 0.02)], "accent_glow", GLOW),
     ]
+    # Puffed feather masses: the breast, the back and the nape, faceted like the stones.
+    fine = 3 if matriarch else 2
+    p += [
+        mesh.rock_part("chest", B("chest", 0.35, (0, -0.06, -0.02)), r(0.3, 0.26, 0.3), FEATHER_L, seed=131, rough=0.08, cuts=2, subdiv=fine),
+        mesh.rock_part("body", B("body", 0.5, (0, 0.02, 0.06)), r(0.32, 0.36, 0.24), FEATHER, seed=132, rough=0.08, cuts=2, subdiv=fine),
+        mesh.rock_part("neck", B("neck", 0.6, (0, 0.03, 0.0)), r(0.17, 0.17, 0.16), FEATHER, seed=133, rough=0.06, cuts=1, subdiv=2),
+        mesh.rock_part("head", B("head", 0.3, (0, 0.0, 0.02)), r(0.17, 0.19, 0.16), FEATHER, seed=134, rough=0.04, cuts=1, subdiv=fine),
+    ]
+    # The tail: a fan of five feathers, quill tips glowing.
+    for k in range(5):
+        dx = (k - 2) * 0.05
+        p.append(mesh.path_part("tail", [B("tail", 0.1, (dx * 0.3, 0, 0)), B("tail", 0.95, (dx, 0.04 * abs(k - 2), 0))], 4, [r(0.035, 0.012), r(0.04, 0.01)],
+                                "cloth", FEATHER if k % 2 else FEATHER_L))
+    # Scaled feathers down the chest.
+    for k, (t, x) in enumerate(((0.2, 0.0), (0.5, 0.06), (0.5, -0.06), (0.8, 0.0))):
+        p.append(mesh.path_part("chest", [B("chest", t, (x, -0.12, 0.04)), B("chest", t - 0.25, (x, -0.13, -0.02))], 5, [r(0.05, 0.015), (0, 0)], "cloth", FEATHER_L))
     left = [
         mesh.box_part("head", B("head", 0.55, (0.07, 0, 0.02)), r(0.03, 0.03, 0.025), "accent_glow", GLOW),
         mesh.path_part("crest", [B("crest", 0.0, (0.03, 0, 0)), B("crest", 0.9, (0.08, 0.06, -0.02))], 4, [r(0.025, 0.01), (0, 0)], "accent", EDGE),
+        mesh.path_part("crest", [B("crest", 0.0, (0.05, 0.02, -0.03)), B("crest", 0.7, (0.12, 0.1, -0.08))], 4, [r(0.02, 0.008), (0, 0)], "accent", EDGE),
         # Wings folded high: a broad shoulder of coverts, long primaries with glowing tips.
-        mesh.path_part("wing_l", [B("wing_l", -0.1), B("wing_l", 0.5), B("wing_l", 1.0)], 6, [r(0.08, 0.035), r(0.16, 0.035), r(0.17, 0.03)], "cloth", FEATHER_L),
-        mesh.path_part("wing_tip_l", [B("wing_tip_l", 0.0), B("wing_tip_l", 0.5), B("wing_tip_l", 0.88)], 5, [r(0.17, 0.03), r(0.15, 0.025), r(0.1, 0.02)], "cloth", FEATHER),
-        mesh.path_part("wing_tip_l", [B("wing_tip_l", 0.88), B("wing_tip_l", 1.12)], 5, [r(0.1, 0.02), (0, 0)], "accent_glow", GLOW),
+        mesh.path_part("wing_l", [B("wing_l", -0.1), B("wing_l", 0.5), B("wing_l", 1.0)], 8, [r(0.08, 0.035), r(0.16, 0.035), r(0.17, 0.03)], "cloth", FEATHER_L),
+        mesh.path_part("wing_tip_l", [B("wing_tip_l", 0.0), B("wing_tip_l", 0.5), B("wing_tip_l", 0.88)], 6, [r(0.17, 0.03), r(0.15, 0.025), r(0.1, 0.02)], "cloth", FEATHER),
+        *[mesh.path_part("wing_tip_l", [B("wing_tip_l", 0.35 + 0.12 * k, (0.0, 0, -0.01 * k)), B("wing_tip_l", 0.95 + 0.04 * k, (0.03 * k - 0.04, 0, -0.03))], 4,
+                         [r(0.035, 0.01), r(0.02, 0.008)], "cloth", FEATHER_L if k % 2 else FEATHER) for k in range(4)],
+        mesh.path_part("wing_tip_l", [B("wing_tip_l", 0.88), B("wing_tip_l", 1.12)], 6, [r(0.1, 0.02), (0, 0)], "accent_glow", GLOW),
         # Long scaled legs, talons.
-        mesh.path_part("thigh_l", [B("thigh_l", -0.1), B("thigh_l", 1.0)], 6, [r(0.06, 0.07), r(0.035, 0.035)], "cloth", FEATHER),
-        mesh.path_part("shin_l", [B("shin_l", 0), B("shin_l", 1.0)], 5, [r(0.022, 0.022), r(0.02, 0.02)], "cloth", LEG),
+        mesh.path_part("thigh_l", [B("thigh_l", -0.1), B("thigh_l", 1.0)], 8, [r(0.06, 0.07), r(0.035, 0.035)], "cloth", FEATHER),
+        mesh.path_part("shin_l", [B("shin_l", 0), B("shin_l", 1.0)], 6, [r(0.022, 0.022), r(0.02, 0.02)], "cloth", LEG),
         mesh.path_part("foot_l", [B("foot_l", 0), B("foot_l", 1.1)], 4, [r(0.03, 0.012), r(0.015, 0.01)], "cloth", LEG),
         mesh.path_part("foot_l", [B("foot_l", 0.9), B("foot_l", 1.2, (0, 0, -0.01))], 4, [r(0.012, 0.012), (0, 0)], "cloth", TALON),
     ]
     if matriarch:
+        # A ruffled mantle over both shoulders.
+        p += [mesh.rock_part("chest", B("chest", 0.85, (x, 0.04, 0.06)), r(0.2, 0.22, 0.16), FEATHER_L, seed=140 + i, rough=0.1, cuts=2, subdiv=3)
+              for i, x in enumerate((0.12, -0.12))]
         # A tall crest and a mantle of quills over the shoulders.
         p.append(mesh.path_part("crest", [B("crest", 0.6), B("crest", 1.6, (0, 0.08, 0.04))], 4, [r(0.025, 0.01), (0, 0)], "accent", EDGE))
         left += [

@@ -42,11 +42,11 @@ def body():
     ua, fa, th, ca = "upperarm_l", "forearm_l", "thigh_l", "calf_l"
     p = [
         # A barrel of bark, magma in its cracks.
-        mesh.rock_part("pelvis", B("pelvis", 0.3), (0.8, 0.62, 0.5), BARK, seed=2, cuts=3, subdiv=2),
-        mesh.rock_part("spine_01", B("spine_01", 0.5), (0.98, 0.74, 0.5), BARK, seed=4, cuts=3, subdiv=2),
+        mesh.rock_part("pelvis", B("pelvis", 0.3), (0.8, 0.62, 0.5), BARK, seed=2, cuts=3, subdiv=3),
+        mesh.rock_part("spine_01", B("spine_01", 0.5), (0.98, 0.74, 0.5), BARK, seed=4, cuts=3, subdiv=3),
         mesh.path_part("spine_02", [B("spine_02", -0.1, (0, -0.25, 0)), B("spine_02", 0.6, (0, -0.4, 0))], 5, [(0.18, 0.06), (0.22, 0.07)],
                        "accent_glow", GLOW),
-        mesh.rock_part("spine_02", B("spine_02", 0.5), (1.2, 0.86, 0.56), BARK_L, seed=6, cuts=4, subdiv=2),
+        mesh.rock_part("spine_02", B("spine_02", 0.5), (1.2, 0.86, 0.56), BARK_L, seed=6, cuts=4, subdiv=3),
         # The great hunched back: bark slabs, smoldering thorn stumps up its ridge.
         mesh.rock_part("chest", B("chest", 0.5, (0, 0.06, 0)), (1.5, 1.02, 0.78), BARK, moss=CHAR, seed=9, cuts=5, subdiv=3),
         mesh.path_part("chest", [B("chest", 0.1, (0, -0.42, 0)), B("chest", 0.55, (0, -0.52, 0)), B("chest", 0.95, (0, -0.4, 0))], 6,
@@ -55,13 +55,24 @@ def body():
         mesh.path_part("chest", [B("chest", 0.05, (0, 0.38, 0.3)), B("chest", 0.5, (0.05, 0.42, 0.42)), B("chest", 0.95, (-0.04, 0.3, 0.42))], 5,
                        [(0.06, 0.03), (0.07, 0.035), (0.04, 0.02)], "accent_glow", GLOW),
         # The head: low and ahead, a boar's snout, tusks curling up, ember eyes.
-        mesh.rock_part("head", B("head", 0.35, (0, -0.06, 0)), (0.5, 0.56, 0.42), BARK_L, seed=13, cuts=3, subdiv=2),
+        mesh.rock_part("head", B("head", 0.35, (0, -0.06, 0)), (0.5, 0.56, 0.42), BARK_L, seed=13, cuts=3, subdiv=3),
+        # Bark slabs layered over the back, ash on their edges.
+        mesh.rock_part("chest", B("chest", 0.9, (0, 0.2, 0.38)), (0.7, 0.5, 0.2), BARK_L, moss=ASH, seed=19, cuts=3, subdiv=2),
+        mesh.rock_part("spine_02", B("spine_02", 0.6, (0, 0.34, 0.12)), (0.62, 0.46, 0.2), BARK_L, moss=ASH, seed=20, cuts=3, subdiv=2),
+        mesh.rock_part("spine_01", B("spine_01", 0.6, (0, 0.3, 0.08)), (0.5, 0.4, 0.18), BARK_L, moss=ASH, seed=21, cuts=3, subdiv=2),
         mesh.box_part("head", B("head", 0.2, (0, -0.32, -0.04)), (0.3, 0.3, 0.22), "cloth", BARK, rot=(-12, 0, 0), taper=0.8, bevel=0.3),
         mesh.box_part("head", B("head", 0.2, (0, -0.48, -0.02)), (0.22, 0.04, 0.14), "cloth", CHAR, bevel=0.3),
         mesh.path_part("head", [B("head", 0.1, (0, -0.4, -0.13)), B("head", 0.1, (0, -0.47, -0.13))], 6, [(0.12, 0.05), (0.1, 0.04)],
                        "accent_glow", GLOW),
     ]
     left = [
+        # A mane of smoldering moss strands over the shoulders, their tips burning.
+        mesh.path_part("chest", [B("chest", 0.95, (0.2, -0.1, 0.3)), B("chest", 0.95, (0.4, 0.1, 0.42)), B("chest", 0.95, (0.5, 0.32, 0.36))], 5,
+                       [(0.07, 0.04), (0.06, 0.035), (0.03, 0.02)], "cloth", CHAR),
+        mesh.path_part("chest", [B("chest", 0.95, (0.5, 0.32, 0.36)), B("chest", 0.95, (0.54, 0.4, 0.33))], 5, [(0.03, 0.02), (0, 0)], "accent_glow", GLOW),
+        mesh.path_part("chest", [B("chest", 0.8, (0.34, -0.12, 0.2)), B("chest", 0.8, (0.6, 0.0, 0.3)), B("chest", 0.8, (0.74, 0.18, 0.22))], 5,
+                       [(0.06, 0.035), (0.05, 0.03), (0.03, 0.02)], "cloth", CHAR),
+        mesh.path_part("chest", [B("chest", 0.8, (0.74, 0.18, 0.22)), B("chest", 0.8, (0.78, 0.24, 0.2))], 5, [(0.03, 0.02), (0, 0)], "accent_glow", GLOW),
         mesh.path_part("chest", [B("chest", 0.3, (0.12, 0.4, 0.36)), B("chest", 0.55, (0.42, 0.36, 0.34)), B("chest", 0.75, (0.62, 0.2, 0.26))], 5,
                        [(0.05, 0.025), (0.06, 0.03), (0.035, 0.02)], "accent_glow", GLOW),
         mesh.box_part("head", B("head", 0.45, (0.13, -0.29, 0.02)), (0.1, 0.05, 0.05), "accent_glow", GLOW, rot=(0, 0, 18)),
@@ -82,15 +93,20 @@ def body():
                        "accent_glow", GLOW),
         # Arms: a bark boulder of a shoulder, a long forearm, a fist like a stump; magma along
         # the forearm's crack.
-        mesh.rock_part(ua, B(ua, 0.15, (0.04, 0, 0.1)), (0.72, 0.72, 0.62), BARK, moss=CHAR, seed=15, cuts=4, subdiv=2, rot=(0, -20, 0)),
+        mesh.rock_part(ua, B(ua, 0.15, (0.04, 0, 0.1)), (0.72, 0.72, 0.62), BARK, moss=CHAR, seed=15, cuts=4, subdiv=3, rot=(0, -20, 0)),
+        mesh.path_part(ua, [B(ua, 0.1, (0.2, 0.1, 0.3)), B(ua, 0.1, (0.34, 0.2, 0.62))], 5, [(0.07, 0.07), (0.04, 0.04)], "cloth", BARK_L),
+        mesh.path_part(ua, [B(ua, 0.1, (0.34, 0.2, 0.62)), B(ua, 0.1, (0.36, 0.22, 0.72))], 5, [(0.04, 0.04), (0, 0)], "accent_glow", GLOW),
+        mesh.rock_part(fa, B(fa, 0.1, (0, 0.12, 0)), (0.3, 0.28, 0.26), BARK, moss=ASH, seed=22, cuts=3, subdiv=2),
         mesh.path_part(ua, [B(ua, 0), B(ua, 0.5), B(ua, 1)], 7, [(0.2, 0.2), (0.22, 0.21), (0.17, 0.17)], "cloth", BARK),
         mesh.path_part(fa, [B(fa, -0.05), B(fa, 0.5), B(fa, 1.0)], 7, [(0.18, 0.18), (0.23, 0.22), (0.25, 0.24)], "cloth", BARK_L),
         mesh.path_part(fa, [B(fa, 0.15, (0, -0.2, 0)), B(fa, 0.85, (0, -0.24, 0))], 5, [(0.04, 0.03), (0.035, 0.03)], "accent_glow", GLOW),
         mesh.path_part(fa, [B(fa, 0.25), B(fa, 0.4)], 7, [(0.215, 0.205), (0.225, 0.215)], "accent", HOT),
-        mesh.rock_part("hand_l", B("hand_l", 0.6), (0.46, 0.44, 0.48), CHAR, seed=17, cuts=4, subdiv=2),
+        mesh.rock_part("hand_l", B("hand_l", 0.6), (0.46, 0.44, 0.48), CHAR, seed=17, cuts=4, subdiv=3),
+        mesh.box_part("fingers_l", B("fingers_l", 0.5, (0, -0.1, 0)), (0.34, 0.08, 0.12), "accent", HOT, bevel=0.3),
         mesh.box_part("fingers_l", B("fingers_l", 0.4), (0.36, 0.3, 0.26), "cloth", BARK, bevel=0.3),
         # Short, thick legs and hooves.
-        mesh.path_part(th, [B(th, 0), B(th, 1)], 7, [(0.25, 0.25), (0.2, 0.2)], "cloth", BARK),
+        mesh.path_part(th, [B(th, 0), B(th, 1)], 8, [(0.25, 0.25), (0.2, 0.2)], "cloth", BARK),
+        mesh.rock_part(ca, B(ca, 0.05, (0, -0.1, 0)), (0.26, 0.2, 0.24), BARK_L, moss=ASH, seed=23, cuts=3, subdiv=2),
         mesh.path_part(ca, [B(ca, 0), B(ca, 1)], 6, [(0.19, 0.19), (0.16, 0.16)], "cloth", BARK_L),
         mesh.box_part("foot_l", B("foot_l", 0.25), (0.3, 0.42, 0.16), "cloth", CHAR, bevel=0.35),
         mesh.box_part("toe_l", B("toe_l", 0.3, (0, 0, 0.04)), (0.26, 0.16, 0.12), "cloth", CHAR, bevel=0.3),

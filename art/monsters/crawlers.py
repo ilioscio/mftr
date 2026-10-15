@@ -74,7 +74,7 @@ def body(elder):
         # A claw: a heavy arm, a boulder of a hand, the moving pincer; amber on the inner faces.
         mesh.path_part("claw_arm_l", [B("claw_arm_l", -0.1), B("claw_arm_l", 1.0)], 6, [r(0.13, 0.13), r(0.16, 0.16)], "cloth", LEGC),
         mesh.rock_part("claw_arm_l", B("claw_arm_l", 0.55, (0, 0, 0.06)), r(0.26, 0.3, 0.2), ROCK, moss=MOSS, seed=97, cuts=3, subdiv=1),
-        mesh.rock_part("claw_l", B("claw_l", 0.4), r(0.48, 0.66, 0.4), ROCK, moss=MOSS, seed=96, cuts=4, subdiv=2),
+        mesh.rock_part("claw_l", B("claw_l", 0.4), r(0.48, 0.66, 0.4), ROCK, moss=MOSS, seed=96, cuts=4, subdiv=3 if elder else 2),
         mesh.path_part("claw_l", [B("claw_l", 0.55, (-0.08, 0, -0.05)), B("claw_l", 1.08, (-0.05, 0, -0.06))], 6, [r(0.13, 0.08), r(0.03, 0.02)], "cloth", ROCK),
         mesh.path_part("claw_l", [B("claw_l", 0.6, (-0.17, 0, -0.05)), B("claw_l", 0.98, (-0.12, 0, -0.06))], 4, [r(0.04, 0.03), r(0.025, 0.02)], "accent", BAND),
         mesh.path_part("pincer_l", [B("pincer_l", -0.1), B("pincer_l", 1.08)], 6, [r(0.1, 0.06), r(0.025, 0.02)], "cloth", ROCK_D),
@@ -83,9 +83,15 @@ def body(elder):
     for i in (1, 2, 3):
         left += [
             mesh.path_part(f"leg_{i}_l", [B(f"leg_{i}_l", -0.05), B(f"leg_{i}_l", 1.05)], 6, [r(0.1, 0.1), r(0.08, 0.08)], "cloth", LEGC),
-            mesh.rock_part(f"leg_{i}_l", B(f"leg_{i}_l", 1.0), r(0.13, 0.13, 0.13), ROCK, seed=100 + i, cuts=2, subdiv=1),
+            mesh.rock_part(f"leg_{i}_l", B(f"leg_{i}_l", 1.0), r(0.13, 0.13, 0.13), ROCK, seed=100 + i, cuts=2, subdiv=2 if elder else 1),
             mesh.path_part(f"foot_{i}_l", [B(f"foot_{i}_l", 0.0), B(f"foot_{i}_l", 0.75), B(f"foot_{i}_l", 1.0)], 6, [r(0.08, 0.08), r(0.05, 0.05), (0, 0)], "cloth", LEGC),
         ]
+    if elder:
+        # Barnacle stones and more crystal clusters crusting the elder's shell.
+        for i, (x, t, z) in enumerate(((0.42, 0.3, 0.3), (-0.4, 0.65, 0.32), (0.3, 0.85, 0.36), (-0.3, 0.15, 0.36), (0.5, 0.6, 0.18), (-0.52, 0.4, 0.16))):
+            p.append(mesh.rock_part("body", B("body", t, (x, 0, z)), r(0.24, 0.22, 0.16), ROCK_D if i % 2 else ROCK, moss=MOSS, seed=150 + i, cuts=2, subdiv=2))
+        for i, (x, t, z, tx, tz) in enumerate(((0.3, 0.3, 0.38, 0.52, 0.7), (-0.32, 0.45, 0.4, -0.55, 0.66), (0.1, 0.85, 0.4, 0.16, 0.74), (-0.08, 0.6, 0.45, -0.1, 0.86))):
+            p.append(mesh.path_part("body", [B("body", t, (x, 0, z)), B("body", t - 0.1, (tx, 0, tz))], 5, [r(0.07, 0.065), (0, 0)], "accent_glow", GLOW))
     return p + left + [mesh.mirror(b) for b in left]
 
 

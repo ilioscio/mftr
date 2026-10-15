@@ -67,7 +67,7 @@ def body(alpha):
 
     p = [
         # The body: rigid segments, deep in the chest, tucked at the waist.
-        mesh.path_part("pelvis", [B("pelvis", -0.15), B("pelvis", 1.0)], 8, [r(0.15, 0.17), r(0.17, 0.2)], "cloth", FUR),
+        mesh.path_part("pelvis", [B("pelvis", -0.15), B("pelvis", 1.0)], 12, [r(0.15, 0.17), r(0.17, 0.2)], "cloth", FUR),
         # A streak of glowing moss down the back between the plates: the camp's green, from above.
         mesh.path_part("chest", [B("chest", 1.0, (0, 0, 0.24)), B("chest", 0.3, (0, 0, 0.27)), B("spine", 0.6, (0, 0, 0.23)), B("pelvis", 0.2, (0, 0, 0.18))], 4,
                        [r(0.03, 0.02), r(0.04, 0.025), r(0.04, 0.025), r(0.02, 0.015)], "accent_glow", GLOW),
@@ -75,22 +75,28 @@ def body(alpha):
                        [r(0.17, 0.19), r(0.18, 0.21), r(0.21, 0.26)], "cloth", FUR_D),
         mesh.path_part("chest", [B("chest", -0.05, (0, 0, -0.04)), B("chest", 0.5, (0, 0, -0.06)), B("chest", 1.05, (0, 0, -0.02))], 8,
                        [r(0.21, 0.27), r(0.22, 0.29), r(0.17, 0.24)], "cloth", FUR_L),
-        mesh.path_part("chest", [B("chest", 0.2, (0, 0, -0.24)), B("chest", 0.85, (0, 0, -0.22))], 6, [r(0.12, 0.05), r(0.1, 0.05)], "cloth", BELLY),
-        mesh.path_part("neck", [B("neck", -0.1), B("neck", 1.1)], 7, [r(0.14, 0.15), r(0.1, 0.11)], "cloth", FUR),
+        mesh.path_part("chest", [B("chest", 0.2, (0, 0, -0.24)), B("chest", 0.85, (0, 0, -0.22))], 9, [r(0.12, 0.05), r(0.1, 0.05)], "cloth", BELLY),
+        mesh.path_part("neck", [B("neck", -0.1), B("neck", 1.1)], 10, [r(0.14, 0.15), r(0.1, 0.11)], "cloth", FUR),
         # The head: a skull, a long snout, a black nose; the lower jaw and its teeth.
         mesh.path_part("head", [B("head", -0.05, (0, 0, 0.02)), B("head", 0.35, (0, 0, 0.02)), B("head", 0.8, (0, 0, -0.01)), B("head", 1.0, (0, 0, -0.02))], 7,
                        [r(0.11, 0.1), r(0.12, 0.1), r(0.06, 0.055), r(0.045, 0.04)], "cloth", FUR),
-        mesh.path_part("head", [B("head", 0.98, (0, 0, -0.015)), B("head", 1.05, (0, 0, -0.02))], 6, [r(0.04, 0.035), r(0.02, 0.02)], "cloth", NOSE),
-        mesh.path_part("jaw", [B("jaw", 0.0), B("jaw", 1.0)], 6, [r(0.06, 0.03), r(0.035, 0.02)], "cloth", FUR_L),
+        mesh.path_part("head", [B("head", 0.98, (0, 0, -0.015)), B("head", 1.05, (0, 0, -0.02))], 9, [r(0.04, 0.035), r(0.02, 0.02)], "cloth", NOSE),
+        mesh.path_part("jaw", [B("jaw", 0.0), B("jaw", 1.0)], 9, [r(0.06, 0.03), r(0.035, 0.02)], "cloth", FUR_L),
         mesh.path_part("jaw", [B("jaw", 0.75, (0, 0, 0.025)), B("jaw", 0.95, (0, 0, 0.03))], 4, [r(0.03, 0.01), r(0.02, 0.008)], "skin", TOOTH),
         # The tail: bushy, dark-tipped.
-        mesh.path_part("tail_1", [B("tail_1", 0), B("tail_1", 1)], 6, [r(0.06, 0.06), r(0.08, 0.08)], "cloth", FUR),
-        mesh.path_part("tail_2", [B("tail_2", 0), B("tail_2", 1)], 6, [r(0.08, 0.08), r(0.07, 0.07)], "cloth", FUR_L),
-        mesh.path_part("tail_3", [B("tail_3", 0), B("tail_3", 1.1)], 6, [r(0.07, 0.07), (0, 0)], "cloth", FUR),
+        mesh.path_part("tail_1", [B("tail_1", 0), B("tail_1", 1)], 9, [r(0.06, 0.06), r(0.08, 0.08)], "cloth", FUR),
+        mesh.path_part("tail_2", [B("tail_2", 0), B("tail_2", 1)], 9, [r(0.08, 0.08), r(0.07, 0.07)], "cloth", FUR_L),
+        mesh.path_part("tail_3", [B("tail_3", 0), B("tail_3", 1.1)], 9, [r(0.07, 0.07), (0, 0)], "cloth", FUR),
     ]
     # Bark plates down the spine.
     for i, (bn, t) in enumerate((("chest", 0.55), ("chest", 0.05), ("spine", 0.5), ("pelvis", 0.6))):
-        p.append(mesh.rock_part(bn, B(bn, t, (0, 0, 0.22 - 0.02 * i)), r(0.3 - 0.03 * i, 0.24, 0.1), BARK, seed=40 + i, cuts=2, subdiv=1))
+        p.append(mesh.rock_part(bn, B(bn, t, (0, 0, 0.22 - 0.02 * i)), r(0.3 - 0.03 * i, 0.24, 0.1), BARK, seed=40 + i, cuts=2, subdiv=3 if alpha else 2))
+    # Fur tufts down the flanks and over the haunches, pointing back.
+    for i, (bn, t, z) in enumerate((("chest", 0.3, 0.05), ("chest", 0.8, 0.0), ("spine", 0.3, 0.06), ("spine", 0.8, 0.04), ("pelvis", 0.4, 0.06))):
+        for side in (1, -1):
+            x = side * (0.2 if bn != "pelvis" else 0.17)
+            p.append(mesh.path_part(bn, [B(bn, t, (x, 0, z)), B(bn, t, (x * 1.15, 0.14, z + 0.02))], 4, [r(0.05, 0.02), (0, 0)], "cloth",
+                                    FUR_L if i % 2 else FUR))
     left = [
         mesh.path_part("ear_l", [B("ear_l", -0.1), B("ear_l", 1.0)], 4, [r(0.05, 0.02), (0, 0)], "cloth", FUR),
         mesh.box_part("head", B("head", 0.32, (0.065, 0, 0.05)), r(0.06, 0.04, 0.035), "accent_glow", GLOW, rot=(0, 0, 25)),
@@ -103,13 +109,17 @@ def body(alpha):
         mesh.path_part("neck", [B("neck", 0.6, (0.2, 0.22, 0.2)), B("neck", 0.6, (0.24, 0.31, 0.24))], 4, [r(0.045, 0.012), (0, 0)], "accent", TIP),
         mesh.path_part("neck", [B("neck", 0.85, (0.1, 0.22, 0.28)), B("neck", 0.85, (0.12, 0.31, 0.33))], 4, [r(0.04, 0.012), (0, 0)], "accent", TIP),
         # Legs: thick at the top, thin below, broad paws.
-        mesh.path_part("upper_front_l", [B("upper_front_l", -0.1), B("upper_front_l", 1.0)], 6, [r(0.08, 0.1), r(0.05, 0.05)], "cloth", FUR),
-        mesh.path_part("lower_front_l", [B("lower_front_l", 0), B("lower_front_l", 1.0)], 5, [r(0.042, 0.042), r(0.034, 0.034)], "cloth", FUR_L),
+        mesh.path_part("upper_front_l", [B("upper_front_l", -0.1), B("upper_front_l", 1.0)], 9, [r(0.08, 0.1), r(0.05, 0.05)], "cloth", FUR),
+        mesh.path_part("lower_front_l", [B("lower_front_l", 0), B("lower_front_l", 1.0)], 7, [r(0.042, 0.042), r(0.034, 0.034)], "cloth", FUR_L),
         mesh.box_part("paw_front_l", B("paw_front_l", 0.5, (0, 0, 0.0)), r(0.08, 0.12, 0.05), "cloth", FUR, bevel=0.3),
-        mesh.path_part("thigh_l", [B("thigh_l", -0.15), B("thigh_l", 1.0)], 6, [r(0.1, 0.13), r(0.055, 0.06)], "cloth", FUR),
-        mesh.path_part("shin_l", [B("shin_l", 0), B("shin_l", 1.0)], 5, [r(0.045, 0.045), r(0.035, 0.035)], "cloth", FUR_L),
-        mesh.path_part("hock_l", [B("hock_l", 0), B("hock_l", 1.0)], 5, [r(0.033, 0.033), r(0.03, 0.03)], "cloth", FUR_L),
+        mesh.path_part("paw_front_l", [B("paw_front_l", 0.9, (0, 0, 0.01)), B("paw_front_l", 1.25, (0, 0, -0.005))], 4, [r(0.03, 0.012), (0, 0)], "cloth", NOSE),
+        mesh.path_part("thigh_l", [B("thigh_l", 0.3, (0.07, 0.02, 0.06)), B("thigh_l", 0.3, (0.09, 0.16, 0.08))], 4, [r(0.05, 0.02), (0, 0)], "cloth", FUR_L),
+        mesh.path_part("thigh_l", [B("thigh_l", -0.15), B("thigh_l", 1.0)], 9, [r(0.1, 0.13), r(0.055, 0.06)], "cloth", FUR),
+        mesh.path_part("shin_l", [B("shin_l", 0), B("shin_l", 1.0)], 7, [r(0.045, 0.045), r(0.035, 0.035)], "cloth", FUR_L),
+        mesh.path_part("hock_l", [B("hock_l", 0), B("hock_l", 1.0)], 7, [r(0.033, 0.033), r(0.03, 0.03)], "cloth", FUR_L),
         mesh.box_part("paw_hind_l", B("paw_hind_l", 0.5, (0, 0, 0.0)), r(0.075, 0.12, 0.045), "cloth", FUR, bevel=0.3),
+        mesh.path_part("paw_hind_l", [B("paw_hind_l", 0.9, (0, 0, 0.01)), B("paw_hind_l", 1.25, (0, 0, -0.005))], 4, [r(0.03, 0.012), (0, 0)], "cloth", NOSE),
+        mesh.path_part("jaw", [B("jaw", 0.7, (0.03, 0, 0.03)), B("jaw", 0.72, (0.03, 0, 0.07))], 3, [r(0.01, 0.008), (0, 0)], "skin", TOOTH),
     ]
     if alpha:
         # Bramble antlers: two branches with twigs, a few green-glowing buds.
@@ -119,7 +129,21 @@ def body(alpha):
             mesh.path_part("head", [B("head", 0.0, (0.16, 0.08, 0.26)), B("head", 0.15, (0.26, 0.0, 0.34))], 4, [r(0.018, 0.018), (0, 0)], "cloth", BARK),
             mesh.path_part("head", [B("head", -0.05, (0.19, 0.14, 0.31)), B("head", -0.1, (0.3, 0.16, 0.26))], 4, [r(0.015, 0.015), (0, 0)], "cloth", BARK),
             mesh.box_part("head", B("head", 0.15, (0.26, 0.0, 0.34)), r(0.03, 0.03, 0.03), "accent_glow", GLOW),
+            mesh.path_part("head", [B("head", 0.05, (0.12, 0.04, 0.18)), B("head", 0.25, (0.2, -0.04, 0.24))], 4, [r(0.014, 0.014), (0, 0)], "cloth", BARK),
+            mesh.path_part("head", [B("head", -0.08, (0.21, 0.18, 0.34)), B("head", -0.2, (0.24, 0.26, 0.44))], 4, [r(0.013, 0.013), (0, 0)], "cloth", BARK),
+            mesh.box_part("head", B("head", -0.2, (0.24, 0.26, 0.44)), r(0.026, 0.026, 0.026), "accent_glow", GLOW),
+            mesh.box_part("head", B("head", -0.1, (0.3, 0.16, 0.26)), r(0.024, 0.024, 0.024), "accent_glow", GLOW),
         ]
+        # A fuller ruff: a second ring of leaves, and a mane of them down the neck's back.
+        for k, (t, out, up, back) in enumerate(((0.2, 0.16, -0.12, 0.2), (0.45, 0.2, 0.0, 0.24), (0.7, 0.16, 0.12, 0.26), (0.95, 0.1, 0.2, 0.22))):
+            left += [
+                mesh.path_part("neck", [B("neck", t, (out * 0.5, 0.02, up * 0.5)), B("neck", t, (out + 0.06, back, up + 0.04))], 4, [r(0.08, 0.015), (0, 0)],
+                               "cloth", LEAF),
+                mesh.path_part("neck", [B("neck", t, (out + 0.06, back, up + 0.04)), B("neck", t, (out + 0.09, back + 0.08, up + 0.05))], 4,
+                               [r(0.04, 0.012), (0, 0)], "accent", TIP),
+            ]
+        for k, t in enumerate((0.2, 0.55, 0.9)):
+            p.append(mesh.path_part("neck", [B("neck", t, (0, 0.02, 0.1)), B("neck", t, (0, 0.18, 0.2))], 4, [r(0.07, 0.015), (0, 0)], "cloth", LEAF))
     return p + left + [mesh.mirror(b) for b in left]
 
 

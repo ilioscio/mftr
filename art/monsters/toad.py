@@ -61,42 +61,49 @@ def body():
         # The body: a broad dome over a pale belly.
         mesh.path_part("body", [B("body", -0.1, (0, 0, -0.04)), B("body", 0.3, (0, 0, 0.02)), B("body", 0.7, (0, 0, 0.02)), B("body", 1.05, (0, 0, -0.02))], 12,
                        [(0.52, 0.34), (0.66, 0.42), (0.62, 0.4), (0.46, 0.3)], "cloth", SKIN),
-        mesh.path_part("body", [B("body", 0.05, (0, 0, -0.2)), B("body", 0.95, (0, 0, -0.18))], 10, [(0.48, 0.16), (0.42, 0.14)], "cloth", BELLY),
+        mesh.path_part("body", [B("body", 0.05, (0, 0, -0.2)), B("body", 0.95, (0, 0, -0.18))], 14, [(0.48, 0.16), (0.42, 0.14)], "cloth", BELLY),
         # The head: wide and flat, the mouth's dark line, the jaw under it.
         mesh.path_part("head", [B("head", -0.05), B("head", 0.5, (0, 0, 0.02)), B("head", 1.0, (0, 0, -0.03))], 10,
                        [(0.42, 0.2), (0.4, 0.18), (0.22, 0.1)], "cloth", SKIN),
-        mesh.path_part("jaw", [B("jaw", 0.0), B("jaw", 0.6), B("jaw", 1.0)], 10, [(0.4, 0.1), (0.36, 0.09), (0.18, 0.05)], "cloth", BELLY),
-        mesh.path_part("jaw", [B("jaw", 0.2, (0, 0, 0.07)), B("jaw", 0.9, (0, 0, 0.06))], 8, [(0.34, 0.03), (0.16, 0.02)], "cloth", MOUTH),
+        mesh.path_part("jaw", [B("jaw", 0.0), B("jaw", 0.6), B("jaw", 1.0)], 14, [(0.4, 0.1), (0.36, 0.09), (0.18, 0.05)], "cloth", BELLY),
+        mesh.path_part("jaw", [B("jaw", 0.2, (0, 0, 0.07)), B("jaw", 0.9, (0, 0, 0.06))], 10, [(0.34, 0.03), (0.16, 0.02)], "cloth", MOUTH),
         # The throat sac, in the camp's color.
-        mesh.path_part("throat", [B("throat", -0.3), B("throat", 0.5), B("throat", 1.2)], 10, [(0.12, 0.1), (0.24, 0.17), (0.08, 0.06)], "accent", SAC),
+        mesh.path_part("throat", [B("throat", -0.3), B("throat", 0.5), B("throat", 1.2)], 14, [(0.12, 0.1), (0.24, 0.17), (0.08, 0.06)], "accent", SAC),
         # The tongue, folded inside the mouth until it snaps out.
-        mesh.path_part("tongue_1", [B("tongue_1", 0), B("tongue_1", 1)], 6, [(0.05, 0.02), (0.045, 0.02)], "skin", PETAL),
-        mesh.path_part("tongue_2", [B("tongue_2", 0), B("tongue_2", 1)], 6, [(0.045, 0.02), (0.045, 0.02)], "skin", PETAL),
-        mesh.path_part("tongue_3", [B("tongue_3", 0), B("tongue_3", 1.2)], 6, [(0.05, 0.022), (0, 0)], "skin", PETAL),
+        mesh.path_part("tongue_1", [B("tongue_1", 0), B("tongue_1", 1)], 8, [(0.05, 0.02), (0.045, 0.02)], "skin", PETAL),
+        mesh.path_part("tongue_2", [B("tongue_2", 0), B("tongue_2", 1)], 8, [(0.045, 0.02), (0.045, 0.02)], "skin", PETAL),
+        mesh.path_part("tongue_3", [B("tongue_3", 0), B("tongue_3", 1.2)], 8, [(0.05, 0.022), (0, 0)], "skin", PETAL),
         # A lily pad on its head, a bloom on the pad.
-        mesh.path_part("head", [B("head", 0.2, (0.0, 0.05, 0.21)), B("head", 0.2, (0.0, 0.05, 0.24))], 12, [(0.34, 0.34), (0.33, 0.33)], "cloth", PAD),
-        mesh.path_part("head", [B("head", 0.2, (0.1, 0.12, 0.24)), B("head", 0.2, (0.1, 0.12, 0.34))], 8, [(0.13, 0.13), (0.03, 0.03)], "cloth", PETAL),
-        mesh.path_part("head", [B("head", 0.2, (0.1, 0.12, 0.3)), B("head", 0.2, (0.1, 0.12, 0.36))], 6, [(0.04, 0.04), (0, 0)], "cloth", EYE),
+        mesh.path_part("head", [B("head", 0.2, (0.0, 0.05, 0.21)), B("head", 0.2, (0.0, 0.05, 0.24))], 18, [(0.34, 0.34), (0.33, 0.33)], "cloth", PAD),
+        mesh.path_part("head", [B("head", 0.2, (0.1, 0.12, 0.24)), B("head", 0.2, (0.1, 0.12, 0.34))], 10, [(0.13, 0.13), (0.03, 0.03)], "cloth", PETAL),
+        mesh.path_part("head", [B("head", 0.2, (0.1, 0.12, 0.3)), B("head", 0.2, (0.1, 0.12, 0.36))], 8, [(0.04, 0.04), (0, 0)], "cloth", EYE),
     ]
     # Warts over the back, and a row of glowing ones down the spine.
     warts = [(0.25, 0.2, 0.3), (-0.3, 0.3, 0.28), (0.35, 0.6, 0.24), (-0.38, 0.65, 0.22), (0.18, 0.85, 0.28), (-0.2, 0.05, 0.32),
              (0.42, 0.4, 0.18), (-0.45, 0.45, 0.18)]
     for i, (x, t, z) in enumerate(warts):
-        p.append(mesh.rock_part("body", B("body", t, (x, 0, z)), (0.12, 0.12, 0.08), WART, seed=60 + i, rough=0.1, cuts=1, subdiv=1))
+        p.append(mesh.rock_part("body", B("body", t, (x, 0, z)), (0.12, 0.12, 0.08), WART, seed=60 + i, rough=0.1, cuts=1, subdiv=2))
     for i, t in enumerate((0.05, 0.3, 0.55, 0.8)):
         p.append(mesh.rock_part("body", B("body", t, (0, 0, 0.4 - 0.03 * abs(i - 1.5))), (0.18, 0.18, 0.12), GLOW, seed=70 + i, rough=0.05, cuts=1,
-                                subdiv=1, slot="accent_glow"))
+                                subdiv=2, slot="accent_glow"))
+    # More warts over the flanks and haunches, and dark mottling.
+    more = [(0.5, 0.25, 0.08), (-0.52, 0.3, 0.06), (0.46, 0.75, 0.1), (-0.48, 0.8, 0.08), (0.12, 0.45, 0.36), (-0.14, 0.62, 0.34),
+            (0.3, 0.95, 0.18), (-0.3, 0.1, 0.24)]
+    for i, (x, t, z) in enumerate(more):
+        p.append(mesh.rock_part("body", B("body", t, (x, 0, z)), (0.1, 0.1, 0.07), WART, seed=110 + i, rough=0.1, cuts=1, subdiv=2))
+    for i, (x, t, z) in enumerate(((0.32, 0.45, 0.3), (-0.34, 0.5, 0.28), (0.0, 0.92, 0.3), (0.44, 0.1, 0.16), (-0.42, 0.88, 0.16))):
+        p.append(mesh.rock_part("body", B("body", t, (x, 0, z)), (0.22, 0.2, 0.05), SKIN_D, seed=120 + i, rough=0.05, cuts=0, subdiv=2))
     left = [
         # Bulging eyes on top of the head.
-        mesh.rock_part("head", B("head", 0.3, (0.2, 0, 0.17)), (0.17, 0.17, 0.15), EYE, seed=80, rough=0.0, cuts=0, subdiv=2),
+        mesh.rock_part("head", B("head", 0.3, (0.2, 0, 0.17)), (0.17, 0.17, 0.15), EYE, seed=80, rough=0.0, cuts=0, subdiv=3),
         mesh.rock_part("head", B("head", 0.3, (0.22, -0.07, 0.19)), (0.07, 0.04, 0.09), PUPIL, seed=81, rough=0.0, cuts=0, subdiv=1),
         mesh.rock_part("head", B("head", 0.3, (0.2, 0.01, 0.12)), (0.21, 0.21, 0.12), SKIN_D, seed=82, rough=0.05, cuts=1, subdiv=1),
         # Front legs, splayed; folded hind legs, the big feet webbed.
-        mesh.path_part("arm_l", [B("arm_l", -0.1), B("arm_l", 1.0)], 7, [(0.09, 0.09), (0.06, 0.06)], "cloth", SKIN),
-        mesh.path_part("hand_l", [B("hand_l", 0), B("hand_l", 1.0)], 6, [(0.06, 0.05), (0.09, 0.03)], "cloth", SKIN_D),
-        mesh.path_part("thigh_l", [B("thigh_l", -0.15), B("thigh_l", 1.0)], 8, [(0.18, 0.16), (0.11, 0.1)], "cloth", SKIN),
-        mesh.path_part("shin_l", [B("shin_l", 0), B("shin_l", 1.0)], 7, [(0.1, 0.09), (0.07, 0.06)], "cloth", SKIN_D),
-        mesh.path_part("foot_l", [B("foot_l", 0), B("foot_l", 1.1)], 6, [(0.07, 0.03), (0.15, 0.03)], "cloth", SKIN_D),
+        mesh.path_part("arm_l", [B("arm_l", -0.1), B("arm_l", 1.0)], 9, [(0.09, 0.09), (0.06, 0.06)], "cloth", SKIN),
+        mesh.path_part("hand_l", [B("hand_l", 0), B("hand_l", 1.0)], 8, [(0.06, 0.05), (0.09, 0.03)], "cloth", SKIN_D),
+        mesh.path_part("thigh_l", [B("thigh_l", -0.15), B("thigh_l", 1.0)], 10, [(0.18, 0.16), (0.11, 0.1)], "cloth", SKIN),
+        mesh.path_part("shin_l", [B("shin_l", 0), B("shin_l", 1.0)], 9, [(0.1, 0.09), (0.07, 0.06)], "cloth", SKIN_D),
+        mesh.path_part("foot_l", [B("foot_l", 0), B("foot_l", 1.1)], 8, [(0.07, 0.03), (0.15, 0.03)], "cloth", SKIN_D),
     ]
     return p + left + [mesh.mirror(b) for b in left]
 

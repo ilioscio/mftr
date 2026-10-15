@@ -69,3 +69,28 @@ them). `fire` on an attack is the sim's windup (validated ±1 frame).
 
 A lineup in color and in black silhouettes beside a champion and a minion; each camp at the
 gameplay camera in its clearing, idle and in a fight; `pack validate` clean.
+
+## 7. As built (2026-10-15)
+
+| Pack | Rig | Triangles | Clips |
+|---|---|---|---|
+| `warden` | biped, its own proportions; three runestone bones | 4,346 | idle, idle_fidget_1, run, attack_1 (slam), attack_2 (backhand), death, flinch |
+| `brute` | biped, hunched in its poses, long arms | 4,562 | as the Warden's (a pound, a haymaker) |
+| `hound_alpha` / `hound` | creature, 28 bones (the pups at 0.9 of the alpha's 1.35) | 2,594 / 1,364 | idle, idle_fidget_1 (a howl / a sniff and a scratch), run, attack_1, death, flinch |
+| `toad` | creature, 21 bones (a three-bone tongue) | 3,616 | the creatures' six |
+| `raven_alpha` / `raven` | creature, 21 bones (two-bone wings) | 2,598 / 1,208 | the creatures' six |
+| `crawler_elder` / `crawler` | creature, 23 bones (six legs, three-bone claws) | 2,668 / 1,316 | the creatures' six |
+
+- **Built by** `art/monsters/build.py --id <key>` (one module per camp; `creature.py` builds bone
+  tables). The Blender tools gained `rig.use_table` (a creature's own skeleton), `mesh.rock_part`
+  (chipped, skinned stone: the Warden's boulders, the Brute's bark, the crawlers' shells, the
+  birds' feather masses) and `mesh.mirror`.
+- **In the client:** a monster's `accent` and `accent_glow` take its camp's color, saturated
+  (the champions' glows keep a pale core); its attacks play out whole (no timing on the wire);
+  it dies where it fell, as minions do. Its shots take its camp's look (the toad's glob an orb,
+  the ravenhawks' quill a shard). A bigger hitbox draws the model bigger by as much: horde
+  mode's boss Brute (×1.5) is a giant, and a horde boss wears its team's ring instead of the
+  neutral gold.
+- **Reviewing:** `--lineup "rook,warden:attack_1@0.6,…"` (with `--lineup-black` and
+  `--lineup-turn`) places models under the game's light at the gameplay camera;
+  `--shot-goto X,Y --shot-goto-fight` fights a camp once it has spawned.

@@ -317,11 +317,7 @@ var _lineup_turn := -25.0                 # `--lineup-turn DEG`: how far each mo
 var _lineup_rows := []                    # [{body, clip, at, t}]
 var _lineup_t := 0.0
 var _lineup_frame := 0
-const LINEUP_RADII := {
-	"warden": 90.0, "brute": 90.0, "hound_alpha": 60.0, "hound": 40.0, "toad": 80.0,
-	"raven_alpha": 50.0, "raven": 30.0, "crawler_elder": 75.0, "crawler": 45.0,
-	"melee": 48.0, "caster": 48.0, "siege": 65.0, "super": 65.0,
-}
+const LINEUP_RADII := {"melee": 48.0, "caster": 48.0, "siege": 65.0, "super": 65.0}
 
 
 func _start_lineup() -> void:
@@ -346,7 +342,7 @@ func _start_lineup() -> void:
 		var clip := spec.get_slice(":", 1) if ":" in spec else ""
 		var id := spec.get_slice(":", 0)
 		var body: Node3D
-		var radius: float = LINEUP_RADII.get(id, 45.0)
+		var radius: float = LINEUP_RADII.get(id, MONSTER_RADII.get(id, 45.0))
 		if names.has(id.to_lower()):
 			body = _make_champion(ALLY_COLOR, names[id.to_lower()])
 			body.position.y = 0.85
@@ -1654,7 +1650,8 @@ func _update_remotes(delta: float) -> void:
 			elif u.minion:
 				b = _make_minion(MINION_BLUE if u.ally else MINION_RED, u.radius, u.get("minion_kind", ""))
 			elif u.kind == "monster":
-				b = _make_monster(u.get("monster", ""), u.radius)
+				# Neutral in the jungle; a horde's boss fights for a team and wears its ring.
+				b = _make_monster(u.get("monster", ""), u.radius, NEUTRAL_COLOR if u.get("neutral", true) else team_color)
 			elif u.kind == "ward":
 				b = _make_ward(u.get("ward", "stealth"), ALLY_COLOR if u.ally else ENEMY_COLOR)
 			else:
@@ -1811,6 +1808,12 @@ const MONSTER_GLOW := {
 	"crawler_elder": Color(1.0, 0.5, 0.06), "crawler": Color(1.0, 0.5, 0.06),
 }
 var monster_models := {}                  # key -> MftrModel (or null without a pack)
+## Each monster's collision radius as its camp has it (jungle.rs): a bigger one (a horde boss)
+## draws its model bigger by as much.
+const MONSTER_RADII := {
+	"warden": 90.0, "brute": 90.0, "hound_alpha": 60.0, "hound": 40.0, "toad": 80.0,
+	"raven_alpha": 50.0, "raven": 30.0, "crawler_elder": 75.0, "crawler": 45.0,
+}
 
 
 func _monster_model(key: String) -> MftrModel:
@@ -1826,7 +1829,7 @@ func _monster_model(key: String) -> MftrModel:
 ## (a faceted body sized to its hitbox, a head, horns on the buff camps' guardians and ears on
 ## the hounds). Either way a gold ring at its feet: neutral, so any team reads it as "not a
 ## champion".
-func _make_monster(key: String, collision_radius_u: float) -> Node3D:
+func _make_monster(key: String, collision_radius_u: float, ring_color := NEUTRAL_COLOR) -> Node3D:
 	var color: Color = MONSTER_COLORS.get(key, Color(0.5, 0.45, 0.4))
 	var r := collision_radius_u * UNITS_TO_METERS
 	var root := MeshInstance3D.new()
@@ -1875,8 +1878,9 @@ func _make_monster(key: String, collision_radius_u: float) -> Node3D:
 	torus.inner_radius = r - 0.03
 	ring.mesh = torus
 	ring.position = Vector3(0, 0.02, 0)
-	ring.material_override = _unshaded(NEUTRAL_COLOR)
+	ring.material_override = _unshaded(ring_color)
 	root.add_child(ring)
+	root.set_meta("monster", key)
 	var pack := _monster_model(key)
 	if pack != null:
 		var glow: Color = MONSTER_GLOW.get(key, NEUTRAL_COLOR)
@@ -1884,6 +1888,8 @@ func _make_monster(key: String, collision_radius_u: float) -> Node3D:
 		_attach_model(root, glow, "", pack, 0.0)
 		for m in root.get_meta("flash_mats", []):
 			m.set_shader_parameter("glow_white", 0.06)
+		var base: float = MONSTER_RADII.get(key, collision_radius_u)
+		root.get_meta("rig").model.scale = Vector3.ONE * clampf(collision_radius_u / base, 0.5, 3.0)
 		_apply_model_mode(root)
 	return root
 
@@ -2446,10 +2452,17 @@ func _style(champion: String, action: String, phase: String, table: Dictionary) 
 	return {}
 
 
-func _make_missile(side: String, radius_u: float, hard_cc: bool, champion := "", action := "") -> Node3D:
+## A monster's shot (16): in its camp's glow; a toad's glob, a ravenhawk's quill.
+const MONSTER_SHOTS := {"toad": "orb", "raven_alpha": "shard", "raven": "shard"}
+
+
+func _make_missile(side: String, radius_u: float, hard_cc: bool, champion := "", action := "", monster := "") -> Node3D:
 	var root := Node3D.new()
 	var color := _side_color(side)
 	var style := _style(champion, action, "projectile", MISSILE_MOTIFS)
+	if monster != "":
+		var glow: Color = MONSTER_GLOW.get(monster, NEUTRAL_COLOR)
+		style = {"motif": MISSILE_MOTIFS[MONSTER_SHOTS.get(monster, "orb")], "color": glow, "core": glow.lightened(0.5)}
 	var trail_u := clampf(radius_u * 4.0, 100.0, 260.0)
 	if style.get("motif", 0) == 3:
 		trail_u = clampf(radius_u * 12.0, 400.0, 900.0)  # a beam: long behind its head
@@ -2493,7 +2506,9 @@ func _update_missiles() -> void:
 		seen[key] = true
 		var world := Vector3(m.pos.x * UNITS_TO_METERS, 0.0, m.pos.y * UNITS_TO_METERS)
 		if not missile_nodes.has(key):
-			var node := _make_missile(m.side, m.radius, m.hard_cc, m.get("champion", ""), m.get("action", ""))
+			var shooter = remote_bodies.get(m.owner)
+			var monster: String = shooter.get_meta("monster", "") if shooter != null else ""
+			var node := _make_missile(m.side, m.radius, m.hard_cc, m.get("champion", ""), m.get("action", ""), monster)
 			add_child(node)
 			missile_nodes[key] = node
 			# Spawn streak (03a §7): enemy missiles are on T_input, their caster on T_interp; a
