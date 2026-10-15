@@ -1302,7 +1302,7 @@ func _build_view() -> void:
 	Seasons.apply_light(Seasons.get_season(season), view_env, view_sun)
 	var geo := {
 		"walls": built.walls, "brush": built.brush, "size": Vector2(s, s), "roads": built.lanes, "river": built.river, "ground": built.get("ground"),
-		"season": season,
+		"season": season, "cliffs": built.get("cliffs", {}),
 		"fountains": [{"center": fountains[0], "radius": float(built.get("fountain_radius", 750.0)), "ally": true}, {"center": fountains[1], "radius": float(built.get("fountain_radius", 750.0)), "ally": false}],
 	}
 	var ground := MapView.make_ground()

@@ -15,6 +15,8 @@ const OUTSIDE_U := 1700.0                 # how far the forest reaches past the 
 const CLIFF_M := 1.4
 
 var _walls: Array = []
+## Which walls are outcrops: boulders in the field, drawn as rock clusters (from the built cliffs).
+var _outcrop := {}
 var _boxes: Array = []                    # each wall's bounding box
 ## Wall edges that face open ground (not seams inside rock), bucketed by EDGE_CELL.
 const EDGE_CELL := 600.0
@@ -43,6 +45,8 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 	var size: Vector2 = geo.size
 	var walls: Array = geo.walls
 	_walls = walls
+	for i in (geo.get("cliffs", {}) as Dictionary).get("outcrops", PackedInt32Array()):
+		_outcrop[i] = true
 	_index_walls(walls, size)
 	_size = size
 	var brush: Array = geo.brush
@@ -84,9 +88,10 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 				_forest_at(p, edge, _near_camera(p, edge), lane_map)
 			x += step
 		y += step
-	# Small walls (outcrops in the lane) are drawn as rock clusters (`is_outcrop`).
-	for poly in walls:
-		if is_outcrop(poly):
+	# Outcrops (small walls on their own, in the lane) are drawn as rock clusters.
+	for wi in walls.size():
+		var poly: PackedVector2Array = walls[wi]
+		if _outcrop.has(wi):
 			var r := _bounds(poly)
 			var c := r.get_center()
 			var rad := maxf(r.size.x, r.size.y) / 2.0
@@ -97,8 +102,9 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 	# Boulders at the foot of the cliffs (15 §4, R06 §3): on the ground, their centers pushed into
 	# the wall so they lean against its face and rise up it; never on the cliff's edge, where
 	# half a rock would hang over the drop. Only along edges that face open ground.
-	for poly in walls:
-		if is_outcrop(poly):
+	for wi in walls.size():
+		var poly: PackedVector2Array = walls[wi]
+		if _outcrop.has(wi):
 			continue
 		var n: int = poly.size()
 		for i in n:
@@ -121,8 +127,9 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 				_add_at(id, q + into * reach, scale, 0.0)
 	# The cliffs' tops along their edges: tufts of grass near the lip, a bush set back from it,
 	# so the edge reads as a meadow's rim rather than a cut (each set back past its own radius).
-	for poly in walls:
-		if is_outcrop(poly):
+	for wi in walls.size():
+		var poly: PackedVector2Array = walls[wi]
+		if _outcrop.has(wi):
 			continue
 		var n: int = poly.size()
 		for i in n:
@@ -205,15 +212,6 @@ func _near_camera(p: Vector2, edge: float) -> bool:
 	return _edge_distance(p + Vector2(0, -(edge * 1.5 + 80.0)), _walls, _size) == 0.0
 
 
-## A wall small enough to be a boulder in the field rather than a cliff (the client draws it
-## with rock props when they're present).
-static func is_outcrop(poly: PackedVector2Array) -> bool:
-	var r := Rect2(poly[0], Vector2.ZERO)
-	for q in poly:
-		r = r.expand(q)
-	return r.size.x < 500.0 and r.size.y < 500.0
-
-
 ## Index the walls: bounding boxes, and their edges that face open ground (both sides of a seam
 ## between two traced pieces are rock) in buckets, so queries look only nearby.
 func _index_walls(walls: Array, size: Vector2) -> void:
@@ -290,11 +288,13 @@ func _out_distance(p: Vector2, size: Vector2) -> float:
 
 
 ## The ground's height under `p`: cliff tops (inside a wall, not an outcrop) stand CLIFF_M high.
-## A lane map's walls reach well past its edges, so the land beyond is cliff too.
+## The land past the map's edges is cliff too (the cliffs' frame, 15 §4).
 func _height_at(p: Vector2) -> float:
+	if p.x < 0.0 or p.y < 0.0 or p.x > _size.x or p.y > _size.y:
+		return CLIFF_M
 	for i in _walls.size():
 		var box: Rect2 = _boxes[i]
-		if box.has_point(p) and not is_outcrop(_walls[i]) and Geometry2D.is_point_in_polygon(p, _walls[i]):
+		if box.has_point(p) and not _outcrop.has(i) and Geometry2D.is_point_in_polygon(p, _walls[i]):
 			return CLIFF_M
 	return 0.0
 

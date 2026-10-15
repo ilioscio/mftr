@@ -94,7 +94,8 @@ static func make_ground() -> MeshInstance3D:
 
 
 ## Build the world: `geo` is `{ walls, brush, size, fountains: [{ center, radius, ally }], roads,
-## river, ground }` (game units; `ground` the ground control map, an Image, 15 §3); `ground` is
+## river, ground, cliffs }` (game units; `ground` the ground control map, an Image, 15 §3;
+## `cliffs` the cliffs' meshes and outcrops, 15 §4); `ground` is
 ## sized and shaded for it. Fountains take the ally or enemy color.
 func build(geo: Dictionary, ground: MeshInstance3D, ally: Color, enemy: Color) -> void:
 	var size: Vector2 = geo.size
@@ -174,26 +175,16 @@ func build(geo: Dictionary, ground: MeshInstance3D, ally: Color, enemy: Color) -
 		wall_mat.set_shader_parameter("map_size", size * U)
 	var brush_mat := ShaderMaterial.new()
 	brush_mat.shader = load("res://shaders/brush.gdshader")
-	var boxes := []
-	for poly in geo.walls:
-		var r := Rect2(poly[0], Vector2.ZERO)
-		for q in poly:
-			r = r.expand(q)
-		boxes.append(r.grow(2.0))
-	for wi in geo.walls.size():
-		var poly: PackedVector2Array = geo.walls[wi]
-		if prop_model("rock_1") != null and preload("res://scripts/scenery.gd").is_outcrop(poly):
-			continue  # drawn as a rock cluster by the scenery
-		# Seams: edges another wall piece continues past (no face there, only rock).
-		var inside_other := func(p: Vector2) -> bool:
-			for oi in geo.walls.size():
-				if oi != wi and boxes[oi].has_point(p) and Geometry2D.is_point_in_polygon(p, geo.walls[oi]):
-					return true
-			return false
+	# The cliffs (15 §4), built whole from the wall pieces (`maps::cliffs`): one mesh per group.
+	var cliffs: Dictionary = geo.get("cliffs", {})
+	for tris in cliffs.get("groups", []):
+		var arrays := []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = tris
+		var mesh := ArrayMesh.new()
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 		var wall := MeshInstance3D.new()
-		wall.mesh = cliff_mesh(poly, CLIFF_M, inside_other)
-		if wall.mesh == null:
-			continue
+		wall.mesh = mesh
 		wall.material_override = wall_mat
 		wall.layers = LAYERS
 		add_child(wall)
@@ -375,118 +366,6 @@ func _process(_delta: float) -> void:
 	_ground_mat.set_shader_parameter("lamps", pos)
 	_ground_mat.set_shader_parameter("lamp_colors", col)
 	_ground_mat.set_shader_parameter("lamp_count", mini(near.size(), LAMPS_DRAWN))
-
-
-## A cliff from a wall polygon (15 §4): its foot exactly on the polygon (the walkable edge the
-## simulation uses), a broken face that steps back over a mossy ledge and leans in as it rises,
-## and a grassy top. Faceted on purpose: the vertices are jittered, the shader shades each face
-## flat. Null for a polygon too small to build.
-static func cliff_mesh(poly: PackedVector2Array, height: float, is_seam_side := Callable()) -> ArrayMesh:
-	var n := poly.size()
-	if n < 3:
-		return null
-	var pts := PackedVector2Array()
-	for p in poly:
-		pts.append(p * U)
-	# Which side of the edges is inside: probe just off the longest edge's middle.
-	var longest := 0
-	for i in n:
-		if pts[i].distance_squared_to(pts[(i + 1) % n]) > pts[longest].distance_squared_to(pts[(longest + 1) % n]):
-			longest = i
-	var e0 := pts[longest]
-	var e1 := pts[(longest + 1) % n]
-	var probe := (e0 + e1) * 0.5 + (e1 - e0).orthogonal().normalized() * 0.02
-	var turn := 1.0 if Geometry2D.is_point_in_polygon(probe, pts) else -1.0
-	var inward := PackedVector2Array()
-	for i in n:
-		var a := pts[(i - 1 + n) % n]
-		var b := pts[i]
-		var c := pts[(i + 1) % n]
-		var n1 := (b - a).orthogonal().normalized() * turn
-		var n2 := (c - b).orthogonal().normalized() * turn
-		var m := (n1 + n2)
-		m = m.normalized() / maxf(0.35, m.normalized().dot(n1)) if m.length() > 1e-4 else n1
-		inward.append(m)
-	# Vertices on a seam (an edge with another piece of wall past it) stay put: no face there.
-	var seam := PackedByteArray()
-	seam.resize(n)
-	if is_seam_side.is_valid():
-		for i in n:
-			var a2 := pts[i]
-			var b2 := pts[(i + 1) % n]
-			var outward := -(b2 - a2).orthogonal().normalized() * turn
-			if is_seam_side.call(((a2 + b2) * 0.5 + outward * 0.2) / U):
-				seam[i] = 1
-				seam[(i + 1) % n] = 1
-	# Rings: the foot, the lip of the ledge, the back of the ledge, the top edge.
-	var rings := []
-	var profile := [[0.0, 0.0], [0.1, height * 0.42], [0.22, height * 0.47], [0.32, height]]
-	for k in profile.size():
-		var ring := PackedVector3Array()
-		for i in n:
-			var j := _jitter(pts[i], k) if k > 0 else 0.0
-			var d: float = 0.0 if seam[i] == 1 else profile[k][0] + j * 0.08
-			var p := pts[i] + inward[i] * d
-			var y: float = profile[k][1] + (j * 0.12 if k == 1 or k == 2 else 0.0)
-			ring.append(Vector3(p.x, y, p.y))
-		rings.append(ring)
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for k in range(1, rings.size()):
-		var lo: PackedVector3Array = rings[k - 1]
-		var hi: PackedVector3Array = rings[k]
-		for i in n:
-			var i2 := (i + 1) % n
-			_quad(st, lo[i], lo[i2], hi[i2], hi[i])
-	# The top: the polygon's own triangulation on the top ring's points (the same vertices, a
-	# little inside), so the top never reaches past the face below it.
-	var top: PackedVector3Array = rings[rings.size() - 1]
-	var tris := Geometry2D.triangulate_polygon(pts)
-	for t in range(0, tris.size(), 3):
-		var a3 := top[tris[t]]
-		var b3 := top[tris[t + 1]]
-		var c3 := top[tris[t + 2]]
-		a3.y = height
-		b3.y = height
-		c3.y = height
-		# Facing up (clockwise seen from above).
-		if (b3 - a3).cross(c3 - a3).y < 0.0:
-			st.add_vertex(a3)
-			st.add_vertex(b3)
-			st.add_vertex(c3)
-		else:
-			st.add_vertex(a3)
-			st.add_vertex(c3)
-			st.add_vertex(b3)
-	st.generate_normals()
-	return st.commit()
-
-
-## A quad of the cliff's face, front side out (Godot's front faces wind clockwise).
-static func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
-	var lo := (a + b) * 0.5
-	var hi := (c + d) * 0.5
-	var out := Vector3(lo.x - hi.x, 0.0, lo.z - hi.z) + Vector3(0, 0.3, 0) * maxf((a - b).length(), 0.01)
-	if (b - a).cross(c - a).dot(out) < 0.0:
-		st.add_vertex(a)
-		st.add_vertex(b)
-		st.add_vertex(c)
-		st.add_vertex(a)
-		st.add_vertex(c)
-		st.add_vertex(d)
-	else:
-		st.add_vertex(a)
-		st.add_vertex(c)
-		st.add_vertex(b)
-		st.add_vertex(a)
-		st.add_vertex(d)
-		st.add_vertex(c)
-
-
-## A small repeatable jitter in -1..1 for a cliff vertex (by its position and ring).
-static func _jitter(p: Vector2, k: int) -> float:
-	var h := sin(p.x * 12.9898 + p.y * 78.233 + float(k) * 37.719) * 43758.5453
-	return (h - floor(h)) * 2.0 - 1.0
 
 
 ## CSGPolygon3D extrudes along local -Z; rotating +90° about X lays the polygon on the ground

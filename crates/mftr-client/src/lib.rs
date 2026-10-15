@@ -29,6 +29,7 @@ use mftr_sim::{
 use std::collections::{BTreeMap, VecDeque};
 
 pub mod blind;
+pub mod cliffs;
 pub mod effects;
 pub mod ground;
 pub mod missiles;

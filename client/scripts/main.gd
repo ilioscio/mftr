@@ -1783,6 +1783,7 @@ func _build_map() -> void:
 	_map_built = true
 	var geo: Dictionary = client.map_geometry()
 	geo["ground"] = client.map_ground()
+	geo["cliffs"] = client.map_cliffs()
 	# The map's own season unless the player picked one (15 §9).
 	if settings.season in Seasons.NAMES:
 		geo["season"] = settings.season

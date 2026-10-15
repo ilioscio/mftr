@@ -28,6 +28,9 @@ fn polygons(polys: &[Vec<Vec2>]) -> VarArray {
     out
 }
 
+/// The cliffs' height (m), as the client draws them.
+pub const CLIFF_M: f32 = 1.4;
+
 /// The ground control map (15 §3) as an RGBA8 image, one texel per `ground::TEXEL_U` units.
 pub fn ground_image(map: &Map) -> Gd<godot::classes::Image> {
     use godot::classes::image::Format;
@@ -35,6 +38,23 @@ pub fn ground_image(map: &Map) -> Gd<godot::classes::Image> {
     let bytes: PackedByteArray = g.rgba.into_iter().collect();
     godot::classes::Image::create_from_data(g.width as i32, g.height as i32, false, Format::RGBA8, &bytes)
         .expect("ground image")
+}
+
+/// The cliffs (15 §4): `groups`, triangles per group of wall pieces (PackedVector3Array, meters,
+/// three vertices a triangle), and `outcrops`, the indices of the walls that are boulders in the
+/// field instead (drawn with rock props).
+pub fn cliffs(map: &Map, height_m: f32) -> VarDictionary {
+    let c = mftr_client::cliffs::build(map, height_m);
+    let mut groups = VarArray::new();
+    for g in &c.groups {
+        let tris: PackedVector3Array = g.iter().map(|v| Vector3::new(v[0], v[1], v[2])).collect();
+        groups.push(&tris.to_variant());
+    }
+    let outcrops: PackedInt32Array = c.outcrops.iter().map(|&i| i as i32).collect();
+    let mut d = VarDictionary::new();
+    d.set("groups", &groups);
+    d.set("outcrops", &outcrops);
+    d
 }
 
 fn lines(ls: &[Line]) -> VarArray {
@@ -165,6 +185,7 @@ impl MftrMaps {
         d.set("walls", &polygons(&map.walls));
         d.set("brush", &polygons(&map.brush));
         d.set("ground", &ground_image(&map));
+        d.set("cliffs", &cliffs(&map, CLIFF_M));
         let l = &map.layout;
         let mut lanes = VarArray::new();
         for lane in 0..spec.lanes.len() {

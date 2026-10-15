@@ -64,6 +64,12 @@ limited to a fixed number of segments, so any map works.
   strata, moss on the ledges and grass running over the top. The tops are the ground's own grass
   (one shared shader include): a lighter lip where it rolls over the drop, the forest's gloom
   deeper in, tufts of grass and bushes along the edge, each set back past its own radius.
+- **One outline per cliff** (`mftr_client::cliffs`): the simulation traces walls in tiles, so a
+  cliff is several pieces meeting at straight seams. The client merges them (shared edges
+  cancel), smooths the merged outline (each point within 0.18 m of the walkable edge) and draws
+  one face along it; the tops are the pieces' own, following the face. Only a group of pieces
+  that is small and on its own is an outcrop (drawn with rock props). The land past the map's
+  edges is rock at the cliffs' height, so a wall along the edge never shows a drop behind it.
 - **Rocks:** boulders are placed from each wall's edges *at ground level*, their centers inside
   the wall so they lean into the cliff face and rise up it; on the tops they're set back from the
   edge by their own radius. Rocks are rebuilt with the larger budget: several shapes, chipped

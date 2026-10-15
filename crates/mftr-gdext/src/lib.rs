@@ -938,6 +938,13 @@ impl MatchClient {
         d
     }
 
+    /// The cliffs' meshes and which walls are outcrops (15 §4; `maps::cliffs`). Built on each
+    /// call: call once per map.
+    #[func]
+    fn map_cliffs(&self) -> VarDictionary {
+        maps::cliffs(self.session.map(), maps::CLIFF_M)
+    }
+
     /// What the ground is made of where (15 §3): the map's ground control map, an RGBA8 Image.
     /// Baked on each call: call once per map (`map_geometry` is cheap and called often).
     #[func]
