@@ -4224,6 +4224,43 @@ mod tests {
         assert_eq!(s.order, Order::Idle);
     }
 
+    /// LoL minion behavior: a minion leaves a champion for an enemy minion (higher priority),
+    /// never the other way, and lets a fleeing champion go instead of chasing it off the lane.
+    #[test]
+    fn minions_switch_only_up_the_priority_ladder_and_do_not_chase_off_lane() {
+        use crate::lane::{Seen, laner_think};
+        let mut w = World::new(1);
+        let lane = [Vec2::new(0.0, 1000.0), Vec2::new(4000.0, 1000.0)];
+        let me = w.spawn_minion(
+            MinionKind::Melee,
+            Team::Blue,
+            Vec2::new(1000.0, 1000.0),
+            Some(Brain::Laner { lane: 0, next: 0 }),
+        );
+        let champ = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, Vec2::new(1300.0, 1000.0));
+        let foe = w.spawn_minion(MinionKind::Melee, Team::Red, Vec2::new(1400.0, 1000.0), None);
+        let map = w.map().clone();
+        let seen = |w: &World| w.units().iter().map(Seen::of).collect::<Vec<_>>();
+        let mut unit = w.unit(me).unwrap().clone();
+        // The champion is the only target: take it.
+        let only_champ: Vec<Seen> = seen(&w).into_iter().filter(|s| s.id != foe).collect();
+        laner_think(&mut unit, &only_champ, &lane, &[], &[], &map);
+        assert_eq!(unit.state.order, Order::Attack(champ));
+        // An enemy minion shows up: it outranks the champion.
+        laner_think(&mut unit, &seen(&w), &lane, &[], &[], &map);
+        assert_eq!(unit.state.order, Order::Attack(foe));
+        // The champion never outranks the minion back.
+        laner_think(&mut unit, &seen(&w), &lane, &[], &[], &map);
+        assert_eq!(unit.state.order, Order::Attack(foe));
+        // A champion target pulled far off the lane is let go: back to walking the lane.
+        unit.state.set_order(Order::Attack(champ), &map);
+        unit.state.pos = Vec2::new(1300.0, 2000.0);
+        w.unit_mut(champ).unwrap().state.pos = Vec2::new(1300.0, 2100.0);
+        let far: Vec<Seen> = seen(&w).into_iter().filter(|s| s.id != foe).collect();
+        laner_think(&mut unit, &far, &lane, &[], &[], &map);
+        assert!(matches!(unit.state.order, Order::MoveTo(_)), "{:?}", unit.state.order);
+    }
+
     #[test]
     fn subtick_command_moves_only_for_the_rest_of_the_tick() {
         let mut w = World::new(1);
@@ -6661,7 +6698,7 @@ mod tests {
 
     /// The Bridge built from its spec (12 §1, E6): its walls are traced, so they differ a little
     /// from the hand-built polygons it replaced.
-    const GOLDEN_HASH_BRIDGE: u64 = 0x1804_66e0_ba65_f51f;
+    const GOLDEN_HASH_BRIDGE: u64 = 0x2f42_4b83_5307_dbfd;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
