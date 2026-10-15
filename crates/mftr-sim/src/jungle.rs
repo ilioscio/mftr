@@ -96,6 +96,25 @@ impl MonsterKind {
         Self::ALL.get(v as usize).copied()
     }
 
+    /// Its key: the client's name for it and its art pack's id (`art/monsters/<key>`, 16).
+    pub fn key(self) -> &'static str {
+        match self {
+            MonsterKind::Warden => "warden",
+            MonsterKind::Brute => "brute",
+            MonsterKind::HoundAlpha => "hound_alpha",
+            MonsterKind::Hound => "hound",
+            MonsterKind::Toad => "toad",
+            MonsterKind::RavenAlpha => "raven_alpha",
+            MonsterKind::Raven => "raven",
+            MonsterKind::CrawlerElder => "crawler_elder",
+            MonsterKind::Crawler => "crawler",
+        }
+    }
+
+    pub fn by_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.key() == key)
+    }
+
     pub fn def(self) -> MonsterDef {
         let d = |name, health, resist, damage, attack, gold, xp, radius, big| MonsterDef {
             name,

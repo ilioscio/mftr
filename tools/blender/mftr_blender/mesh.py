@@ -297,6 +297,72 @@ def box_part(bone, center, size, slot, color, rot=(0.0, 0.0, 0.0), taper=1.0, be
     return build
 
 
+def rock_part(bone, center, size, color, moss=None, seed=1, rough=0.16, cuts=4, subdiv=2, rot=(0.0, 0.0, 0.0),
+              slot="cloth", dark=0.72, flip=False):
+    """A chipped stone (16, the map's boulders on a bone): a sphere roughened by a few bumps,
+    flattened by `cuts` random planes, `size` (x, y, z) about `center` (a coordinate or (bone, t)),
+    turned by `rot` degrees. Each facet has its own vertices and shade: up-facing ones lighter
+    (or `moss`), down-facing ones darker (`dark`). `flip` mirrors the stone in X (`mirror`)."""
+    def build(bm, layers, groups, mats):
+        import random
+        from mathutils import Euler
+        deform, col = layers
+        rng = random.Random(seed)
+        tmp = bmesh.new()
+        bmesh.ops.create_icosphere(tmp, subdivisions=subdiv, radius=1.0)
+        bumps = [(Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-0.5, 1))).normalized(), rng.uniform(-rough, rough))
+                 for _ in range(6)]
+        for v in tmp.verts:
+            d = v.co.normalized()
+            v.co = d * (1.0 + sum(a * max(0.0, d.dot(b)) ** 2 for b, a in bumps) + rng.uniform(-rough, rough) * 0.25)
+        for _ in range(cuts):
+            n = Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-0.6, 1))).normalized()
+            off = rng.uniform(0.45, 0.75)
+            for v in tmp.verts:
+                over = v.co.dot(n) - off
+                if over > 0:
+                    v.co -= n * over
+        m = Euler(tuple(math.radians(a) for a in rot), "XYZ").to_matrix()
+        c = _resolve(center)
+        sx = -1.0 if flip else 1.0
+        for f in tmp.faces:
+            pts = [c + m @ Vector((sx * v.co.x * size[0] / 2, v.co.y * size[1] / 2, v.co.z * size[2] / 2)) for v in f.verts]
+            if flip:
+                pts.reverse()
+            nz = (m @ f.normal).z
+            shade = color
+            if moss is not None and nz > 0.6 and rng.random() < 0.85:
+                shade = moss
+            k = (1.0 + 0.18 * max(0.0, nz)) if nz >= 0 else (1.0 - (1.0 - dark) * min(1.0, -nz))
+            k *= rng.uniform(0.92, 1.08)
+            vs = [bm.verts.new(p) for p in pts]
+            face = bm.faces.new(vs)
+            face.material_index = mats[slot]
+            face.smooth = False
+            for v in vs:
+                v[deform][groups[bone]] = 1.0
+                ao = max(0.55, min(1.0, 0.55 + 0.45 * v.co.z / AO_HEIGHT))
+                v[col] = (*(min(1.0, x * k) for x in shade), ao)
+        tmp.free()
+    build.mftr_rock = (bone, center, size, color, moss, seed, rough, cuts, subdiv, rot, slot, dark, flip)
+    return build
+
+
+def mirror(part):
+    """A `box_part`, `path_part` or `rock_part` builder for the other side (X mirrored, `_l`
+    bones swapped for `_r`)."""
+    if hasattr(part, "mftr_box"):
+        bone, center, size, slot, color, rot, taper, bevel = part.mftr_box
+        return box_part(_swap_side(bone), _mirror_point(center), size, slot, color, (rot[0], -rot[1], -rot[2]), taper, bevel)
+    if hasattr(part, "mftr_rock"):
+        bone, center, size, color, moss, seed, rough, cuts, subdiv, rot, slot, dark, flip = part.mftr_rock
+        return rock_part(_swap_side(bone), _mirror_point(center), size, color, moss, seed, rough, cuts, subdiv,
+                         (rot[0], -rot[1], -rot[2]), slot, dark, not flip)
+    bone, points, sides, radii, slot, color, roll, ref, colors = part.mftr_path
+    return path_part(_swap_side(bone), [_mirror_point(q) for q in points], sides, radii, slot, color, -roll,
+                     None if ref is None else (-ref[0], ref[1], ref[2]), colors)
+
+
 def box_pair(bone, center, size, slot, color, rot=(0.0, 0.0, 0.0), taper=1.0, bevel=0.0):
     """`box_part` and its mirror (the rotation mirrored about X)."""
     return [box_part(bone, center, size, slot, color, rot, taper, bevel),

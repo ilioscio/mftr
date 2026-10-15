@@ -881,6 +881,26 @@ map's visual update (R06), with editor maps first-class and seasons planned for.
 - **Later:** seasonal prop variants (snowy pines, bare trees, winter grass); butterflies that
   scatter from units; reeds.
 
+## J — Jungle monsters (after P)
+
+The owner's call: the camps were still placeholder spheres after the champions and the map got
+real art. The rules are [16](16-jungle-monster-art.md) (D61, Proposed).
+
+### Status (2026-10-15): ✅ all six camps built (awaiting the owner's review)
+- **Packs:** `monster` packs for all nine monsters, validated against their sim kind (`fire` on
+  the windup); the Warden and Brute on the biped bones, the beasts on the new `creature`
+  archetype.
+- **The camps:** the Azure Warden (a mossy monolith, an azure crystal heart and spires,
+  orbiting runestones), the Ember Brute (charred, knuckle-walking, magma cracks), Thicket Hounds
+  (bark-backed wolves; the alpha's bramble antlers), the Bog Toad (lily pad, glowing warts, a
+  tongue and a spit), Ravenhawks (crested; wings that spread and beat; quills), Stone Crawlers
+  (boulder shells, amber crystals, snapping claws). Each glows in its camp's color.
+- **Horde mode:** its bosses (the Warden at wave 10, the Brute at 20) use the same models, scaled
+  to their hitboxes, in their team's ring.
+- **Checked:** lineups in color and black silhouettes beside Rook and a minion; the Warden, the
+  toad, the ravenhawks and the hounds fought in matches at the gameplay camera; `pack validate`
+  clean; a test that every sim monster has a pack that validates.
+
 ## S — One server, many matches (between E and M4 slice 5)
 The server plays whatever its players ask for ([13](13-server-instances.md), D57): one process
 on one port runs match instances of every full-match queue, created and stopped with their

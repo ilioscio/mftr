@@ -385,3 +385,23 @@ fn minion_packs_are_checked_against_their_kind() {
     let siege = validate_file(&art("minions/siege/export/siege.glb"));
     assert!(siege.summary[0].contains("38 bones"), "{:?}", siege.summary);
 }
+
+#[test]
+fn every_monster_has_a_pack_checked_against_its_kind() {
+    // 16: one pack per sim monster, `creature` or `biped`, `fire` on the monster's windup.
+    for m in mftr_sim::jungle::MonsterKind::ALL {
+        let key = m.key();
+        let r = validate_file(&art(&format!("monsters/{key}/export/{key}.glb")));
+        assert!(errors(&r).is_empty(), "{key}: {:?}", errors(&r));
+    }
+    let glb = std::fs::read(art("monsters/hound/export/hound.glb")).unwrap();
+    let side = std::fs::read_to_string(art("monsters/hound/export/hound.anims.ron")).unwrap();
+    let late = side.replace(r#"(name: "fire", frame: 15)"#, r#"(name: "fire", frame: 20)"#);
+    assert_ne!(late, side);
+    assert_error(&validate(&glb, &late), "the monster fires at 15.0");
+    let wolf = side.replace(r#"id: "hound""#, r#"id: "wolf""#);
+    assert_error(&validate(&glb, &wolf), "monster `wolf` must be one of");
+    // A creature skeleton is only for monsters.
+    let champ = side.replace(r#"kind: "monster""#, r#"kind: "champion""#);
+    assert_error(&validate(&glb, &champ), "`creature` for a monster");
+}

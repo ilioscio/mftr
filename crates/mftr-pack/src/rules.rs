@@ -4,6 +4,7 @@
 use mftr_sim::MinionKind;
 use mftr_sim::ability::Effect;
 use mftr_sim::champion::ChampionDef;
+use mftr_sim::jungle::MonsterKind;
 
 pub const FPS: u32 = 30;
 
@@ -12,6 +13,8 @@ pub const FPS: u32 = 30;
 pub const TRIANGLES_TARGET: (usize, usize) = (5000, 8000);
 /// Lane minions (A5): many on screen at once, so lighter. ×1.5 by D60 (15 §2).
 pub const MINION_TRIANGLES_TARGET: (usize, usize) = (900, 3900);
+/// Jungle monsters (16): a camp's few on screen at once; the buff monsters at the top.
+pub const MONSTER_TRIANGLES_TARGET: (usize, usize) = (1200, 7000);
 pub const TRIANGLES_MAX: usize = 12_000;
 /// Map props (structures, trees, rocks): static, one `root` bone, no clips. A structure is the
 /// most detailed thing on screen, so its cap is higher; scenery is drawn many times over. ×1.5
@@ -151,6 +154,30 @@ pub fn minion_kind(id: &str) -> Option<MinionKind> {
 /// A minion's attack fire time in frames (its windup, 10 §4.3).
 pub fn minion_fire_frame(kind: MinionKind) -> f32 {
     mftr_sim::lane::minion_attack(kind).windup().0 as f32 * FPS as f32 / 1920.0
+}
+
+/// Jungle monsters (16): every pack (`art/monsters/<key>`) ships these. Camps spend most of a
+/// match waiting, so an idle fidget is required.
+pub const REQUIRED_MONSTER: &[&str] = &["idle", "idle_fidget_1", "run", "attack_1", "death", "flinch"];
+
+/// The sim's monster a monster pack is for (its id is the monster's key).
+pub fn monster_kind(id: &str) -> Option<MonsterKind> {
+    MonsterKind::by_key(id)
+}
+
+/// A monster's attack fire time in frames (its windup, 10 §4.3).
+pub fn monster_fire_frame(kind: MonsterKind) -> f32 {
+    kind.def().attack.windup().0 as f32 * FPS as f32 / 1920.0
+}
+
+/// The `creature` archetype (16 §3): a free skeleton for beasts (four legs, wings, many legs),
+/// made of these. Names are lowercase snake case, paired bones end in `_l` / `_r`.
+pub const CREATURE_REQUIRED: &[&str] = &["root", "head", "socket_chest", "socket_overhead"];
+
+pub fn creature_bone_allowed(name: &str) -> bool {
+    !name.is_empty()
+        && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        && name.as_bytes()[0].is_ascii_lowercase()
 }
 
 /// Fallbacks the library also carries (A3): champions without their own play these.

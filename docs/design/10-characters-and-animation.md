@@ -234,6 +234,7 @@ Fallbacks: a champion without its own `idle`, `run`, `death`, attack or ability 
 | `biped`, minion shape | Lane minions (A5) | The `biped` bones placed by `rig.use_shape("minion")`: chibi proportions (a big head on short legs, ~1.05 m; the super minion ×1.6). Same names, so the validator, animator and clip tools apply unchanged |
 | `quadruped` | Beasts, mounts | Own shared library |
 | `floater` | Spirits, serpents, constructs | Spine chain plus sockets, no legs |
+| `creature` | Jungle monsters (D61, [16](16-jungle-monster-art.md)) | A free skeleton in lowercase snake case with `root`, `head`, `socket_chest` and `socket_overhead`; faces +Z, `_l` on +X; ships every clip itself. Built from a bone table (`rig.use_table`) |
 | `custom` | Anything else | Must provide the required sockets (§7.2) and every clip itself |
 
 ### 7.2 `biped` v1

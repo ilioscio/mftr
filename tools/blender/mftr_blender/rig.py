@@ -124,8 +124,32 @@ def shaped(p):
     return (p[0] * _shape["x"] * s, p[1] * _shape["y"] * s, _remap_z(p[2], _shape["heights"]) * s)
 
 
+# A creature's own skeleton (16 §3), when one is in use: `use_table`.
+_table = None
+_table_archetype = None
+
+
+def use_table(table, archetype="creature"):
+    """Use `table` instead of the biped (a creature's skeleton, 16 §3): entries as the biped's,
+    (name, parent, head, tail, deform, roll axis), parents first, in meters facing -Y. Paired
+    bones are listed on the left (+X, names ending `_l`) and mirrored by `mirrored`. Everything
+    built from `bone_table` (the armature, (bone, t) points of mesh parts) follows.
+    `use_table(None)` restores the biped."""
+    global _table, _table_archetype
+    _table = list(table) if table is not None else None
+    _table_archetype = archetype if table is not None else None
+
+
+def mirrored(left):
+    """`left` (bones ending `_l`, on +X) and their right-side mirrors."""
+    return list(left) + [_mirror(b) for b in left]
+
+
 def bone_table():
-    """Every bone of the reference skeleton, parents before children (in the current shape)."""
+    """Every bone of the reference skeleton, parents before children (in the current shape), or
+    the creature table in use."""
+    if _table is not None:
+        return list(_table)
     table = _CENTER + _LEFT + [_mirror(b) for b in _LEFT] + _SOCKETS
     out = [(n, par, shaped(h), shaped(t), d, ax) for n, par, h, t, d, ax in table]
     if _shape is None or not any(k in _shape for k in ("shoulder", "arm", "hand")):
@@ -213,6 +237,6 @@ def build_armature(name="biped_v1", collection=None):
 
     for pb in obj.pose.bones:
         pb.rotation_mode = "QUATERNION"
-    obj["mftr_archetype"] = ARCHETYPE
+    obj["mftr_archetype"] = _table_archetype or ARCHETYPE
     obj["mftr_rig_version"] = VERSION
     return obj
