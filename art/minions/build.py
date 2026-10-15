@@ -25,9 +25,10 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "tools", "blender"))
 
 import bpy  # noqa: E402
+from mathutils import Vector  # noqa: E402
 
 from mftr_blender import clips, mesh, rig  # noqa: E402
-from mftr_blender.clips import merge, sym  # noqa: E402
+from mftr_blender.clips import grip, ik, merge, sym  # noqa: E402
 from mftr_blender.library import _clip, arms, cycle, run_half  # noqa: E402
 
 # Per kind: overall scale, extra width, attack timing (frames at 30 fps; `fire` = the sim's
@@ -191,16 +192,74 @@ def siege_gear():
     return g
 
 
+# The super minion's maul, in meters at its built size (`hand_r` runs ~0.14 m): the fist closes
+# around the haft at GRIP along `hand_r`, the head's center HEAD_AT along it.
+MAUL_GRIP = 0.08
+MAUL_HEAD_AT = MAUL_GRIP + 0.80
+
+
+def _hand_r():
+    b = next(b for b in rig.bone_table() if b[0] == "hand_r")
+    return Vector(b[2]), Vector(b[3])
+
+
+def maul():
+    """The great maul, skinned to the right hand and laid along it (the haft runs through the
+    fist), so a pose aims the whole maul by aiming `hand_r` or by an IK target (`maul_at`)."""
+    h, t = _hand_r()
+    axis = (t - h).normalized()
+    g = h + axis * MAUL_GRIP
+    c = h + axis * MAUL_HEAD_AT
+    across = axis.cross(Vector((0, 1, 0))).normalized()
+
+    def p(v):
+        return tuple(v)
+
+    hb = "hand_r"
+    return [
+        # Pommel, haft, a leather wrap under the fist, an iron collar under the head.
+        mesh.path_part(hb, [p(g - axis * 0.16), p(g - axis * 0.12)], 6, [(.035, .035), (.035, .035)], "metal", IRON, ref=across),
+        mesh.path_part(hb, [p(g - axis * 0.13), p(c)], 6, [(.026, .026), (.03, .03)], "cloth", WOOD, ref=across),
+        mesh.path_part(hb, [p(g - axis * 0.08), p(g + axis * 0.10)], 6, [(.033, .033), (.033, .033)], "cloth", LEATHER, ref=across),
+        mesh.path_part(hb, [p(c - axis * 0.22), p(c - axis * 0.15)], 6, [(.04, .04), (.05, .05)], "metal", IRON, ref=across),
+        # The head: an iron block across the haft, steel-faced at both ends.
+        mesh.path_part(hb, [p(c - across * 0.17), p(c + across * 0.17)], 4, [(.19, .19), (.19, .19)], "metal", IRON, ref=axis),
+        mesh.path_part(hb, [p(c - across * 0.21), p(c - across * 0.17)], 4, [(.15, .15), (.15, .15)], "metal", METAL, ref=axis),
+        mesh.path_part(hb, [p(c + across * 0.17), p(c + across * 0.21)], 4, [(.15, .15), (.15, .15)], "metal", METAL, ref=axis),
+    ]
+
+
+def maul_at(head, toward, left=None):
+    """The maul's head center at `head` (armature space: X left, -Y forward, Z up), the haft
+    running from it toward `toward`, the right fist on it at MAUL_GRIP; with `left`, the left hand
+    on the haft that many meters past the right toward the pommel (both hands on it)."""
+    hp, tw = Vector(head), Vector(toward)
+    axis = (hp - tw).normalized()
+    out = {"ik_hand_r": ik(tuple(hp - axis * MAUL_HEAD_AT), aim=tuple(axis))}
+    if left is not None:
+        out["grip_l"] = grip("hand_r", at=MAUL_GRIP - left, pole=(1.0, 0.2, -1.0))
+    return out
+
+
+# Where the maul is: on the right shoulder, head behind it (idle, run); raised high behind the
+# head in both hands (windup); slammed into the ground in front (`fire`).
+MAUL_SHOULDER = maul_at((-0.40, 0.32, 1.30), (-0.30, -0.42, 0.72))
+MAUL_RAISED = maul_at((-0.10, 0.45, 1.95), (-0.12, -0.12, 1.40), left=0.16)
+MAUL_SLAM = maul_at((-0.12, -1.00, 0.19), (-0.12, -0.30, 0.78), left=0.16)
+# In-betweens that keep the swing in the plane the minion faces, not out to its side: lifted
+# up off the shoulder, upright overhead on the way down, carried upright back to the shoulder.
+MAUL_LIFT = maul_at((-0.30, 0.18, 1.85), (-0.26, -0.22, 1.05), left=0.16)
+MAUL_OVER = maul_at((-0.12, -0.45, 1.95), (-0.12, -0.22, 1.15), left=0.16)
+MAUL_CARRY = maul_at((-0.30, -0.30, 1.60), (-0.28, -0.25, 0.75))
+
+
 def super_gear():
     # Armor over the robe (chest plate, pauldrons, a horned crown around the hood, gauntlets) and
     # a great maul in the right hand.
     g = [
         part("chest", (0, -0.03, 0.55), (0, -0.035, 0.69), 8, [(0, .10, .07), (.5, .115, .08), (1, .09, .06)], "metal", IRON),
         part("head", (0, 0.005, 0.69), (0, 0.01, 0.75), 12, [(0, .14, .135), (1, .135, .13)], "metal", IRON),
-        part("hand_r", (-0.439, 0.12, 0.435), (-0.439, -0.46, 0.435), 6, [(0, .018, .018), (1, .02, .02)], "cloth", WOOD),
-        part("hand_r", (-0.36, -0.50, 0.435), (-0.52, -0.50, 0.435), 4, [(0, .085, .085), (1, .085, .085)], "metal", IRON),
-        part("hand_r", (-0.35, -0.50, 0.435), (-0.37, -0.50, 0.435), 4, [(0, .07, .07), (1, .07, .07)], "metal", METAL),
-    ]
+    ] + maul()
     left = [
         part("upperarm_l", (0.09, 0.0, 0.69), (0.21, 0.0, 0.72), 8, [(0, .055, .055), (.45, .085, .08), (1, 0, 0)], "metal", IRON),
         part("forearm_l", ("forearm_l", .55), ("forearm_l", .95), 8, [(0, .062, .062), (1, .07, .07)], "metal", IRON),
@@ -226,7 +285,7 @@ def hold(kind):
         "melee": arms((0.35, 0.35, -1), (0.1, 1, -0.3), (0.6, 0.15, -0.8), (0.8, 0.35, -0.5)),
         "caster": arms((0.3, 0.05, -1), (0.2, 0.25, -1), (0.65, 0.15, -0.75), (0.85, 0.15, -0.5)),
         "siege": arms((0.15, 0.7, -1), (0.0, 1, -0.6)),
-        "super": arms((0.35, 0.0, -1), (0.25, 0.3, -1), (0.4, -0.3, 0.6), (-0.1, 0.4, 1)),
+        "super": merge(arms((0.35, 0.0, -1), (0.25, 0.3, -1)), MAUL_SHOULDER),
     }[kind]
 
 
@@ -286,14 +345,15 @@ def attack_1(arm, kind, frames, fire):
         barrel = {fire - 1: 0.0, fire: 0.0, fire + 2: 0.12, fire + 10: 0.0}
         keys = [(f, p, merge(l or {}, {"extra_barrel_1": (0, barrel.get(f, 0.0) * S, 0)})) for f, p, l in keys]
     else:
-        # The super minion: maul high over the head, a ground-shaking slam on `fire`.
-        up = merge(st, arms((0.35, 0.0, -1), (0.25, 0.3, -1), (0.2, -0.2, 1), (-0.1, -0.6, 0.6)), {"spine_02": (-14, 0, 8), "head": (-8, 0, 0)},
-                   sym("thigh", -6, 0, 0))
-        slam = merge(st, arms((0.35, 0.4, -1), (0.25, 0.8, -0.5), (0.1, 1, -0.6), (0.0, 1, -0.9)), {"spine_01": (16, 0, 0), "spine_02": (14, 0, -8)},
-                     sym("thigh", -24, 0, 0), sym("calf", 30, 0, 0))
-        keys = [(0, merge(st, hold("super")), None), (fire - 5, up, L({"pelvis": (0, 0.02, 0.02)})),
+        # The super minion: the maul raised high behind the head in both hands, a ground-shaking
+        # slam on `fire`.
+        up = merge(st, MAUL_RAISED, {"spine_02": (-14, 0, 8), "head": (-8, 0, 0)}, sym("thigh", -6, 0, 0))
+        slam = merge(st, MAUL_SLAM, {"spine_01": (16, 0, 0), "spine_02": (14, 0, -8)}, sym("thigh", -24, 0, 0), sym("calf", 30, 0, 0))
+        over = merge(st, MAUL_OVER, {"spine_01": (6, 0, 0), "spine_02": (2, 0, 0)})
+        keys = [(0, merge(st, hold("super")), None), (fire - 8, merge(st, MAUL_LIFT, {"spine_02": (-6, 0, 4)}), None),
+                (fire - 5, up, L({"pelvis": (0, 0.02, 0.02)})), (fire - 2, over, L({"pelvis": (0, -0.01, -0.03)})),
                 (fire, slam, L({"pelvis": (0, -0.04, -0.10)})), (fire + 10, merge(slam, {"spine_01": (10, 0, 0)}), L({"pelvis": (0, -0.03, -0.07)})),
-                (frames, merge(st, hold("super")), None)]
+                (fire + 17, merge(st, hold("super"), MAUL_CARRY), None), (frames, merge(st, hold("super")), None)]
     return _clip(arm, "attack_1", frames, keys, markers={"fire": fire})
 
 
@@ -309,6 +369,10 @@ def death(arm, kind):
     ]
     if kind == "siege":
         keys = [(f, merge(p, {"extra_cart_1": (0, -28 * min(1.0, f / 12), 0)}), l) for f, p, l in keys]
+    if kind == "super":
+        # The maul flies up as it staggers, drops, and lies on the ground beside it.
+        hand = {5: (0.2, -0.5, 0.85), 12: (0.5, 0.4, -0.75), 24: (0.15, 1.0, -0.05)}
+        keys = [(f, merge(p, {"hand_r": clips.aim(*hand[f], side="r")}) if f in hand else p, l) for f, p, l in keys]
     return _clip(arm, "death", 24, keys)
 
 
