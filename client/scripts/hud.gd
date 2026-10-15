@@ -46,6 +46,9 @@ const STAT_ICONS := {
 	"haste": '<circle cx="12" cy="13" r="8" fill="none" stroke="#c9d3df" stroke-width="2.2"/><path d="M12 8v5l3 2" stroke="#c9d3df" stroke-width="2.2" stroke-linecap="round" fill="none"/>',
 	"ms": '<path d="M5 16c3 0 4-8 9-8 3 0 5 2 6 5l-2 3H5z" fill="#d8dee6"/><path d="M3 20h18" stroke="#d8dee6" stroke-width="2" stroke-linecap="round"/>',
 	"gold": '<circle cx="12" cy="12" r="8.5" fill="#f2c14e" stroke="#9a6b10" stroke-width="1.6"/><circle cx="12" cy="12" r="4.5" fill="none" stroke="#9a6b10" stroke-width="1.4"/>',
+	"range": '<circle cx="12" cy="12" r="8.5" fill="none" stroke="#c9d3df" stroke-width="2" stroke-dasharray="3.2 2.4"/><circle cx="12" cy="12" r="2.6" fill="#c9d3df"/>',
+	"ls": '<path d="M12 3c3.6 5 6.2 8.2 6.2 11.3a6.2 6.2 0 0 1-12.4 0C5.8 11.2 8.4 8 12 3z" fill="#ff6f7a"/>',
+	"regen": '<path d="M9.5 3h5v6.5H21v5h-6.5V21h-5v-6.5H3v-5h6.5z" fill="#5fe08a"/>',
 }
 
 static var _cache := {}

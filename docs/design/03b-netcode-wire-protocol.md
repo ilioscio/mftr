@@ -129,6 +129,15 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 > share, CC) and a lingering flag. Enemy beams are revealed once any point of the line is in
 > vision.
 
+> **Implemented (protocol 25):** the inspect window ([01 §13](01-gameplay.md#13-controls)).
+> `Inspect { unit }` (client kind 5) asks about a unit; while the window is open the client asks
+> five times a second, and the server answers at most ten times a second per connection, only if
+> the asker's team sees the unit (spectators see all), with `Inspect` (server kind 6, about 70
+> bytes): its whole stats (attack damage, ability power, armor, magic resist, attack speed ×
+> 1000, attack range, move speed, ability haste, regen × 10, life steal %), items, augments,
+> Stat Anvil steps and up to 16 effects (kind, tenths of a second left, a value: a slow's
+> percent, a shield's points, plates, stacks). Nothing in snapshots changes.
+
 > **Implemented (S1, protocol 21):** a Hello carries the queue to play (13 §2); without one, the
 > server answers with `Queues` (server kind 5: each queue's mode, Co-op flag, map name, humans
 > and matches; at most 64), unless it offers a single queue. The client picks one and says hello

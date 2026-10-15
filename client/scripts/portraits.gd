@@ -9,6 +9,11 @@ extends Node
 ##   "full"  — the whole champion, tall (the champion-select splash, the loading screen)
 ## `portrait()` returns null until a champion is rendered and queues it; `rendered` fires when
 ## it's ready. One champion renders at a time, a few frames each.
+##
+## Other units have portraits too (the inspect window, 01 §13), keyed "minion:<kind>",
+## "monster:<key>" or "prop:<id>" plus a suffix of the caller's choosing (its team): `tints`
+## and `accents` give such a key its backdrop and team colors. A prop has no head and no idle:
+## its "bust" frames the whole model.
 
 signal rendered(champion: String)
 
@@ -24,6 +29,8 @@ var _colors := {}                        # champion -> identity color
 var _cache := {}                         # champion -> { bust, round, small, full }
 var _queue: Array[String] = []
 var _busy := false
+var tints := {}                          # portrait key -> backdrop color (keys other than champions')
+var accents := {}                        # portrait key -> the `accent` slots' color
 
 
 func setup(model_for: Callable, template: MftrModel, colors: Dictionary) -> void:
@@ -97,7 +104,8 @@ func _render(champion: String) -> void:
 	rim.light_energy = 1.1
 	vp.add_child(rim)
 
-	var tint: Color = _colors.get(champion, Color(0.5, 0.5, 0.55))
+	var tint: Color = tints.get(champion, _colors.get(champion, Color(0.5, 0.5, 0.55)))
+	var prop := champion.begins_with("prop:")
 	var backdrop := MeshInstance3D.new()
 	var quad := QuadMesh.new()
 	quad.size = Vector2(8, 8)
@@ -117,16 +125,19 @@ func _render(champion: String) -> void:
 		var m := ShaderMaterial.new()
 		m.shader = load("res://shaders/champion_model.gdshader")
 		m.set_shader_parameter("slot", SLOTS.find(slots[i]))
-		m.set_shader_parameter("team_accent", ACCENT)
+		m.set_shader_parameter("team_accent", accents.get(champion, ACCENT))
+		if champion.begins_with("monster:"):
+			m.set_shader_parameter("glow_white", 0.06)
 		m.set_shader_parameter("identity", tint)
 		m.set_shader_parameter("identity_mix", 0.6 if source == _template else 0.0)
 		m.set_shader_parameter("cloud_receive", 0.0)
 		mesh.set_surface_override_material(i, m)
 	# The idle pose, settled.
 	var skeleton: Skeleton3D = model.get_node("Skeleton")
-	var animator = source.new_animator()
-	for i in 12:
-		animator.drive(skeleton, {}, 0.0, 0.1)
+	if not prop:
+		var animator = source.new_animator()
+		for i in 12:
+			animator.drive(skeleton, {}, 0.0, 0.1)
 	await get_tree().process_frame
 	var head_i := skeleton.find_bone("head")
 	var head := Vector3(0, 1.55, 0)
@@ -147,6 +158,11 @@ func _render(champion: String) -> void:
 	cam.fov = 26.0
 	# Framed for a human-sized champion; bigger ones (Bastion) are framed wider.
 	cam.position = aim + dir * (0.31 * bulk / tan(deg_to_rad(13.0)))
+	if prop or head_i < 0:
+		# No head: the whole model, a little from above.
+		var box := mesh.get_aabb()
+		aim = box.get_center()
+		cam.position = aim + dir * (box.size.length() * 0.5 / tan(deg_to_rad(13.0)))
 	cam.look_at(aim, Vector3.UP)
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw

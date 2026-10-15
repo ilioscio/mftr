@@ -346,6 +346,8 @@ pub struct ClientSession {
     /// The latest scoreboard (the match clock and the Tab breakdown).
     scoreboard: Option<msg::Scoreboard>,
     horde: Option<msg::HordeStatus>,
+    /// The latest answer about the unit the inspect window shows (01 §13).
+    inspected: Option<msg::UnitInfo>,
     /// Casts with no windup (supports, shields, blinks) since the last take: `(unit, slot)`.
     /// Their animation can only start on the confirmed event (A6).
     instant_casts: Vec<(UnitId, u8)>,
@@ -420,6 +422,7 @@ impl ClientSession {
             own_cc: (SimTime(0), SimTime(0), SimTime(0)),
             scoreboard: None,
             horde: None,
+            inspected: None,
             instant_casts: Vec::new(),
             notices: Vec::new(),
             last_own_blink: SimTime(0),
@@ -932,6 +935,7 @@ impl ClientSession {
             ServerMessage::Snapshot(s) if self.phase != Phase::Map => self.on_snapshot(*s, now),
             ServerMessage::Snapshot(_) => {}
             ServerMessage::MapChunk { hash, total, offset, bytes } => self.on_map_chunk(hash, total, offset, &bytes),
+            ServerMessage::Inspect(info) => self.inspected = Some(*info),
             ServerMessage::Reject { reason } => {
                 if matches!(self.phase, Phase::Connecting | Phase::Queues) {
                     self.rejected = Some(reason);
@@ -1531,6 +1535,18 @@ impl ClientSession {
     /// The recap of the own champion's latest death (01 §13).
     pub fn last_recap(&self) -> Option<&recap::DeathRecap> {
         self.last_recap.as_ref()
+    }
+
+    /// Ask the server about `unit` for the inspect window (01 §13), as a packet to send.
+    pub fn inspect_packet(&mut self, unit: UnitId) -> Vec<u8> {
+        let h = self.header();
+        let bytes = msg::encode_client(&h, &ClientMessage::Inspect { unit });
+        self.finish_packet(bytes)
+    }
+
+    /// The latest answer about an inspected unit (whichever was asked about last).
+    pub fn inspected(&self) -> Option<&msg::UnitInfo> {
+        self.inspected.as_ref()
     }
 
     /// The latest scoreboard: the match clock and every champion's score.

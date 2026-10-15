@@ -1017,6 +1017,23 @@ players.
   of 8 too, and the levels in all were the same, so it now asks for level 4 each and 5 on
   average.
 
+## I — Inspecting units (after P and J)
+
+The owner's call: hovering an ally lights the cursor up; that's an invitation, so clicking a
+unit should show everything about it, the reference game's selected-unit panel with any
+critical information it lacks.
+
+### Status (2026-10-15): ✅ built
+- **Protocol 25:** `Inspect { unit }` and its answer: whole stats, items, augments, Stat Anvils,
+  and up to 16 effects with their time left, only for a unit the asker's team sees
+  (`mftr-server/src/inspect.rs`), at most ten a second per connection.
+- **The window** (01 §13): left-click any unit; portraits rendered from every unit's own model
+  (minions, monsters and structures too, in their team's or camp's colors); stats with armor,
+  magic resist and haste as percentages; items and augments with their tooltips; effects with
+  live timers; a line on what non-champions do. Movable, remembered, Esc closes it.
+- **Checked:** round-trip and visibility tests; captures of the window on ourselves, an enemy,
+  a minion, a turret and a camp in a Classic match.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

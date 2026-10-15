@@ -1655,6 +1655,68 @@ impl MatchClient {
         out
     }
 
+    /// Ask the server about unit `id` for the inspect window (01 §13); call a few times a
+    /// second while it's open. The answer arrives as `inspect_info`.
+    #[func]
+    fn inspect(&mut self, id: i64) {
+        if id < 0 || self.session.phase() != Phase::Playing {
+            return;
+        }
+        let now = self.now();
+        let p = self.session.inspect_packet(mftr_sim::world::UnitId(id as u32));
+        self.transmit(p, now);
+    }
+
+    /// The latest answer about unit `id` (empty until one arrives): `{ attack_damage,
+    /// ability_power, armor, magic_resist, attack_speed, attack_range, move_speed, ability_haste,
+    /// health_regen, life_steal, items: [ids], augments: [cards], anvils: [texts], effects:
+    /// [{ key, name, text, seconds, value, mood }] }`, `mood` "good", "bad" or "" (neutral).
+    #[func]
+    fn inspect_info(&self, id: i64) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let Some(i) = self.session.inspected().filter(|i| i.unit.0 as i64 == id) else { return d };
+        d.set("attack_damage", i.attack_damage as i64);
+        d.set("ability_power", i.ability_power as i64);
+        d.set("armor", i.armor as i64);
+        d.set("magic_resist", i.magic_resist as i64);
+        d.set("attack_speed", i.attack_speed_milli as f64 / 1000.0);
+        d.set("attack_range", i.attack_range as i64);
+        d.set("move_speed", i.move_speed as i64);
+        d.set("ability_haste", i.ability_haste as i64);
+        d.set("health_regen", i.health_regen_tenths as f64 / 10.0);
+        d.set("life_steal", i.life_steal_pct as i64);
+        let items: PackedInt32Array = i.items.iter().map(|v| *v as i32).collect();
+        d.set("items", &items);
+        let mut augs = VarArray::new();
+        for id in i.augments.iter().filter(|id| **id != 0) {
+            if augments::augment(*id).is_some() {
+                augs.push(&augment_card(*id).to_variant());
+            }
+        }
+        d.set("augments", &augs);
+        let mut anvils = VarArray::new();
+        for (stat, n) in mftr_sim::anvils::STATS.iter().zip(i.anvils) {
+            if n > 0 {
+                anvils.push(&anvil_text(*stat, n).to_variant());
+            }
+        }
+        d.set("anvils", &anvils);
+        let mut effects = VarArray::new();
+        for e in &i.effects {
+            let (key, name, text, mood) = effect_text(e);
+            let mut m = VarDictionary::new();
+            m.set("key", key);
+            m.set("name", name.as_str());
+            m.set("text", text.as_str());
+            m.set("seconds", e.tenths as f64 / 10.0);
+            m.set("value", e.value as i64);
+            m.set("mood", mood);
+            effects.push(&m.to_variant());
+        }
+        d.set("effects", &effects);
+        d
+    }
+
     /// Turrets destroyed: `[ours, theirs]` (the Tab breakdown's header).
     #[func]
     fn towers(&self) -> PackedInt32Array {
@@ -2121,6 +2183,64 @@ fn icon_kind(a: &mftr_sim::ability::Ability) -> &'static str {
 
 /// An augment for the client: `{ id, name, tier, text, glyph }`, the glyph naming its icon (its
 /// mechanic, or for a stat augment its main stat).
+/// An inspected unit's effect, worded: `(key, name, text, mood)`.
+fn effect_text(e: &mftr_net::msg::InfoEffect) -> (&'static str, String, String, &'static str) {
+    use mftr_net::msg::InfoEffectKind as K;
+    let v = e.value;
+    match e.kind {
+        K::Stunned => ("stunned", "Stunned".into(), "Can't move, attack or cast.".into(), "bad"),
+        K::Rooted => ("rooted", "Rooted".into(), "Can't move; can still attack and cast.".into(), "bad"),
+        K::Slowed => ("slowed", "Slowed".into(), format!("Moving {v}% slower."), "bad"),
+        K::Shield => ("shield", "Shield".into(), format!("Absorbs the next {v} damage."), "good"),
+        K::Potion => ("potion", "Potion".into(), format!("Restoring {v} health a second."), "good"),
+        K::Recalling => {
+            ("recall", "Recalling".into(), "Channeling home: moving or taking damage cancels it.".into(), "")
+        }
+        K::Spellblade => {
+            ("spellblade", "Spellblade".into(), "The next basic attack deals bonus damage.".into(), "good")
+        }
+        K::Insight => (
+            "insight",
+            "Insight".into(),
+            format!("The Azure Warden's buff: +{} ability haste.", mftr_sim::jungle::INSIGHT_HASTE as i32),
+            "good",
+        ),
+        K::Cinder => (
+            "cinder",
+            "Cinder".into(),
+            format!(
+                "The Ember Brute's buff: basic attacks burn for true damage and slow by {}%.",
+                mftr_sim::jungle::CINDER_SLOW
+            ),
+            "good",
+        ),
+        K::Protected => (
+            "protected",
+            "Protected".into(),
+            "Can't be damaged while the structure before it in its lane stands.".into(),
+            "",
+        ),
+        K::Plates => (
+            "plates",
+            format!("Plating ×{v}"),
+            format!("Each plate broken pays {} gold. They fall off at 14:00.", mftr_sim::lane::PLATE_GOLD as i32),
+            "",
+        ),
+        K::ChampionDamage if v < 100 => (
+            "backdoor",
+            "Backdoor protection".into(),
+            format!("No enemy minions near: takes only {v}% of champions' damage."),
+            "good",
+        ),
+        K::ChampionDamage => {
+            ("exposed", "Weathered".into(), format!("Late in the match, takes {v}% of champions' damage."), "bad")
+        }
+        K::Stacks => ("stacks", format!("Spellhunger ×{v}"), format!("+{v} ability power from stacks."), "good"),
+        K::Dead => ("dead", "Dead".into(), "Respawns when the timer runs out.".into(), "bad"),
+        K::Boss => ("boss", "Horde boss".into(), "This wave's boss: defeat it to clear the wave.".into(), ""),
+    }
+}
+
 fn augment_card(id: u8) -> VarDictionary {
     let mut c = VarDictionary::new();
     if let Some(a) = augments::augment(id) {
