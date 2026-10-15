@@ -147,7 +147,8 @@ impl MftrModel {
     #[func]
     fn new_animator(&self) -> Gd<MftrAnimator> {
         let mut animator = Animator::new(&self.pack.library);
-        animator.finish_attacks = self.pack.kind == "minion";
+        // Minions' and monsters' attacks have no timing on the wire: they play out whole.
+        animator.finish_attacks = matches!(self.pack.kind.as_str(), "minion" | "monster");
         Gd::from_init_fn(|base| MftrAnimator { base, pack: self.pack.clone(), animator })
     }
 }
@@ -169,6 +170,21 @@ impl MftrAnimator {
     fn pulse(&mut self, slot: i64) {
         let kind = if slot < 0 { ActionKind::Attack { variant: 1 } } else { ActionKind::Cast { slot: slot as u8 } };
         self.animator.pulse(&self.pack.library, kind);
+    }
+
+    /// Pose `skeleton` as clip `name` is at `time` seconds (reviews and lineups); false if the
+    /// pack has no such clip.
+    #[func]
+    fn pose_clip(&mut self, mut skeleton: Gd<Skeleton3D>, name: GString, time: f32) -> bool {
+        let lib = &self.pack.library;
+        let Some(clip) = lib.clip(&name.to_string()) else { return false };
+        for (i, p) in lib.sample(clip, time).iter().enumerate() {
+            let i = i as i32;
+            skeleton.set_bone_pose_position(i, Vector3::new(p.t[0], p.t[1], p.t[2]));
+            skeleton.set_bone_pose_rotation(i, Quaternion::new(p.r[0], p.r[1], p.r[2], p.r[3]));
+            skeleton.set_bone_pose_scale(i, Vector3::new(p.s[0], p.s[1], p.s[2]));
+        }
+        true
     }
 
     /// Advance `dt` seconds and pose `skeleton`. `unit` is an `own_status()` or

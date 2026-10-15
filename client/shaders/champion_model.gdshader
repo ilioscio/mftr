@@ -10,6 +10,9 @@ render_mode specular_disabled;
 // minions' eyes and orbs) (`MftrModel.surface_slots`).
 uniform int slot = 1;
 uniform vec3 team_accent : source_color = vec3(0.25, 0.55, 1.0);
+// How white-hot `accent_glow` burns: champions' and minions' glows have a pale core; monsters'
+// glow in their camp's color (16 §2).
+uniform float glow_white = 0.35;
 // Until a champion ships its own model, the shared template wears its identity color.
 uniform vec3 identity : source_color = vec3(1.0);
 uniform float identity_mix = 0.0;
@@ -27,7 +30,7 @@ void fragment() {
 	if (slot == 4) {
 		c = team_accent * (0.75 + 0.25 * dot(COLOR.rgb, vec3(0.3333)));
 	} else if (slot == 5) {
-		c = mix(team_accent, vec3(1.0), 0.35);
+		c = mix(team_accent, vec3(1.0), glow_white);
 	} else if (slot == 1) {
 		c = mix(c, identity * (0.55 + dot(COLOR.rgb, vec3(0.3333))), identity_mix);
 	}

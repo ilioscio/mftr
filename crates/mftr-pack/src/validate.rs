@@ -94,7 +94,11 @@ pub fn validate_model(model: &Model, glb_len: usize, side: &Sidecar) -> Report {
         check_prop(&mut r, model);
         return r;
     }
-    let joints = check_skeleton(&mut r, model);
+    let joints = if side.archetype == "creature" {
+        check_creature_skeleton(&mut r, model)
+    } else {
+        check_skeleton(&mut r, model)
+    };
     check_clips(&mut r, model, side, &joints);
     r
 }
@@ -125,8 +129,8 @@ fn check_prop(r: &mut Report, m: &Model) {
 }
 
 fn check_header(r: &mut Report, side: &Sidecar) {
-    if !matches!(side.kind.as_str(), "champion" | "library" | "minion" | "rig" | "prop") {
-        r.err(format!("sidecar kind `{}` must be champion, library, minion, rig or prop", side.kind));
+    if !matches!(side.kind.as_str(), "champion" | "library" | "minion" | "monster" | "rig" | "prop") {
+        r.err(format!("sidecar kind `{}` must be champion, library, minion, monster, rig or prop", side.kind));
     }
     if side.kind == "prop" {
         if side.archetype != "prop" {
@@ -140,11 +144,17 @@ fn check_header(r: &mut Report, side: &Sidecar) {
     if side.kind == "minion" && rules::minion_kind(&side.id).is_none() {
         r.err(format!("minion `{}` must be one of {}", side.id, rules::MINION_IDS.join(", ")));
     }
-    if side.archetype != "biped" {
-        r.err(format!("archetype `{}`: only `biped` exists so far (10 §7.1)", side.archetype));
+    if side.kind == "monster" && rules::monster_kind(&side.id).is_none() {
+        let keys: Vec<&str> = mftr_sim::jungle::MonsterKind::ALL.iter().map(|m| m.key()).collect();
+        r.err(format!("monster `{}` must be one of {}", side.id, keys.join(", ")));
+    }
+    // `creature` (16 §3): monsters only, so far.
+    let creature_ok = side.archetype == "creature" && side.kind == "monster";
+    if side.archetype != "biped" && !creature_ok {
+        r.err(format!("archetype `{}`: `biped`, or `creature` for a monster (10 §7.1, 16 §3)", side.archetype));
     }
     if side.rig_version != 1 {
-        r.err(format!("biped rig version {} is unknown (expected 1)", side.rig_version));
+        r.err(format!("{} rig version {} is unknown (expected 1)", side.archetype, side.rig_version));
     }
     if side.fps != rules::FPS {
         r.err(format!("clips must be authored at {} fps, not {}", rules::FPS, side.fps));
@@ -156,6 +166,7 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
     let prop = kind == "prop";
     let target = match kind {
         "minion" => rules::MINION_TRIANGLES_TARGET,
+        "monster" => rules::MONSTER_TRIANGLES_TARGET,
         "prop" => rules::PROP_TRIANGLES_TARGET,
         // The shared library's and the rig's mannequins only preview clips: no lower bound.
         "library" | "rig" => (0, rules::TRIANGLES_TARGET.1),
@@ -287,6 +298,53 @@ fn check_skeleton(r: &mut Report, m: &Model) -> Vec<usize> {
     joints
 }
 
+/// A `creature` skeleton (16 §3): free names (lowercase snake case), `root`, a `head` and the
+/// chest and overhead sockets; facing +Z (the head ahead of the root) and left on +X.
+fn check_creature_skeleton(r: &mut Report, m: &Model) -> Vec<usize> {
+    let skinned = m.nodes.iter().filter(|n| n.skin.is_some() && n.mesh.is_some()).count();
+    if m.skins.len() != 1 || skinned != 1 {
+        r.err(format!("expected one skinned mesh and one skin, found {skinned} and {}", m.skins.len()));
+        return Vec::new();
+    }
+    let joints = m.skins[0].clone();
+    let names: Vec<&str> = joints.iter().map(|&j| m.nodes[j].name.as_str()).collect();
+    if names.len() > rules::BONES_MAX {
+        r.err(format!("{} bones, over the {} cap", names.len(), rules::BONES_MAX));
+    } else if names.len() > rules::BONES_TARGET {
+        r.warn(format!("{} bones, over the {} target", names.len(), rules::BONES_TARGET));
+    }
+    for n in &names {
+        if !rules::creature_bone_allowed(n) {
+            r.err(format!("bone `{n}`: creature bones are lowercase snake case"));
+        }
+    }
+    for need in rules::CREATURE_REQUIRED {
+        if !names.contains(need) {
+            r.err(format!("required bone `{need}` is missing"));
+        }
+    }
+    let max_joint = joints.len() as u32;
+    if m.meshes.iter().flatten().flat_map(|p| p.joints.iter()).any(|j| j.iter().any(|&i| i >= max_joint)) {
+        r.err("a vertex references a joint outside the skin");
+    }
+    let world = m.world_positions();
+    let pos = |name: &str| m.node_by_name(name).map(|i| world[i]);
+    if let (Some(root), Some(head)) = (pos("root"), pos("head"))
+        && head[2] <= root[2]
+    {
+        r.err("the model does not face +Z (glTF): author it facing -Y in Blender, its head ahead");
+    }
+    for n in names.iter().filter(|n| n.ends_with("_l")) {
+        let other = format!("{}_r", &n[..n.len() - 2]);
+        if let (Some(l), Some(rr)) = (pos(n), pos(&other))
+            && l[0] < rr[0] - 1e-3
+        {
+            r.err(format!("`{n}` is right of `{other}`: `_l` bones are on the creature's left (+X)"));
+        }
+    }
+    joints
+}
+
 fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
     // Clip catalogue.
     let names: Vec<&str> = m.animations.iter().map(|a| a.name.as_str()).collect();
@@ -296,6 +354,7 @@ fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
             required.extend(rules::SHARED_LIBRARY.iter().chain(rules::LIBRARY_FALLBACKS).map(|s| s.to_string()))
         }
         "minion" => required.extend(rules::REQUIRED_MINION.iter().map(|s| s.to_string())),
+        "monster" => required.extend(rules::REQUIRED_MONSTER.iter().map(|s| s.to_string())),
         "champion" => {
             required.extend(rules::REQUIRED_CHAMPION.iter().map(|s| s.to_string()));
             match ChampionId::by_name(&side.id) {
@@ -318,6 +377,7 @@ fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
 
     let champion = (side.kind == "champion").then(|| ChampionId::by_name(&side.id)).flatten();
     let minion = (side.kind == "minion").then(|| rules::minion_kind(&side.id)).flatten();
+    let monster = (side.kind == "monster").then(|| rules::monster_kind(&side.id)).flatten();
     let root = m.node_by_name("root");
     for a in &m.animations {
         let Some(clip) = side.clips.iter().find(|c| c.name == a.name) else {
@@ -391,6 +451,15 @@ fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
         {
             let want = rules::minion_fire_frame(kind);
             r.err(ctx(format!("`fire` at frame {fire}, but the minion fires at {want:.1} (±1 frame)")));
+        }
+
+        if let Some(kind) = monster
+            && clip.name.starts_with("attack_")
+            && let Some(fire) = clip.marker("fire")
+            && (fire as f32 - rules::monster_fire_frame(kind)).abs() > 1.0
+        {
+            let want = rules::monster_fire_frame(kind);
+            r.err(ctx(format!("`fire` at frame {fire}, but the monster fires at {want:.1} (±1 frame)")));
         }
 
         // No root motion: the sim moves the unit.

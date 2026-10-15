@@ -170,6 +170,8 @@ func _ready() -> void:
 		elif args[i] == "--shot-seq-every" and i + 1 < args.size():
 			_shot_seq_every = float(args[i + 1])
 			i += 1
+		elif args[i] == "--shot-goto-fight":
+			_shot_goto_fight = true
 		elif args[i] == "--shot-collapse":
 			_shot_collapse = true
 		elif args[i] == "--shot-tour" and i + 1 < args.size():
@@ -194,6 +196,14 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-tab":
 			_shot_tab = true
+		elif args[i] == "--lineup" and i + 1 < args.size():
+			_lineup = args[i + 1]
+			i += 1
+		elif args[i] == "--lineup-turn" and i + 1 < args.size():
+			_lineup_turn = float(args[i + 1])
+			i += 1
+		elif args[i] == "--lineup-black":
+			_lineup_black = true
 		elif args[i] == "--season" and i + 1 < args.size():
 			settings.season = args[i + 1]  # for this run (not saved): captures of each season
 			i += 1
@@ -283,13 +293,115 @@ func _ready() -> void:
 		i += 1
 	if blind_enabled:
 		_menu_mode = 2
-	if _start_editor:
+	if _lineup != "":
+		_start_lineup.call_deferred()
+	elif _start_editor:
 		_open_map_editor.call_deferred()
 	elif address == "" or _back_to_menu:
 		_back_to_menu = false
 		_show_menu("")
 	else:
 		_connect(address)
+
+
+## ---- Lineups (16 §6, 14 §6) -----------------------------------------------------------------
+## `--lineup "rook,melee,warden:attack_1@0.6,hound:run"`: champions, minions and monsters in a
+## row on the ground under the game's light, seen from the gameplay camera, for reviews. An entry
+## is an id (a champion's name, a minion kind or a monster key), optionally `:clip` (played on
+## a loop) and `@seconds` (held at that moment); without a clip it idles. `--lineup-black` draws
+## them as black silhouettes on white. `--shot`, `--shot-at` and `--shot-seq`/`--shot-seq-every`
+## capture it.
+var _lineup := ""
+var _lineup_black := false
+var _lineup_turn := -25.0                 # `--lineup-turn DEG`: how far each model turns from the camera
+var _lineup_rows := []                    # [{body, clip, at, t}]
+var _lineup_t := 0.0
+var _lineup_frame := 0
+const LINEUP_RADII := {
+	"warden": 90.0, "brute": 90.0, "hound_alpha": 60.0, "hound": 40.0, "toad": 80.0,
+	"raven_alpha": 50.0, "raven": 30.0, "crawler_elder": 75.0, "crawler": 45.0,
+	"melee": 48.0, "caster": 48.0, "siege": 65.0, "super": 65.0,
+}
+
+
+func _start_lineup() -> void:
+	backdrop.visible = false
+	Seasons.apply_light(Seasons.SUMMER, world_env, sun)
+	var gm: ShaderMaterial = ground.material_override
+	gm.set_shader_parameter("lane_mode", 1.0)
+	if _lineup_black:
+		ground.material_override = _unshaded(Color.WHITE)
+	var names := {}
+	for n in client.champion_names():
+		names[String(n).to_lower()] = n
+	var x := 0.0
+	var center := Vector3(20.0, 0.0, 20.0)
+	var entries := _lineup.split(",")
+	for e in entries:
+		var spec := e.strip_edges()
+		var at := -1.0
+		if "@" in spec:
+			at = float(spec.get_slice("@", 1))
+			spec = spec.get_slice("@", 0)
+		var clip := spec.get_slice(":", 1) if ":" in spec else ""
+		var id := spec.get_slice(":", 0)
+		var body: Node3D
+		var radius: float = LINEUP_RADII.get(id, 45.0)
+		if names.has(id.to_lower()):
+			body = _make_champion(ALLY_COLOR, names[id.to_lower()])
+			body.position.y = 0.85
+		elif id in ["melee", "caster", "siege", "super"]:
+			body = _make_minion(MINION_BLUE, radius, id)
+			body.position.y = 0.45
+		else:
+			body = _make_monster(id, radius)
+		add_child(body)
+		x += radius * UNITS_TO_METERS + 0.35
+		body.position.x = center.x + x
+		body.position.z = center.z
+		x += radius * UNITS_TO_METERS + 0.35
+		if body.has_meta("rig"):
+			body.get_meta("rig").model.rotation.y = deg_to_rad(_lineup_turn)
+		if _lineup_black:
+			for m in body.find_children("*", "MeshInstance3D", true, false):
+				(m as MeshInstance3D).material_override = _unshaded(Color.BLACK)
+				for i in (m as MeshInstance3D).get_surface_override_material_count():
+					(m as MeshInstance3D).set_surface_override_material(i, null)
+		_lineup_rows.append({"body": body, "clip": clip, "at": at})
+	# Center the row in view.
+	for r in _lineup_rows:
+		r.body.position.x -= x / 2.0
+	_place_camera(center)
+
+
+func _update_lineup(delta: float) -> void:
+	_lineup_t += delta
+	for r in _lineup_rows:
+		var body: Node3D = r.body
+		if not body.has_meta("rig"):
+			continue
+		var rig: Dictionary = body.get_meta("rig")
+		if r.clip != "":
+			rig.animator.pose_clip(rig.skeleton, r.clip, r.at if r.at >= 0.0 else _lineup_t)
+		else:
+			rig.animator.drive(rig.skeleton, {}, 0.0, delta)
+	if _shot_path == "":
+		return
+	if _lineup_t < maxf(_shot_at, 1.0):
+		return
+	if _shot_seq <= 0:
+		get_viewport().get_texture().get_image().save_png(_shot_path)
+		print("MFTR: saved screenshot to ", _shot_path)
+		get_tree().quit()
+		return
+	if _lineup_t - _shot_seq_last < _shot_seq_every and _lineup_frame > 0:
+		return
+	_shot_seq_last = _lineup_t
+	get_viewport().get_texture().get_image().save_png("%s_%03d.png" % [_shot_path.get_basename(), _lineup_frame])
+	_lineup_frame += 1
+	if _lineup_frame >= _shot_seq:
+		print("MFTR: saved %d frames" % _shot_seq)
+		get_tree().quit()
 
 
 ## The shared template from `art/` (A3), validated by `mftr-pack` on load (11 §4). Missing or
@@ -400,6 +512,7 @@ var _editor_map := ""                    # `--editor-map bridge|crossroads|FILE`
 var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's reference image
 var _shot_ward := false                  # `--shot-ward`: place a stealth ward ahead at 2.5 s
 var _shot_goto = null                     # `--shot-goto X,Y`: walk there (game units) from 2 s on
+var _shot_goto_fight := false             # `--shot-goto-fight`: and from 1:32 (the camps are up) fight there
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
 var _shot_queues := false                 # `--shot-queues`: capture the server's queue list
 var _shot_keep_points := false            # `--keep-points`: don't spend the starting points
@@ -468,7 +581,10 @@ func _update_shot(delta: float) -> void:
 	elif _shot_ward and _shot_moved and _shot_timer > 2.5 and _shot_timer - delta <= 2.5:
 		client.use_trinket(own + inward * 450.0)
 	elif _shot_goto != null and _shot_moved and _shot_timer > 2.0 and fmod(_shot_timer, 2.0) < delta:
-		client.move_to(_shot_goto)
+		if _shot_goto_fight and _shot_timer > 92.0:
+			client.attack_move(_shot_goto)
+		else:
+			client.move_to(_shot_goto)
 	elif _shot_recall and _shot_moved and _shot_timer > _shot_at - 3.0 and _shot_timer - delta <= _shot_at - 3.0:
 		client.recall()
 	elif _shot_charge and _shot_moved and _shot_timer > 2.0 and _shot_timer <= _shot_at:
@@ -1359,6 +1475,9 @@ var _last_phase := ""
 
 
 func _process(delta: float) -> void:
+	if _lineup != "":
+		_update_lineup(delta)
+		return
 	var phase := client.phase()
 	if phase != _last_phase:
 		print("MFTR phase: %s -> %s (unit %d, server key %s)" % [_last_phase, phase, client.own_unit_id(), client.server_fingerprint()])
@@ -1598,9 +1717,9 @@ func _update_remotes(delta: float) -> void:
 		_show_statuses(body, u.stunned, u.rooted, u.shield, u.get("slowed", false))
 		if u.champion != "":
 			_show_recall(body, u.get("recalling", false), ALLY_COLOR if u.ally else ENEMY_COLOR, u.champion)
-		if u.champion != "" or (u.minion and body.has_meta("rig")):
+		if u.champion != "" or ((u.minion or u.kind == "monster") and body.has_meta("rig")):
 			_animate(body, u, delta)
-		if u.minion:
+		if u.minion or u.kind == "monster":
 			body.set_meta("last_health", float(u.get("health", 1.0)))
 	for id in remote_bodies.keys():
 		if not seen.has(id):
@@ -1611,8 +1730,8 @@ func _update_remotes(delta: float) -> void:
 			if gone.has_meta("prop"):
 				_collapse(gone)
 				continue
-			# A minion last seen at 0 health died (rather than leaving our vision): it plays its
-			# death where it fell, then sinks away (A5).
+			# A minion or monster last seen at 0 health died (rather than leaving our vision): it
+			# plays its death where it fell, then sinks away (A5, 16).
 			if _models_shown(gone) and float(gone.get_meta("last_health", 1.0)) <= 0.0:
 				for c in gone.get_children():
 					c.visible = c == gone.get_meta("rig").model
@@ -1683,13 +1802,34 @@ const MONSTER_COLORS := {
 const NEUTRAL_COLOR := Color(0.95, 0.75, 0.25)
 
 
-## A placeholder jungle monster (no models yet): a faceted body sized to its hitbox, a head
-## facing ahead, horns on the buff camps' guardians and ears on the hounds, a gold ring at its
-## feet. The ring and bar are the neutral gold, so any team reads it as "not a champion".
+## Each camp's signature glow (16 §2): what its packs' `accent` and `accent_glow` slots are
+## painted in, instead of a team's color.
+const MONSTER_GLOW := {
+	"warden": Color(0.25, 0.62, 1.0), "brute": Color(1.0, 0.24, 0.04),
+	"hound_alpha": Color(0.55, 0.95, 0.3), "hound": Color(0.55, 0.95, 0.3),
+	"toad": Color(0.2, 0.9, 0.75), "raven_alpha": Color(0.72, 0.4, 1.0), "raven": Color(0.72, 0.4, 1.0),
+	"crawler_elder": Color(1.0, 0.5, 0.06), "crawler": Color(1.0, 0.5, 0.06),
+}
+var monster_models := {}                  # key -> MftrModel (or null without a pack)
+
+
+func _monster_model(key: String) -> MftrModel:
+	if key == "":
+		return null
+	if not monster_models.has(key):
+		var path := _art_path("monsters/%s/export/%s.glb" % [key, key])
+		monster_models[key] = MftrModel.load(path) if FileAccess.file_exists(path) else null
+	return monster_models[key]
+
+
+## A jungle monster (16): its pack's model (glowing in its camp's color), else the placeholder
+## (a faceted body sized to its hitbox, a head, horns on the buff camps' guardians and ears on
+## the hounds). Either way a gold ring at its feet: neutral, so any team reads it as "not a
+## champion".
 func _make_monster(key: String, collision_radius_u: float) -> Node3D:
 	var color: Color = MONSTER_COLORS.get(key, Color(0.5, 0.45, 0.4))
 	var r := collision_radius_u * UNITS_TO_METERS
-	var root := Node3D.new()
+	var root := MeshInstance3D.new()
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
 	mat.roughness = 0.9
@@ -1702,6 +1842,7 @@ func _make_monster(key: String, collision_radius_u: float) -> Node3D:
 	body.mesh = sphere
 	body.position = Vector3(0, r * 0.75, 0)
 	body.material_override = mat
+	body.set_meta("placeholder", true)
 	root.add_child(body)
 	var head := MeshInstance3D.new()
 	var hs := SphereMesh.new()
@@ -1712,6 +1853,7 @@ func _make_monster(key: String, collision_radius_u: float) -> Node3D:
 	head.mesh = hs
 	head.position = Vector3(0, r * 1.15, r * 0.8)
 	head.material_override = mat
+	head.set_meta("placeholder", true)
 	root.add_child(head)
 	if key in ["warden", "brute", "crawler_elder", "hound_alpha", "hound"]:
 		for side in [-1.0, 1.0]:
@@ -1725,6 +1867,7 @@ func _make_monster(key: String, collision_radius_u: float) -> Node3D:
 			horn.position = head.position + Vector3(side * r * 0.3, r * 0.4, -r * 0.05)
 			horn.rotation_degrees = Vector3(-20, 0, side * -25)
 			horn.material_override = _unshaded(color.lightened(0.45))
+			horn.set_meta("placeholder", true)
 			root.add_child(horn)
 	var ring := MeshInstance3D.new()
 	var torus := TorusMesh.new()
@@ -1734,6 +1877,14 @@ func _make_monster(key: String, collision_radius_u: float) -> Node3D:
 	ring.position = Vector3(0, 0.02, 0)
 	ring.material_override = _unshaded(NEUTRAL_COLOR)
 	root.add_child(ring)
+	var pack := _monster_model(key)
+	if pack != null:
+		var glow: Color = MONSTER_GLOW.get(key, NEUTRAL_COLOR)
+		root.set_meta("outline", _outline_material(color.darkened(0.6)))
+		_attach_model(root, glow, "", pack, 0.0)
+		for m in root.get_meta("flash_mats", []):
+			m.set_shader_parameter("glow_white", 0.06)
+		_apply_model_mode(root)
 	return root
 
 

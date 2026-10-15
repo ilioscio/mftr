@@ -2099,18 +2099,7 @@ fn item_lines(it: &items::Item) -> VarArray {
 
 /// A monster kind's key for the client ("warden", "hound_alpha", …).
 fn monster_key(m: mftr_sim::jungle::MonsterKind) -> &'static str {
-    use mftr_sim::jungle::MonsterKind as M;
-    match m {
-        M::Warden => "warden",
-        M::Brute => "brute",
-        M::HoundAlpha => "hound_alpha",
-        M::Hound => "hound",
-        M::Toad => "toad",
-        M::RavenAlpha => "raven_alpha",
-        M::Raven => "raven",
-        M::CrawlerElder => "crawler_elder",
-        M::Crawler => "crawler",
-    }
+    m.key()
 }
 
 /// The icon kind of an ability (the HUD's glyphs): what its effect does.

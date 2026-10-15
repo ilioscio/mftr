@@ -21,6 +21,8 @@ This is a living document. Each file covers one area. Record decisions in [DECIS
 | 10 | [Characters & Animation](10-characters-and-animation.md) | Faceted PS1 style, facing, action timing contract, the full animation set, rig standard, Blender pipeline, pilots |
 | 11 | [Content Packs & Mods](11-content-packs-and-mods.md) | Server-pushed packs, threat model, data-only format, validation, signatures, cache |
 | 14 | [Champion Art Direction](14-champion-art-direction.md) | Silhouette and heroic proportions, weight (blow timing, holds, grips), signature colors in model and effects, the roster's briefs |
+| 15 | [Map Art Direction](15-map-art-direction.md) | The painted ground from each map's data, cliffs, structures and their fall, light, life, seasons |
+| 16 | [Jungle Monster Art](16-jungle-monster-art.md) | The six camps' silhouettes, glows, rigs (the `creature` archetype) and clips |
 | — | [Decisions & Open Questions](DECISIONS.md) | Decision log and unresolved questions |
 
 ### Reference analyses
