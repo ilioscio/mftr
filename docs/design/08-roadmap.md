@@ -878,8 +878,10 @@ map's visual update (R06), with editor maps first-class and seasons planned for.
 - **Checked:** captures at the gameplay camera on Crossroads and The Bridge, each season, a
   structure falling frame by frame, the editor's Actual view of an autumn map; `pack validate`
   clean; a season round-trip test.
-- **Later:** seasonal prop variants (snowy pines, bare trees, winter grass); butterflies that
-  scatter from units; reeds.
+- **Since:** winter's prop variants (snow-laden pines, a bare broadleaf, dry straw grass, bare
+  shrubs in drifts); butterflies that scatter from units; darker cliff faces; Horde maps (one
+  fountain) get the lane maps' ground, scenery and structure facing.
+- **Later:** reeds; autumn variants.
 
 ## J — Jungle monsters (after P)
 

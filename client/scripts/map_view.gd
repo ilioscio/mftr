@@ -117,8 +117,10 @@ func build(geo: Dictionary, ground: MeshInstance3D, ally: Color, enemy: Color) -
 			return null
 		var mats := prop_materials(model, Color.WHITE, true)
 		for m in mats:
-			var sway := 0.05 if id.begins_with("grass") else (0.012 if id.begins_with("pine") else 0.0)
+			var sway := 0.05 if id.begins_with("grass") else (0.012 if id.begins_with("pine") or id.begins_with("tree") else 0.0)
 			m.set_shader_parameter("sway", 0.08 if id.begins_with("flowers") else sway)
+			if id.begins_with("grass"):
+				m.set_shader_parameter("snow", 0.0)  # grass stands up out of the snow
 		return [model.static_mesh(), mats]
 	dressing.build(geo, materials_for)
 	for c in dressing.get_children():

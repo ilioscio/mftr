@@ -60,8 +60,10 @@ limited to a fixed number of segments, so any map works.
 
 ## 4. Walls, cliffs and rocks
 
-- Cliffs keep their 1.4 m height and their polygons (the sim's walls). Their faces get stepped
-  strata, moss on the ledges and grass running over the top. The tops are the ground's own grass
+- Cliffs keep their 1.4 m height and their polygons (the sim's walls). Their faces are dark stone
+  (well below the floor's and the tops' value, darkest at the foot), so a wall reads as tall
+  against the lit ground, as in LoL; they get stepped strata, crevices, moss on the ledges and
+  grass running over the top. The tops are the ground's own grass
   (one shared shader include): a lighter lip where it rolls over the drop, the forest's gloom
   deeper in, tufts of grass and bushes along the edge, each set back past its own radius.
 - **One outline per cliff** (`mftr_client::cliffs`): the simulation traces walls in tiles, so a
@@ -116,7 +118,7 @@ little more detail with the larger budget. They stay hooded and faceless, in tea
 | Life | Where | How |
 |---|---|---|
 | Flowers | grass near brush and walls | clusters of small faceted blooms in the season's colors |
-| Butterflies | over flower patches | fluttering in loose loops (scattering from units: later) |
+| Butterflies | over flower patches | fluttering in loose loops; any unit within ~2.6 m scatters them (they bolt away and up, jinking, then drift back) |
 | Lily pads | the river's edges | on the water, turning and bobbing slightly |
 | Frogs | river banks | sitting, hopping now and then |
 | Fireflies or spores | the jungle's darker ground | slow glowing motes |
@@ -127,8 +129,10 @@ on a lane, a plinth or a camp's dirt, and not drawn on the minimap.
 ## 9. Seasons
 
 A season (`summer`, `autumn`, `winter`; `client/scripts/seasons.gd`) is a set of: the ground's four
-material palettes, the cliffs' rock and moss, the scenery's tint and prop substitutions (pines →
-snowy pines, when such props exist), snow on every prop's upward facets (winter), the life
+material palettes, the cliffs' rock and moss, the scenery's tint and prop substitutions (winter:
+snow-laden pines, a bare broadleaf for the broad pine, dry straw grass that stands out of the
+snow, bare red-stemmed shrubs in drifts), snow on every prop's upward facets (winter; not the
+grass), the life
 (autumn keeps lily pads and spores; winter has none), the ambient motes (pollen, falling leaves,
 snow), and the light's color and strength. A map names its default season (`season autumn` in
 its file, [12](12-map-editor.md); summer without it), picked in the editor, whose Actual view

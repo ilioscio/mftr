@@ -1530,6 +1530,7 @@ func _process(delta: float) -> void:
 		if not _note_dash(caster, who, int(c.slot)):
 			caster.get_meta("rig").animator.pulse(int(c.slot))
 	_update_remotes(delta)
+	_update_life()
 	_update_hover()
 	_update_missiles()
 	_update_areas()
@@ -1548,6 +1549,25 @@ func _process(delta: float) -> void:
 	_update_ability_tip()
 	_hud_dt = delta
 	overlay.queue_redraw()
+
+
+## Small life reacts to the units we can see: butterflies scatter from them (15 §8).
+func _update_life() -> void:
+	if _life == null or not is_instance_valid(_life):
+		var view := get_node_or_null("MapView")
+		if view == null:
+			return
+		_life = view.get_node_or_null("Life")
+		if _life == null:
+			return
+	var points := PackedVector3Array()
+	if own_body != null and own_body.visible:
+		points.append(own_body.position)
+	for id in remote_bodies:
+		var b: Node3D = remote_bodies[id]
+		if b.visible and not b.has_meta("prop"):
+			points.append(b.position)
+	_life.disturb(points)
 
 
 ## The rig moves the look point (edge, keys, drag, lock, Space); the camera frames it (D13).
@@ -1925,6 +1945,7 @@ func _make_minion(color: Color, collision_radius_u: float, kind := "") -> MeshIn
 ## announced. The same polygons drive collision, pathing and vision in the simulation.
 var _map_built := false
 var _lane_axis := []                      # a lane map's [blue fountain, unit direction to red's]
+var _life: Node3D                         # the map's small life (MapView/Life), once it's built
 var _road_segments := PackedVector4Array()  # its roads (blue to red) as segments, in meters
 
 

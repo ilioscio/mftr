@@ -73,8 +73,8 @@ fn committed_exports_are_clean() {
     }
 }
 
-/// The Bridge's dressing and structures (art/props).
-const MAP_PROPS: [&str; 14] = [
+/// The maps' dressing and structures (art/props), winter's variants among them.
+const MAP_PROPS: [&str; 19] = [
     "turret",
     "gatehouse",
     "base",
@@ -89,6 +89,11 @@ const MAP_PROPS: [&str; 14] = [
     "fountain",
     "relic_pad",
     "rubble",
+    "pine_1_snow",
+    "pine_2_snow",
+    "tree_bare_1",
+    "grass_winter",
+    "bush_winter",
 ];
 
 /// A prop is static: its model loads (one `root` bone, no clips), and the same model claiming to

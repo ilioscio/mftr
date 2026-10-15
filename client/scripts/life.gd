@@ -1,7 +1,7 @@
 extends Node3D
 ## Small life (15 §8): flowers in the grass near the cliffs and the brush, lily pads on the
 ## river's edges, frogs on its banks that hop now and then, butterflies looping over the flowers
-## and glowing spores drifting over the jungle's darker ground. A detail every few screens, never
+## (scattering from anyone who walks into them, then drifting back) and glowing spores drifting over the jungle's darker ground. A detail every few screens, never
 ## on a lane, a plinth or a camp's dirt.
 ##
 ## Placed from the map's ground control map (15 §3) with a fixed seed, so every map the editor
@@ -15,6 +15,9 @@ const WALL_REACH_U := 1000.0              # its alpha's full scale either side o
 
 const FROG := 3.0                         # the frog's scale (its model is life size)
 const BUTTERFLY_COLORS := [Color(0.98, 0.62, 0.16), Color(0.96, 0.9, 0.55), Color(0.6, 0.78, 1.0)]
+const SCARE_M := 2.6                      # a unit this near (m, across the ground) scatters a butterfly
+const FLEE_S := Vector2(1.3, 2.1)         # how long it bolts (s)
+const SETTLE_S := 3.0                     # then about this long to drift back to its flowers
 
 var _ctl: Image
 var _size := Vector2.ZERO
@@ -25,7 +28,8 @@ var _pads: MultiMeshInstance3D
 var _pad_list := []                       # [position (m), turn, phase]
 var _frogs := []                          # { node, home, from, to, t, wait, turn }
 var _flies: MultiMeshInstance3D
-var _fly_list := []                       # { home (m), r, w, phase }
+var _fly_list := []                       # { home (m), r, w, phase, off, vel, fleeing, last }
+var _near := PackedVector3Array()          # where the units are (m), for scattering butterflies
 
 
 ## `ctl` is the map's ground control map; `materials_for(id)` returns [mesh, materials] or null
@@ -160,7 +164,8 @@ func _butterflies(patches: Array) -> void:
 		var color: Color = BUTTERFLY_COLORS[_rng.randi() % BUTTERFLY_COLORS.size()]
 		for k in _rng.randi_range(1, 2):
 			_fly_list.append({"home": Vector3(p.x * U, 0.0, p.y * U), "r": Vector2(_rng.randf_range(0.5, 1.4), _rng.randf_range(0.5, 1.4)),
-				"w": Vector2(_rng.randf_range(0.35, 0.6), _rng.randf_range(0.45, 0.8)), "phase": _rng.randf_range(0, TAU)})
+				"w": Vector2(_rng.randf_range(0.35, 0.6), _rng.randf_range(0.45, 0.8)), "phase": _rng.randf_range(0, TAU),
+				"off": Vector3.ZERO, "vel": Vector3.ZERO, "fleeing": 0.0, "last": Vector3.ZERO})
 			list.append(color)
 	if list.is_empty():
 		return
@@ -179,7 +184,13 @@ func _butterflies(patches: Array) -> void:
 	_flies.layers = 1
 	_flies.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_flies)
-	_update_flies()
+	_update_flies(0.0)
+
+
+## Where the units stand this frame (m): butterflies scatter from them. The match sets it; the
+## map editor's view has none.
+func disturb(points: PackedVector3Array) -> void:
+	_near = points
 
 
 ## A butterfly: two pairs of wings either side of a thin body along +z (the shader flaps them
@@ -305,7 +316,7 @@ func _process(delta: float) -> void:
 	for f in _frogs:
 		_hop(f, delta)
 	if _flies != null:
-		_update_flies()
+		_update_flies(delta)
 
 
 ## A frog sits, then hops a short way along its bank: a quick arc, a squash as it lands.
@@ -339,14 +350,35 @@ func _hop(f: Dictionary, delta: float) -> void:
 	f.landed = _t + 0.42
 
 
-## Butterflies loop over their flowers, bobbing, always facing the way they're going.
-func _update_flies() -> void:
+## Butterflies loop over their flowers, bobbing, always facing the way they're going. One a unit
+## walks into bolts away from it and up, zigzagging, then drifts back down to its flowers.
+func _update_flies(delta: float) -> void:
 	var mm := _flies.multimesh
 	for i in _fly_list.size():
 		var b: Dictionary = _fly_list[i]
 		var t: float = _t + b.phase * 7.0
-		var off := Vector3(sin(t * b.w.x + b.phase) * b.r.x, 0.0, cos(t * b.w.y) * b.r.y)
-		var vel := Vector3(cos(t * b.w.x + b.phase) * b.r.x * b.w.x, 0.0, -sin(t * b.w.y) * b.r.y * b.w.y)
-		var pos: Vector3 = b.home + off + Vector3(0, 0.7 + 0.25 * sin(t * 1.7) + 0.08 * sin(t * 9.0), 0)
+		var loop := Vector3(sin(t * b.w.x + b.phase) * b.r.x, 0.0, cos(t * b.w.y) * b.r.y)
+		var pos: Vector3 = b.home + loop + Vector3(0, 0.7 + 0.25 * sin(t * 1.7) + 0.08 * sin(t * 9.0), 0) + b.off
+		if b.fleeing <= 0.0:
+			for q in _near:
+				var away := Vector2(pos.x - q.x, pos.z - q.z)
+				if away.length() < SCARE_M:
+					var dir := away.normalized() if away.length() > 0.05 else Vector2.from_angle(_rng.randf_range(0, TAU))
+					dir = dir.rotated(_rng.randf_range(-0.5, 0.5))
+					b.vel = Vector3(dir.x, 0.0, dir.y) * _rng.randf_range(3.5, 5.0) + Vector3(0, _rng.randf_range(1.8, 2.6), 0)
+					b.fleeing = _rng.randf_range(FLEE_S.x, FLEE_S.y)
+					break
+		if b.fleeing > 0.0:
+			b.fleeing -= delta
+			# Darting: the flight jinks side to side as it slows.
+			var side := Vector3(-b.vel.z, 0.0, b.vel.x).normalized() * sin(_t * 11.0 + b.phase) * 1.6
+			b.off += (b.vel + side) * delta
+			b.vel *= pow(0.45, delta)
+		else:
+			b.off = b.off.lerp(Vector3.ZERO, 1.0 - exp(-delta / SETTLE_S * 2.5))
+		b.off.y = minf(b.off.y, 4.0)
+		pos = b.home + loop + Vector3(0, 0.7 + 0.25 * sin(t * 1.7) + 0.08 * sin(t * 9.0), 0) + b.off
+		var vel: Vector3 = (pos - b.last) if delta > 0.0 else Vector3(cos(t * b.w.x + b.phase), 0.0, -sin(t * b.w.y))
+		b.last = pos
 		var basis := Basis(Vector3.UP, atan2(vel.x, vel.z)).scaled(Vector3.ONE * 2.2)
 		mm.set_instance_transform(i, Transform3D(basis, pos))
