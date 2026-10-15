@@ -22,13 +22,16 @@ from mathutils import Vector  # noqa: E402
 
 from mftr_blender import prop  # noqa: E402
 
-STONE = [(0.5, 0.48, 0.44), (0.44, 0.43, 0.41), (0.53, 0.5, 0.44), (0.42, 0.41, 0.4), (0.48, 0.45, 0.4)]
-STONE_DARK = (0.34, 0.33, 0.32)
-TRIM = (0.56, 0.53, 0.47)
-IRON = (0.28, 0.29, 0.32)
-WOOD = (0.36, 0.24, 0.14)
+# Linear vertex colors: the paving's blue-grey stone (15 §5), as the structures'.
+STONE = [(0.15, 0.16, 0.18), (0.13, 0.14, 0.16), (0.17, 0.18, 0.19), (0.12, 0.13, 0.15), (0.16, 0.165, 0.17)]
+STONE_DARK = (0.085, 0.095, 0.11)
+TRIM = (0.2, 0.205, 0.21)
+IRON = (0.32, 0.2, 0.07)                 # bronze fittings
+WOOD = (0.1, 0.055, 0.03)
 FIRE = (1.0, 0.62, 0.22)
-MOSS = (0.36, 0.43, 0.26)
+MOSS = (0.06, 0.1, 0.035)
+SLATE = (0.04, 0.05, 0.07)
+DEAD_CRYSTAL = (0.05, 0.07, 0.09)
 TEAM = (0.8, 0.8, 0.8)
 
 
@@ -98,28 +101,35 @@ def relic_pad(p):
 
 
 def rubble(p):
+    """What a structure leaves on its plinth (15 §5): a heap of broken dressed blocks over a
+    ragged stub, roof slates and dead, dark crystal shards scattered round it."""
     p.skip_bottoms = True
     p.clamp_ground = True
-    # A snapped stub of wall, ragged on top.
-    p.blocks_ring((0, 0), 0.72, 0.0, 2, 0.35, 11, 0.13, "cloth", STONE, var=0.14, alt=MOSS, alt_every=6)
-    for i in range(7):
-        a = 2 * math.pi * i / 7 + p.rng.uniform(-0.2, 0.2)
-        if p.rng.random() < 0.65:
-            c = Vector((math.cos(a), math.sin(a), 0)) * 0.66
-            p.box((c.x, c.y, 0.7), (0.32, 0.18, p.rng.uniform(0.15, 0.4)), "cloth", p.rng.choice(STONE), var=0.12, rot_z=a + math.pi / 2)
-    p.prism((0, 0), [(0.0, 0.6), (0.6, 0.55)], 10, "cloth", STONE_DARK, cap_top=True)
-    # Fallen blocks and broken slates around it.
-    for i in range(16):
+    # The heap: blocks tumbled in rough layers, highest in the middle.
+    for layer, (count, r_max, z) in enumerate(((22, 1.7, 0.0), (14, 1.15, 0.22), (8, 0.7, 0.45), (4, 0.35, 0.66))):
+        for i in range(count):
+            a = p.rng.uniform(0, 2 * math.pi)
+            r = r_max * math.sqrt(p.rng.uniform(0.05, 1.0))
+            c = Vector((math.cos(a), math.sin(a), 0)) * r
+            size = (p.rng.uniform(0.24, 0.46), p.rng.uniform(0.18, 0.34), p.rng.uniform(0.16, 0.3))
+            col = p.rng.choice(STONE) if p.rng.random() > 0.12 else MOSS
+            p.box((c.x, c.y, z * (1.0 - r / (r_max + 0.4))), size, "cloth", col, var=0.14, rot_z=p.rng.uniform(0, math.pi),
+                  tilt=(p.rng.uniform(-0.45, 0.45), p.rng.uniform(-0.45, 0.45)))
+    # A broken bit of wall still standing at one side.
+    for k in range(3):
+        a0 = 2.4 + k * 0.32
+        c = Vector((math.cos(a0), math.sin(a0), 0)) * 0.7
+        p.box((c.x, c.y, 0.0), (0.34, 0.2, 0.9 - 0.25 * k), "cloth", p.rng.choice(STONE), var=0.1, rot_z=a0 + math.pi / 2)
+    # Roof slates and dead crystal shards scattered round.
+    for i in range(10):
         a = p.rng.uniform(0, 2 * math.pi)
-        r = p.rng.uniform(0.9, 1.9)
-        c = Vector((math.cos(a), math.sin(a), 0)) * r
-        size = (p.rng.uniform(0.2, 0.4), p.rng.uniform(0.15, 0.3), p.rng.uniform(0.12, 0.26))
-        p.box((c.x, c.y, 0.0), size, "cloth", p.rng.choice(STONE), var=0.12, rot_z=p.rng.uniform(0, math.pi),
-              tilt=(p.rng.uniform(-0.3, 0.3), p.rng.uniform(-0.3, 0.3)))
-    for i in range(6):
+        c = Vector((math.cos(a), math.sin(a), 0)) * p.rng.uniform(1.0, 2.1)
+        p.box((c.x, c.y, 0.0), (0.32, 0.24, 0.03), "cloth", SLATE, var=0.15, rot_z=p.rng.uniform(0, math.pi),
+              tilt=(p.rng.uniform(-0.2, 0.2), p.rng.uniform(-0.2, 0.2)))
+    for i in range(5):
         a = p.rng.uniform(0, 2 * math.pi)
-        c = Vector((math.cos(a), math.sin(a), 0)) * p.rng.uniform(0.8, 1.6)
-        p.box((c.x, c.y, 0.0), (0.3, 0.22, 0.03), "cloth", (0.3, 0.32, 0.38), var=0.15, rot_z=p.rng.uniform(0, math.pi))
+        c = Vector((math.cos(a), math.sin(a), 0)) * p.rng.uniform(0.6, 1.6)
+        p.prism((c.x, c.y), [(0.0, 0.07), (0.32 + 0.1 * (i % 2), 0.0)], 5, "cloth", DEAD_CRYSTAL, cap_top=False, rot=a)
 
 
 BUILDS = {"fountain": fountain, "relic_pad": relic_pad, "rubble": rubble}

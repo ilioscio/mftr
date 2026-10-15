@@ -101,7 +101,7 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 				var into := normal if _inside_wall(q + normal * 30.0) else -normal
 				if _inside_wall(q - into * 30.0):
 					continue  # a seam between two pieces of rock, not a cliff face
-				var id: String = ["rock_1", "rock_2", "rock_3", "rock_1", "bush_1"][_rng.randi() % 5]
+				var id: String = ["rock_4", "rock_1", "rock_4", "rock_3", "bush_1"][_rng.randi() % 5]
 				var scale := _rng.randf_range(1.1, 1.6)
 				var reach := 0.5 * 95.0 * scale      # half the rock's half-width (u): it leans on the face
 				_add_at(id, q + into * reach, scale, 0.0)
@@ -117,6 +117,12 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 					_add("grass_1", p, _rng.randf_range(1.3, 1.9))
 				gx += 55.0
 			gy += 55.0
+	# Small stones in the grass near the walls (ankle high: they never read as blocking).
+	for i in int(size.x * size.y / 900000.0):
+		var p := Vector2(_rng.randf_range(0, size.x), _rng.randf_range(0, size.y))
+		var e := _wall_near(p, 260.0)
+		if e and not _inside_wall(p):
+			_add("stones_1", p, _rng.randf_range(0.7, 1.2))
 	# Tufts scattered over the walkable grass, sparse in the middle of the lane.
 	for i in int(size.x * size.y / 90000.0):
 		var p := Vector2(_rng.randf_range(0, size.x), _rng.randf_range(0, size.y))
@@ -140,7 +146,7 @@ func _forest_at(p: Vector2, edge: float, near_camera: bool, lane_map: bool) -> v
 		var id: String = ["pine_1", "pine_2", "pine_3"][_rng.randi() % 3]
 		_add(id, p, _rng.randf_range(0.85, 1.35))
 	elif _rng.randf() < 0.5 and edge > 260.0:
-		_add(["rock_1", "rock_3"][_rng.randi() % 2], p, _rng.randf_range(1.0, 1.8))
+		_add(["rock_1", "rock_2", "rock_2"][_rng.randi() % 3], p, _rng.randf_range(1.0, 1.8))
 
 
 ## Whether `p` (unwalkable, `edge` from walkable ground) stands between the camera and the
@@ -189,6 +195,17 @@ func _index_walls(walls: Array, size: Vector2) -> void:
 					if not _edge_cells.has(key):
 						_edge_cells[key] = []
 					_edge_cells[key].append([a, b])
+
+
+## Whether a wall edge facing open ground lies within `reach` of `p`.
+func _wall_near(p: Vector2, reach: float) -> bool:
+	var c := Vector2i(floori(p.x / EDGE_CELL), floori(p.y / EDGE_CELL))
+	for cy in range(c.y - 1, c.y + 2):
+		for cx in range(c.x - 1, c.x + 2):
+			for e in _edge_cells.get(Vector2i(cx, cy), []):
+				if p.distance_to(Geometry2D.get_closest_point_to_segment(p, e[0], e[1])) < reach:
+					return true
+	return false
 
 
 func _inside_wall(p: Vector2) -> bool:

@@ -167,6 +167,11 @@ func _ready() -> void:
 		elif args[i] == "--zoom" and i + 1 < args.size():
 			camera_zoom = maxf(0.05, float(args[i + 1]))
 			i += 1
+		elif args[i] == "--shot-seq-every" and i + 1 < args.size():
+			_shot_seq_every = float(args[i + 1])
+			i += 1
+		elif args[i] == "--shot-collapse":
+			_shot_collapse = true
 		elif args[i] == "--shot-tour" and i + 1 < args.size():
 			for xy in args[i + 1].split(";"):
 				var v := xy.split(",")
@@ -371,6 +376,10 @@ var _menu_auto_join := false             # `--menu-join`: join the first remembe
 var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
 var _shot_look = null                     # `--look X,Y`: scripted captures look at this map point
 var _shot_tour: Array = []                # `--shot-tour "X,Y;X,Y;..."`: one shot at each point
+var _shot_seq_every := 0.0               # `--shot-seq-every S`: a sequence's frames S seconds apart
+var _shot_seq_last := -1.0
+var _shot_collapse := false
+var _shot_collapse_body = null               # `--shot-collapse`: bring down the structure nearest the look point
 var _shot_tour_i := 0
 var _shot_tour_at := 0.0
 var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
@@ -481,8 +490,26 @@ func _update_shot(delta: float) -> void:
 	elif _shot_settings >= 0 and _shot_moved and settings_panel == null:
 		_open_settings()
 		settings_panel.tabs.current_tab = _shot_settings
+	elif _shot_collapse and _shot_moved and _shot_timer > _shot_at - 2.0 and _shot_timer - delta <= _shot_at - 2.0:
+		# Structure collapse review (15 §5): look at the turret nearest the look point...
+		var look: Vector2 = _shot_look if _shot_look != null else client.own_position()
+		var best = null
+		for id in remote_bodies:
+			var b: Node3D = remote_bodies[id]
+			if b.get_meta("prop", "") == "turret" and (best == null or Vector2(b.position.x, b.position.z).distance_to(look * UNITS_TO_METERS) < Vector2(best.position.x, best.position.z).distance_to(look * UNITS_TO_METERS)):
+				best = b
+		if best != null:
+			_shot_look = Vector2(best.position.x, best.position.z) / UNITS_TO_METERS
+			_shot_collapse_body = best
+	elif _shot_collapse and _shot_moved and _shot_timer > _shot_at - 0.2 and _shot_timer - delta <= _shot_at - 0.2:
+		# ...and bring it down (client only).
+		if _shot_collapse_body != null:
+			_collapse(_shot_collapse_body)
+	elif _shot_moved and _shot_timer > _shot_at and _shot_seq > 0 and _shot_timer - _shot_seq_last < _shot_seq_every:
+		pass
 	elif _shot_moved and _shot_timer > _shot_at and _shot_seq > 0:
 		# A frame sequence (14 §6 reviews): <path>_000.png, _001, ...
+		_shot_seq_last = _shot_timer
 		get_viewport().get_texture().get_image().save_png(_shot_path.get_basename() + "_%03d.png" % _shot_seq_i)
 		_shot_seq_i += 1
 		if _shot_seq_i >= _shot_seq:
@@ -1576,9 +1603,11 @@ func _update_remotes(delta: float) -> void:
 		if not seen.has(id):
 			var gone: Node3D = remote_bodies[id]
 			remote_bodies.erase(id)
-			# Structures are always visible: one that's gone fell. It leaves rubble.
+			# Structures are always visible: one that's gone fell. It collapses (15 §5): the
+			# plinth and the stump stay, under rubble.
 			if gone.has_meta("prop"):
-				_leave_rubble(gone)
+				_collapse(gone)
+				continue
 			# A minion last seen at 0 health died (rather than leaving our vision): it plays its
 			# death where it fell, then sinks away (A5).
 			if _models_shown(gone) and float(gone.get_meta("last_health", 1.0)) <= 0.0:
@@ -1587,6 +1616,7 @@ func _update_remotes(delta: float) -> void:
 				corpses.append({ "body": gone, "t": 0.0 })
 			else:
 				gone.queue_free()
+	_update_collapses(delta)
 	for c in corpses.duplicate():
 		c.t += delta
 		var rig: Dictionary = c.body.get_meta("rig")
@@ -1790,12 +1820,20 @@ func _prop_node(id: String, team: Color) -> MeshInstance3D:
 
 ## A structure from its prop (turned to face down the lane when placed); null without one.
 func _structure_prop(id: String, color: Color, dome_radius: float, dome_lift: float) -> Node3D:
-	var model := _prop_node(id, color)
-	if model == null:
+	var source := _prop_model(id)
+	if source == null:
 		return null
+	# Skinned (not a static copy): its part bones fall when it's destroyed (15 §5).
+	var model: Node3D = source.instantiate()
+	var mesh: MeshInstance3D = model.get_node("Skeleton/Mesh")
+	var mats := _prop_materials(source, color)
+	for i in mats.size():
+		mesh.set_surface_override_material(i, mats[i])
+	model.set_meta("prop_mats", mats)
 	var root := Node3D.new()
 	model.name = "Model"
 	root.add_child(model)
+	root.set_meta("team_color", color)
 	# Protected (an earlier structure in its lane stands): a pale ward ring on the ground and a
 	# cold sheen on the stone, instead of a dome hiding the model.
 	var ward := MeshInstance3D.new()
@@ -1827,6 +1865,115 @@ func _relic_pad(at: Vector2) -> void:
 	if pad != null:
 		pad.position = _to_world(at)
 		add_child(pad)
+
+
+## ---- Structures falling (15 §5) --------------------------------------------------------------
+## A destroyed structure comes down in stages, heavy: its crystal shatters first, then each part
+## above the stump, top first, shudders, tips about its foot and drops with gravity onto the
+## plinth, throwing up dust and stone chips where it lands, and sinks into its own rubble. The
+## plinth and the stump stay. The motion is computed here from the model's part bones
+## (`part_*`, each pivoting at its foot), so every structure that has them falls the same way.
+
+var collapses := []
+const COLLAPSE_SECONDS := 3.4
+const STONE_DUST := [Color(0.42, 0.42, 0.42), Color(0.33, 0.34, 0.35), Color(0.24, 0.25, 0.26)]
+const STONE_CHIPS := [Color(0.58, 0.6, 0.63), Color(0.42, 0.44, 0.47), Color(0.28, 0.29, 0.32)]
+
+
+func _collapse(body: Node3D) -> void:
+	if body.has_node("Protected"):
+		body.get_node("Protected").visible = false
+	var skel: Skeleton3D = body.get_node_or_null("Model/Skeleton")
+	if skel == null:
+		_leave_rubble(body)
+		return
+	# Which way it falls: away from its own side, a little to one side, from where it stands.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(Vector2i(roundi(body.position.x * 10.0), roundi(body.position.z * 10.0)))
+	var parts := []
+	for b in skel.get_bone_count():
+		var bone_name := skel.get_bone_name(b)
+		if not bone_name.begins_with("part_"):
+			continue
+		var foot: float = skel.get_bone_rest(b).origin.y
+		parts.append({"bone": b, "name": bone_name, "foot": foot})
+	parts.sort_custom(func(a, b): return a.foot > b.foot)
+	var lean := Vector3(rng.randf_range(-1.0, 1.0), 0.0, rng.randf_range(-1.0, 1.0)).normalized()
+	for i in parts.size():
+		var pt: Dictionary = parts[i]
+		pt.delay = 0.12 + 0.3 * i
+		# Higher parts tip further and slide out; lower ones mostly drop where they stand.
+		var height_share: float = clampf(pt.foot / 5.0, 0.2, 1.0)
+		pt.tilt = deg_to_rad(rng.randf_range(35.0, 80.0) * height_share)
+		pt.axis = lean.cross(Vector3.UP).rotated(Vector3.UP, rng.randf_range(-0.5, 0.5)).normalized()
+		pt.slide = lean * pt.foot * rng.randf_range(0.35, 0.6) * height_share
+		pt.drop = pt.foot * 0.92
+		pt.landed = false
+	collapses.append({"body": body, "skel": skel, "parts": parts, "t": 0.0, "rubble": false})
+	_sfx_play("", ["structure.fall"], body.global_position)
+
+
+func _update_collapses(delta: float) -> void:
+	const G := 9.8
+	for c in collapses.duplicate():
+		c.t += delta
+		var skel: Skeleton3D = c.skel
+		if not is_instance_valid(skel):
+			collapses.erase(c)
+			continue
+		for pt in c.parts:
+			var t: float = c.t - pt.delay
+			if t < 0.0:
+				continue
+			var b: int = pt.bone
+			if pt.name.begins_with("part_crystal"):
+				# The eye cracks, flares and bursts into shards.
+				if t < 0.35:
+					skel.set_bone_pose_scale(b, Vector3.ONE * (1.0 + 0.06 * sin(t * 90.0)))
+				elif not pt.landed:
+					pt.landed = true
+					var at: Vector3 = skel.global_transform * skel.get_bone_global_pose(b).origin + Vector3(0, 0.4, 0)
+					var color: Color = c.body.get_meta("team_color", Color.WHITE)
+					vfx.play({"kit": "flash", "ramp": PackedColorArray([Color.WHITE, color.lightened(0.4), color]), "count": 12, "size": 2.0}, at)
+					vfx.play({"kit": "burst", "ramp": PackedColorArray([color.lightened(0.5), color, color.darkened(0.4)]), "count": 36, "speed": 5.5, "lifetime": 0.9, "size": 1.4}, at)
+					skel.set_bone_pose_scale(b, Vector3.ZERO)
+				continue
+			var rest: Transform3D = skel.get_bone_rest(b)
+			var shake := 0.28
+			if t < shake:
+				# A shudder before it goes.
+				var j := sin(t * 70.0 + float(b)) * 0.02 * (t / shake)
+				skel.set_bone_pose_rotation(b, rest.basis.get_rotation_quaternion() * Quaternion(pt.axis, j))
+				continue
+			var tf: float = sqrt(2.0 * pt.drop / G)
+			var s := clampf((t - shake) / tf, 0.0, 1.0)
+			var tip: float = pt.tilt * pow(s, 1.6)
+			var fall: Vector3 = Vector3(0, -pt.drop * s * s, 0) + pt.slide * s * s
+			if s >= 1.0:
+				if not pt.landed:
+					pt.landed = true
+					var at: Vector3 = skel.global_transform * (rest.origin + fall)
+					_stone_impact(at, clampf(pt.drop / 2.0, 0.6, 1.6))
+				# Settling into the rubble: sinks slowly.
+				var sink: float = minf((t - shake - tf) * 0.35, 0.9)
+				fall.y -= sink
+			skel.set_bone_pose_rotation(b, Quaternion(pt.axis, tip) * rest.basis.get_rotation_quaternion())
+			skel.set_bone_pose_position(b, rest.origin + fall)
+		if not c.rubble and c.t > COLLAPSE_SECONDS - 0.9:
+			c.rubble = true
+			_leave_rubble(c.body)
+		if c.t > COLLAPSE_SECONDS:
+			for pt in c.parts:
+				skel.set_bone_pose_scale(pt.bone, Vector3.ZERO)
+			collapses.erase(c)
+
+
+## Where a falling part hits: a cloud of stone dust, chips flying, cracks in the ground.
+func _stone_impact(at: Vector3, size: float) -> void:
+	var ground := Vector3(at.x, 0.05, at.z)
+	vfx.play({"kit": "dust", "ramp": PackedColorArray(STONE_DUST), "count": int(16 * size), "size": 1.3 * size, "speed": 2.0 * size, "lifetime": 1.2}, ground)
+	vfx.play({"kit": "burst", "ramp": PackedColorArray(STONE_CHIPS), "count": int(22 * size), "size": 1.3, "speed": 4.5 * size, "lifetime": 0.7}, ground + Vector3(0, 0.3, 0))
+	vfx.play({"kit": "crack", "ramp": PackedColorArray([Color(0.3, 0.3, 0.32), Color(0.2, 0.2, 0.22), Color(0.14, 0.14, 0.15)]), "count": 5, "size": size, "lifetime": 1.5}, ground)
 
 
 func _leave_rubble(gone: Node3D) -> void:

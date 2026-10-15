@@ -6,7 +6,12 @@
 
 A stepped octagonal platform of dressed stone, a ring of pillars carrying a stone lintel ring,
 team banners between them, and at the heart a great team-colored crystal over a stone basin,
-banded in iron, with three smaller crystals leaning out around it.
+banded in iron, with three smaller crystals leaning out around it. In the paving's blue-grey
+stone (15 §5, R06 §2); team color only in the crystals and the banners.
+
+Collapse: the crystals shatter (`part_crystal*`), the lintel ring with its merlons and banners
+falls (`part_lintel`), and three of the six pillars topple (`part_pillar_*`); the platform and
+the other three pillars stay standing as ruins.
 """
 
 import math
@@ -21,11 +26,12 @@ from mathutils import Matrix, Vector  # noqa: E402
 
 from mftr_blender import prop  # noqa: E402
 
-STONE = [(0.5, 0.48, 0.44), (0.44, 0.43, 0.41), (0.53, 0.5, 0.44), (0.42, 0.41, 0.4), (0.48, 0.45, 0.4)]
-STONE_DARK = (0.36, 0.35, 0.34)
-TRIM = (0.58, 0.55, 0.49)
-MOSS = (0.36, 0.43, 0.26)
-IRON = (0.28, 0.29, 0.32)
+# Linear vertex colors: the paving's stone (as the turret's).
+STONE = [(0.15, 0.16, 0.18), (0.13, 0.14, 0.16), (0.17, 0.18, 0.19), (0.12, 0.13, 0.15), (0.16, 0.165, 0.17)]
+STONE_DARK = (0.085, 0.095, 0.11)
+TRIM = (0.2, 0.205, 0.21)
+MOSS = (0.06, 0.1, 0.035)
+IRON = (0.32, 0.2, 0.07)                 # bronze bands
 TEAM = (0.8, 0.8, 0.8)
 
 
@@ -52,17 +58,35 @@ def build():
     # The stepped platform: three octagonal tiers, their risers in stone blocks.
     for k, (r, z) in enumerate(((2.25, 0.0), (1.95, 0.22), (1.62, 0.44))):
         p.prism((0, 0), [(z, r), (z + 0.22, r)], 8, "cloth", STONE_DARK, var=0.06, rot=math.pi / 8)
-        p.blocks_ring((0, 0), r + 0.02, z, 1, 0.22, 16, 0.08, "cloth", STONE, var=0.12, alt=MOSS, alt_every=8)
+        p.blocks_ring((0, 0), r + 0.02, z, 1, 0.22, 28, 0.08, "cloth", STONE, var=0.12, alt=MOSS, alt_every=8)
     top = 0.66
     p.prism((0, 0), [(top - 0.01, 1.6), (top, 1.6)], 16, "cloth", TRIM, var=0.08)
+    # Braziers at four corners of the lowest tier.
+    for i in range(4):
+        a = math.pi / 4 + i * math.pi / 2
+        x, y = math.cos(a) * 2.05, math.sin(a) * 2.05
+        p.prism((x, y), [(0.22, 0.14), (0.8, 0.1), (0.86, 0.15)], 6, "cloth", TRIM, var=0.08)
+        p.prism((x, y), [(0.86, 0.13), (0.98, 0.22), (1.02, 0.22)], 8, "metal", IRON, var=0.06)
+        p.prism((x, y), [(0.96, 0.17), (1.0, 0.17)], 8, "emissive", (1.0, 0.45, 0.12))
+    # A ring of team runes around the basin.
+    for i in range(12):
+        a = 2 * math.pi * i / 12
+        c = Vector((math.cos(a), math.sin(a), 0)) * 1.05
+        p.box((c.x, c.y, top), (0.12, 0.05, 0.02), "accent_glow", TEAM, rot_z=a + math.pi / 2)
     # Six pillars and a lintel ring.
     n = 6
     for i in range(n):
         a = 2 * math.pi * (i + 0.5) / n
         c = Vector((math.cos(a), math.sin(a), 0)) * 1.32
         p.box((c.x, c.y, top), (0.4, 0.4, 0.14), "cloth", TRIM, var=0.08, rot_z=a)
-        p.prism((c.x, c.y), [(top + 0.14, 0.16), (top + 2.3, 0.14)], 8, "cloth", p.rng.choice(STONE), var=0.08)
+        p.part(f"pillar_{i}" if i % 2 == 0 else None, (c.x, c.y, top + 0.14))
+        # Fluted pillars: a shaft of twelve faces in three drums, a capital.
+        for d in range(3):
+            z0 = top + 0.14 + d * 0.72
+            p.prism((c.x, c.y), [(z0, 0.16 - 0.006 * d), (z0 + 0.7, 0.155 - 0.006 * d)], 12, "cloth", p.rng.choice(STONE), var=0.08)
+        p.prism((c.x, c.y), [(top + 2.18, 0.15), (top + 2.3, 0.22)], 12, "cloth", TRIM, var=0.06)
         p.box((c.x, c.y, top + 2.3), (0.38, 0.38, 0.16), "cloth", TRIM, var=0.08, rot_z=a)
+    p.part("lintel", (0, 0, top + 2.46))
     lintel_z = top + 2.46
     outer = p.ring((0, 0), 1.55, 1.55, 18, lintel_z)
     inner = p.ring((0, 0), 1.1, 1.1, 18, lintel_z)
@@ -91,12 +115,15 @@ def build():
                base + Vector((0, 0, b + 0.24)), base + side * w + Vector((0, 0, b))]
         p.face(pts, "accent", TEAM, out=out)
         p.face(list(reversed([q - out * 0.02 for q in pts])), "accent", (0.55, 0.55, 0.55), out=-out)
-    # The basin and the great crystal, banded in iron, with three smaller ones leaning out.
+    # The basin and the great crystal, banded in bronze, with three smaller ones leaning out.
+    p.part(None)
     p.prism((0, 0), [(top, 0.75), (top + 0.2, 0.85), (top + 0.45, 0.78), (top + 0.55, 0.88)], 8, "cloth", TRIM, var=0.08)
     p.prism((0, 0), [(top + 0.5, 0.7), (top + 0.56, 0.7)], 8, "cloth", STONE_DARK)
+    p.part("crystal", (0, 0, top + 0.35))
     crystal(p, (0, 0, top + 0.35), (0, 0, 1), 3.4, 0.5)
     for z in (top + 1.2, top + 1.9):
         p.prism((0, 0), [(z, 0.5), (z + 0.1, 0.5)], 8, "metal", IRON, cap_top=False)
+    p.part("crystal_shards", (0, 0, top + 0.4))
     for i in range(3):
         a = 2 * math.pi * i / 3 + 0.4
         o = Vector((math.cos(a), math.sin(a), 0))
