@@ -46,19 +46,22 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
 - **As built on The Bridge:** the structures, landmarks and scenery are map props (kind `prop`,
   [11 §3](11-content-packs-and-mods.md#3-what-a-pack-may-contain)), built by scripts in `art/props`
   with `mftr_blender.prop` in the champions' faceted style (every face its own shade, the team
-  color on `accent`). Turrets are round stone towers with team-colored roofs, the Gatehouse a gate
-  between two towers, the Base a crystal shrine; the fountain is a platform, relics float over
-  pads, fallen structures leave rubble. The client scatters the scenery from a fixed seed in
-  batches (pines on the cliffs and past the map, rocks on the cliff edges, tall grass in the
-  brush), never close to the lane on the camera's side. The ground shader draws grass with
-  chunky texels, a dirt road with ruts, pebbles and a worn cobbled spine; cliffs have strata,
-  moss and grassy tops, and the land past a lane map's edges is raised to them.
+  color on `accent`). Turrets are round stone towers, the Gatehouse a gate between two towers, the
+  Base a crystal shrine, all in the paving's stone with the team color in their crystals, banners
+  and runes; the fountain is a platform, relics float over pads, and structures collapse into
+  rubble. The client scatters the scenery from a fixed seed in batches (pines on the cliffs and
+  past the map, boulders at the cliffs' feet, tall grass in the brush, small life), never close to
+  the lane on the camera's side. Since D60 the ground, cliffs, structures, light, life and seasons
+  follow [15](15-map-art-direction.md): one ground shader over grass, dirt, paving and water, from
+  a control map baked from each map's own data, so editor maps look like official ones.
 - **Light, as built:** a warm late-afternoon sun with soft shadows over the view, a cool sky
   fill (shade reads blue, not grey), a filmic tonemap with a gentle grade, bloom on what glows,
   and haze only toward the far edge of the view. Cloud shadows drift across the map: a shared
   shader include (`clouds.gdshaderinc`) dims the sun, not the fill, on terrain, props and
-  champions alike, procedurally (no textures). Pollen motes float in the light near the camera.
-  Shadows, bloom, and clouds with motes can each be turned off in Settings → Graphics.
+  champions alike, procedurally (no textures). The season's motes (pollen, leaves, snow) float
+  near the camera, braziers burn, and a vignette darkens the corners ([15 §7](15-map-art-direction.md#7-light-and-shaders)).
+  Shadows, bloom, and clouds with motes can each be turned off in Settings → Graphics, where the
+  season can be chosen too.
 
 ## 4. Champions
 

@@ -22,6 +22,7 @@ A map is one of two **kinds** (`kind aram` in the file; Classic without it):
 | Part | Drawn as | Notes |
 |---|---|---|
 | **Size** | a preset | Classic: Small 10,000, Medium 14,500 (the default), Large 16,000 u square. ARAM: 9,000, 10,607 (The Bridge), 12,000 |
+| **Season** | a preset | Summer (the default), Autumn, Winter: how the map is dressed ([15 §9](15-map-art-direction.md#9-seasons)): its ground, cliffs, light, flora and fauna. `season autumn` in the file; summer without it. Players may choose another; it never changes play |
 | **Base** | fixed | Classic: blue's corner (bottom left): fountain, Base, two base turrets. ARAM: the lane's start, The Bridge's spacing along it (fountain 300 u in, champions 450, Base 1,250, base turrets side by side at 1,650, minion waves from 1,700) in a round court. Turned for red |
 | **Lanes** (1–5) | a line with a width | From blue's base to the river line. Lanes pair up down the river line (top with bottom; a middle lane with itself): each runs on into its partner's half, turned, so paired lanes end at matching spots (the editor snaps them; a middle lane ends at the center). Each gets outer, inner and gatehouse turrets and a Gatehouse, placed along it and draggable along it |
 | **River** | lines with widths | Must lie along the river line (top-left to bottom-right corner) |

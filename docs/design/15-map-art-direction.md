@@ -35,9 +35,10 @@ it feel modern is the light and the shaders, not more polygons.
 | Lane minions | 600–2,600 triangles | **900–3,900** |
 | Map props (structures, scenery) | 20–8,000, cap 12,000 | **20–12,000, cap 18,000** |
 
-Structures should use their room (a turret ≈ 4,000–6,000 triangles; the base ≈ 8,000+); scenery
-is drawn many times, so a rock or a tree stays in the hundreds, but now has the room for real
-shapes (a rock ≈ 300–600 triangles, not 80).
+The structures have room to grow into; as built they use 2,450–3,624 triangles (the faceted look
+reads best with big, simple shapes). Scenery is drawn many times, so a rock or a tree stays in the
+hundreds, but now has the room for real shapes (a rock ≈ 230–450 triangles, not 80). Small life
+is tens to hundreds (a lily pad 34, a frog 260).
 
 ## 3. The ground
 
@@ -50,7 +51,7 @@ editor alike), in Rust from the map itself:
 | R | dirt | lanes (wide), jungle paths and camps (the walkable ground that isn't lane), fading at the edges |
 | G | paving | plinths under every structure, the bases' plazas around the fountains and the base, emblem slabs where lanes meet |
 | B | water | the river, by its distance to the river's course |
-| A | wall distance | how far a point is from the nearest wall (cliff-foot occlusion, the jungle's gloom) |
+| A | signed wall distance | 0.5 on a wall's edge; above, how far open ground is from the nearest wall (cliff-foot occlusion, the jungle's gloom); below, how far a cliff's top is from its edge (the grassy lip, the forest's gloom); 10 m full scale either way |
 
 The shader breaks every boundary with noise (grass tongues over dirt, loose slabs off the paving,
 ragged banks), adds the grain and detail of each material (cracks in the dirt, joints with grass
@@ -60,7 +61,9 @@ limited to a fixed number of segments, so any map works.
 ## 4. Walls, cliffs and rocks
 
 - Cliffs keep their 1.4 m height and their polygons (the sim's walls). Their faces get stepped
-  strata, moss on the ledges and grass running over the top.
+  strata, moss on the ledges and grass running over the top. The tops are the ground's own grass
+  (one shared shader include): a lighter lip where it rolls over the drop, the forest's gloom
+  deeper in, tufts of grass and bushes along the edge, each set back past its own radius.
 - **Rocks:** boulders are placed from each wall's edges *at ground level*, their centers inside
   the wall so they lean into the cliff face and rise up it; on the tops they're set back from the
   edge by their own radius. Rocks are rebuilt with the larger budget: several shapes, chipped
@@ -75,7 +78,11 @@ limited to a fixed number of segments, so any map works.
 - **Destruction:** a structure that falls plays a **collapse**: its upper parts crack, tilt and
   fall in stages, heavy (slow start, fast fall, a bounce of dust), with stone chips and a dust
   cloud on each impact, ending in its rubble on the plinth. The plinth stays. Built as part bones
-  on the structure's prop and a baked `collapse` clip.
+  (`part_*`, each pivoting at its foot) on the structure's prop; the client computes the fall
+  from them (the crystal shatters first, then each part from the top shudders, tips and drops
+  with gravity, throwing up a soft, heavy dust cloud and stone chips where it lands), so any
+  structure with part bones falls the same way and the props stay clipless. What a fall uncovers
+  is modeled: a turret's torn top is broken masonry around a charred floor.
 
 ## 6. Minions
 
@@ -87,10 +94,15 @@ little more detail with the larger budget. They stay hooded and faceless, in tea
 - **One world lighting model** shared by ground, cliffs and props: a wrapped diffuse with a cool
   tint in the shadowed side, the cloud shadows, and occlusion (vertex occlusion on props, the wall
   distance on the ground).
-- **Screen-space ambient occlusion** for contact shadows under props, structures and units (a
-  graphics setting).
-- **Local lights:** braziers along the lanes and in the bases (flickering, warm), glowing plants in
-  the jungle (cool), the structures' crystals in team color.
+- **Occlusion** from what the map knows: props' baked vertex occlusion, the ground darkened at
+  every wall's foot and in the forest's gloom (the control map's wall distance). (The client's
+  Mobile renderer has no screen-space ambient occlusion.) Faces turned from the sun take a little
+  of it bounced off the ground, so shaded stone reads warm, not the sky's blue.
+- **Local lights:** small flames over every ember bowl and a warm, flickering pool on the ground
+  under each; a pool in team color under each structure's crystal (out when it falls); glowing
+  spores in the jungle. Found from each prop's own `emissive` and `accent_glow` surfaces. The
+  pools are drawn by the ground shader (the 16 nearest the camera's look point), not as lights:
+  one big ground mesh would hit the renderer's per-object light limit.
 - **A vignette** darkening the screen's corners.
 
 ## 8. Life
@@ -98,22 +110,27 @@ little more detail with the larger budget. They stay hooded and faceless, in tea
 | Life | Where | How |
 |---|---|---|
 | Flowers | grass near brush and walls | clusters of small faceted blooms in the season's colors |
-| Butterflies | over grass near brush, by day | fluttering in loose loops, scattering from units nearby |
-| Lily pads and reeds | the river's edges | on the water, bobbing slightly |
+| Butterflies | over flower patches | fluttering in loose loops (scattering from units: later) |
+| Lily pads | the river's edges | on the water, turning and bobbing slightly |
 | Frogs | river banks | sitting, hopping now and then |
 | Fireflies or spores | the jungle's darker ground | slow glowing motes |
 
-All placed from a fixed seed from the map's features, purely visual, never on a lane's center.
+All placed from a fixed seed from the map's ground control map (`life.gd`), purely visual, never
+on a lane, a plinth or a camp's dirt, and not drawn on the minimap.
 
 ## 9. Seasons
 
-A season (`summer` first; `autumn` and `winter` planned) is a set of: the ground's four material
-palettes, the cliffs' rock and moss, the scenery's tints and prop substitutions (pines → snowy
-pines), the life (butterflies → falling leaves, frogs → none), the ambient particles (pollen →
-snow), and the light's color and strength. A map names its default season; the client can override
-it (a setting).
+A season (`summer`, `autumn`, `winter`; `client/scripts/seasons.gd`) is a set of: the ground's four
+material palettes, the cliffs' rock and moss, the scenery's tint and prop substitutions (pines →
+snowy pines, when such props exist), snow on every prop's upward facets (winter), the life
+(autumn keeps lily pads and spores; winter has none), the ambient motes (pollen, falling leaves,
+snow), and the light's color and strength. A map names its default season (`season autumn` in
+its file, [12](12-map-editor.md); summer without it), picked in the editor, whose Actual view
+follows; a player can override it in Settings → Graphics → Season. Looks only: the simulation
+never reads it. Adding a season is a new entry in `seasons.gd`, plus any seasonal props.
 
 ## 10. Review
 
 Before and after at the gameplay camera on every map (The Bridge, Crossroads, a fresh editor map):
-a lane with a turret, a base, the river, a jungle camp; a minion wave; a structure falling.
+a lane with a turret, a base, the river, a jungle camp; a minion wave; a structure falling; each
+season.
