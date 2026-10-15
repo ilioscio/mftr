@@ -13,10 +13,15 @@ use crate::math::{QPoint, Vec2};
 use crate::time::{SimDuration, SimTime};
 use crate::world::{Brain, MinionKind, Order, Team, Unit, UnitId, UnitKind};
 
-/// How far lane minions look for something to fight.
-pub const MINION_ACQUIRE: f32 = 700.0;
-/// A minion drops a target that drags it this far from where it is.
-pub const MINION_LEASH: f32 = 1000.0;
+/// How far lane minions look for something to fight (LoL: 500).
+pub const MINION_ACQUIRE: f32 = 500.0;
+/// How far a minion answers a call for help: an enemy champion hurting an allied champion
+/// (LoL: 1000).
+pub const MINION_HELP: f32 = 1000.0;
+/// A minion lets go of a target this much beyond its acquisition (or attack) range, and of any
+/// target once the chase has pulled it this far off its lane: it goes back to walking the lane.
+pub const MINION_DROP_MARGIN: f32 = 150.0;
+pub const MINION_LEASH: f32 = 800.0;
 /// How long an attack on a champion keeps calling for help (minions and turrets, 01 §3–§4).
 pub const AGGRESSION_MEMORY: SimDuration = SimDuration::from_millis(2000);
 /// Champions who damaged a champion this recently share its kill as assists (01 §5).
@@ -299,6 +304,8 @@ pub struct Seen {
     /// Attack range (minion type for turret priorities), 0 if none.
     pub range: f32,
     pub targetable: bool,
+    /// The unit it is attacking, if any (minion target priorities).
+    pub target: Option<UnitId>,
 }
 
 impl Seen {
@@ -311,6 +318,10 @@ impl Seen {
             radius: u.gameplay_radius,
             range: u.attack.map_or(0.0, |a| a.range),
             targetable: u.targetable(),
+            target: match u.state.order {
+                Order::Attack(id) => Some(id),
+                _ => None,
+            },
         }
     }
 }
@@ -421,8 +432,21 @@ fn aggressor(
         .map(|(a, _)| a.id)
 }
 
-/// Lane minion decisions (01 §4): answer calls for help, else keep a valid target, else take
-/// the closest enemy minion, then structure, then champion; with nothing to fight, walk the lane.
+/// Lane minion decisions (01 §4, LoL's minion behavior). Targets by priority, closest first
+/// within one:
+///
+/// 1. an enemy champion attacking an allied champion (a call for help, up to `MINION_HELP`;
+///    not while sieging a turret, nor when that champion stands under its own turret);
+/// 2. an enemy minion attacking an allied champion;
+/// 3. an enemy minion attacking an allied minion;
+/// 4. an enemy turret attacking an allied minion;
+/// 5. the closest enemy minion;
+/// 6. the closest enemy champion;
+/// 7. any other structure.
+///
+/// A minion keeps its target until something of strictly higher priority shows up, but never
+/// mid-windup; it lets go once the target hides, leaves its range, or the chase pulls it off its
+/// lane. With nothing to fight, it walks the lane.
 pub fn laner_think(
     unit: &mut Unit,
     seen: &[Seen],
@@ -436,29 +460,64 @@ pub fn laner_think(
         return;
     }
     let me = unit.state.pos;
+    let team = unit.team;
+    let range = unit.attack.map_or(0.0, |a| a.range);
+    let find = |id: UnitId| seen.iter().find(|s| s.id == id);
+    let ally = |id: Option<UnitId>, kind: UnitKind| id.and_then(find).is_some_and(|s| s.team == team && s.kind == kind);
+    let dist = |s: &Seen| (s.pos - me).length() - s.radius;
+    let under_own_turret = |s: &Seen| {
+        seen.iter()
+            .any(|t| t.kind == UnitKind::Turret && t.team == s.team && (t.pos - s.pos).length() <= TURRET_ATTACK.range)
+    };
+    let sieging = matches!(unit.state.order, Order::Attack(id) if find(id).is_some_and(|s| s.kind == UnitKind::Turret));
+    let called = |s: &Seen| {
+        !sieging
+            && !under_own_turret(s)
+            && aggression.iter().any(|&(a, v, _)| {
+                a == s.id
+                    && find(v).is_some_and(|v| {
+                        v.team == team && v.kind == UnitKind::Champion && (v.pos - me).length() <= MINION_HELP
+                    })
+            })
+    };
+    // Priority (lower first) and how near it must be, for a valid enemy.
+    let priority = |s: &Seen| -> (u8, f32) {
+        match s.kind {
+            UnitKind::Champion if called(s) => (1, MINION_HELP),
+            UnitKind::Minion if ally(s.target, UnitKind::Champion) => (2, MINION_ACQUIRE),
+            UnitKind::Minion if ally(s.target, UnitKind::Minion) => (3, MINION_ACQUIRE),
+            UnitKind::Turret if ally(s.target, UnitKind::Minion) => (4, MINION_ACQUIRE.max(range)),
+            UnitKind::Minion => (5, MINION_ACQUIRE),
+            UnitKind::Champion => (6, MINION_ACQUIRE),
+            _ => (7, MINION_ACQUIRE),
+        }
+    };
     let valid = |s: &&Seen| enemy_valid(unit, s, hidden);
-    let near = |s: &&Seen, r: f32| (s.pos - me).length_sq() <= r * r;
-    let help = aggressor(unit.team, seen, aggression, (me, MINION_ACQUIRE), hidden);
+    let off_lane = distance_to_path(lane, me) > MINION_LEASH;
     let current = match unit.state.order {
-        Order::Attack(id) => seen.iter().filter(valid).find(|s| s.id == id && near(s, MINION_LEASH)).map(|s| s.id),
+        Order::Attack(id) => seen.iter().filter(valid).find(|s| s.id == id).and_then(|s| {
+            let (p, reach) = priority(s);
+            let winding_up = unit.state.attack.is_some();
+            let kept = winding_up || (!off_lane && dist(s) <= reach.max(range) + MINION_DROP_MARGIN);
+            kept.then_some((p, s.id))
+        }),
         _ => None,
     };
-    let rank = |s: &Seen| match s.kind {
-        UnitKind::Minion => 0,
-        UnitKind::Turret | UnitKind::Gatehouse | UnitKind::Base => 1,
-        _ => 2,
+    let best = seen
+        .iter()
+        .filter(valid)
+        .filter_map(|s| {
+            let (p, reach) = priority(s);
+            (dist(s) <= reach).then_some((p, dist(s), s.id))
+        })
+        .min_by(|a, b| a.partial_cmp(b).unwrap());
+    let pick = match (current, best) {
+        (Some((_, id)), _) if unit.state.attack.is_some() => Some(id),
+        (Some((cp, _)), Some((bp, _, id))) if bp < cp => Some(id),
+        (Some((_, id)), _) => Some(id),
+        (None, Some(_)) if off_lane => None, // back to the lane first
+        (None, b) => b.map(|(_, _, id)| id),
     };
-    let pick = help.or(current).or_else(|| {
-        seen.iter()
-            .filter(valid)
-            .filter(|s| near(s, MINION_ACQUIRE))
-            .min_by(|a, b| {
-                (rank(a), (a.pos - me).length_sq(), a.id)
-                    .partial_cmp(&(rank(b), (b.pos - me).length_sq(), b.id))
-                    .unwrap()
-            })
-            .map(|s| s.id)
-    });
     if let Some(id) = pick {
         if unit.state.order != Order::Attack(id) {
             unit.state.set_order(Order::Attack(id), map);
@@ -476,6 +535,21 @@ pub fn laner_think(
             unit.state.set_order(goal, map);
         }
     }
+}
+
+/// How far `p` is from the polyline `path`.
+fn distance_to_path(path: &[Vec2], p: Vec2) -> f32 {
+    if path.len() < 2 {
+        return path.first().map_or(0.0, |a| (p - *a).length());
+    }
+    path.windows(2)
+        .map(|w| {
+            let (a, b) = (w[0], w[1]);
+            let seg = b - a;
+            let t = ((p - a).dot(seg) / seg.length_sq().max(1e-3)).clamp(0.0, 1.0);
+            (a + seg * t - p).length()
+        })
+        .fold(f32::INFINITY, f32::min)
 }
 
 /// Lane turret decisions (01 §3): a champion attacking an allied champion in range first, then
