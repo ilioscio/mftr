@@ -11,7 +11,7 @@ const SUMMER := {
 	"sun_color": Color(1.0, 0.9, 0.76),
 	"sun_energy": 1.5,
 	"sky_fill": Color(0.44, 0.54, 0.76),
-	"sky_fill_energy": 0.52,
+	"sky_fill_energy": 0.6,
 	"exposure": 1.08,
 	"contrast": 1.12,
 	"saturation": 1.02,
@@ -25,7 +25,7 @@ const SUMMER := {
 		"flower_a": Color(0.40, 0.24, 0.55), "flower_b": Color(0.30, 0.42, 0.68), "flower_c": Color(0.70, 0.62, 0.22),
 	},
 	"cliff": {
-		"rock": Color(0.40, 0.42, 0.44), "rock_dark": Color(0.24, 0.26, 0.29), "moss": Color(0.22, 0.32, 0.17),
+		"rock": Color(0.50, 0.52, 0.54), "rock_dark": Color(0.32, 0.34, 0.37), "moss": Color(0.24, 0.34, 0.18),
 		"top_a": Color(0.14, 0.25, 0.12), "top_b": Color(0.20, 0.32, 0.14),
 	},
 	"tint": Color(1.0, 1.0, 1.0),

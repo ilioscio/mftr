@@ -6,7 +6,8 @@
 Tiny hooded figures, distinct from champions at a glance: chibi proportions on the `biped`
 skeleton (`rig.use_shape("minion")`: the same bones, a big head on short legs, ~1.05 m), a
 team-colored robe and pointed hood (`accent`), and no face, only a shadowed void with two eyes
-glowing in the team color (`accent_glow`). Four kinds, as the sim has them:
+glowing in the team color (`accent_glow`). Squat (15 §6): short legs, a wide body, ~0.95 m to the
+hood's tip. Four kinds, as the sim has them:
 
     melee   sword and buckler           caster  a staff with a glowing orb
     siege   a gunner pushing a wheeled  super   a 1.6x armored brute with a maul
@@ -61,13 +62,41 @@ S = 1.0   # the current kind's scale and width (set by `build`)
 W = 1.0
 
 
+# The parts below are authored for the first, taller minion; the squat one (15 §6) stands on the
+# same bones remapped (`rig.SHAPES["minion"]`), so authored heights go through the same remap
+# and widths widen with the body.
+_OLD_Z = [0.0, 0.02, 0.05, 0.22, 0.40, 0.46, 0.60, 0.68, 0.71, 0.98, 1.20]
+_NEW_Z = [0.0, 0.02, 0.045, 0.17, 0.32, 0.38, 0.53, 0.62, 0.66, 0.90, 1.08]
+_WIDEN = (0.84 / 0.72, 0.84 / 0.75)
+
+
+def squat_z(z):
+    for i in range(len(_OLD_Z) - 1):
+        if z <= _OLD_Z[i + 1] or i == len(_OLD_Z) - 2:
+            a, b = _OLD_Z[i], _OLD_Z[i + 1]
+            t = (z - a) / (b - a)
+            return _NEW_Z[i] + t * (_NEW_Z[i + 1] - _NEW_Z[i])
+    return z
+
+
+# The siege cart is a vehicle on the ground, not part of the body: it isn't squashed.
+RAW = False
+
+
 def pt(p):
     """A point authored for a 1.0-scale minion, placed for the current kind (bone refs pass)."""
-    return p if isinstance(p[0], str) else (p[0] * S * W, p[1] * S, p[2] * S)
+    if isinstance(p[0], str):
+        return p
+    if RAW:
+        return (p[0] * S * W, p[1] * S, p[2] * S)
+    return (p[0] * _WIDEN[0] * S * W, p[1] * _WIDEN[1] * S, squat_z(p[2]) * S)
 
 
 def part(bone, a, b, sides, prof, slot, color):
-    return (bone, pt(a), pt(b), sides, [(t, ru * S * W, rv * S) for t, ru, rv in prof], slot, color)
+    # Round parts get half again as many sides (D60's larger budget): rounder robes and hoods.
+    sides = sides + sides // 2 if sides >= 8 else sides
+    wx, wy = (1.0, 1.0) if RAW else _WIDEN
+    return (bone, pt(a), pt(b), sides, [(t, ru * wx * S * W, rv * wy * S) for t, ru, rv in prof], slot, color)
 
 
 # --- Mesh -----------------------------------------------------------------------------------
@@ -137,6 +166,8 @@ WHEEL_R = [(-0.17, -0.36, 0.17), (-0.24, -0.36, 0.17)]
 
 
 def siege_gear():
+    global RAW
+    RAW = True
     g = [
         part("extra_cart_1", (0, -0.13, 0.25), (0, -0.57, 0.25), 4, [(0, .21, .07), (1, .21, .07)], "cloth", WOOD),
         part("extra_cart_1", (0.20, -0.36, 0.17), (-0.20, -0.36, 0.17), 6, [(0, .018, .018), (1, .018, .018)], "metal", IRON),
@@ -156,6 +187,7 @@ def siege_gear():
             part(bone, (0.175 * sgn, -0.36, 0.17), (0.215 * sgn, -0.36, 0.17), 8, [(0, .168, .168), (1, .168, .168)], "metal", IRON),
             part(bone, (0.225 * sgn, -0.36, 0.17), (0.245 * sgn, -0.36, 0.17), 6, [(0, .04, .04), (1, .03, .03)], "metal", IRON),
         ]
+    RAW = False
     return g
 
 
@@ -183,8 +215,8 @@ STAND = merge(sym("thigh", -3, 0, 0), sym("calf", 6, 0, 0), sym("foot", -3, 0, 0
 
 
 def L(locs):
-    """Pelvis offsets authored for a 1.9 m biped, scaled to this minion."""
-    return {k: (x * S * 0.55, y * S * 0.55, z * S * 0.55) for k, (x, y, z) in (locs or {}).items()} if locs else None
+    """Pelvis offsets authored for a 1.9 m biped, scaled to this (squat) minion."""
+    return {k: (x * S * 0.5, y * S * 0.5, z * S * 0.45) for k, (x, y, z) in (locs or {}).items()} if locs else None
 
 
 def hold(kind):
@@ -290,7 +322,7 @@ def flinch(arm, kind):
 # --- Build ----------------------------------------------------------------------------------
 
 def build(kind):
-    global S, W
+    global S, W, RAW
     cfg = KINDS[kind]
     S, W = cfg["scale"], cfg["wide"]
     bpy.ops.wm.read_homefile(use_empty=True)
@@ -300,10 +332,12 @@ def build(kind):
     arm = rig.build_armature(name=f"minion_{kind}")
     parts = body(hood_tip=1.16 if kind == "caster" else 1.10, hood_back=0.14 if kind == "caster" else 0.10)
     if kind == "siege":
+        RAW = True
         rig.add_chain(arm, "cart", "root", [pt(p) for p in CART])
         rig.add_chain(arm, "barrel", "extra_cart_1", [pt(p) for p in BARREL])
         rig.add_chain(arm, "wheel_l", "extra_cart_1", [pt(p) for p in WHEEL_L])
         rig.add_chain(arm, "wheel_r", "extra_cart_1", [pt(p) for p in WHEEL_R])
+        RAW = False
         parts += siege_gear()
     else:
         parts += {"melee": melee_gear, "caster": caster_gear, "super": super_gear}[kind]()
