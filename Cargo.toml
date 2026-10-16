@@ -8,6 +8,7 @@ members = [
     "crates/mftr-tools",
     "crates/mftr-gdext",
     "crates/mftr-pack",
+    "crates/mftr-bots",
 ]
 
 [workspace.package]
@@ -22,6 +23,7 @@ mftr-net = { path = "crates/mftr-net" }
 mftr-client = { path = "crates/mftr-client" }
 mftr-server = { path = "crates/mftr-server" }
 mftr-pack = { path = "crates/mftr-pack" }
+mftr-bots = { path = "crates/mftr-bots" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -29,6 +31,10 @@ unsafe_code = "forbid"
 # The simulation optimized in dev builds too: debug clients build maps (map editor) and step the
 # sim at playable speed.
 [profile.dev.package.mftr-sim]
+opt-level = 2
+
+# Bots too: debug test runs play whole bot matches.
+[profile.dev.package.mftr-bots]
 opt-level = 2
 
 [profile.release]

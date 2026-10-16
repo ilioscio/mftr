@@ -18,15 +18,14 @@ use mftr_sim::{
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-pub mod bots;
 pub mod game;
 pub mod hub;
 pub mod inspect;
 pub mod lobby;
-pub use bots::Bot;
 pub use game::{Fog, Match, Replay, ReplayCheck, ReplayEntry};
 pub use hub::{Hub, HubConfig, QueueSpec};
 use lobby::Lobby;
+pub use mftr_bots::{Bots, Tier};
 
 /// Opaque per-connection address key, assigned by the transport.
 pub type ClientKey = u64;
@@ -162,6 +161,9 @@ pub struct ServerConfig {
     /// Co-op vs bots (13 §1): humans play blue only. Teams follow player ids, so replays
     /// don't need it.
     pub coop: bool,
+    /// How well bots play (17 §3): the starting choice in co-op champion select, and the tier
+    /// of Versus fill-ins and of bots that take over dropped players.
+    pub bot_tier: Tier,
 }
 
 impl Default for ServerConfig {
@@ -177,6 +179,7 @@ impl Default for ServerConfig {
             scenario: Scenario::Empty,
             map: None,
             coop: false,
+            bot_tier: Tier::Veteran,
         }
     }
 }
@@ -292,7 +295,7 @@ struct Dropped {
 pub struct ServerCore {
     cfg: ServerConfig,
     game: Match,
-    bots: Vec<Bot>,
+    bots: Bots,
     /// Champion select, until the match starts.
     lobby: Option<Lobby>,
     /// Connections in champion select.
@@ -324,13 +327,13 @@ impl ServerCore {
             cfg.coop = true;
         }
         let mut game = Match::new(cfg.clone());
-        let mut bots = Vec::new();
+        let mut bots = Bots::new(cfg.seed);
         let lobby = cfg.lobby.then(|| Self::make_lobby(&cfg, cfg.seed));
         if !cfg.lobby {
             for _ in 0..cfg.bots.min(cfg.max_players) {
                 let Some(player) = game.free_player() else { break };
                 game.join(player, None);
-                bots.push(Bot::new(player, cfg.seed));
+                bots.add(player, cfg.bot_tier);
             }
         }
         Self {
@@ -448,7 +451,7 @@ impl ServerCore {
                     unit: u.id,
                     champion,
                     team: u.team,
-                    bot: u.owner.is_some_and(|o| self.bots.iter().any(|b| b.player == o)),
+                    bot: u.owner.is_some_and(|o| self.bots.contains(o)),
                     level: p.level,
                     kills: p.kills,
                     deaths: p.deaths,
@@ -515,7 +518,7 @@ impl ServerCore {
                         // Reconnect: the champion is still there (in a match, the bot playing
                         // it hands it back).
                         let d = self.dropped.remove(i);
-                        self.bots.retain(|b| b.player != d.player);
+                        self.bots.remove(d.player);
                         self.conns.insert(from, Conn::new(d.player, d.unit, d.team, d.token, false, now));
                     } else if let Some(old) = live {
                         // The same player from a new address (a restarted client): take over.
@@ -775,9 +778,7 @@ impl ServerCore {
             self.conns.values().filter(|c| !c.spectator && c.team == team).count()
                 + held.iter().filter(|p| lobby::team_of(**p) == team).count()
         };
-        let seat = |team: Team| {
-            self.bots.iter().map(|b| b.player).filter(|p| !held.contains(p) && lobby::team_of(*p) == team).min()
-        };
+        let seat = |team: Team| self.bots.players().filter(|p| !held.contains(p) && lobby::team_of(*p) == team).min();
         let mut teams = if self.cfg.coop { vec![Team::Blue] } else { vec![Team::Blue, Team::Red] };
         teams.sort_by_key(|t| humans(*t));
         teams.into_iter().find_map(seat)
@@ -850,7 +851,7 @@ impl ServerCore {
                     champion: if mine { mid.champion } else { current.unwrap_or(ChampionId::Ember) },
                     rerolls: if mine { mid.rerolls } else { 0 },
                     ready: if mine { mid.ready } else { true },
-                    bot: !mine && self.bots.iter().any(|b| b.player == p),
+                    bot: !mine && self.bots.contains(p),
                 }
             })
             .collect();
@@ -872,7 +873,7 @@ impl ServerCore {
         let p = self.pending.remove(&key)?;
         let mid = p.mid?;
         let (unit, team) = self.game.takeover(p.player, mid.champion)?;
-        self.bots.retain(|b| b.player != p.player);
+        self.bots.remove(p.player);
         let token = self.new_token();
         let mut conn = Conn::new(p.player, unit, team, token, false, now);
         conn.send = p.send;
@@ -888,7 +889,7 @@ impl ServerCore {
         for slot in lobby.slots() {
             let (unit, team, _) = self.game.join(slot.player, Some(slot.champion));
             if slot.bot {
-                self.bots.push(Bot::new(slot.player, self.cfg.seed));
+                self.bots.add(slot.player, self.cfg.bot_tier);
                 continue;
             }
             let Some(key) = self.pending.iter().find(|(_, p)| p.player == slot.player).map(|(k, _)| *k) else {
@@ -950,7 +951,7 @@ impl ServerCore {
         {
             self.queue.retain(|cmd| cmd.player != c.player);
             if self.cfg.scenario.is_match() {
-                self.bots.push(Bot::new(c.player, self.cfg.seed));
+                self.bots.add(c.player, self.cfg.bot_tier);
             } else {
                 self.game.leave(c.player);
             }
@@ -968,7 +969,7 @@ impl ServerCore {
             if !c.spectator {
                 self.queue.retain(|cmd| cmd.player != c.player);
                 if self.cfg.scenario.is_match() {
-                    self.bots.push(Bot::new(c.player, self.cfg.seed));
+                    self.bots.add(c.player, self.cfg.bot_tier);
                 }
                 self.dropped.push(Dropped { token: c.token, player: c.player, unit: c.unit, team: c.team, since: now });
             }
@@ -1031,10 +1032,10 @@ impl ServerCore {
         }
         let (mut due, later): (Vec<Command>, Vec<Command>) = self.queue.drain(..).partition(|c| c.tick <= k);
         self.queue = later;
-        for bot in &mut self.bots {
-            due.extend(bot.think(&self.game.world, k));
-        }
+        due.extend(self.bots.think(&self.game.world, k));
         let (events, fog) = self.game.step(due);
+        self.bots.observe(&self.game.world, &events, &fog.visions);
+        let _pings = self.bots.take_pings();
         self.stats.ticks += 1;
 
         let since = ((now - self.tick_time(k)).max(0.0) * 1e6) as u32;
@@ -1421,6 +1422,40 @@ pub struct BotMatch {
     pub replay: Replay,
     /// Horde tuning checkpoints, after each clear (empty for ordinary matches).
     pub horde_waves: Vec<HordeWaveReport>,
+    /// Each champion's match (17 §11).
+    pub champions: Vec<ChampionReport>,
+    /// What the bots cost, against the simulation.
+    pub cost: BotCost,
+}
+
+/// One champion's match, for the measurements (17 §11).
+#[derive(Clone, Debug)]
+pub struct ChampionReport {
+    pub player: PlayerId,
+    pub team: Team,
+    pub champion: ChampionId,
+    pub tier: Option<Tier>,
+    pub kills: u16,
+    pub deaths: u16,
+    pub assists: u16,
+    pub cs: u16,
+    /// Net worth (gold plus items bought) at 10 and 15 minutes and at the end.
+    pub worth: [f32; 3],
+    pub dead_secs: f32,
+    pub monsters: u32,
+    /// Enemy lane minions that died within 900 u of it while it lived (what it could have
+    /// last-hit).
+    pub minions_near: u32,
+    pub stats: Option<mftr_bots::agent::AgentStats>,
+}
+
+/// Time spent in bots and in the simulation over a bot match (microseconds).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BotCost {
+    pub ticks: u32,
+    pub bots_us: f64,
+    pub bots_worst_us: f64,
+    pub sim_us: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -1433,30 +1468,79 @@ pub struct HordeWaveReport {
     pub base_health: f32,
 }
 
+/// How a bot match is set up beyond its config.
+#[derive(Clone, Debug, Default)]
+pub struct BotMatchOptions {
+    /// Champions for the first bot seats.
+    pub team: Vec<ChampionId>,
+    /// Each team's bot tier (else the config's for both).
+    pub tiers: Option<[Tier; 2]>,
+    /// Print what this player's bot does every second (development).
+    pub trace: Option<PlayerId>,
+}
+
 /// Play a match with server bots only, as fast as possible (no network, no clients), until a
 /// Base falls or `max_ticks` pass.
 pub fn run_bot_match(cfg: ServerConfig, max_ticks: u32) -> BotMatch {
-    run_bot_match_with_team(cfg, max_ticks, &[])
+    run_bot_match_with(cfg, max_ticks, &BotMatchOptions::default())
 }
 
 /// The same balance/replay check with explicit champions for the first bot seats.
 pub fn run_bot_match_with_team(cfg: ServerConfig, max_ticks: u32, team: &[ChampionId]) -> BotMatch {
+    run_bot_match_with(cfg, max_ticks, &BotMatchOptions { team: team.to_vec(), ..Default::default() })
+}
+
+fn net_worth(u: &mftr_sim::Unit) -> f32 {
+    u.state.progress.gold
+        + u.state.progress.items.iter().filter_map(|id| mftr_sim::items::item(*id)).map(|item| item.cost).sum::<f32>()
+}
+
+/// A bot match with each team's tier and champions chosen (17 §11's measurements).
+pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOptions) -> BotMatch {
     let mut core = ServerCore::new(ServerConfig { record: true, ..cfg }, 0.0);
+    let team = &opts.team;
     assert!(team.len() <= core.bots.len(), "the selected team needs that many bot seats");
-    for (bot, &champion) in core.bots.iter().zip(team) {
-        core.game.takeover(bot.player, champion).expect("bot seat");
+    let seats: Vec<PlayerId> = core.bots.players().collect();
+    for (player, &champion) in seats.iter().zip(team) {
+        core.game.takeover(*player, champion).expect("bot seat");
+    }
+    if let Some(tiers) = opts.tiers {
+        for player in &seats {
+            let team = core
+                .game
+                .world
+                .units()
+                .iter()
+                .find(|u| u.owner == Some(*player) && u.kind == UnitKind::Champion)
+                .map_or(Team::Blue, |u| u.team);
+            core.bots.add(*player, tiers[(team == Team::Red) as usize]);
+        }
     }
     let (mut kills, mut structures) = (0, 0);
     let mut monsters = [0u32; 2];
+    let mut monsters_by: Vec<(UnitId, u32)> = Vec::new();
+    let mut near_by: Vec<(UnitId, u32)> = Vec::new();
+    let mut dead: Vec<(UnitId, u32)> = Vec::new();
+    let mut worth: Vec<(UnitId, [f32; 3])> = Vec::new();
     let mut falls = Vec::new();
     let mut horde_waves = Vec::new();
+    let mut cost = BotCost::default();
+    let mut winner = None;
     for _ in 0..max_ticks {
         let k = core.game.world.tick().next();
-        let mut due = Vec::new();
-        for bot in &mut core.bots {
-            due.extend(bot.think(&core.game.world, k));
-        }
-        let (events, _) = core.game.step(due);
+        let t0 = std::time::Instant::now();
+        let due = core.bots.think(&core.game.world, k);
+        let t1 = std::time::Instant::now();
+        let (events, fog) = core.game.step(due);
+        let t2 = std::time::Instant::now();
+        core.bots.observe(&core.game.world, &events, &fog.visions);
+        core.bots.take_pings();
+        let t3 = std::time::Instant::now();
+        let bots_us = ((t1 - t0) + (t3 - t2)).as_secs_f64() * 1e6;
+        cost.ticks += 1;
+        cost.bots_us += bots_us;
+        cost.bots_worst_us = cost.bots_worst_us.max(bots_us);
+        cost.sim_us += (t2 - t1).as_secs_f64() * 1e6;
         for e in &events {
             if let SimEvent::Died { unit, killer, .. } = e
                 && let Some(u) = core.game.world.unit(*unit)
@@ -1466,15 +1550,77 @@ pub fn run_bot_match_with_team(cfg: ServerConfig, max_ticks: u32, team: &[Champi
                     mftr_sim::UnitKind::Monster => {
                         if let Some(k) = core.game.world.unit(*killer).filter(|k| k.team != Team::Neutral) {
                             monsters[k.team as usize] += 1;
+                            match monsters_by.iter_mut().find(|(id, _)| *id == k.id) {
+                                Some(e) => e.1 += 1,
+                                None => monsters_by.push((k.id, 1)),
+                            }
                         }
                     }
                     kind if kind.is_structure() => {
                         structures += 1;
                         falls.push((k, u.team, kind, u.tier));
                     }
+                    mftr_sim::UnitKind::Minion => {
+                        for c in core.game.world.units().iter().filter(|c| {
+                            c.kind == UnitKind::Champion
+                                && c.team != u.team
+                                && c.state.alive()
+                                && c.state.pos.distance(u.state.pos) < 900.0
+                        }) {
+                            match near_by.iter_mut().find(|(id, _)| *id == c.id) {
+                                Some(e) => e.1 += 1,
+                                None => near_by.push((c.id, 1)),
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
+        }
+        let secs = k.0 / mftr_sim::TICK_HZ;
+        if let Some(p) = opts.trace
+            && k.0.is_multiple_of(mftr_sim::TICK_HZ)
+            && let Some(u) = core.game.world.units().iter().find(|u| u.owner == Some(p) && u.kind == UnitKind::Champion)
+        {
+            let st = &u.state;
+            eprintln!(
+                "{:>2}:{:02} {:?} ({:.0},{:.0}) hp {:.0}/{:.0} gold {:.0} cs {} lvl {} order {:?}  {}",
+                secs / 60,
+                secs % 60,
+                u.champion,
+                st.pos.x,
+                st.pos.y,
+                st.health,
+                u.stats.max_health,
+                st.progress.gold,
+                st.progress.cs,
+                st.progress.level,
+                st.order,
+                core.bots.describe(p).unwrap_or_default()
+            );
+        }
+        for u in core.game.world.units().iter().filter(|u| u.kind == UnitKind::Champion) {
+            if !u.state.alive() {
+                match dead.iter_mut().find(|(id, _)| *id == u.id) {
+                    Some(e) => e.1 += 1,
+                    None => dead.push((u.id, 1)),
+                }
+            }
+            let i = match worth.iter().position(|(id, _)| *id == u.id) {
+                Some(i) => i,
+                None => {
+                    worth.push((u.id, [0.0; 3]));
+                    worth.len() - 1
+                }
+            };
+            let w = &mut worth[i].1;
+            if secs <= 600 {
+                w[0] = net_worth(u);
+            }
+            if secs <= 900 {
+                w[1] = net_worth(u);
+            }
+            w[2] = net_worth(u);
         }
         if let Some(h) = &core.game.world.game().horde
             && h.cleared > horde_waves.last().map_or(0, |r: &HordeWaveReport| r.wave)
@@ -1491,38 +1637,44 @@ pub fn run_bot_match_with_team(cfg: ServerConfig, max_ticks: u32, team: &[Champi
                 wave: h.cleared,
                 tick: k,
                 levels: champions.iter().map(|u| u.state.progress.level).collect(),
-                build_gold: champions
-                    .iter()
-                    .map(|u| {
-                        u.state.progress.gold
-                            + u.state
-                                .progress
-                                .items
-                                .iter()
-                                .filter_map(|id| mftr_sim::items::item(*id))
-                                .map(|item| item.cost)
-                                .sum::<f32>()
-                    })
-                    .collect(),
+                build_gold: champions.iter().map(|u| net_worth(u)).collect(),
                 base_health,
             });
         }
         if let Some((team, at)) = core.game.world.game().winner {
-            let tick = Tick((at.0 / mftr_sim::SUBTICKS as u64) as u32);
-            return BotMatch {
-                winner: Some((team, tick)),
-                ticks: core.game.world.tick().0,
-                champion_kills: kills,
-                structures_destroyed: structures,
-                monsters_killed: monsters,
-                falls,
-                replay: core.game.replay(),
-                horde_waves,
-            };
+            winner = Some((team, Tick((at.0 / mftr_sim::SUBTICKS as u64) as u32)));
+            break;
         }
     }
+    let stats = core.bots.stats();
+    let champions = core
+        .game
+        .world
+        .units()
+        .iter()
+        .filter(|u| u.kind == UnitKind::Champion)
+        .filter_map(|u| {
+            let player = u.owner?;
+            let p = &u.state.progress;
+            Some(ChampionReport {
+                player,
+                team: u.team,
+                champion: u.champion?,
+                tier: core.bots.tier(player),
+                kills: p.kills,
+                deaths: p.deaths,
+                assists: p.assists,
+                cs: p.cs,
+                worth: worth.iter().find(|(id, _)| *id == u.id).map_or([0.0; 3], |(_, w)| *w),
+                dead_secs: dead.iter().find(|(id, _)| *id == u.id).map_or(0.0, |(_, n)| *n as f32 / 30.0),
+                monsters: monsters_by.iter().find(|(id, _)| *id == u.id).map_or(0, |(_, n)| *n),
+                minions_near: near_by.iter().find(|(id, _)| *id == u.id).map_or(0, |(_, n)| *n),
+                stats: stats.iter().find(|(q, _)| *q == player).map(|(_, s)| *s),
+            })
+        })
+        .collect();
     BotMatch {
-        winner: None,
+        winner,
         ticks: core.game.world.tick().0,
         champion_kills: kills,
         structures_destroyed: structures,
@@ -1530,6 +1682,8 @@ pub fn run_bot_match_with_team(cfg: ServerConfig, max_ticks: u32, team: &[Champi
         falls,
         replay: core.game.replay(),
         horde_waves,
+        champions,
+        cost,
     }
 }
 
@@ -1980,11 +2134,9 @@ mod tests {
         let mut worst = (0u32, mftr_sim::UnitId(0));
         for _ in 0..(10 * 60 * 30) {
             let k = core.game.world.tick().next();
-            let mut due = Vec::new();
-            for bot in &mut core.bots {
-                due.extend(bot.think(&core.game.world, k));
-            }
-            core.game.step(due);
+            let due = core.bots.think(&core.game.world, k);
+            let (events, fog) = core.game.step(due);
+            core.bots.observe(&core.game.world, &events, &fog.visions);
             if core.game.world.game().winner.is_some() {
                 break;
             }
@@ -2065,26 +2217,25 @@ mod tests {
     #[test]
     fn replays_handle_joins_and_leaves() {
         let mut m = Match::new(ServerConfig { scenario: Scenario::Duel, record: true, ..Default::default() });
-        let mut bots: Vec<Bot> = Vec::new();
+        let mut bots = Bots::new(7);
         for k in 1..=900u32 {
             if k == 1 || k == 200 || k == 450 {
                 let p = m.free_player().unwrap();
                 m.join(p, None);
-                bots.push(Bot::new(p, 7));
+                bots.add(p, Tier::Veteran);
             }
             if k == 600 {
-                let gone = bots.remove(0).player;
+                let gone = bots.players().next().unwrap();
+                bots.remove(gone);
                 m.leave(gone);
             }
-            let mut due = Vec::new();
-            for b in &mut bots {
-                due.extend(b.think(m.world(), Tick(k)));
-            }
-            m.step(due);
+            let due = bots.think(m.world(), Tick(k));
+            let (events, fog) = m.step(due);
+            bots.observe(m.world(), &events, &fog.visions);
             if k == 700 {
                 let p = m.free_player().unwrap();
                 m.join(p, Some(ChampionId::Shade));
-                bots.push(Bot::new(p, 8));
+                bots.add(p, Tier::Elite);
             }
         }
         let replay = Replay::from_text(&m.replay().to_text()).unwrap();
@@ -2099,9 +2250,10 @@ mod tests {
     #[test]
     fn replays_handle_a_restart_between_matches() {
         let mut m = Match::new(ServerConfig { scenario: Scenario::Aram, record: true, ..Default::default() });
-        let mut bots: Vec<Bot> = (0..4u8).map(|p| Bot::new(PlayerId(p), 3)).collect();
-        for b in &bots {
-            m.join(b.player, None);
+        let mut bots = Bots::new(3);
+        for p in 0..4u8 {
+            bots.add(PlayerId(p), Tier::Veteran);
+            m.join(PlayerId(p), None);
         }
         for k in 1..=700u32 {
             if k == 400 {
@@ -2109,16 +2261,15 @@ mod tests {
                     m.leave(p);
                 }
                 m.restart();
-                bots = (0..4u8).map(|p| Bot::new(PlayerId(p), 5)).collect();
-                for (i, b) in bots.iter().enumerate() {
-                    m.join(b.player, Some(ChampionId::ALL[5 - i]));
+                bots = Bots::new(5);
+                for i in 0..4u8 {
+                    bots.add(PlayerId(i), Tier::Recruit);
+                    m.join(PlayerId(i), Some(ChampionId::ALL[5 - i as usize]));
                 }
             }
-            let mut due = Vec::new();
-            for b in &mut bots {
-                due.extend(b.think(m.world(), Tick(k)));
-            }
-            m.step(due);
+            let due = bots.think(m.world(), Tick(k));
+            let (events, fog) = m.step(due);
+            bots.observe(m.world(), &events, &fog.visions);
         }
         let text = m.replay().to_text();
         assert!(text.contains("\nR 399\n"), "the restart is recorded");

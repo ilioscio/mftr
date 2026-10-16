@@ -430,6 +430,7 @@ impl Replay {
             scenario: Scenario::by_name(f[7]).ok_or(format!("scenario {}", f[7]))?,
             map: None,
             coop: false,
+            ..ServerConfig::default()
         };
         let mut cfg = cfg;
         let mut entries: Vec<ReplayEntry> = Vec::new();
