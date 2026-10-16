@@ -400,14 +400,19 @@ impl Agent {
         // or they're in reach and we're half down). A laner merely outmatched keeps its distance
         // instead (laning's spacing), without leaving the lane.
         let danger = c.memory.danger(st.pos, 1500.0, now);
-        let low = share < self.p.retreat_health || share < 0.12;
+        // Without a fountain to heal at (ARAM), a champion kept alive at low health is a
+        // champion short in every fight: it stays in, behind its team, and flees only when
+        // nearly dead (dying sends it home whole, and to the shop).
+        let low = share < self.p.retreat_health * if heals_home { 1.0 } else { 0.45 } || share < 0.1;
         let hit = c.memory.damage_on(me.id, 1.5, now) > me.stats.max_health * 0.04;
         let in_reach = near.iter().any(|e| {
             let reach = c.b.enemy_power(e.id).map_or(500.0, |p| p.range) + 150.0;
             e.state.pos.distance(st.pos) < reach
         });
-        let losing = local < -0.35 && in_reach && (hit || share < 0.5);
-        let committed_fight = self.mode == Mode::Fight && now.secs_since(self.mode_since) < self.p.overchase;
+        let losing = local < -0.35 && in_reach && (hit || share < 0.5) && (heals_home || local < -0.55 || share < 0.3);
+        // The team's call to go in holds unless we're about to die.
+        let committed_fight = (self.mode == Mode::Fight && now.secs_since(self.mode_since) < self.p.overchase)
+            || (matches!(task, Task::Engage { .. }) && share > self.p.retreat_health);
         if ((low && (!near.is_empty() || danger > 0.5 || share < 0.12)) || (losing && !committed_fight))
             && !(horde && c.b.enemy_minions.is_empty() && near.is_empty())
         {
@@ -433,6 +438,7 @@ impl Agent {
                 Task::Lane(_) => 0.18,
                 Task::Jungle => 0.1,
                 Task::Gank { .. } => -0.15,
+                Task::Engage { .. } => -0.4,
                 Task::Hold { .. } => -0.05,
                 _ => -0.1,
             } - if self.mode == Mode::Fight { 0.15 } else { 0.0 };
@@ -545,6 +551,15 @@ impl Agent {
             }
             Task::Siege { lane } => {
                 self.set_mode(Mode::Siege, now);
+                // A window to take the structure outright: go hit it.
+                if let Some(t) = c.b.lanes.get(lane).and_then(|v| v.their_target).and_then(|id| c.b.unit(id))
+                    && micro::siege_window(c, t)
+                {
+                    if st.pos.distance(t.state.pos) > 1300.0 {
+                        return self.go(c, t.state.pos);
+                    }
+                    return Some(CommandKind::Attack(t.id));
+                }
                 laning::farm(self, c, lane, true)
             }
             Task::Defend { lane, at } => {
@@ -557,6 +572,20 @@ impl Agent {
                     return Some(cmd);
                 }
                 laning::farm(self, c, lane, true)
+            }
+            Task::Engage { at } => {
+                // The front line goes in; the back line fights from behind it.
+                self.set_mode(Mode::Fight, now);
+                let back = me.champion.is_some_and(|ch| Archetype::of(ch).back());
+                if let Some(cmd) = micro::fight(self, c, !back, None) {
+                    return Some(cmd);
+                }
+                if back {
+                    let home = c.k.homes[c.b.team as usize];
+                    let range = me.attack.map_or(500.0, |s| s.range);
+                    return self.go(c, at + (home - at).normalize_or_zero() * range);
+                }
+                self.go(c, at)
             }
             Task::Group { at } | Task::Hold { at } => {
                 let horde = c.b.world.rules().horde;
@@ -646,6 +675,27 @@ impl Agent {
         {
             return Some(cmd);
         }
+        // Safe under our turret: defend from there (its shots and ours on the minions it
+        // covers), rather than stand by while the wave takes it.
+        if st.pos.distance(safe) < 500.0
+            && !c.b.enemies.iter().any(|e| e.state.pos.distance(st.pos) < e.attack.map_or(500.0, |s| s.range) + 250.0)
+            && let Some(t) = c.b.ally_turrets_covering(st.pos, 0.0).next()
+        {
+            let range = t.attack.map_or(775.0, |s| s.range);
+            if let laning::LastHit::Take(m) = laning::last_hit(self, c, 900.0)
+                && m.state.pos.distance(t.state.pos) <= range
+            {
+                return Some(CommandKind::Attack(m.id));
+            }
+            let covered =
+                c.b.enemy_minions
+                    .iter()
+                    .filter(|m| m.state.pos.distance(t.state.pos) <= range && m.state.pos.distance(st.pos) < 700.0)
+                    .min_by(|a, b| a.state.health.total_cmp(&b.state.health));
+            if let Some(m) = covered {
+                return Some(CommandKind::Attack(m.id));
+            }
+        }
         self.go(c, if heals_home && !near { home } else { safe })
     }
 
@@ -654,8 +704,9 @@ impl Agent {
     fn maybe_recall(&mut self, c: &Ctx, share: f32, danger: f32) -> Option<CommandKind> {
         let me = c.me;
         let st = &me.state;
-        let heals = c.k.fountains[c.b.team as usize].is_some() && c.b.world.map().layout.fountain_heals;
-        if !heals || c.b.world.rules().horde {
+        let has_fountain = c.k.fountains[c.b.team as usize].is_some();
+        let heals = has_fountain && c.b.world.map().layout.fountain_heals;
+        if !has_fountain || c.b.world.rules().horde {
             return None;
         }
         let home = c.k.homes[c.b.team as usize];
@@ -666,8 +717,16 @@ impl Agent {
         let next_cost = shop::next_item(&shop::path(champ, 0.5), &st.progress.items)
             .and_then(|n| mftr_sim::items::price(n, &st.progress.items))
             .map_or(f32::MAX, |(cost, _)| cost);
-        let rich = st.progress.gold >= next_cost.max(1100.0) + 150.0 * (self.p.strategy as f32);
-        let hurt = share < 0.38;
+        if !heals && crate::tier::off("aram-recall") {
+            return None;
+        }
+        // Without healing at home (ARAM), only a real purchase is worth the walk back.
+        let rich = if heals {
+            st.progress.gold >= next_cost.max(1100.0) + 150.0 * (self.p.strategy as f32)
+        } else {
+            self.p.strategy >= 1 && st.progress.gold >= next_cost.max(1800.0) + 300.0
+        };
+        let hurt = heals && share < 0.38;
         if !(hurt || rich) {
             return None;
         }

@@ -111,3 +111,100 @@ fn mid_duel() {
         lane(&[(ChampionId::Ember, Team::Blue, tier), (ChampionId::Quill, Team::Red, tier)], 8, trace);
     }
 }
+
+/// Teamfights in the open: what the fight model predicts against what happens.
+#[test]
+#[ignore]
+fn teamfight_calibration() {
+    use mftr_bots::fight::{self, Side};
+    let comps: [[ChampionId; 5]; 2] = [
+        [ChampionId::Ember, ChampionId::Bastion, ChampionId::Lumen, ChampionId::Quill, ChampionId::Marrow],
+        [ChampionId::Vesper, ChampionId::Rook, ChampionId::Shade, ChampionId::Cairn, ChampionId::Wren],
+    ];
+    for level in [3u8, 9, 15] {
+        for tier in [Tier::Legacy, Tier::Nightmare] {
+            for swap in [false, true] {
+                let mut w = World::new(9);
+                w.set_map(MapId::Open.shared());
+                w.set_rules(Rules::ARAM);
+                let mut bots = Bots::new(1);
+                let mut ids = Vec::new();
+                for i in 0..10u8 {
+                    let team = if i % 2 == 0 { Team::Blue } else { Team::Red };
+                    let side = (i % 2 == 0) == !swap;
+                    let c = comps[if side { 0 } else { 1 }][i as usize / 2];
+                    let x = if team == Team::Blue { 1400.0 } else { 2600.0 };
+                    let pos = mftr_sim::Vec2::new(x, 1200.0 + (i / 2) as f32 * 400.0);
+                    let id = w.spawn_champion(PlayerId(i), team, c, pos);
+                    let u = w.unit_mut(id).unwrap();
+                    let p = &mut u.state.progress;
+                    p.level = level;
+                    p.points = 0;
+                    p.ranks = [
+                        mftr_sim::champion::max_rank(0, level),
+                        mftr_sim::champion::max_rank(1, level)
+                            .min(level.saturating_sub(mftr_sim::champion::max_rank(0, level))),
+                        1,
+                        mftr_sim::champion::max_rank(3, level),
+                    ];
+                    // Items worth what a champion has by then.
+                    let budget = (level as f32 - 3.0) * 900.0;
+                    let mut spent = 0.0;
+                    let mut slot = 0;
+                    for &it in mftr_sim::items::build_path(c) {
+                        let cost = mftr_sim::items::item(it).unwrap().cost;
+                        if spent + cost > budget || slot >= 6 {
+                            break;
+                        }
+                        if mftr_sim::items::item(it).unwrap().recipe.is_empty() {
+                            p.items[slot] = it;
+                            slot += 1;
+                            spent += cost;
+                        }
+                    }
+                    u.refresh_stats();
+                    u.state.health = u.stats.max_health;
+                    ids.push(id);
+                    bots.add(PlayerId(i), tier);
+                }
+                let now = mftr_sim::SimTime::end_of(w.tick());
+                let (mut a, mut b) = (Side::default(), Side::default());
+                for id in &ids {
+                    let u = w.unit(*id).unwrap();
+                    let side = if u.team == Team::Blue { &mut a } else { &mut b };
+                    side.add(&fight::power(u, now, true, |_| true), 1.0);
+                }
+                let predicted = fight::outcome(&a, &b);
+                for _ in 0..(40 * 30) {
+                    step(&mut w, &mut bots);
+                    let alive = |t: Team| {
+                        ids.iter().filter(|id| w.unit(**id).is_some_and(|u| u.team == t && u.state.alive())).count()
+                    };
+                    if alive(Team::Blue) == 0 || alive(Team::Red) == 0 {
+                        break;
+                    }
+                }
+                let hp = |t: Team| -> f32 {
+                    ids.iter()
+                        .filter_map(|id| w.unit(*id))
+                        .filter(|u| u.team == t && u.state.alive())
+                        .map(|u| u.state.health / u.stats.max_health)
+                        .sum()
+                };
+                let alive = |t: Team| {
+                    ids.iter().filter(|id| w.unit(**id).is_some_and(|u| u.team == t && u.state.alive())).count()
+                };
+                println!(
+                    "level {level:>2} {:<9} blue={}: predicted {predicted:+.2}; after {:>4.1} s blue {} alive ({:.1} hp), red {} alive ({:.1} hp)",
+                    tier.name(),
+                    if swap { "melee" } else { "mages" },
+                    w.tick().0 as f32 / 30.0,
+                    alive(Team::Blue),
+                    hp(Team::Blue),
+                    alive(Team::Red),
+                    hp(Team::Red)
+                );
+            }
+        }
+    }
+}

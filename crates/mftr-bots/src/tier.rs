@@ -210,3 +210,14 @@ mod tests {
         }
     }
 }
+
+/// Development switches for experiments (`MFTR_BOTS_OFF=name,name`): turn a feature off to
+/// measure it. Read once.
+pub fn off(feature: &str) -> bool {
+    static OFF: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    OFF.get_or_init(|| {
+        std::env::var("MFTR_BOTS_OFF").map(|v| v.split(',').map(|s| s.trim().to_string()).collect()).unwrap_or_default()
+    })
+    .iter()
+    .any(|f| f == feature)
+}

@@ -27,6 +27,8 @@ pub enum Task {
     Defend { lane: usize, at: Vec2 },
     /// Gather and fight around a point.
     Group { at: Vec2 },
+    /// The team goes in together: fight around this point (the enemies' center), chasing.
+    Engage { at: Vec2 },
     /// Take a camp (buffs, contested camps).
     Objective { camp: usize },
     /// Stand at a point until something comes (Horde's line, a regroup).
@@ -90,6 +92,8 @@ pub struct Coach {
     rng: Pcg32,
     /// The lane the team pushes together in the mid game, and since when.
     focus: Option<(usize, SimTime)>,
+    /// The team's last call to go in, and when.
+    engaged: Option<(Vec2, SimTime)>,
 }
 
 /// How often the coach thinks (ticks).
@@ -115,6 +119,7 @@ impl Coach {
             announced: Vec::new(),
             rng: Pcg32::new(seed ^ 0x636f_6163_68, team as u64),
             focus: None,
+            engaged: None,
         }
     }
 
@@ -259,7 +264,9 @@ impl Coach {
                     .map(|m| m.player)
                     .next();
             }
-            let at = self.lane_front(b, knowledge, focus);
+            let front = self.lane_front(b, knowledge, focus);
+            let engage = self.engage_call(b, memory, members, front, strategy);
+            let at = front;
             for m in members.iter().filter(|m| m.bot) {
                 if Some(m.player) == splitter {
                     let side = (0..lanes).filter(|l| *l != focus).max_by(|a, c| {
@@ -278,7 +285,11 @@ impl Coach {
                     .their_target
                     .and_then(|id| b.unit(id))
                     .is_some_and(|t| b.lanes[focus].ours.is_some_and(|(_, p)| p.distance(t.state.pos) < 1500.0));
-                let t = if near_structure { Task::Siege { lane: focus } } else { Task::Group { at } };
+                let t = match engage {
+                    Some(at) => Task::Engage { at },
+                    None if near_structure => Task::Siege { lane: focus },
+                    None => Task::Group { at },
+                };
                 set(&mut tasks, m.player, t);
             }
         }
@@ -504,6 +515,74 @@ impl Coach {
         best.map(|(_, l, id)| (l, id))
     }
 
+    /// Whether the team should go in now, and where (the center of the enemies it sees near
+    /// `around`): the fight there, with everyone of ours who can join, is ours by a margin; a
+    /// call stands while the fight stays even. Lower tiers need a bigger margin (17 §3).
+    fn engage_call(
+        &mut self,
+        b: &Board,
+        memory: &Memory,
+        members: &[Member],
+        around: Vec2,
+        strategy: u8,
+    ) -> Option<Vec2> {
+        let now = b.now;
+        let enemies: Vec<&Unit> = b.enemies.iter().copied().filter(|e| e.state.pos.distance(around) < 2600.0).collect();
+        if enemies.is_empty() {
+            self.engaged = None;
+            return None;
+        }
+        let center = enemies.iter().fold(Vec2::ZERO, |s, e| s + e.state.pos) * (1.0 / enemies.len() as f32);
+        let (mut us, them) = b.engagement(center, 1600.0, Some(memory));
+        // Allies close enough to join count too.
+        for m in members {
+            if let Some(u) = b.unit(m.unit).filter(|u| u.state.alive()) {
+                let d = u.state.pos.distance(center);
+                if (1600.0..2800.0).contains(&d) {
+                    us.add(&fight::power(u, now, true, |s| u.state.can_cast(now, s)), 0.8);
+                }
+            }
+        }
+        let o = fight::outcome(&us, &them);
+        // A clear edge to start a fight; kept briefly while it stays ours.
+        let holding = self.engaged.is_some_and(|(_, at)| now.secs_since(at) < 3.0);
+        let bar = if holding {
+            0.05
+        } else if strategy >= 1 {
+            0.25
+        } else {
+            0.35
+        };
+        if o > bar {
+            if !holding {
+                self.engaged = Some((center, now));
+            }
+            Some(center)
+        } else {
+            self.engaged = None;
+            None
+        }
+    }
+
+    /// A spot near `front` (toward home) out of the reach of the enemies seen around it: where to
+    /// wait when the team isn't going in, so poke doesn't wear it down.
+    fn out_of_poke(&self, b: &Board, knowledge: &Knowledge, front: Vec2) -> Vec2 {
+        let home = knowledge.homes[self.team as usize];
+        let back = (home - front).normalize_or_zero();
+        let mut at = front;
+        for _ in 0..12 {
+            let threat = b.enemies.iter().any(|e| {
+                let reach = b.enemy_power(e.id).map_or(600.0, |p| p.range) + 150.0;
+                e.state.pos.distance(at) < reach
+            });
+            if !threat {
+                break;
+            }
+            at += back * 150.0;
+        }
+        at
+    }
+
     fn aram(
         &mut self,
         b: &Board,
@@ -512,18 +591,31 @@ impl Coach {
         members: &[Member],
         strategy: u8,
     ) -> Vec<(PlayerId, Task)> {
-        // The team moves as one around its wave; pushes the next structure with numbers up.
+        // The team moves as one around its wave: in together when the fight is ours, out of
+        // their poke when it isn't, pushing the next structure with numbers up.
         let front = self.lane_front(b, knowledge, 0);
         let dead = memory
             .enemies
             .iter()
             .filter(|s| !s.alive && s.respawn_at.is_some_and(|t| t.secs_since(b.now) > 8.0))
             .count();
-        let push = strategy >= 1 && (dead >= 2 || (dead >= 1 && b.lanes[0].our_count >= 3));
+        let push =
+            strategy >= 1 && (dead >= 2 || (dead >= 1 && b.lanes[0].our_count >= 3)) && !crate::tier::off("siege");
+        let engage =
+            if crate::tier::off("engage") { None } else { self.engage_call(b, memory, members, front, strategy) };
+        // Hold the wave: a team that gives it up loses its towers to it.
+        let wait = front;
         members
             .iter()
             .filter(|m| m.bot)
-            .map(|m| (m.player, if push { Task::Siege { lane: 0 } } else { Task::Group { at: front } }))
+            .map(|m| {
+                let t = match engage {
+                    _ if push => Task::Siege { lane: 0 },
+                    Some(at) => Task::Engage { at },
+                    None => Task::Group { at: wait },
+                };
+                (m.player, t)
+            })
             .collect()
     }
 
@@ -675,6 +767,7 @@ impl Coach {
                     from: Some(m.unit),
                 }),
                 Task::Defend { at, .. } => Some(Ping { kind: PingKind::Defend, at, target: None, from: Some(m.unit) }),
+                Task::Engage { at } => Some(Ping { kind: PingKind::Attack, at, target: None, from: Some(m.unit) }),
                 Task::Objective { camp } => knowledge.camps.get(camp).map(|c| Ping {
                     kind: PingKind::Group,
                     at: c.pos,

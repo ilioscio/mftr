@@ -14,6 +14,7 @@ pub struct BotmatchConfig {
     pub tiers: [Tier; 2],
     pub replay: Option<String>,
     pub trace: Option<u8>,
+    pub trace_falls: bool,
 }
 
 fn clock(ticks: u32) -> String {
@@ -70,12 +71,12 @@ fn detail(cfg: &BotmatchConfig, m: &BotMatch, secs: f64) {
         println!("  {:>5}  {team:?} {kind:?} (tier {tier})", clock(t.0));
     }
     println!(
-        "  champion    team  tier       K/D/A     CS (near)  CS/min  worth@10  worth@15   dead    orders/min  time by mode (idle retreat recall fight farm jungle travel siege ward)"
+        "  champion    team  tier       K/D/A     CS (near)  CS/min  worth@10  worth@15   dead   dealt  taken (minions turrets)  orders/min  time by mode (idle retreat recall fight farm jungle travel siege ward)"
     );
     let minutes = (m.ticks as f32 / 30.0 / 60.0).max(0.1);
     for c in &m.champions {
         println!(
-            "  {:<10}  {:<4}  {:<9}  {:>2}/{:>2}/{:>2}  {:>4} ({:>4})  {:>6.1}  {:>8.0}  {:>8.0}  {:>4.0} s  {:>8.0}",
+            "  {:<10}  {:<4}  {:<9}  {:>2}/{:>2}/{:>2}  {:>4} ({:>4})  {:>6.1}  {:>8.0}  {:>8.0}  {:>4.0} s  {:>6.0} {:>6.0} ({:>6.0} {:>6.0})  {:>8.0}",
             format!("{:?}", c.champion),
             format!("{:?}", c.team),
             c.tier.map_or("human".into(), |t| t.name().to_string()),
@@ -88,6 +89,10 @@ fn detail(cfg: &BotmatchConfig, m: &BotMatch, secs: f64) {
             c.worth[0],
             c.worth[1],
             c.dead_secs,
+            c.damage_dealt,
+            c.damage_taken,
+            c.taken_minions,
+            c.taken_structures,
             c.stats.map_or(0.0, |s| s.orders as f32 / minutes),
         );
         if let Some(s) = c.stats {
@@ -106,25 +111,58 @@ fn detail(cfg: &BotmatchConfig, m: &BotMatch, secs: f64) {
     );
 }
 
+/// The champions for a seed: the ones asked for, else the roster shuffled by the seed (so a
+/// series measures the bots, not one lineup).
+fn lineup(cfg: &BotmatchConfig, seed: u64) -> Vec<ChampionId> {
+    if !cfg.team.is_empty() {
+        return cfg.team.clone();
+    }
+    let mut all = ChampionId::ALL.to_vec();
+    let mut rng = mftr_sim::rng::Pcg32::new(seed ^ 0x6c69_6e65, 1);
+    for i in (1..all.len()).rev() {
+        all.swap(i, rng.next_u32() as usize % (i + 1));
+    }
+    all
+}
+
+/// Swap each pair of seats (blue i, red i): the same champions on the other side.
+fn swapped(lineup: &[ChampionId]) -> Vec<ChampionId> {
+    let mut out = lineup.to_vec();
+    for pair in out.chunks_mut(2) {
+        pair.swap(0, pair.len() - 1);
+    }
+    out
+}
+
 pub fn run(cfg: &BotmatchConfig) -> bool {
+    // Two different tiers play each seed twice, sides swapped, so each tier plays each lineup
+    // from each side once; wins are counted by tier.
+    let paired = cfg.tiers[0] != cfg.tiers[1] && cfg.team.is_empty() && cfg.scenario != Scenario::Horde;
     let mut wins = [0u32; 2];
     let mut undecided = 0;
     let mut lengths = Vec::new();
     let mut cost = (0.0f64, 0.0f64, 0.0f64, 0u64);
     let mut ok = true;
-    // Per side: kills, deaths, cs, worth@15, matches.
+    // Per tier (0: --blue's, 1: --red's): kills, deaths, cs/min, worth@15, champions.
     let mut side = [[0f64; 5]; 2];
-    for seed in cfg.seed..cfg.seed + cfg.seeds {
+    let games = cfg.seeds * if paired { 2 } else { 1 };
+    for game in 0..games {
+        let seed = cfg.seed + if paired { game / 2 } else { game };
+        let flip = paired && game % 2 == 1;
+        let lineup = if flip { swapped(&lineup(cfg, seed)) } else { lineup(cfg, seed) };
+        let tiers = if flip { [cfg.tiers[1], cfg.tiers[0]] } else { cfg.tiers };
         let server = ServerConfig { seed, bots: 10, scenario: cfg.scenario, ..Default::default() };
         let started = std::time::Instant::now();
+        let team = if cfg.scenario == Scenario::Horde { cfg.team.clone() } else { lineup };
         let opts = BotMatchOptions {
-            team: cfg.team.clone(),
-            tiers: Some(cfg.tiers),
+            team,
+            tiers: Some(tiers),
             trace: cfg.trace.map(mftr_sim::PlayerId),
+            trace_falls: cfg.trace_falls,
         };
         let m = mftr_server::run_bot_match_with(server, (cfg.minutes * 60.0 * 30.0) as u32, &opts);
         let secs = started.elapsed().as_secs_f64();
-        if cfg.seeds == 1 {
+        if games == 1 {
             detail(cfg, &m, secs);
             if let Some(path) = &cfg.replay {
                 std::fs::write(path, m.replay.to_text()).expect("write replay");
@@ -135,12 +173,13 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
         if let Some((t, a, b)) = check.mismatch {
             println!("seed {seed}: replay MISMATCH at tick {}: {a:016x} vs {b:016x}", t.0);
             ok = false;
-        } else if cfg.seeds == 1 {
+        } else if games == 1 {
             println!("replay: {} ticks, {} hashes checked, all match", check.ticks, check.hashes_checked);
         }
+        // Which of the asked tiers won (0: --blue's, 1: --red's).
+        let tier_of = |team: Team| (team == Team::Red) != flip;
         match m.winner {
-            Some((Team::Blue, _)) => wins[0] += 1,
-            Some(_) => wins[1] += 1,
+            Some((team, _)) => wins[tier_of(team) as usize] += 1,
             None => undecided += 1,
         }
         lengths.push(m.ticks);
@@ -149,30 +188,37 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
         cost.2 += m.cost.sim_us;
         cost.3 += m.cost.ticks as u64;
         for c in &m.champions {
-            let s = &mut side[(c.team == Team::Red) as usize];
+            let s = &mut side[tier_of(c.team) as usize];
             s[0] += c.kills as f64;
             s[1] += c.deaths as f64;
             s[2] += c.cs as f64 / (m.ticks as f64 / 1800.0).max(0.1);
             s[3] += c.worth[1] as f64;
             s[4] += 1.0;
         }
-        if cfg.seeds > 1 {
+        if games > 1 {
             let towers = |team: Team| m.falls.iter().filter(|f| f.1 == team).count();
+            let names: Vec<String> = lineup_names(&m);
             println!(
-                "seed {seed:>3}: {:<10} {:>6}  kills {:>3}  structures lost blue {:>2} red {:>2}  ({:.1} s)",
-                m.winner.map_or("undecided".to_string(), |(t, _)| format!("{t:?} won")),
+                "seed {seed:>3}{}: {:<18} {:>6}  kills {:>3}  structures lost blue {:>2} red {:>2}  ({:.1} s)  {}",
+                if flip { "'" } else { " " },
+                m.winner.map_or("undecided".to_string(), |(t, _)| format!(
+                    "{} won",
+                    tiers[(t == Team::Red) as usize].name()
+                )),
                 clock(m.ticks),
                 m.champion_kills,
                 towers(Team::Blue),
                 towers(Team::Red),
-                secs
+                secs,
+                names.join(" ")
             );
         }
     }
-    if cfg.seeds > 1 {
-        let n = cfg.seeds as f64;
+    if games > 1 {
+        let n = games as f64;
         println!(
-            "\nblue ({}) won {}, red ({}) won {}, undecided {}  —  average length {}",
+            "
+{} won {}, {} won {}, undecided {}  —  average length {}",
             cfg.tiers[0].name(),
             wins[0],
             cfg.tiers[1].name(),
@@ -180,11 +226,12 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
             undecided,
             clock((lengths.iter().map(|t| *t as f64).sum::<f64>() / n) as u32)
         );
-        for (i, name) in ["blue", "red"].into_iter().enumerate() {
+        for (i, tier) in cfg.tiers.iter().enumerate() {
             let s = side[i];
             let k = s[4].max(1.0);
             println!(
-                "  {name:<4} per champion: kills {:.1}  deaths {:.1}  CS/min {:.1}  worth@15 {:.0}",
+                "  {:<9} per champion: kills {:.1}  deaths {:.1}  CS/min {:.1}  worth@15 {:.0}",
+                tier.name(),
                 s[0] / k,
                 s[1] / k,
                 s[2] / k,
@@ -195,4 +242,15 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
         println!("  bots {:.1} µs a tick (worst {:.0} µs), simulation {:.1} µs", cost.0 / t, cost.1, cost.2 / t);
     }
     ok
+}
+
+/// "blue: A B C D E / red: …" in short.
+fn lineup_names(m: &BotMatch) -> Vec<String> {
+    let mut blue: Vec<String> = Vec::new();
+    let mut red: Vec<String> = Vec::new();
+    for c in &m.champions {
+        let n = format!("{:?}", c.champion);
+        if c.team == Team::Blue { blue.push(n) } else { red.push(n) }
+    }
+    vec![format!("[{}]", blue.join(",")), "v".into(), format!("[{}]", red.join(","))]
 }

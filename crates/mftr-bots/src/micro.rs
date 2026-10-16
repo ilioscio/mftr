@@ -54,6 +54,36 @@ pub fn turret_unsafe(c: &Ctx, p: Vec2) -> bool {
     })
 }
 
+/// A structure we can take now without minions to tank it: no enemy champion there to defend
+/// it (seen or likely), and our champions near it kill it before its shots would kill the
+/// sturdiest of them (17 §6's numbers windows; Veteran and up).
+pub fn siege_window(c: &Ctx, t: &Unit) -> bool {
+    if c.strategy < 1 || !t.targetable() {
+        return false;
+    }
+    let at = t.state.pos;
+    if c.b.enemies.iter().any(|e| e.state.pos.distance(at) < 1400.0) || c.memory.danger(at, 1400.0, c.now) > 0.4 {
+        return false;
+    }
+    let ours: Vec<&Unit> =
+        c.b.allies.iter().copied().filter(|a| a.state.alive() && a.state.pos.distance(at) < 1300.0).collect();
+    if ours.is_empty() {
+        return false;
+    }
+    let dps: f32 = ours.iter().map(|a| a.stats.attack_damage * a.attack.map_or(0.7, |s| s.attack_speed)).sum::<f32>()
+        * t.champion_damage_taken
+        * mftr_sim::combat::resist_multiplier(t.stats.armor);
+    let to_kill = t.state.health / dps.max(1.0);
+    if t.kind != UnitKind::Turret {
+        return true;
+    }
+    // Its shots ramp on one champion; the sturdiest takes them.
+    let sturdiest = ours.iter().map(|a| a.state.health * (1.0 + a.stats.armor / 100.0)).fold(0.0, f32::max);
+    let shot = t.stats.attack_damage * 2.0;
+    let survives = sturdiest / (shot * t.attack.map_or(0.83, |s| s.attack_speed)).max(1.0);
+    to_kill < survives * (0.7 + 0.25 * (ours.len() as f32 - 1.0)).min(1.5)
+}
+
 /// Our team's burst on `t` now: every ally within `reach` of it.
 pub fn team_burst(c: &Ctx, t: &Unit, reach: f32) -> f32 {
     c.b.allies
@@ -274,7 +304,18 @@ pub fn best_cast(a: &mut Agent, c: &Ctx, target: &Unit, aggressive: bool) -> Opt
                 (aim_at, value_of(target) * chance, chance)
             }
         };
-        let min_chance = if ult { 0.5 } else { 0.28 };
+        // No mana: a basic ability is worth casting at any fair chance (it comes back); hard
+        // crowd control and long cooldowns wait for a likelier hit; ultimates for a good one.
+        let cd = ab.cooldown_at(rank).0 as f32 / mftr_sim::time::SUBTICKS_PER_SECOND as f32;
+        let min_chance = if ult {
+            0.5
+        } else if kit::cc_seconds(&ab) > 0.0 {
+            if aggressive { 0.3 } else { 0.45 }
+        } else if cd <= 9.0 {
+            0.12
+        } else {
+            0.28
+        };
         if chance < min_chance || value <= 0.0 {
             continue;
         }
@@ -310,6 +351,35 @@ pub fn attack(a: &mut Agent, c: &Ctx, t: &Unit, chase: bool) -> Option<CommandKi
     }
     let their_range = t.attack.map_or(150.0, |s| s.range) + me.gameplay_radius;
     let ready_in = if st.attack_ready_at > c.now { st.attack_ready_at.secs_since(c.now) } else { 0.0 };
+    let back = me.champion.is_some_and(|ch| Archetype::of(ch).back());
+    if back && d > reach + 30.0 {
+        // A back-liner doesn't walk past the enemy's front line for a target: where it would
+        // have to stand must be out of every other enemy champion's reach.
+        let stand = t.state.pos + (st.pos - t.state.pos).normalize_or_zero() * (reach - 30.0);
+        let exposed = c.b.enemies.iter().any(|e| {
+            e.id != t.id
+                && e.state.pos.distance(stand) < e.attack.map_or(150.0, |s| s.range) + me.gameplay_radius + 120.0
+        });
+        if exposed {
+            return None;
+        }
+    }
+    // Spacing: a ranged champion steps back from a shorter-reach enemy closing in while its own
+    // attack recharges (every tier but the lowest; the top tiers kite every attack).
+    if a.p.strategy >= 1 && my_range > 300.0 && st.attack.is_none() && ready_in > 0.2 {
+        if let Some(threat) =
+            c.b.enemies.iter().filter(|e| e.attack.map_or(150.0, |s| s.range) < my_range - 100.0).find(|e| {
+                e.state.pos.distance(st.pos) < e.attack.map_or(150.0, |s| s.range) + me.gameplay_radius + 90.0
+            })
+        {
+            let away = (st.pos - threat.state.pos).normalize_or_zero();
+            let to = st.pos + away * 220.0;
+            if c.b.world.map().walkable(to, 40.0) && !turret_unsafe(c, to) {
+                a.wake_at(c.now.plus(mftr_sim::SimDuration::from_millis((ready_in * 1000.0) as u64)));
+                return Some(CommandKind::MoveTo(QPoint::from_vec2(to)));
+            }
+        }
+    }
     if a.p.kites
         && my_range > 300.0
         && their_range < reach - 100.0

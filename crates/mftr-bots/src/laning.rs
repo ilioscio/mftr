@@ -309,6 +309,10 @@ fn spot(c: &Ctx, lane: usize, cautious: bool) -> Vec2 {
 pub fn farm(a: &mut Agent, c: &Ctx, lane: usize, push: bool) -> Option<CommandKind> {
     let me = c.me;
     let now = c.now;
+    if c.b.lanes.get(lane).is_none() {
+        // No lanes (a sandbox): fight whatever's there.
+        return micro::fight(a, c, true, None);
+    }
     let cautious = c.coach.cautions.iter().any(|(p, _)| p.distance(me.state.pos) < 3000.0)
         || c.memory.danger(me.state.pos, 1500.0, now) > 1.3;
     // A support with its carry nearby (a bot or a human) leaves the last hits to it.
@@ -433,7 +437,7 @@ pub fn siege_structure(c: &Ctx, lane: usize) -> Option<CommandKind> {
     if me.state.pos.distance(t.state.pos) > 1300.0 {
         return None;
     }
-    if t.kind == UnitKind::Turret && micro::turret_unsafe(c, t.state.pos) {
+    if t.kind == UnitKind::Turret && micro::turret_unsafe(c, t.state.pos) && !micro::siege_window(c, t) {
         return None;
     }
     Some(CommandKind::Attack(t.id))

@@ -124,6 +124,7 @@ fn main() {
                 tiers: [tier("--blue").unwrap_or(both), tier("--red").unwrap_or(both)],
                 replay: get("--replay"),
                 trace: get("--trace").map(|p| p.parse().expect("--trace PLAYER")),
+                trace_falls: args.iter().any(|a| a == "--trace-falls"),
             };
             if !mftr_tools::botmatch::run(&cfg) {
                 std::process::exit(1);

@@ -1446,6 +1446,12 @@ pub struct ChampionReport {
     /// Enemy lane minions that died within 900 u of it while it lived (what it could have
     /// last-hit).
     pub minions_near: u32,
+    /// Damage dealt to enemy champions, and taken from them.
+    pub damage_dealt: f32,
+    pub damage_taken: f32,
+    /// Damage taken from minions and from structures.
+    pub taken_minions: f32,
+    pub taken_structures: f32,
     pub stats: Option<mftr_bots::agent::AgentStats>,
 }
 
@@ -1477,6 +1483,8 @@ pub struct BotMatchOptions {
     pub tiers: Option<[Tier; 2]>,
     /// Print what this player's bot does every second (development).
     pub trace: Option<PlayerId>,
+    /// Print every champion's state when a structure falls (development).
+    pub trace_falls: bool,
 }
 
 /// Play a match with server bots only, as fast as possible (no network, no clients), until a
@@ -1520,6 +1528,8 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
     let mut monsters = [0u32; 2];
     let mut monsters_by: Vec<(UnitId, u32)> = Vec::new();
     let mut near_by: Vec<(UnitId, u32)> = Vec::new();
+    let mut dealt: Vec<(UnitId, f32, f32)> = Vec::new();
+    let mut taken_other: Vec<(UnitId, f32, f32)> = Vec::new();
     let mut dead: Vec<(UnitId, u32)> = Vec::new();
     let mut worth: Vec<(UnitId, [f32; 3])> = Vec::new();
     let mut falls = Vec::new();
@@ -1542,6 +1552,37 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
         cost.bots_worst_us = cost.bots_worst_us.max(bots_us);
         cost.sim_us += (t2 - t1).as_secs_f64() * 1e6;
         for e in &events {
+            if let SimEvent::Damage { source, target, amount, absorbed, .. } = e
+                && let (Some(s), Some(t)) = (core.game.world.unit(*source), core.game.world.unit(*target))
+                && s.kind == UnitKind::Champion
+                && t.kind == UnitKind::Champion
+                && s.team != t.team
+            {
+                let d = amount + absorbed;
+                match dealt.iter_mut().find(|(id, ..)| *id == s.id) {
+                    Some(e) => e.1 += d,
+                    None => dealt.push((s.id, d, 0.0)),
+                }
+                match dealt.iter_mut().find(|(id, ..)| *id == t.id) {
+                    Some(e) => e.2 += d,
+                    None => dealt.push((t.id, 0.0, d)),
+                }
+            }
+            if let SimEvent::Damage { source, target, amount, absorbed, .. } = e
+                && let (Some(s), Some(t)) = (core.game.world.unit(*source), core.game.world.unit(*target))
+                && t.kind == UnitKind::Champion
+                && matches!(s.kind, UnitKind::Minion | UnitKind::Turret)
+            {
+                let (m, st) =
+                    if s.kind == UnitKind::Minion { (amount + absorbed, 0.0) } else { (0.0, amount + absorbed) };
+                match taken_other.iter_mut().find(|(id, ..)| *id == t.id) {
+                    Some(e) => {
+                        e.1 += m;
+                        e.2 += st;
+                    }
+                    None => taken_other.push((t.id, m, st)),
+                }
+            }
             if let SimEvent::Died { unit, killer, .. } = e
                 && let Some(u) = core.game.world.unit(*unit)
             {
@@ -1559,6 +1600,22 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
                     kind if kind.is_structure() => {
                         structures += 1;
                         falls.push((k, u.team, kind, u.tier));
+                        if opts.trace_falls {
+                            let s = k.0 / mftr_sim::TICK_HZ;
+                            eprintln!("{:>2}:{:02} {:?} {:?} tier {} falls", s / 60, s % 60, u.team, kind, u.tier);
+                            for c in core.game.world.units().iter().filter(|c| c.kind == UnitKind::Champion) {
+                                eprintln!(
+                                    "      {:?} {:<8} {:>5.0} u away, hp {:>4.0}/{:<4.0} {}  {}",
+                                    c.team,
+                                    format!("{:?}", c.champion.unwrap_or(ChampionId::Ember)),
+                                    c.state.pos.distance(u.state.pos),
+                                    c.state.health,
+                                    c.stats.max_health,
+                                    if c.state.alive() { "" } else { "DEAD" },
+                                    c.owner.and_then(|p| core.bots.describe(p)).unwrap_or_default()
+                                );
+                            }
+                        }
                     }
                     mftr_sim::UnitKind::Minion => {
                         for c in core.game.world.units().iter().filter(|c| {
@@ -1578,6 +1635,35 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
             }
         }
         let secs = k.0 / mftr_sim::TICK_HZ;
+        if opts.trace_falls && k.0.is_multiple_of(30 * mftr_sim::TICK_HZ) {
+            let w = &core.game.world;
+            let line = |team: Team| {
+                let champs: Vec<_> =
+                    w.units().iter().filter(|u| u.kind == UnitKind::Champion && u.team == team).collect();
+                let alive = champs.iter().filter(|u| u.state.alive()).count();
+                let hp: f32 =
+                    champs.iter().filter(|u| u.state.alive()).map(|u| u.state.health / u.stats.max_health).sum::<f32>()
+                        / alive.max(1) as f32;
+                let gold: f32 = champs.iter().map(|u| u.state.progress.gold).sum::<f32>() / champs.len().max(1) as f32;
+                let structures: f32 = w
+                    .units()
+                    .iter()
+                    .filter(|u| u.team == team && u.kind.is_structure() && u.kind != UnitKind::Relic && u.state.alive())
+                    .map(|u| u.state.health / u.stats.max_health)
+                    .sum();
+                let minions = w
+                    .units()
+                    .iter()
+                    .filter(|u| u.team == team && u.kind == UnitKind::Minion && u.state.alive())
+                    .count();
+                format!(
+                    "{alive} alive at {:>3.0}% hp, gold {:>5.0}, structures {structures:.2}, minions {minions:>2}",
+                    hp * 100.0,
+                    gold
+                )
+            };
+            eprintln!("{:>2}:{:02} blue: {}  |  red: {}", secs / 60, secs % 60, line(Team::Blue), line(Team::Red));
+        }
         if let Some(p) = opts.trace
             && k.0.is_multiple_of(mftr_sim::TICK_HZ)
             && let Some(u) = core.game.world.units().iter().find(|u| u.owner == Some(p) && u.kind == UnitKind::Champion)
@@ -1669,6 +1755,10 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
                 dead_secs: dead.iter().find(|(id, _)| *id == u.id).map_or(0.0, |(_, n)| *n as f32 / 30.0),
                 monsters: monsters_by.iter().find(|(id, _)| *id == u.id).map_or(0, |(_, n)| *n),
                 minions_near: near_by.iter().find(|(id, _)| *id == u.id).map_or(0, |(_, n)| *n),
+                damage_dealt: dealt.iter().find(|(id, ..)| *id == u.id).map_or(0.0, |d| d.1),
+                damage_taken: dealt.iter().find(|(id, ..)| *id == u.id).map_or(0.0, |d| d.2),
+                taken_minions: taken_other.iter().find(|(id, ..)| *id == u.id).map_or(0.0, |d| d.1),
+                taken_structures: taken_other.iter().find(|(id, ..)| *id == u.id).map_or(0.0, |d| d.2),
                 stats: stats.iter().find(|(q, _)| *q == player).map(|(_, s)| *s),
             })
         })
