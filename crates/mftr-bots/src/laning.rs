@@ -477,7 +477,10 @@ fn trade(a: &mut Agent, c: &Ctx) -> Option<CommandKind> {
     let share = |u: &Unit| u.state.health / u.stats.max_health.max(1.0);
     let (us, them) = c.b.engagement(me.state.pos.lerp(e.state.pos, 0.5), 1100.0, Some(c.memory));
     let o = fight::outcome(&us, &them) + a.read_noise();
-    if o > 0.35 && share(me) > 0.5 && a.p.strategy >= 1 {
+    // Its way out known to be down (the top tier tracks spells): a smaller edge kills it.
+    let trapped = a.p.strategy >= 3 && !crate::tier::off("trapped") && micro::escapes_down(a, c, e);
+    let bar = if trapped { 0.15 } else { 0.35 };
+    if o > bar && share(me) > 0.5 && a.p.strategy >= 1 {
         return micro::fight(a, c, true, Some(e.id));
     }
     if share(me) + 0.12 < share(e) {

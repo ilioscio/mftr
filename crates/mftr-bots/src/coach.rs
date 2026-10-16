@@ -102,6 +102,16 @@ pub struct Coach {
     sticky: Vec<(PlayerId, Task, SimTime)>,
 }
 
+/// One of our structures under threat, and how many should come.
+struct Threatened {
+    lane: usize,
+    at: Vec2,
+    tier: u8,
+    threat: usize,
+    needed: usize,
+    urgency: f32,
+}
+
 /// How often the coach thinks (ticks).
 const EVERY: u32 = 30;
 /// How long a human's ping is acted on (s).
@@ -351,58 +361,98 @@ impl Coach {
             }
         }
 
-        // Defend structures under threat.
+        // Defend structures under threat: the most urgent first, each bot defending one at most
+        // (a laner isn't pulled off its own turret to another lane's). Every structure that can
+        // be hurt counts: once a Gatehouse is down, the base turrets can be hurt alongside the
+        // lanes' own.
         if strategy >= 1 {
-            for lane in 0..lanes {
-                let Some(structure) = b
-                    .ally_structures
-                    .iter()
-                    .filter(|s| s.lane as usize == lane && s.kind != UnitKind::Relic && s.targetable())
-                    .min_by(|a, c| {
-                        knowledge
-                            .along(lane, self.team, a.state.pos)
-                            .0
-                            .total_cmp(&knowledge.along(lane, self.team, c.state.pos).0)
-                    })
-                    .copied()
-                    .filter(|s| s.tier >= 1)
-                else {
-                    continue;
-                };
+            let mut threatened: Vec<Threatened> = Vec::new();
+            for structure in
+                b.ally_structures.iter().filter(|s| s.kind != UnitKind::Relic && s.tier >= 1 && s.targetable())
+            {
                 let at = structure.state.pos;
-                let threat = b.enemies.iter().filter(|e| e.state.pos.distance(at) < 1600.0).count();
-                let hurt = structure.state.health < structure.stats.max_health * 0.85;
+                let inner = structure.tier >= 3;
+                // A siege spreads out around an inner structure.
+                let around = if inner { 2400.0 } else { 1600.0 };
+                let threat = b.enemies.iter().filter(|e| e.state.pos.distance(at) < around).count();
+                let health = structure.state.health / structure.stats.max_health.max(1.0);
+                let hurt = health < 0.85;
                 // A wave crashing into it with nobody there: someone catches it.
                 let wave = b.enemy_minions.iter().filter(|m| m.state.pos.distance(at) < 1500.0).count();
-                let needed = if threat >= 2 || (threat >= 1 && hurt) {
+                let needed = if threat >= 2 || (threat >= 1 && (hurt || inner)) {
                     threat + 1 + (strategy >= 2) as usize
-                } else if wave >= 3 && (hurt || wave >= 5 || mid_game) {
+                } else if wave >= 3 && (hurt || wave >= 5 || mid_game || inner) {
                     1
                 } else {
                     0
                 };
-                if needed == 0 {
-                    continue;
+                if needed > 0 {
+                    let urgency = threat as f32 + (1.0 - health) * 2.0 + structure.tier as f32 * 0.5;
+                    let lane = (structure.lane as usize).min(lanes.saturating_sub(1));
+                    threatened.push(Threatened { lane, at, tier: structure.tier, threat, needed, urgency });
                 }
-                let sent = members
-                    .iter()
-                    .filter(|m| Self::unit(b, m).is_some_and(|u| u.state.alive() && u.state.pos.distance(at) < 1800.0))
-                    .count();
+            }
+            threatened.sort_by(|a, c| c.urgency.total_cmp(&a.urgency));
+            let mut defending: Vec<PlayerId> = Vec::new();
+            for d in &threatened {
+                let at = d.at;
                 // A wave alone isn't worth the jungler's time while the lanes are being played.
-                let minions_only = threat == 0;
+                let minions_only = d.threat == 0;
+                // The base (gatehouse and in) with champions at it: the top tier brings everyone
+                // but a bot about to finish theirs (17 §6).
+                let base = d.tier >= 4 && d.threat >= 1 && strategy >= 3 && !crate::tier::off("base");
+                // Inner structures are worth crossing the map for.
+                let reach = 340.0
+                    * if d.tier >= 3 && !minions_only {
+                        f32::MAX
+                    } else if minions_only {
+                        14.0
+                    } else {
+                        22.0
+                    };
                 let mut helpers: Vec<&Member> = members
                     .iter()
-                    .filter(|m| m.bot && alive(m) && pos(m).distance(at) >= 1800.0)
-                    .filter(|m| knowledge.travel(pos(m), at) < 340.0 * if minions_only { 14.0 } else { 22.0 })
+                    .filter(|m| m.bot && alive(m) && pos(m).distance(at) >= 1800.0 && !defending.contains(&m.player))
+                    .filter(|m| knowledge.travel(pos(m), at) < reach)
                     .filter(|m| !(minions_only && !mid_game && is_jungler(m.player)))
+                    // A bot nearly through the enemy's base finishes it: the race is won there.
+                    .filter(|m| !(base && self.finishing(b, m)))
                     .collect();
+                // The top tier doesn't feed a defense it can't win of a turret it can spare: it
+                // takes something elsewhere instead (17 §6: objective trades).
+                if strategy >= 3 && d.tier <= 2 && d.threat >= 2 && !crate::tier::off("trade") {
+                    let (mut us, them) = b.engagement(at, 1600.0, Some(memory));
+                    for m in &helpers {
+                        if let Some(u) = Self::unit(b, m) {
+                            us.add(&fight::power(u, now, true, |s| u.state.can_cast(now, s)), 1.0);
+                        }
+                    }
+                    if fight::outcome(&us, &them) < -0.3
+                        && let Some(lane) = self.trade_lane(b, memory, d.lane)
+                    {
+                        for m in helpers.iter().filter(|m| !is_jungler(m.player) || mid_game) {
+                            set(&mut tasks, m.player, Task::Siege { lane });
+                            defending.push(m.player);
+                        }
+                        continue;
+                    }
+                }
+                let sent: Vec<PlayerId> = members
+                    .iter()
+                    .filter(|m| Self::unit(b, m).is_some_and(|u| u.state.alive() && u.state.pos.distance(at) < 1800.0))
+                    .map(|m| m.player)
+                    .collect();
+                defending.extend(sent.iter().copied().filter(|p| members.iter().any(|m| m.bot && m.player == *p)));
+                let needed = if base { usize::MAX } else { d.needed };
                 // The lane's own laner first, then by distance.
-                let own = |m: &Member| role_of(m.player).and_then(|r| r.lane()).map(|l| l.min(lanes - 1)) == Some(lane);
+                let own =
+                    |m: &Member| role_of(m.player).and_then(|r| r.lane()).map(|l| l.min(lanes - 1)) == Some(d.lane);
                 helpers.sort_by(|a, c| {
                     (!own(a), knowledge.travel(pos(a), at) as u32).cmp(&(!own(c), knowledge.travel(pos(c), at) as u32))
                 });
-                for m in helpers.into_iter().take(needed.saturating_sub(sent)) {
-                    set(&mut tasks, m.player, Task::Defend { lane, at });
+                for m in helpers.into_iter().take(needed.saturating_sub(sent.len())) {
+                    set(&mut tasks, m.player, Task::Defend { lane: d.lane, at });
+                    defending.push(m.player);
                 }
             }
         }
@@ -458,6 +508,33 @@ impl Coach {
             }
         }
         tasks
+    }
+
+    /// Whether `m` is at the enemy's base structures and nearly through one (it stays rather
+    /// than going home: the race is won there).
+    fn finishing(&self, b: &Board, m: &Member) -> bool {
+        let Some(u) = Self::unit(b, m) else { return false };
+        b.lanes.iter().filter_map(|v| v.their_target.and_then(|id| b.unit(id))).any(|t| {
+            t.tier >= 5 && t.state.pos.distance(u.state.pos) < 1200.0 && t.state.health < t.stats.max_health * 0.4
+        })
+    }
+
+    /// Where to trade for a turret we can't hold in lane `lost`: another lane whose next enemy
+    /// structure has no enemy seen or likely near, our wave there farthest along.
+    fn trade_lane(&self, b: &Board, memory: &Memory, lost: usize) -> Option<usize> {
+        (0..b.lanes.len())
+            .filter(|l| *l != lost)
+            .filter_map(|l| {
+                let t = b.lanes[l].their_target.and_then(|id| b.unit(id))?;
+                let seen = b.enemies.iter().any(|e| e.state.pos.distance(t.state.pos) < 2000.0);
+                if seen || memory.danger(t.state.pos, 2000.0, b.now) > 0.5 {
+                    return None;
+                }
+                let wave = b.lanes[l].ours.map_or(0.0, |(d, _)| d);
+                Some((l, wave - t.state.health * 0.5))
+            })
+            .max_by(|a, c| a.1.total_cmp(&c.1))
+            .map(|(l, _)| l)
     }
 
     /// The lane the team pushes together: where our wave is farthest along and their next

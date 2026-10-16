@@ -100,6 +100,10 @@ impl Tier {
     }
 
     pub fn params(self) -> Params {
+        tune(self, self.table())
+    }
+
+    fn table(self) -> Params {
         match self {
             Tier::Legacy | Tier::Recruit => Params {
                 reaction_ms: 650.0,
@@ -179,6 +183,56 @@ impl Tier {
             },
         }
     }
+}
+
+/// Development overrides for tuning (`MFTR_BOTS_TUNE=nightmare.think_fight=4,elite.dodge=0.9`):
+/// a tier's number set for an experiment. Read once; unknown names are ignored.
+fn tune(tier: Tier, mut p: Params) -> Params {
+    static TUNE: std::sync::OnceLock<Vec<(String, String, f32)>> = std::sync::OnceLock::new();
+    let all = TUNE.get_or_init(|| {
+        std::env::var("MFTR_BOTS_TUNE")
+            .map(|v| {
+                v.split(',')
+                    .filter_map(|kv| {
+                        let (k, v) = kv.split_once('=')?;
+                        let (t, f) = k.trim().split_once('.')?;
+                        Some((t.to_ascii_lowercase(), f.to_string(), v.trim().parse().ok()?))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    });
+    for (_, f, v) in all.iter().filter(|(t, ..)| *t == tier.name().to_ascii_lowercase()) {
+        let v = *v;
+        match f.as_str() {
+            "reaction_ms" => p.reaction_ms = v,
+            "reaction_spread_ms" => p.reaction_spread_ms = v,
+            "think_fight" => p.think_fight = v as u32,
+            "think_calm" => p.think_calm = v as u32,
+            "orders_per_second" => p.orders_per_second = v,
+            "lead" => p.lead = v,
+            "aim_error" => p.aim_error = v,
+            "dodge" => p.dodge = v,
+            "last_hit_error_ms" => p.last_hit_error_ms = v,
+            "read_noise" => p.read_noise = v,
+            "tracking" => {
+                p.tracking = match v as u8 {
+                    0 => Tracking::None,
+                    1 => Tracking::Ultimates,
+                    2 => Tracking::Abilities,
+                    _ => Tracking::Everything,
+                }
+            }
+            "strategy" => p.strategy = v as u8,
+            "kites" => p.kites = v != 0.0,
+            "overchase" => p.overchase = v,
+            "ability_use" => p.ability_use = v,
+            "pings" => p.pings = v,
+            "retreat_health" => p.retreat_health = v,
+            _ => {}
+        }
+    }
+    p
 }
 
 /// Development switches for experiments (`MFTR_BOTS_OFF=name,name`): turn a feature off to

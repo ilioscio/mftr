@@ -1054,14 +1054,25 @@ to keep many matches on a server ([17](17-bots.md), D62).
   rate-limited.
 - **`mftr-tools botmatch`:** tier against tier on paired seeds, with CS, worth, damage, pings,
   time per mode and bot cost; `--trace` and `--trace-falls` for one bot's decisions.
-- **Measured:** Veteran beats the old bot 33–4 in ARAM and 18–2 in Classic; each tier
-  beats the one below (ARAM 27–4 and 25–11, Classic 17–3 and 14–6) except Nightmare over Elite,
-  which is about even (ARAM 17–14, Classic 31–29 over 60 games) until its strategic edges
-  (counter-jungling, objective trades) are built. Every tier clears the Horde campaign; the old
-  bot fell at wave 19 on one of two seeds. Bots cost about a tenth of the simulation in Classic
-  (6–12 µs a tick against 94–100 µs). Dodging by tier, Recruit to Nightmare: lines 0–94%, areas
-  17–100% (17 §12).
-- **Not yet:** counter-jungling, objective trades and vision denial (17 §12).
+- **Defense** (all tiers): every structure that can be hurt is a candidate, the most urgent
+  first, one defense per bot; inner structures draw defenders from anywhere.
+- **Nightmare's edges:** base defense with every bot, objective trades for outer turrets it
+  can't hold, all-ins on targets whose escapes are down, counter-jungling when the enemy
+  jungler is seen far away, lone ganks.
+- **Measured** (40 games a pairing):
+
+  | Matchup | ARAM | Classic |
+  |---|---|---|
+  | Veteran vs old bot | 33–4 | 37–3 |
+  | Veteran vs Recruit | 27–4 | 37–3 |
+  | Elite vs Veteran | 25–11 | 30–10 |
+  | Nightmare vs Elite | 19–15 | 23–17 (50–30 over 80) |
+
+  - Every tier clears the Horde campaign; the old bot fell at wave 19 on one of two seeds.
+  - Bots cost about a tenth of the simulation in Classic (6–14 µs a tick against about 100 µs),
+    worst tick under 0.5 ms.
+  - Dodging by tier, Recruit to Nightmare: lines 0–94%, areas 17–100% (17 §12).
+- **Not yet:** vision denial; ARAM edges for Nightmare (17 §12).
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.

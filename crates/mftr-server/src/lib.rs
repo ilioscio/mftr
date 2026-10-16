@@ -1492,6 +1492,8 @@ pub struct ChampionReport {
     pub worth: [f32; 3],
     pub dead_secs: f32,
     pub monsters: u32,
+    /// Of those, on the enemy's side of the map (counter-jungling).
+    pub monsters_theirs: u32,
     /// Enemy lane minions that died within 900 u of it while it lived (what it could have
     /// last-hit).
     pub minions_near: u32,
@@ -1577,7 +1579,7 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
     }
     let (mut kills, mut structures) = (0, 0);
     let mut monsters = [0u32; 2];
-    let mut monsters_by: Vec<(UnitId, u32)> = Vec::new();
+    let mut monsters_by: Vec<(UnitId, u32, u32)> = Vec::new();
     let mut near_by: Vec<(UnitId, u32)> = Vec::new();
     let mut dealt: Vec<(UnitId, f32, f32)> = Vec::new();
     let mut taken_other: Vec<(UnitId, f32, f32)> = Vec::new();
@@ -1645,9 +1647,15 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
                     mftr_sim::UnitKind::Monster => {
                         if let Some(k) = core.game.world.unit(*killer).filter(|k| k.team != Team::Neutral) {
                             monsters[k.team as usize] += 1;
-                            match monsters_by.iter_mut().find(|(id, _)| *id == k.id) {
-                                Some(e) => e.1 += 1,
-                                None => monsters_by.push((k.id, 1)),
+                            let homes = core.game.world.map().layout.champion_spawn;
+                            let (ours, theirs) = (homes[k.team as usize], homes[1 - k.team as usize]);
+                            let stolen = (u.home.distance(theirs) + 600.0 < u.home.distance(ours)) as u32;
+                            match monsters_by.iter_mut().find(|(id, ..)| *id == k.id) {
+                                Some(e) => {
+                                    e.1 += 1;
+                                    e.2 += stolen;
+                                }
+                                None => monsters_by.push((k.id, 1, stolen)),
                             }
                         }
                     }
@@ -1807,7 +1815,8 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
                 cs: p.cs,
                 worth: worth.iter().find(|(id, _)| *id == u.id).map_or([0.0; 3], |(_, w)| *w),
                 dead_secs: dead.iter().find(|(id, _)| *id == u.id).map_or(0.0, |(_, n)| *n as f32 / 30.0),
-                monsters: monsters_by.iter().find(|(id, _)| *id == u.id).map_or(0, |(_, n)| *n),
+                monsters: monsters_by.iter().find(|(id, ..)| *id == u.id).map_or(0, |m| m.1),
+                monsters_theirs: monsters_by.iter().find(|(id, ..)| *id == u.id).map_or(0, |m| m.2),
                 minions_near: near_by.iter().find(|(id, _)| *id == u.id).map_or(0, |(_, n)| *n),
                 damage_dealt: dealt.iter().find(|(id, ..)| *id == u.id).map_or(0.0, |d| d.1),
                 damage_taken: dealt.iter().find(|(id, ..)| *id == u.id).map_or(0.0, |d| d.2),
