@@ -2190,8 +2190,9 @@ impl World {
                 let hide = &hidden[unit.team as usize];
                 match unit.brain {
                     Some(Brain::Laner { lane, .. }) => {
+                        let start = map.layout.wave_spawn[lane as usize][unit.team as usize];
                         let lane = &map.layout.lanes[lane as usize][unit.team as usize];
-                        lane::laner_think(unit, &seen, lane, &recent, hide, map);
+                        lane::laner_think(unit, &seen, start, lane, &recent, hide, map);
                     }
                     Some(Brain::Tower { .. }) => lane::tower_think(unit, &seen, &recent, hide, map),
                     Some(Brain::Monster { .. }) if unit.state.alive() => {
@@ -4244,21 +4245,46 @@ mod tests {
         let mut unit = w.unit(me).unwrap().clone();
         // The champion is the only target: take it.
         let only_champ: Vec<Seen> = seen(&w).into_iter().filter(|s| s.id != foe).collect();
-        laner_think(&mut unit, &only_champ, &lane, &[], &[], &map);
+        laner_think(&mut unit, &only_champ, lane[0], &lane, &[], &[], &map);
         assert_eq!(unit.state.order, Order::Attack(champ));
         // An enemy minion shows up: it outranks the champion.
-        laner_think(&mut unit, &seen(&w), &lane, &[], &[], &map);
+        laner_think(&mut unit, &seen(&w), lane[0], &lane, &[], &[], &map);
         assert_eq!(unit.state.order, Order::Attack(foe));
         // The champion never outranks the minion back.
-        laner_think(&mut unit, &seen(&w), &lane, &[], &[], &map);
+        laner_think(&mut unit, &seen(&w), lane[0], &lane, &[], &[], &map);
         assert_eq!(unit.state.order, Order::Attack(foe));
         // A champion target pulled far off the lane is let go: back to walking the lane.
         unit.state.set_order(Order::Attack(champ), &map);
         unit.state.pos = Vec2::new(1300.0, 2000.0);
         w.unit_mut(champ).unwrap().state.pos = Vec2::new(1300.0, 2100.0);
         let far: Vec<Seen> = seen(&w).into_iter().filter(|s| s.id != foe).collect();
-        laner_think(&mut unit, &far, &lane, &[], &[], &map);
+        laner_think(&mut unit, &far, lane[0], &lane, &[], &[], &map);
         assert!(matches!(unit.state.order, Order::MoveTo(_)), "{:?}", unit.state.order);
+    }
+
+    /// A lane's waypoints leave out its spawn: on Crossroads, a lane's first waypoint is the far
+    /// corner (or mid's center), so the whole of a team's half lies between its spawn and that
+    /// point. Minions there are on their lane and fight what they meet, rather than walking past
+    /// an enemy wave as if they'd been dragged off the lane.
+    #[test]
+    fn minions_fight_between_their_spawn_and_the_first_waypoint() {
+        use crate::lane::{Seen, laner_think};
+        for lane in 0..3 {
+            let mut w = World::new(1);
+            w.set_map(MapId::Crossroads.shared());
+            let start = w.map().layout.wave_spawn[lane][Team::Blue as usize];
+            let path = w.map().layout.lanes[lane][Team::Blue as usize].clone();
+            let at = start.lerp(path[0], 0.25);
+            let brain = Some(Brain::Laner { lane: lane as u8, next: 0 });
+            let me = w.spawn_minion(MinionKind::Melee, Team::Blue, at, brain);
+            let foe =
+                w.spawn_minion(MinionKind::Melee, Team::Red, at + (path[0] - at).normalize_or_zero() * 300.0, None);
+            let map = w.map().clone();
+            let seen: Vec<Seen> = w.units().iter().map(Seen::of).collect();
+            let mut unit = w.unit(me).unwrap().clone();
+            laner_think(&mut unit, &seen, start, &path, &[], &[], &map);
+            assert_eq!(unit.state.order, Order::Attack(foe), "lane {lane}");
+        }
     }
 
     #[test]
@@ -6697,8 +6723,9 @@ mod tests {
     }
 
     /// The Bridge built from its spec (12 §1, E6): its walls are traced, so they differ a little
-    /// from the hand-built polygons it replaced.
-    const GOLDEN_HASH_BRIDGE: u64 = 0x2f42_4b83_5307_dbfd;
+    /// from the hand-built polygons it replaced. Minions count the stretch from their spawn to
+    /// the first waypoint as their lane.
+    const GOLDEN_HASH_BRIDGE: u64 = 0x0368_74ac_a841_886a;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.

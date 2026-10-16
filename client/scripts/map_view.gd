@@ -117,8 +117,10 @@ func build(geo: Dictionary, ground: MeshInstance3D, ally: Color, enemy: Color) -
 			return null
 		var mats := prop_materials(model, Color.WHITE, true)
 		for m in mats:
-			var sway := 0.05 if id.begins_with("grass") else (0.012 if id.begins_with("pine") else 0.0)
+			var sway := 0.05 if id.begins_with("grass") else (0.012 if id.begins_with("pine") or id.begins_with("tree") else 0.0)
 			m.set_shader_parameter("sway", 0.08 if id.begins_with("flowers") else sway)
+			if id.begins_with("grass"):
+				m.set_shader_parameter("snow", 0.0)  # grass stands up out of the snow
 		return [model.static_mesh(), mats]
 	dressing.build(geo, materials_for)
 	for c in dressing.get_children():
@@ -133,14 +135,16 @@ func build(geo: Dictionary, ground: MeshInstance3D, ally: Color, enemy: Color) -
 		add_child(life)
 		life.build(geo, control, season, materials_for)
 	Seasons.apply_palette(season, "ground", gm)
-	if control is Image and fountains.size() == 2:
-		# A lane map: the ground's materials come from its control map (15 §3).
+	if control is Image and not fountains.is_empty():
+		# A lane map (Horde's have only blue's fountain): the ground's materials come from its
+		# control map (15 §3).
 		gm.set_shader_parameter("control", ImageTexture.create_from_image(control))
 		gm.set_shader_parameter("control_on", true)
 		gm.set_shader_parameter("map_size", size * U)
 		gm.set_shader_parameter("lane_mode", 1.0)
-	if fountains.size() == 2:
-		# Facing props along the roads.
+	if not fountains.is_empty():
+		# Facing props along the roads. Horde maps have one fountain (no red champions) but
+		# still a lane, and their structures face down it like any other.
 		road_segments = segments(geo.get("roads", []))
 	for f in fountains:
 		# The spawn platform (a prop the size of the fountain's circle), else a tinted disk.

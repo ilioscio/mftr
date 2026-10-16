@@ -321,7 +321,7 @@ impl Bot {
             .filter(|u| matches!(u.brain, Some(mftr_sim::world::Brain::Laner { lane: l, .. }) if l as usize == lane))
             .max_by(|a, b| progress(a.state.pos).total_cmp(&progress(b.state.pos)));
         let behind = if cautious { 550.0 } else { 150.0 };
-        // No wave (Horde has none): wait under the frontmost allied turret of this lane, just
+        // No wave (Horde has none) and nothing to meet: wait under the frontmost allied turret of this lane, just
         // behind it rather than on it (a turret is solid: walking to its center pins a bot against
         // it). Enemies that come into reach get fought above. Frontmost means farthest from home:
         // a lane path may start mid-map (The Bridge's does), so every turret behind its start
@@ -335,13 +335,34 @@ impl Bot {
                 .max_by(|a, b| a.state.pos.distance(home).total_cmp(&b.state.pos.distance(home)))
                 .map(|u| u.state.pos)
         };
-        let (mut goal, dir) = match (front, turret()) {
-            (Some(m), _) => (m.state.pos - along(path, m.state.pos).1 * behind, along(path, m.state.pos).1),
-            (None, Some(t)) => {
+        // Horde, once a wave is out: go meet it rather than wait for it at the turret. Head for the
+        // visible attacker nearest home, or while none is in sight yet, halfway from that turret
+        // to where the horde comes from.
+        let meet = (world.rules().horde && world.game().next_wave_at.is_none())
+            .then(|| {
+                world
+                    .units()
+                    .iter()
+                    .filter(visible)
+                    .filter(|u| {
+                        u.team != team && u.targetable() && matches!(u.kind, UnitKind::Minion | UnitKind::Monster)
+                    })
+                    .min_by(|a, b| a.state.pos.distance(home).total_cmp(&b.state.pos.distance(home)))
+                    .map(|u| u.state.pos)
+                    .or_else(|| {
+                        let from = layout.wave_spawn.get(lane)?[1 - team as usize];
+                        Some(turret().map_or(from, |t| t.lerp(from, 0.5)))
+                    })
+            })
+            .flatten();
+        let (mut goal, dir) = match (front, meet, turret()) {
+            (Some(m), _, _) => (m.state.pos - along(path, m.state.pos).1 * behind, along(path, m.state.pos).1),
+            (None, Some(e), _) => (e, (e - home).normalize_or_zero()),
+            (None, None, Some(t)) => {
                 let ahead = (t - home).normalize_or_zero();
                 (t - ahead * 250.0, ahead)
             }
-            (None, None) => (path[0], along(path, path[0]).1),
+            (None, None, None) => (path[0], along(path, path[0]).1),
         };
         // Back off along the lane while the spot is in an unsafe turret's range.
         for _ in 0..20 {
@@ -578,10 +599,7 @@ mod tests {
     use mftr_sim::map::MapId;
     use mftr_sim::world::Rules;
 
-    /// Horde: bots leave the fountain during the first break and wait under the furthest turret,
-    /// so they're there when the horde arrives instead of walking out late.
-    #[test]
-    fn horde_bots_wait_under_the_furthest_turret_before_the_first_wave() {
+    fn horde() -> (World, Vec<Bot>) {
         let mut w = World::new(7);
         w.set_map(MapId::HordeBridge.shared());
         w.set_rules(Rules::HORDE);
@@ -592,20 +610,67 @@ mod tests {
             w.spawn_champion(player, Team::Blue, *champion, w.map().layout.champion_spawn[0]);
             bots.push(Bot::new(player, 7));
         }
-        while w.game().next_wave_at.is_some() {
-            let k = Tick(w.tick().0 + 1);
-            let cmds: Vec<Command> = bots.iter_mut().flat_map(|b| b.think(&w, k)).collect();
-            w.step(&cmds);
-        }
-        let first = w
-            .units()
+        (w, bots)
+    }
+
+    fn step(w: &mut World, bots: &mut [Bot]) {
+        let k = Tick(w.tick().0 + 1);
+        let cmds: Vec<Command> = bots.iter_mut().flat_map(|b| b.think(w, k)).collect();
+        w.step(&cmds);
+    }
+
+    fn first_turret(w: &World) -> Vec2 {
+        w.units()
             .iter()
             .find(|u| u.team == Team::Blue && u.kind == UnitKind::Turret && u.tier == 1)
             .map(|u| u.state.pos)
-            .unwrap();
+            .unwrap()
+    }
+
+    /// Horde: bots leave the fountain during the first break and wait under the furthest turret,
+    /// so they're there when the horde arrives instead of walking out late.
+    #[test]
+    fn horde_bots_wait_under_the_furthest_turret_before_the_first_wave() {
+        let (mut w, mut bots) = horde();
+        while w.game().next_wave_at.is_some() {
+            step(&mut w, &mut bots);
+        }
+        let first = first_turret(&w);
         for u in w.units().iter().filter(|u| u.kind == UnitKind::Champion) {
             let d = u.state.pos.distance(first);
             assert!(d < 600.0, "{:?} waits {d:.0} u from the furthest turret", u.champion);
         }
+    }
+
+    /// Horde: once a wave is out, bots walk past the turret to meet it, so the fight happens in
+    /// front of the turret rather than under it.
+    #[test]
+    fn horde_bots_advance_to_meet_each_wave() {
+        let (mut w, mut bots) = horde();
+        while w.game().next_wave_at.is_some() {
+            step(&mut w, &mut bots);
+        }
+        let home = w.map().layout.champion_spawn[0];
+        let turret = first_turret(&w).distance(home);
+        for _ in 0..40 * mftr_sim::TICK_HZ {
+            step(&mut w, &mut bots);
+            let horde: Vec<Vec2> = w
+                .units()
+                .iter()
+                .filter(|u| u.team == Team::Red && u.state.alive() && u.kind == UnitKind::Minion)
+                .map(|u| u.state.pos)
+                .collect();
+            let met = w
+                .units()
+                .iter()
+                .filter(|u| u.kind == UnitKind::Champion)
+                .any(|c| horde.iter().any(|h| h.distance(c.state.pos) < 600.0));
+            if met {
+                let front = horde.iter().map(|h| h.distance(home)).fold(f32::MAX, f32::min);
+                assert!(front > turret + 1500.0, "met the horde {front:.0} u from home, turret at {turret:.0}");
+                return;
+            }
+        }
+        panic!("bots never met the first wave");
     }
 }

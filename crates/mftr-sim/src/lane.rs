@@ -446,10 +446,13 @@ fn aggressor(
 ///
 /// A minion keeps its target until something of strictly higher priority shows up, but never
 /// mid-windup; it lets go once the target hides, leaves its range, or the chase pulls it off its
-/// lane. With nothing to fight, it walks the lane.
+/// lane. With nothing to fight, it walks the lane. The lane runs from `start`, where its wave
+/// spawned, through the waypoints of `lane` (which leave `start` out).
+#[allow(clippy::too_many_arguments)]
 pub fn laner_think(
     unit: &mut Unit,
     seen: &[Seen],
+    start: Vec2,
     lane: &[Vec2],
     aggression: &[(UnitId, UnitId, SimTime)],
     hidden: &[UnitId],
@@ -493,7 +496,10 @@ pub fn laner_think(
         }
     };
     let valid = |s: &&Seen| enemy_valid(unit, s, hidden);
-    let off_lane = distance_to_path(lane, me) > MINION_LEASH;
+    // The stretch from the spawn to the first waypoint is lane too (in a base-to-corner lane, it's
+    // the whole of our half).
+    let from_start = lane.first().map_or(f32::INFINITY, |&first| distance_to_path(&[start, first], me));
+    let off_lane = distance_to_path(lane, me).min(from_start) > MINION_LEASH;
     let current = match unit.state.order {
         Order::Attack(id) => seen.iter().filter(valid).find(|s| s.id == id).and_then(|s| {
             let (p, reach) = priority(s);

@@ -69,6 +69,11 @@ pub enum ClientMessage {
         hash: u64,
         have: u32,
     },
+    /// The details of a unit for the inspect window (01 §13), asked a few times a second while
+    /// it's open; the server answers with `Inspect` if the unit is visible to the asker.
+    Inspect {
+        unit: UnitId,
+    },
 }
 
 /// What a player can do in champion select (ARAM all-random, 06 §2).
@@ -309,6 +314,100 @@ pub enum ServerMessage {
     },
     /// What the server offers (13 §1), answering a Hello without a queue.
     Queues(Vec<QueueInfo>),
+    /// A unit's details, answering `ClientMessage::Inspect`.
+    Inspect(Box<UnitInfo>),
+}
+
+/// One unit's details for the inspect window (01 §13): its live stats, inventory, augments and
+/// what's on it right now. Whole numbers, as shown.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnitInfo {
+    pub unit: UnitId,
+    pub attack_damage: u16,
+    pub ability_power: u16,
+    pub armor: u16,
+    pub magic_resist: u16,
+    /// Attacks per second × 1000 (0: no basic attack).
+    pub attack_speed_milli: u16,
+    pub attack_range: u16,
+    pub move_speed: u16,
+    pub ability_haste: u16,
+    /// Health per second × 10.
+    pub health_regen_tenths: u16,
+    /// Percent of basic-attack damage returned as health.
+    pub life_steal_pct: u8,
+    pub items: [u8; INVENTORY],
+    pub augments: [u8; mftr_sim::augments::SLOTS],
+    /// Stat Anvil steps kept, per `anvils::STATS`.
+    pub anvils: [u16; 8],
+    pub effects: Vec<InfoEffect>,
+}
+
+/// Most effects an `UnitInfo` carries.
+pub const MAX_INFO_EFFECTS: usize = 16;
+
+/// Something on a unit right now: what, for how long (tenths of a second left; 0 = while it
+/// lasts) and how much (a slow's percent, a shield's points, stacks, plates…).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InfoEffect {
+    pub kind: InfoEffectKind,
+    pub tenths: u16,
+    pub value: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InfoEffectKind {
+    Stunned = 0,
+    Rooted = 1,
+    /// `value`: percent slower.
+    Slowed = 2,
+    /// `value`: points absorbed.
+    Shield = 3,
+    /// Drinking a potion: `value` health a second.
+    Potion = 4,
+    Recalling = 5,
+    /// The next basic attack is empowered (Sheen's kind).
+    Spellblade = 6,
+    /// The jungle buffs (Azure Warden, Ember Brute).
+    Insight = 7,
+    Cinder = 8,
+    /// A structure that can't be hurt while an earlier one in its lane stands.
+    Protected = 9,
+    /// A turret's plates left (`value`).
+    Plates = 10,
+    /// A structure that takes `value` percent of champions' damage (less: fortified; more:
+    /// backdoored).
+    ChampionDamage = 11,
+    /// Spellhunger's ability power stacks (`value`).
+    Stacks = 12,
+    /// Dead: `tenths` until it respawns.
+    Dead = 13,
+    /// A Horde wave's boss.
+    Boss = 14,
+}
+
+impl InfoEffectKind {
+    pub const ALL: [InfoEffectKind; 15] = [
+        InfoEffectKind::Stunned,
+        InfoEffectKind::Rooted,
+        InfoEffectKind::Slowed,
+        InfoEffectKind::Shield,
+        InfoEffectKind::Potion,
+        InfoEffectKind::Recalling,
+        InfoEffectKind::Spellblade,
+        InfoEffectKind::Insight,
+        InfoEffectKind::Cinder,
+        InfoEffectKind::Protected,
+        InfoEffectKind::Plates,
+        InfoEffectKind::ChampionDamage,
+        InfoEffectKind::Stacks,
+        InfoEffectKind::Dead,
+        InfoEffectKind::Boss,
+    ];
+
+    pub fn from_u8(v: u8) -> Option<Self> {
+        Self::ALL.get(v as usize).copied()
+    }
 }
 
 /// One queue a server offers: a mode on a map, Versus or Co-op vs bots, and how busy it is.
@@ -1671,6 +1770,11 @@ pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
             w.write_u32(*have);
             w.finish()
         }
+        ClientMessage::Inspect { unit } => {
+            let mut w = begin(header, 5);
+            w.write_u32(unit.0);
+            w.finish()
+        }
     }
 }
 
@@ -1707,6 +1811,7 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
             _ => return Err(DecodeError::Invalid("lobby action")),
         }),
         4 => ClientMessage::MapRequest { hash: r.read_u64()?, have: r.read_u32()? },
+        5 => ClientMessage::Inspect { unit: UnitId(r.read_u32()?) },
         _ => return Err(DecodeError::Invalid("message kind")),
     };
     Ok((header, msg))
@@ -1782,6 +1887,87 @@ fn read_scoreboard(r: &mut BitReader) -> Result<Scoreboard, DecodeError> {
     Ok(Scoreboard { started_at, towers, rows })
 }
 
+fn write_unit_info(w: &mut BitWriter, i: &UnitInfo) {
+    w.write_u32(i.unit.0);
+    for v in [
+        i.attack_damage,
+        i.ability_power,
+        i.armor,
+        i.magic_resist,
+        i.attack_speed_milli,
+        i.attack_range,
+        i.move_speed,
+        i.ability_haste,
+        i.health_regen_tenths,
+    ] {
+        w.write_u16(v);
+    }
+    w.write_u8(i.life_steal_pct);
+    for v in i.items {
+        w.write_u8(v);
+    }
+    for v in i.augments {
+        w.write_u8(v);
+    }
+    for v in i.anvils {
+        w.write_u16(v);
+    }
+    let n = i.effects.len().min(MAX_INFO_EFFECTS);
+    w.write(n as u64, 5);
+    for e in &i.effects[..n] {
+        w.write(e.kind as u64, 5);
+        w.write_u16(e.tenths);
+        w.write_u16(e.value);
+    }
+}
+
+fn read_unit_info(r: &mut BitReader) -> Result<UnitInfo, DecodeError> {
+    let unit = UnitId(r.read_u32()?);
+    let mut v = [0u16; 9];
+    for x in v.iter_mut() {
+        *x = r.read_u16()?;
+    }
+    let life_steal_pct = r.read_u8()?;
+    let mut items = [0u8; INVENTORY];
+    for x in items.iter_mut() {
+        *x = r.read_u8()?;
+    }
+    let mut augments = [0u8; mftr_sim::augments::SLOTS];
+    for x in augments.iter_mut() {
+        *x = r.read_u8()?;
+    }
+    let mut anvils = [0u16; 8];
+    for x in anvils.iter_mut() {
+        *x = r.read_u16()?;
+    }
+    let n = r.read(5)? as usize;
+    if n > MAX_INFO_EFFECTS {
+        return Err(DecodeError::Invalid("effect count"));
+    }
+    let mut effects = Vec::with_capacity(n);
+    for _ in 0..n {
+        let kind = InfoEffectKind::from_u8(r.read(5)? as u8).ok_or(DecodeError::Invalid("effect kind"))?;
+        effects.push(InfoEffect { kind, tenths: r.read_u16()?, value: r.read_u16()? });
+    }
+    Ok(UnitInfo {
+        unit,
+        attack_damage: v[0],
+        ability_power: v[1],
+        armor: v[2],
+        magic_resist: v[3],
+        attack_speed_milli: v[4],
+        attack_range: v[5],
+        move_speed: v[6],
+        ability_haste: v[7],
+        health_regen_tenths: v[8],
+        life_steal_pct,
+        items,
+        augments,
+        anvils,
+        effects,
+    })
+}
+
 // ---- server → client --------------------------------------------------------------------
 
 pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
@@ -1841,6 +2027,11 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             for b in &bytes[..n] {
                 w.write_u8(*b);
             }
+            w.finish()
+        }
+        ServerMessage::Inspect(info) => {
+            let mut w = begin(header, 6);
+            write_unit_info(&mut w, info);
             w.finish()
         }
         ServerMessage::Queues(queues) => {
@@ -2040,6 +2231,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             }
             ServerMessage::Queues(queues)
         }
+        6 => ServerMessage::Inspect(Box::new(read_unit_info(&mut r)?)),
         1 => {
             let tick = Tick(r.read_u32()?);
             let since_tick_us = r.read_u32()?;
@@ -2754,6 +2946,36 @@ mod tests {
         assert_eq!(decode_server(&encode_server(&hdr(), &chunk)).unwrap().1, chunk);
         let req = ClientMessage::MapRequest { hash: 99, have: 1800 };
         assert_eq!(decode_client(&encode_client(&hdr(), &req)).unwrap().1, req);
+    }
+
+    /// 01 §13: the inspect window's request and its answer.
+    #[test]
+    fn inspect_round_trips() {
+        let req = ClientMessage::Inspect { unit: UnitId(4242) };
+        assert_eq!(decode_client(&encode_client(&hdr(), &req)).unwrap().1, req);
+        let info = UnitInfo {
+            unit: UnitId(4242),
+            attack_damage: 139,
+            ability_power: 0,
+            armor: 53,
+            magic_resist: 38,
+            attack_speed_milli: 1302,
+            attack_range: 550,
+            move_speed: 375,
+            ability_haste: 20,
+            health_regen_tenths: 52,
+            life_steal_pct: 12,
+            items: [3, 0, 17, 0, 0, 9],
+            augments: [5, 0, 0, 0],
+            anvils: [0, 2, 0, 0, 1, 0, 0, 0],
+            effects: vec![
+                InfoEffect { kind: InfoEffectKind::Slowed, tenths: 14, value: 30 },
+                InfoEffect { kind: InfoEffectKind::Shield, tenths: 20, value: 180 },
+                InfoEffect { kind: InfoEffectKind::Boss, tenths: 0, value: 0 },
+            ],
+        };
+        let msg = ServerMessage::Inspect(Box::new(info));
+        assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
     }
 
     /// 13 §1: the queues a server offers.

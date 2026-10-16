@@ -126,7 +126,7 @@ func _ready() -> void:
 	_load_champion_model()
 	portraits = preload("res://scripts/portraits.gd").new()
 	add_child(portraits)
-	portraits.setup(func(c: String): return _model_for(c), champion_model, CHAMPION_COLORS)
+	portraits.setup(func(c: String): return _portrait_model(c), champion_model, CHAMPION_COLORS)
 	portraits.rendered.connect(_on_portrait)
 	vfx = preload("res://scripts/vfx.gd").new()
 	add_child(vfx)
@@ -235,6 +235,9 @@ func _ready() -> void:
 			return
 		elif args[i] == "--shot-numbers":
 			_shot_numbers = true
+		elif args[i] == "--shot-inspect" and i + 1 < args.size():
+			_shot_inspect = args[i + 1]
+			i += 1
 		elif args[i] == "--shot-charge":
 			_shot_charge = true
 		elif args[i] == "--shot-recall":
@@ -446,6 +449,22 @@ func _model_for(champion: String) -> MftrModel:
 	return champion_models[champion]
 
 
+## The model a portrait shows: a champion's, or another unit's for the inspect window
+## ("minion:<kind>:…", "monster:<key>:…", "prop:<id>:…").
+func _portrait_model(key: String) -> MftrModel:
+	var parts := key.split(":")
+	if parts.size() < 2:
+		return _model_for(key)
+	match parts[0]:
+		"minion":
+			return _minion_model(parts[1])
+		"monster":
+			return _monster_model(parts[1])
+		"prop":
+			return _prop_model(parts[1])
+	return null
+
+
 ## A lane minion's pack (`art/minions/<kind>/export/<kind>.glb`, A5), loaded once per kind;
 ## null without one (the capsule stays).
 func _minion_model(kind: String) -> MftrModel:
@@ -495,6 +514,7 @@ var _shot_tour_i := 0
 var _shot_tour_at := 0.0
 var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
 var _shot_settings := -1                  # `--shot-settings N`: open Settings on tab N
+var _shot_inspect := ""                   # `--shot-inspect self|ally|enemy|minion|monster|turret`: open the inspect window on one
 var _shot_tab_hover := ""                 # `--tab-hover augment|item`: show one's tooltip in it
 var _shot_tab := false                    # `--shot-tab`: hold the match breakdown open
 var _shot_numbers := false                # `--shot-numbers`: sample damage numbers, for review
@@ -552,6 +572,8 @@ func _update_shot(delta: float) -> void:
 	if _shot_path == "" or client.phase() != "playing":
 		return
 	_shot_timer += delta
+	if _shot_inspect != "" and _inspect_id < 0 and _shot_timer > _shot_at - 1.5:
+		_shot_open_inspect()
 	# Everything aims toward the arena's center, whichever side we spawned on.
 	var own := client.own_position()
 	var size: Vector2 = client.map_geometry().size
@@ -1335,6 +1357,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			settings_panel.close()
 		elif shop_panel != null and shop_panel.visible:
 			_toggle_shop()
+		elif inspect_panel != null:
+			_close_inspect()
 		elif menu_panel == null:
 			_toggle_pause_menu()
 		return
@@ -1393,6 +1417,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		if p != null:
 			client.attack_move(p)
 			_show_click_marker(_to_world(p), ENEMY_COLOR)
+		return
+	if event.is_action_pressed("select"):
+		# A unit under the cursor: inspect it (01 §13).
+		var p = _cursor_ground()
+		var id := _pick_unit(p) if p != null else -1
+		if id >= 0:
+			_open_inspect(id)
 		return
 	# Items 1–6: their actives (a potion).
 	for slot in 6:
@@ -1500,6 +1531,7 @@ func _process(delta: float) -> void:
 	_update_anvil(playing)
 	_update_scoreboard(delta, playing)
 	_update_recap(playing)
+	_update_inspect(delta, playing)
 	_update_cursor(playing)
 	_save_session(delta, playing)
 	var spectating: bool = playing and client.is_spectator()
@@ -1530,6 +1562,7 @@ func _process(delta: float) -> void:
 		if not _note_dash(caster, who, int(c.slot)):
 			caster.get_meta("rig").animator.pulse(int(c.slot))
 	_update_remotes(delta)
+	_update_life()
 	_update_hover()
 	_update_missiles()
 	_update_areas()
@@ -1548,6 +1581,25 @@ func _process(delta: float) -> void:
 	_update_ability_tip()
 	_hud_dt = delta
 	overlay.queue_redraw()
+
+
+## Small life reacts to the units we can see: butterflies scatter from them (15 §8).
+func _update_life() -> void:
+	if _life == null or not is_instance_valid(_life):
+		var view := get_node_or_null("MapView")
+		if view == null:
+			return
+		_life = view.get_node_or_null("Life")
+		if _life == null:
+			return
+	var points := PackedVector3Array()
+	if own_body != null and own_body.visible:
+		points.append(own_body.position)
+	for id in remote_bodies:
+		var b: Node3D = remote_bodies[id]
+		if b.visible and not b.has_meta("prop"):
+			points.append(b.position)
+	_life.disturb(points)
 
 
 ## The rig moves the look point (edge, keys, drag, lock, Space); the camera frames it (D13).
@@ -1925,6 +1977,7 @@ func _make_minion(color: Color, collision_radius_u: float, kind := "") -> MeshIn
 ## announced. The same polygons drive collision, pathing and vision in the simulation.
 var _map_built := false
 var _lane_axis := []                      # a lane map's [blue fountain, unit direction to red's]
+var _life: Node3D                         # the map's small life (MapView/Life), once it's built
 var _road_segments := PackedVector4Array()  # its roads (blue to red) as segments, in meters
 
 
@@ -3355,6 +3408,14 @@ func _update_ability_tip() -> void:
 				slot = i
 		if slot < 0 and _shot_hover >= 0 and _shot_hover < mini(6, _ability_boxes.size()):
 			slot = _shot_hover
+	if not _inspect_hover.is_empty() and inspect_panel != null and is_instance_valid(_inspect_hover[2]):
+		var data: Dictionary = _inspect_hover[1]
+		var rect: Rect2 = (_inspect_hover[2] as Control).get_global_rect()
+		if _inspect_hover[0] == "item":
+			ability_tip.show_custom("inspect:item:%d" % data.id, func(t: RichTextLabel): _item_tooltip(t, data, 0, ""), rect, overlay.size)
+		else:
+			ability_tip.show_custom("inspect:aug:%s" % data.name, func(t: RichTextLabel): _augment_tooltip(t, data), rect, overlay.size)
+		return
 	if not _tab_hover.is_empty() and score_panel != null and score_panel.visible:
 		var c: Control = _tab_hover[2]
 		if is_instance_valid(c):
@@ -3660,6 +3721,482 @@ static func _empty_slot() -> Texture2D:
 	return _empty
 
 
+## ---- The inspect window (01 §13) ---------------------------------------------------------------
+## Left-click any unit we can see (the cursor turns teal over an ally: the invitation) for the
+## reference game's selected-unit panel, and a little more: its portrait, level, health and
+## shield; its live stats, with what its armor, magic resist and haste are worth; its items,
+## augments and Stat Anvils; what's on it right now, with the time left; and for anything but a
+## champion, what it is and does. The server answers while our team sees the unit (inspect.rs);
+## out of sight, the window keeps the last answer, dimmed. Movable; Esc or × closes it.
+
+var inspect_panel: PanelContainer
+var _inspect_id := -1
+var _inspect_ask := 0.0
+var _inspect_sig := ""
+var _inspect_hover := []                  # [kind, data, Control] under the mouse in the window
+var _inspect_info := {}                   # the latest answer (kept while out of sight)
+var _inspect_unit_last := {}              # the unit as last seen
+var _inspect_score := {}                  # its scoreboard row (champions)
+var _inspect_timers := []                 # [Label, effect index]: their seconds, every frame
+const INSPECT_ASK_EVERY := 0.2
+const INSPECT_WIDTH := 380.0
+const MINION_NAMES := {"melee": "Melee minion", "caster": "Caster minion", "siege": "Siege minion", "super": "Super minion"}
+const MOOD_COLORS := {"good": Color(0.49, 0.88, 0.49), "bad": Color(1.0, 0.45, 0.4), "": Color(0.95, 0.82, 0.45)}
+
+
+## `--shot-inspect`: the nearest visible unit of that sort to the camera's look point.
+func _shot_open_inspect() -> void:
+	if _shot_inspect == "self":
+		_open_inspect(client.own_unit_id())
+		return
+	var best := -1
+	var best_d := INF
+	for id in remote_info:
+		var u: Dictionary = remote_info[id]
+		var b = remote_bodies.get(id)
+		if b == null or not b.visible:
+			continue
+		var ok: bool = {
+			"ally": u.kind == "champion" and u.ally, "enemy": u.kind == "champion" and not u.ally,
+			"minion": u.kind == "minion", "monster": u.kind == "monster", "turret": u.kind == "turret",
+		}.get(_shot_inspect, false)
+		var d: float = u.pos.distance_to(Vector2(_look_point.x, _look_point.z) / UNITS_TO_METERS)
+		if ok and d < best_d:
+			best = id
+			best_d = d
+	if best >= 0:
+		_open_inspect(best)
+
+
+## The unit under `p` (game units): the nearest whose hitbox, plus a little, holds it, our own
+## champion included; -1 for none.
+func _pick_unit(p: Vector2) -> int:
+	var best := -1
+	var best_d := 40.0
+	if own_body != null and own_body.visible:
+		var d := client.own_position().distance_to(p) - float(own_status.get("hitbox", CHAMPION_RADIUS_U))
+		if d < best_d:
+			best = client.own_unit_id()
+			best_d = d
+	for id in remote_info:
+		var b = remote_bodies.get(id)
+		if b == null or not is_instance_valid(b) or not b.visible:
+			continue
+		var u: Dictionary = remote_info[id]
+		var d: float = u.pos.distance_to(p) - maxf(float(u.get("gameplay_radius", 0.0)), float(u.get("radius", 0.0)))
+		if d < best_d:
+			best = id
+			best_d = d
+	return best
+
+
+## What we know of unit `id` this frame (empty when we can't see it). Our own champion is
+## described from our own status.
+func _inspect_unit(id: int) -> Dictionary:
+	if own_body != null and id == client.own_unit_id():
+		return {"kind": "champion", "champion": own_status.get("champion", ""), "level": own_status.get("level", 1),
+			"health": own_status.get("health", 0.0), "max_health": own_status.get("max_health", 1.0),
+			"shield": own_status.get("shield", 0.0), "ally": true, "you": true}
+	var b = remote_bodies.get(id)
+	if remote_info.has(id) and b != null and is_instance_valid(b) and b.visible:
+		return remote_info[id]
+	return {}
+
+
+func _open_inspect(id: int) -> void:
+	if id != _inspect_id:
+		_inspect_info = {}
+		_inspect_score = {}
+		_inspect_sig = ""
+	_inspect_id = id
+	_inspect_ask = 0.0
+	if inspect_panel == null:
+		var made := _panel(INSPECT_WIDTH)
+		inspect_panel = made[0]
+		inspect_panel.set_meta("box", made[1])
+		(made[1] as VBoxContainer).add_theme_constant_override("separation", 8)
+		Windows.make_movable(inspect_panel, "inspect", settings)
+	inspect_panel.move_to_front()
+
+
+func _close_inspect() -> void:
+	if inspect_panel != null:
+		inspect_panel.queue_free()
+		inspect_panel = null
+	_inspect_id = -1
+	_inspect_hover = []
+	_inspect_timers = []
+	_inspect_unit_last = {}
+
+
+func _update_inspect(delta: float, playing: bool) -> void:
+	if _inspect_id < 0:
+		return
+	if not playing:
+		_close_inspect()
+		return
+	var u := _inspect_unit(_inspect_id)
+	var seen := not u.is_empty()
+	if seen:
+		_inspect_unit_last = u
+	elif _inspect_unit_last.is_empty():
+		_close_inspect()
+		return
+	_inspect_ask -= delta
+	if seen and _inspect_ask <= 0.0:
+		_inspect_ask = INSPECT_ASK_EVERY
+		client.inspect(_inspect_id)
+		_inspect_score = {}
+		for r in client.scoreboard():
+			if int(r.unit) == _inspect_id:
+				_inspect_score = r
+	var info: Dictionary = client.inspect_info(_inspect_id)
+	if not info.is_empty():
+		_inspect_info = info
+	var unit := _inspect_unit_last
+	# Rebuilt when anything but the timers and the health changed (a tooltip stays put).
+	var effects: Array = _inspect_info.get("effects", []).map(func(e): return [e.key, e.value])
+	var stripped := _inspect_info.duplicate()
+	stripped.erase("effects")
+	var score := [_inspect_score.get("kills"), _inspect_score.get("deaths"), _inspect_score.get("assists"), _inspect_score.get("cs")]
+	var sig := str([unit.get("kind"), unit.get("champion"), unit.get("level"), unit.get("minion_kind"), unit.get("monster"), unit.get("ally"), seen]) + str(stripped) + str(effects) + str(score) + str(_portraits_seen)
+	var box: VBoxContainer = inspect_panel.get_meta("box")
+	if sig != _inspect_sig:
+		_inspect_sig = sig
+		_fill_inspect(box, unit, _inspect_info, seen)
+	# The timers count down between answers.
+	var now_effects: Array = _inspect_info.get("effects", [])
+	for t in _inspect_timers:
+		if t[1] < now_effects.size() and is_instance_valid(t[0]):
+			(t[0] as Label).text = _seconds_text(float(now_effects[t[1]].seconds))
+	var bar = box.get_node_or_null("Health")
+	if bar != null:
+		bar.queue_redraw()
+	Windows.place(inspect_panel, "inspect", settings, Vector2(20.0, overlay.size.y * 0.16), overlay.size)
+
+
+static func _seconds_text(s: float) -> String:
+	if s <= 0.0:
+		return ""
+	if s < 10.0:
+		return "%.1f s" % s
+	return "%d:%02d" % [int(s) / 60, int(s) % 60] if s >= 60.0 else "%d s" % ceili(s)
+
+
+## [name, what it is · whose, a line on what it does (not for champions)].
+func _inspect_title(u: Dictionary) -> Array:
+	var side := "You" if u.get("you", false) else ("Neutral" if u.get("neutral", false) else ("Ally" if u.get("ally", false) else "Enemy"))
+	match u.get("kind", ""):
+		"champion":
+			return [u.get("champion", ""), "Level %d champion  ·  %s" % [int(u.get("level", 1)), side], ""]
+		"minion":
+			var kind: String = u.get("minion_kind", "")
+			var what := "Horde minion" if not horde_status.is_empty() else "Lane minion"
+			var does: String = {
+				"melee": "Walks its lane and fights what it meets, up close.",
+				"caster": "Walks its lane and fights from range.",
+				"siege": "Its cannon outranges the others and hits structures hard.",
+				"super": "Marches while an enemy Gatehouse is down: tanky, and hits hard.",
+			}.get(kind, "")
+			return [MINION_NAMES.get(kind, "Minion"), "%s  ·  %s" % [what, side], does]
+		"monster":
+			var key: String = u.get("monster", "")
+			var what := "Horde boss" if u.get("boss", false) else ("Camp leader" if u.get("big", false) else "Jungle monster")
+			var does: String = "This wave's boss: defeat it to clear the wave." if u.get("boss", false) else {
+				"warden": "Take it for Insight: +20 ability haste for 2 minutes.",
+				"brute": "Take it for Cinder: basic attacks burn and slow, for 2 minutes.",
+			}.get(key, "Fights back when attacked, and gives up past its leash.")
+			return [u.get("monster_name", "Monster"), "%s  ·  %s" % [what, side], does]
+		"turret":
+			return ["Turret", "Lane structure  ·  %s" % side, "Shoots enemies in range: first a champion who attacks its allies, else the nearest minion."]
+		"gatehouse":
+			return ["Gatehouse", "Lane structure  ·  %s" % side, "When it falls, the enemy's waves in its lane bring a super minion until it rises again (5:00)."]
+		"base":
+			return ["Base", "Objective  ·  %s" % side, "Destroy the enemy's to win. It can be hit once a Gatehouse and both base turrets have fallen."]
+		"relic":
+			return ["Health relic", "Pickup", "Walk over it to restore health. It comes back a while after it's taken."]
+		"ward":
+			var control: bool = u.get("ward", "") == "control"
+			return ["Control ward" if control else "Stealth ward", "Ward  ·  %s" % side,
+				"Visible; grants vision and reveals stealth wards around it." if control else "Hidden from enemies; grants vision around it."]
+	return ["Unit", side, ""]
+
+
+## The portrait: a champion's, else the unit's own model in its team's (or camp's) colors.
+func _inspect_portrait(u: Dictionary) -> Texture2D:
+	var kind: String = u.get("kind", "")
+	if kind == "champion":
+		return portraits.portrait(u.get("champion", ""), "round")
+	var neutral: bool = u.get("neutral", false)
+	var ally: bool = u.get("ally", false)
+	var side := "n" if neutral else ("a" if ally else "e")
+	var team := NEUTRAL_COLOR if neutral else (ALLY_COLOR if ally else ENEMY_COLOR)
+	var key := ""
+	var accent := team
+	match kind:
+		"minion":
+			key = "minion:%s:%s" % [u.get("minion_kind", ""), side]
+			accent = MINION_BLUE if ally else MINION_RED
+		"monster":
+			key = "monster:%s:%s" % [u.get("monster", ""), side]
+			team = MONSTER_COLORS.get(u.get("monster", ""), team) if neutral else team
+			accent = team
+		"turret", "gatehouse", "base":
+			key = "prop:%s:%s" % [kind, side]
+		"relic":
+			key = "prop:relic_pad:n"
+	if key == "":
+		return null
+	portraits.tints[key] = team.darkened(0.15)
+	portraits.accents[key] = accent
+	return portraits.portrait(key, "round")
+
+
+## The stats worth showing: [icon, name, value, what it means].
+func _inspect_stats(u: Dictionary, info: Dictionary) -> Array:
+	var champ: bool = u.get("kind", "") == "champion"
+	var out := []
+	var cut := func(r: float) -> int: return roundi(100.0 - 100.0 * 100.0 / (100.0 + r)) if r >= 0.0 else -roundi(100.0 * 100.0 / (100.0 - r) - 100.0)
+	out.append(["ad", "Attack damage", str(info.attack_damage), "Each basic attack's damage, before armor."])
+	if champ or info.ability_power > 0:
+		out.append(["ap", "Ability power", str(info.ability_power), "Scales the damage, healing and shields of abilities."])
+	var worth := func(r: int) -> String: return "%d  (−%d%%)" % [r, cut.call(float(r))] if r > 0 else str(r)
+	out.append(["armor", "Armor", worth.call(info.armor), "Takes %d%% less physical damage." % cut.call(float(info.armor))])
+	out.append(["mr", "Magic resist", worth.call(info.magic_resist), "Takes %d%% less magic damage." % cut.call(float(info.magic_resist))])
+	if info.attack_speed > 0.0:
+		out.append(["as", "Attack speed", "%.2f" % info.attack_speed, "Basic attacks a second."])
+	if champ or info.ability_haste > 0:
+		var h: int = info.ability_haste
+		out.append(["haste", "Ability haste", "%d" % h + ("  (−%d%%)" % roundi(100.0 * h / (100.0 + h)) if h > 0 else ""), "Cooldowns are %d%% shorter." % roundi(100.0 * h / (100.0 + h))])
+	if info.move_speed > 0:
+		out.append(["ms", "Move speed", str(info.move_speed), "Units a second."])
+	if info.attack_range > 0:
+		out.append(["range", "Attack range", str(info.attack_range), "How far its basic attacks reach, from its center to the target's edge."])
+	if champ or info.life_steal > 0:
+		out.append(["ls", "Life steal", "%d%%" % info.life_steal, "Heals for this share of its basic attacks' damage."])
+	if info.health_regen > 0.0:
+		out.append(["regen", "Health regen", "%.1f /s" % info.health_regen, "Health restored every second."])
+	return out
+
+
+func _inspect_hoverable(c: Control, kind: String, data: Dictionary) -> void:
+	c.mouse_filter = Control.MOUSE_FILTER_PASS
+	c.mouse_entered.connect(func(): _inspect_hover = [kind, data, c])
+	c.mouse_exited.connect(func():
+		if not _inspect_hover.is_empty() and _inspect_hover[2] == c:
+			_inspect_hover = [])
+
+
+func _inspect_heading(box: VBoxContainer, text: String) -> void:
+	var l := Label.new()
+	l.text = text.to_upper()
+	l.add_theme_font_override("font", _bold_font())
+	l.add_theme_font_size_override("font_size", 13)
+	l.add_theme_color_override("font_color", Hud.GOLD)
+	box.add_child(l)
+
+
+func _fill_inspect(box: VBoxContainer, u: Dictionary, info: Dictionary, seen: bool) -> void:
+	for c in box.get_children():
+		c.queue_free()
+	_inspect_hover = []
+	_inspect_timers = []
+	var title := _inspect_title(u)
+	var dim := Color(0.62, 0.66, 0.72)
+	# The header: portrait, name, what it is, the score; the close button.
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
+	var face := TextureRect.new()
+	face.custom_minimum_size = Vector2(80, 80)
+	face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	face.texture = _inspect_portrait(u)
+	head.add_child(face)
+	var names := VBoxContainer.new()
+	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	names.alignment = BoxContainer.ALIGNMENT_CENTER
+	names.add_theme_constant_override("separation", 2)
+	var name := Label.new()
+	name.text = title[0]
+	name.theme_type_variation = "TitleLabel"
+	name.add_theme_font_size_override("font_size", 22)
+	names.add_child(name)
+	var sub := Label.new()
+	sub.text = title[1]
+	sub.add_theme_color_override("font_color", dim)
+	names.add_child(sub)
+	if not _inspect_score.is_empty():
+		var score := Label.new()
+		score.text = "%d / %d / %d    ·    %d CS" % [_inspect_score.kills, _inspect_score.deaths, _inspect_score.assists, _inspect_score.cs]
+		score.add_theme_font_override("font", _bold_font())
+		names.add_child(score)
+	head.add_child(names)
+	var close := Button.new()
+	close.text = "✕"
+	close.flat = true
+	close.tooltip_text = "Close (Esc)"
+	close.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	close.pressed.connect(_close_inspect)
+	head.add_child(close)
+	box.add_child(head)
+	if title[2] != "":
+		var does := Label.new()
+		does.text = title[2]
+		does.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		does.custom_minimum_size = Vector2(INSPECT_WIDTH - 40.0, 0)
+		does.add_theme_color_override("font_color", dim)
+		does.add_theme_font_size_override("font_size", 14)
+		box.add_child(does)
+	# Health and shield, live.
+	var bar := Control.new()
+	bar.name = "Health"
+	bar.custom_minimum_size = Vector2(0, 22)
+	bar.draw.connect(func(): _draw_inspect_health(bar))
+	box.add_child(bar)
+	if not seen:
+		var gone := Label.new()
+		gone.text = "Out of sight: as last seen."
+		gone.add_theme_color_override("font_color", Color(1.0, 0.82, 0.45))
+		box.add_child(gone)
+	if info.is_empty():
+		var wait := Label.new()
+		wait.text = "Asking the server…"
+		wait.add_theme_color_override("font_color", dim)
+		box.add_child(wait)
+		return
+	# Stats, two columns; each says what it's worth on hover.
+	_inspect_heading(box, "Stats")
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 16)
+	grid.add_theme_constant_override("v_separation", 4)
+	for s in _inspect_stats(u, info):
+		var cell := HBoxContainer.new()
+		cell.add_theme_constant_override("separation", 6)
+		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cell.tooltip_text = "%s: %s" % [s[1], s[3]]
+		cell.mouse_filter = Control.MOUSE_FILTER_PASS
+		var icon := TextureRect.new()
+		icon.custom_minimum_size = Vector2(18, 18)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.texture = Hud.stat_icon(s[0])
+		icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		icon.mouse_filter = Control.MOUSE_FILTER_PASS
+		cell.add_child(icon)
+		var v := Label.new()
+		v.text = s[2]
+		v.add_theme_font_override("font", _bold_font())
+		cell.add_child(v)
+		grid.add_child(cell)
+	box.add_child(grid)
+	# Items (champions).
+	var items: PackedInt32Array = info.get("items", PackedInt32Array())
+	if u.get("kind", "") == "champion":
+		_inspect_heading(box, "Items")
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 4)
+		for id in items:
+			var cell := TextureRect.new()
+			cell.custom_minimum_size = Vector2(44, 44)
+			cell.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			if id != 0 and _catalog.has(id):
+				cell.texture = ItemIcons.icon(_catalog[id])
+				_inspect_hoverable(cell, "item", _catalog[id])
+			else:
+				cell.texture = _empty_slot()
+			row.add_child(cell)
+		box.add_child(row)
+	# Augments and Stat Anvils (Mayhem).
+	var augs: Array = info.get("augments", [])
+	if not augs.is_empty():
+		_inspect_heading(box, "Augments")
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		for a in augs:
+			var cell := HBoxContainer.new()
+			cell.add_theme_constant_override("separation", 4)
+			var icon := TextureRect.new()
+			icon.custom_minimum_size = Vector2(32, 32)
+			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			icon.texture = AugmentIcons.icon(a)
+			cell.add_child(icon)
+			_inspect_hoverable(icon, "augment", a)
+			row.add_child(cell)
+		box.add_child(row)
+	var anvils: Array = info.get("anvils", [])
+	if not anvils.is_empty():
+		var l := Label.new()
+		l.text = "Stat Anvils:  " + ",  ".join(anvils)
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size = Vector2(INSPECT_WIDTH - 40.0, 0)
+		l.add_theme_font_size_override("font_size", 14)
+		box.add_child(l)
+	# What's on it right now: buffs, crowd control, shields, the structure's state.
+	_inspect_heading(box, "Effects")
+	var effects: Array = info.get("effects", [])
+	if effects.is_empty():
+		var none := Label.new()
+		none.text = "Nothing on it right now."
+		none.add_theme_color_override("font_color", dim)
+		box.add_child(none)
+	for i in effects.size():
+		var e: Dictionary = effects[i]
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 8)
+		line.tooltip_text = e.text
+		line.mouse_filter = Control.MOUSE_FILTER_PASS
+		var chip := ColorRect.new()
+		chip.custom_minimum_size = Vector2(4, 0)
+		chip.color = MOOD_COLORS.get(e.mood, MOOD_COLORS[""])
+		line.add_child(chip)
+		var text := VBoxContainer.new()
+		text.add_theme_constant_override("separation", 0)
+		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var n := Label.new()
+		n.text = e.name
+		n.add_theme_font_override("font", _bold_font())
+		n.add_theme_color_override("font_color", MOOD_COLORS.get(e.mood, MOOD_COLORS[""]))
+		text.add_child(n)
+		var d := Label.new()
+		d.text = e.text
+		d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		d.custom_minimum_size = Vector2(INSPECT_WIDTH - 110.0, 0)
+		d.add_theme_font_size_override("font_size", 13)
+		d.add_theme_color_override("font_color", dim)
+		text.add_child(d)
+		line.add_child(text)
+		var t := Label.new()
+		t.text = _seconds_text(float(e.seconds))
+		t.custom_minimum_size = Vector2(48, 0)
+		t.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		t.add_theme_font_override("font", _bold_font())
+		line.add_child(t)
+		_inspect_timers.append([t, i])
+		box.add_child(line)
+	var hint := Label.new()
+	hint.text = "Left-click another unit to inspect it  ·  drag to move"
+	hint.add_theme_font_size_override("font_size", 12)
+	hint.add_theme_color_override("font_color", Color(0.5, 0.54, 0.6))
+	box.add_child(hint)
+
+
+func _draw_inspect_health(c: Control) -> void:
+	var live := _inspect_unit(_inspect_id)
+	var u := live if not live.is_empty() else _inspect_unit_last
+	var hp: float = u.get("health", 0.0)
+	var mx: float = maxf(float(u.get("max_health", 1.0)), 1.0)
+	var shield: float = u.get("shield", 0.0)
+	var color := Color(0.34, 0.78, 0.36) if u.get("ally", false) else (Color(0.95, 0.75, 0.25) if u.get("neutral", false) else Color(0.86, 0.27, 0.22))
+	var rect := Rect2(Vector2.ZERO, c.size)
+	Hud.bar(c, rect, hp, mx, color, shield)
+	var font := _bold_font()
+	var s := "%d / %d" % [roundi(hp), roundi(mx)] + ("  (+%d)" % roundi(shield) if shield > 0.0 else "")
+	Hud.text(c, font, Vector2(0, c.size.y * 0.5 + 6.0), s, 15, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, c.size.x)
+	var regen: float = _inspect_info.get("health_regen", 0.0)
+	if regen > 0.0 and hp < mx:
+		Hud.text(c, font, Vector2(0, c.size.y * 0.5 + 6.0), "+%.1f/s " % regen, 13, Color(0.75, 1.0, 0.75), HORIZONTAL_ALIGNMENT_RIGHT, c.size.x - 4.0)
+
+
 ## ---- The death recap ---------------------------------------------------------------------------
 ## While dead: exactly what killed us. Every hit of the fight, from the server's own damage
 ## events (recap.rs): the total and how long it took, by damage type, by source, and by attack,
@@ -3788,13 +4325,12 @@ func _update_cursor(playing: bool) -> void:
 		elif hovered_body != null:
 			state = "enemy"
 		else:
+			# Teal over anything of ours: click to inspect it (01 §13).
 			var p = _cursor_ground()
 			if p != null:
-				for id in remote_info:
-					var u: Dictionary = remote_info[id]
-					if u.ally and u.champion != "" and u.pos.distance_to(p) < 90.0:
-						state = "ally"
-						break
+				var id := _pick_unit(p)
+				if id >= 0 and _inspect_unit(id).get("ally", false):
+					state = "ally"
 	GameCursor.set_state(state)
 
 
@@ -5636,6 +6172,7 @@ func _reset_match_view() -> void:
 		shop_panel.visible = false
 	match_banner = ""
 	match_banner_subtitle = "A new match starts shortly"
+	_close_inspect()
 	horde_status = {}
 	floaters.clear()
 	notices.clear()

@@ -242,6 +242,16 @@ edges, at a speed the player sets; Esc closes settings, then the shop, then open
 | Scroll the camera | Bump the screen edges, arrow keys, or drag with the middle mouse button |
 | Ping wheel | (to be bound; G is the shop) |
 
+**Inspecting a unit** (*as built*, as in the reference game, with more): left-click any unit
+in sight (the cursor turns teal over an ally to invite it) and a movable window opens with its
+portrait (rendered from its own model: champions, minions, monsters and structures alike), its
+level and score, live health and shield, its stats with what its armor, magic resist and haste
+are worth, its items, augments and Stat Anvils with their tooltips, everything on it right now
+(crowd control, shields, potions, recalls, jungle buffs, a structure's protection, plates and
+backdoor protection) with the time left, and for anything but a champion, what it is and does.
+It follows the unit's health live; out of sight it keeps the last answer, dimmed. Esc or ✕
+closes it.
+
 **Ability tooltips:** hovering an ability on the bar shows what it does, its numbers at the current rank with their AD/AP scaling (colored by damage type; status effects with icons), every rank's values and what the next rank changes. They're generated from the sim's ability data, so they can't drift from the game.
 
 **Cast modes** per key: Normal (press → show indicator → click), Quick cast (cast on press at the cursor), and Quick cast with indicator (cast on release). Ability **range indicators** use the true range and the true hitbox width.

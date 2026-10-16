@@ -59,13 +59,17 @@ func build(geo: Dictionary, materials_for: Callable) -> void:
 		var y := clampi(int(p.y / 25.0), 0, ctl.get_height() - 1)
 		return ctl.get_pixel(x, y).b > 0.1
 	var fountains: Array = geo.get("fountains", [])
-	var lane_map := fountains.size() == 2
-	# Several lanes (Crossroads): whether a spot is on the camera's side of the ground it
-	# borders is probed per spot, not taken from one lane's axis.
-	_probe_camera_side = lane_map and geo.get("roads", []).size() > 1
-	if lane_map:
-		var a: Vector2 = fountains[0].center
-		var b: Vector2 = fountains[1].center
+	var lane_map := not fountains.is_empty()
+	# Several lanes (Crossroads), or one fountain to take an axis from (Horde): whether a spot is
+	# on the camera's side of the ground it borders is probed per spot, not taken from one lane's
+	# axis.
+	_probe_camera_side = lane_map and (geo.get("roads", []).size() > 1 or fountains.size() < 2)
+	var roads: Array = geo.get("roads", [])
+	if lane_map and (fountains.size() == 2 or not roads.is_empty()):
+		# The axis from blue's fountain to red's, or along the first road (Horde).
+		var road: PackedVector2Array = roads[0] if fountains.size() < 2 else PackedVector2Array()
+		var a: Vector2 = fountains[0].center if road.is_empty() else road[0]
+		var b: Vector2 = fountains[1].center if road.is_empty() else road[road.size() - 1]
 		_lane_mid = (a + b) / 2.0
 		var dir := (b - a).normalized()
 		_across = Vector2(-dir.y, dir.x)

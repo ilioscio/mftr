@@ -1,4 +1,5 @@
-// Cliffs (15 §4): the walls' stepped faces in the season's stone, with strata, dark crevices and
+// Cliffs (15 §4): the walls' stepped faces in the season's dark stone (so the walls read as tall
+// against the lit floor and tops, LoL's way), with strata, dark crevices and
 // moss creeping down from the top and over the ledge, and a top of the ground's own grass: a
 // lighter lip where it rolls over the drop, the forest's gloom deeper in (from the ground control
 // map's signed wall distance, 15 §3). Each face is shaded flat (screen-space derivatives), so the
@@ -43,7 +44,7 @@ void fragment() {
 	vec2 cr = w_cells(p * 1.6 + 3.0);
 	c *= 1.0 - (1.0 - smoothstep(0.02, 0.07, cr.x)) * 0.45;
 	// Darker toward the foot (occlusion where it meets the ground).
-	c *= 0.72 + 0.28 * smoothstep(0.0, 0.6, world_pos.y);
+	c *= 0.6 + 0.4 * smoothstep(0.0, 0.8, world_pos.y);
 	// Moss: down from the top edge, and over any ledge (faces looking up).
 	float top_moss = smoothstep(height - 0.35, height - 0.05, world_pos.y + (w_fbm(q * 2.3) - 0.5) * 0.4);
 	float ledge = smoothstep(0.45, 0.8, wn.y) * step(world_pos.y, height - 0.05);

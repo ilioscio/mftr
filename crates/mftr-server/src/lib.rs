@@ -21,6 +21,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 pub mod bots;
 pub mod game;
 pub mod hub;
+pub mod inspect;
 pub mod lobby;
 pub use bots::Bot;
 pub use game::{Fog, Match, Replay, ReplayCheck, ReplayEntry};
@@ -228,7 +229,12 @@ struct Conn {
     token: u64,
     /// Watching: no unit, sees everything.
     spectator: bool,
+    /// When this client last got an inspect answer (they're rate limited).
+    inspected_at: f64,
 }
+
+/// Fastest a client gets inspect answers (seconds apart): the window asks a few times a second.
+const INSPECT_EVERY: f64 = 0.1;
 
 impl Conn {
     fn new(player: PlayerId, unit: UnitId, team: Team, token: u64, spectator: bool, now: f64) -> Self {
@@ -249,6 +255,7 @@ impl Conn {
             last_heard: now,
             token,
             spectator,
+            inspected_at: f64::NEG_INFINITY,
         }
     }
 }
@@ -631,6 +638,22 @@ impl ServerCore {
                 let bytes = msg::encode_server(&header, &chunk);
                 self.stats.bytes_out += bytes.len() as u64;
                 out.push((from, bytes));
+            }
+            ClientMessage::Inspect { unit } => {
+                // The inspect window (01 §13): a unit's details, if the asker's team sees it.
+                let Some(conn) = self.conns.get_mut(&from) else { return out };
+                conn.last_heard = now;
+                if now - conn.inspected_at < INSPECT_EVERY {
+                    return out;
+                }
+                conn.inspected_at = now;
+                let header = Self::header(conn);
+                let team = (!conn.spectator).then_some(conn.team);
+                if let Some(info) = inspect::unit_info(&self.game.world, unit, team) {
+                    let bytes = msg::encode_server(&header, &ServerMessage::Inspect(Box::new(info)));
+                    self.stats.bytes_out += bytes.len() as u64;
+                    out.push((from, bytes));
+                }
             }
             ClientMessage::Bye => {
                 if let Some(p) = self.pending.remove(&from)
