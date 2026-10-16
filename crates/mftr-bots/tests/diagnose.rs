@@ -208,3 +208,18 @@ fn teamfight_calibration() {
         }
     }
 }
+
+/// What building a map's knowledge costs, and each travel field.
+#[test]
+#[ignore]
+fn knowledge_cost() {
+    for id in [MapId::Crossroads, MapId::Bridge, MapId::HordeBridge] {
+        let map = id.shared();
+        let t = std::time::Instant::now();
+        let k = mftr_bots::knowledge::Knowledge::of(&map);
+        let built = t.elapsed();
+        let t = std::time::Instant::now();
+        k.prepare();
+        println!("{id:?}: built in {built:?}, all fields in {:?} ({} keys)", t.elapsed(), k.key_count());
+    }
+}

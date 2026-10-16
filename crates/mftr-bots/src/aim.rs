@@ -110,8 +110,10 @@ mod tests {
         ];
         let (c, v) = best_area(Vec2::ZERO, 900.0, 200.0, &targets).unwrap();
         assert!(v >= 2.0 && c.distance(Vec2::new(50.0, 510.0)) < 80.0, "{c:?} {v}");
-        // Out of range: clamped toward it.
-        let (c, _) = best_area(Vec2::ZERO, 300.0, 100.0, &targets[2..]).unwrap();
+        // A little out of range: clamped toward it, still catching its edge; far out: nothing.
+        let near = [(Vec2::new(-380.0, 0.0), 65.0, 1.0)];
+        let (c, _) = best_area(Vec2::ZERO, 300.0, 100.0, &near).unwrap();
         assert!((c.length() - 300.0).abs() < 1.0);
+        assert!(best_area(Vec2::ZERO, 300.0, 100.0, &targets[2..]).is_none());
     }
 }

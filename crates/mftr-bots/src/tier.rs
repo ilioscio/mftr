@@ -2,11 +2,12 @@
 //! aims, how often it thinks and acts, how much of the game it reads), never what it gets.
 
 /// How strong a bot plays.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Tier {
     /// The M2 bot, kept as a baseline for measurements (17 §11). Not offered to players.
     Legacy,
     Recruit,
+    #[default]
     Veteran,
     Elite,
     Nightmare,
@@ -180,10 +181,15 @@ impl Tier {
     }
 }
 
-impl Default for Tier {
-    fn default() -> Self {
-        Tier::Veteran
-    }
+/// Development switches for experiments (`MFTR_BOTS_OFF=name,name`): turn a feature off to
+/// measure it. Read once.
+pub fn off(feature: &str) -> bool {
+    static OFF: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    OFF.get_or_init(|| {
+        std::env::var("MFTR_BOTS_OFF").map(|v| v.split(',').map(|s| s.trim().to_string()).collect()).unwrap_or_default()
+    })
+    .iter()
+    .any(|f| f == feature)
 }
 
 #[cfg(test)]
@@ -209,15 +215,4 @@ mod tests {
             assert_eq!(Tier::by_name(t.name()), Some(t));
         }
     }
-}
-
-/// Development switches for experiments (`MFTR_BOTS_OFF=name,name`): turn a feature off to
-/// measure it. Read once.
-pub fn off(feature: &str) -> bool {
-    static OFF: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    OFF.get_or_init(|| {
-        std::env::var("MFTR_BOTS_OFF").map(|v| v.split(',').map(|s| s.trim().to_string()).collect()).unwrap_or_default()
-    })
-    .iter()
-    .any(|f| f == feature)
 }

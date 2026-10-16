@@ -366,18 +366,20 @@ pub fn attack(a: &mut Agent, c: &Ctx, t: &Unit, chase: bool) -> Option<CommandKi
     }
     // Spacing: a ranged champion steps back from a shorter-reach enemy closing in while its own
     // attack recharges (every tier but the lowest; the top tiers kite every attack).
-    if a.p.strategy >= 1 && my_range > 300.0 && st.attack.is_none() && ready_in > 0.2 {
-        if let Some(threat) =
+    if a.p.strategy >= 1
+        && my_range > 300.0
+        && st.attack.is_none()
+        && ready_in > 0.2
+        && let Some(threat) =
             c.b.enemies.iter().filter(|e| e.attack.map_or(150.0, |s| s.range) < my_range - 100.0).find(|e| {
                 e.state.pos.distance(st.pos) < e.attack.map_or(150.0, |s| s.range) + me.gameplay_radius + 90.0
             })
-        {
-            let away = (st.pos - threat.state.pos).normalize_or_zero();
-            let to = st.pos + away * 220.0;
-            if c.b.world.map().walkable(to, 40.0) && !turret_unsafe(c, to) {
-                a.wake_at(c.now.plus(mftr_sim::SimDuration::from_millis((ready_in * 1000.0) as u64)));
-                return Some(CommandKind::MoveTo(QPoint::from_vec2(to)));
-            }
+    {
+        let away = (st.pos - threat.state.pos).normalize_or_zero();
+        let to = st.pos + away * 220.0;
+        if c.b.world.map().walkable(to, 40.0) && !turret_unsafe(c, to) {
+            a.wake_at(c.now.plus(mftr_sim::SimDuration::from_millis((ready_in * 1000.0) as u64)));
+            return Some(CommandKind::MoveTo(QPoint::from_vec2(to)));
         }
     }
     if a.p.kites

@@ -674,7 +674,15 @@ mod tests {
     fn champion_select_after_a_match(linger: f64) {
         use mftr_net::msg::LobbyAction;
         use mftr_sim::{UnitId, UnitKind, Vec2};
-        let cfg = ServerConfig { seed: 5, bots: 10, lobby: true, scenario: Scenario::Aram, ..Default::default() };
+        // The baseline bots: today's would come home and defend the Base this test hands us.
+        let cfg = ServerConfig {
+            seed: 5,
+            bots: 10,
+            lobby: true,
+            scenario: Scenario::Aram,
+            bot_tier: mftr_server::Tier::Legacy,
+            ..Default::default()
+        };
         let mut server = ServerCore::new(cfg, 0.0);
         let mut session = ClientSession::new();
         let mut watcher = ClientSession::new();

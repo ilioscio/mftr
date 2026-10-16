@@ -97,7 +97,7 @@ impl Agent {
             player,
             tier,
             p,
-            rng: Pcg32::new(seed ^ 0x6167_656e_74, player.0 as u64 + 101),
+            rng: Pcg32::new(seed ^ 0x0061_6765_6e74, player.0 as u64 + 101),
             next_think: player.0 as u32 % p.think_calm.max(1),
             last_order: None,
             tokens: 2.0,
@@ -225,7 +225,7 @@ impl Agent {
             return Some(CommandKind::ChooseSpell(mftr_sim::ability::SPELL_CLAIM));
         }
         let physical = shop::physical_share(c.memory.enemies.iter().map(|s| s.champion));
-        let classic = c.k.camps.len() > 0 && rules.passive_gold < 3.0;
+        let classic = !c.k.camps.is_empty() && rules.passive_gold < 3.0;
         let potions = if classic && c.b.secs < 18.0 * 60.0 { 2 } else { 0 };
         let wards = if classic && c.b.world.map().layout.wards && self.p.strategy >= 2 && c.b.secs > 240.0 {
             matches!(c.role, Some(Role::Support | Role::Jungle)) as u8
@@ -403,7 +403,7 @@ impl Agent {
         // Without a fountain to heal at (ARAM), a champion kept alive at low health is a
         // champion short in every fight: it stays in, behind its team, and flees only when
         // nearly dead (dying sends it home whole, and to the shop).
-        let low = share < self.p.retreat_health * if heals_home { 1.0 } else { 0.45 } || share < 0.1;
+        let low = heals_home && (share < self.p.retreat_health || share < 0.1);
         let hit = c.memory.damage_on(me.id, 1.5, now) > me.stats.max_health * 0.04;
         let in_reach = near.iter().any(|e| {
             let reach = c.b.enemy_power(e.id).map_or(500.0, |p| p.range) + 150.0;

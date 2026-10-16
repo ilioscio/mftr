@@ -110,37 +110,38 @@ impl Role {
 /// highest total fit. `fixed` entries (Some) keep their role (humans' choices).
 pub fn assign_roles(champions: &[ChampionId], fixed: &[Option<Role>]) -> Vec<Role> {
     let n = champions.len().min(5);
+    // Every ordering of the five roles (120), the first `n` of each given out in order.
     let mut best: (f32, Vec<Role>) = (f32::NEG_INFINITY, Vec::new());
-    let mut used = [false; 5];
-    let mut pick = Vec::with_capacity(n);
-    fn search(
-        i: usize,
-        n: usize,
-        champions: &[ChampionId],
-        fixed: &[Option<Role>],
-        used: &mut [bool; 5],
-        pick: &mut Vec<Role>,
-        score: f32,
-        best: &mut (f32, Vec<Role>),
-    ) {
-        if i == n {
-            if score > best.0 {
-                *best = (score, pick.clone());
-            }
+    let mut order: Vec<usize> = (0..5).collect();
+    let mut c = [0usize; 5];
+    let mut consider = |order: &[usize]| {
+        let roles: Vec<Role> = order[..n].iter().map(|&i| Role::ALL[i]).collect();
+        if roles.iter().zip(fixed).any(|(r, f)| f.is_some_and(|f| f != *r)) {
             return;
         }
-        for (ri, role) in Role::ALL.iter().enumerate() {
-            if used[ri] || fixed.get(i).copied().flatten().is_some_and(|f| f != *role) {
-                continue;
+        let score: f32 = roles.iter().zip(champions).map(|(r, ch)| r.fit(*ch)).sum();
+        if score > best.0 {
+            best = (score, roles);
+        }
+    };
+    // Heap's algorithm.
+    consider(&order);
+    let mut i = 0;
+    while i < 5 {
+        if c[i] < i {
+            if i % 2 == 0 {
+                order.swap(0, i)
+            } else {
+                order.swap(c[i], i)
             }
-            used[ri] = true;
-            pick.push(*role);
-            search(i + 1, n, champions, fixed, used, pick, score + role.fit(champions[i]), best);
-            pick.pop();
-            used[ri] = false;
+            consider(&order);
+            c[i] += 1;
+            i = 0;
+        } else {
+            c[i] = 0;
+            i += 1;
         }
     }
-    search(0, n, champions, fixed, &mut used, &mut pick, 0.0, &mut best);
     // More than five (custom games): the rest double up on lanes.
     let mut roles = best.1;
     while roles.len() < champions.len() {

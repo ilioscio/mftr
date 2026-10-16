@@ -35,6 +35,12 @@ use mftr_sim::{Command, PlayerId, SimEvent, SimTime, SubTick, Team, Tick, UnitKi
 use std::sync::Arc;
 pub use tier::Tier;
 
+/// Build what bots know of `map` ahead of time, travel fields and all (a server does this for
+/// the maps it hosts when it starts, on a thread of its own, so no match tick pays for it).
+pub fn warm_up(map: &Arc<mftr_sim::map::Map>) {
+    Knowledge::of(map).prepare();
+}
+
 /// The other team.
 pub fn other(team: Team) -> Team {
     match team {

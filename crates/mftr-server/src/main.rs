@@ -210,6 +210,25 @@ fn main() -> std::io::Result<()> {
         println!("  {}", q.slug());
     }
 
+    // What bots know of each hosted map, built on a thread of its own before players come.
+    let maps: Vec<std::sync::Arc<mftr_sim::map::Map>> = queues
+        .iter()
+        .map(|q| match &q.map {
+            Some(text) => {
+                let spec = mftr_sim::mapspec::MapSpec::parse(text).expect("the map file reads");
+                let map = mftr_sim::mapspec::build(&spec, mftr_sim::map::MapId::Custom);
+                let map = if q.scenario == Scenario::Horde { mftr_sim::map::for_horde(map) } else { map };
+                std::sync::Arc::new(map)
+            }
+            None => q.scenario.map().shared(),
+        })
+        .collect();
+    std::thread::spawn(move || {
+        for map in &maps {
+            mftr_bots::warm_up(map);
+        }
+    });
+
     let clock = Instant::now();
     let now = || clock.elapsed().as_secs_f64();
     let workers = workers.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));

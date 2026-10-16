@@ -117,7 +117,7 @@ impl Coach {
             last_ping: SimTime(0),
             bot_pinged: Vec::new(),
             announced: Vec::new(),
-            rng: Pcg32::new(seed ^ 0x636f_6163_68, team as u64),
+            rng: Pcg32::new(seed ^ 0x0063_6f61_6368, team as u64),
             focus: None,
             engaged: None,
         }
@@ -348,10 +348,19 @@ impl Coach {
                 let at = structure.state.pos;
                 let threat = b.enemies.iter().filter(|e| e.state.pos.distance(at) < 1600.0).count();
                 let hurt = structure.state.health < structure.stats.max_health * 0.85;
-                if threat == 0 || (threat < 2 && !hurt) {
+                // A wave crashing into it with nobody there: someone catches it.
+                let wave = b.enemy_minions.iter().filter(|m| m.state.pos.distance(at) < 1500.0).count();
+                let needed = if threat >= 2 || (threat >= 1 && hurt) {
+                    threat + 1 + (strategy >= 2) as usize
+                } else if wave >= 3 && (hurt || wave >= 5 || mid_game) {
+                    1
+                } else {
+                    0
+                };
+                if needed == 0 {
                     continue;
                 }
-                let mut sent = members
+                let sent = members
                     .iter()
                     .filter(|m| Self::unit(b, m).is_some_and(|u| u.state.alive() && u.state.pos.distance(at) < 1800.0))
                     .count();
@@ -360,13 +369,13 @@ impl Coach {
                     .filter(|m| m.bot && alive(m) && pos(m).distance(at) >= 1800.0)
                     .filter(|m| knowledge.travel(pos(m), at) < 340.0 * 22.0)
                     .collect();
-                helpers.sort_by(|a, c| knowledge.travel(pos(a), at).total_cmp(&knowledge.travel(pos(c), at)));
-                for m in helpers {
-                    if sent > threat + (strategy >= 2) as usize {
-                        break;
-                    }
+                // The lane's own laner first, then by distance.
+                let own = |m: &Member| role_of(m.player).and_then(|r| r.lane()).map(|l| l.min(lanes - 1)) == Some(lane);
+                helpers.sort_by(|a, c| {
+                    (!own(a), knowledge.travel(pos(a), at) as u32).cmp(&(!own(c), knowledge.travel(pos(c), at) as u32))
+                });
+                for m in helpers.into_iter().take(needed.saturating_sub(sent)) {
                     set(&mut tasks, m.player, Task::Defend { lane, at });
-                    sent += 1;
                 }
             }
         }
@@ -562,25 +571,6 @@ impl Coach {
             self.engaged = None;
             None
         }
-    }
-
-    /// A spot near `front` (toward home) out of the reach of the enemies seen around it: where to
-    /// wait when the team isn't going in, so poke doesn't wear it down.
-    fn out_of_poke(&self, b: &Board, knowledge: &Knowledge, front: Vec2) -> Vec2 {
-        let home = knowledge.homes[self.team as usize];
-        let back = (home - front).normalize_or_zero();
-        let mut at = front;
-        for _ in 0..12 {
-            let threat = b.enemies.iter().any(|e| {
-                let reach = b.enemy_power(e.id).map_or(600.0, |p| p.range) + 150.0;
-                e.state.pos.distance(at) < reach
-            });
-            if !threat {
-                break;
-            }
-            at += back * 150.0;
-        }
-        at
     }
 
     fn aram(

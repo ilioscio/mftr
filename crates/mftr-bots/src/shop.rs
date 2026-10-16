@@ -161,7 +161,7 @@ pub fn augment_worth(c: ChampionId, id: u8) -> f32 {
 pub fn draft(c: ChampionId, p: &Progress) -> Result<u8, u8> {
     let scored: Vec<(usize, f32)> =
         p.offer.iter().enumerate().filter(|(_, id)| **id != 0).map(|(i, id)| (i, augment_worth(c, *id))).collect();
-    let best = scored.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1)).map_or((0, 0.0), |b| b);
+    let best = scored.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or((0, 0.0));
     let worst = scored.iter().copied().min_by(|a, b| a.1.total_cmp(&b.1));
     if let Some((w, value)) = worst
         && best.1 < 1200.0
@@ -301,15 +301,14 @@ pub fn buy(u: &Unit, physical: f32, potions: u8, wards: u8) -> Option<CommandKin
     let path = path(c, physical);
     if let Some(next) = next_item(&path, &p.items)
         && let Some((cost, used)) = items::price(next, &p.items)
+        && cost <= gold
     {
-        if cost <= gold {
-            if free > 0 || !used.is_empty() {
-                return Some(CommandKind::Buy(next));
-            }
-            // Full: make room by selling a consumable.
-            if let Some(slot) = p.items.iter().position(|i| items::stackable(*i).is_some()) {
-                return Some(CommandKind::Sell(slot as u8));
-            }
+        if free > 0 || !used.is_empty() {
+            return Some(CommandKind::Buy(next));
+        }
+        // Full: make room by selling a consumable.
+        if let Some(slot) = p.items.iter().position(|i| items::stackable(*i).is_some()) {
+            return Some(CommandKind::Sell(slot as u8));
         }
     }
     if count(HEALTH_POTION) < potions && gold >= 50.0 && (free > 1 || count(HEALTH_POTION) > 0) {

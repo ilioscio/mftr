@@ -11,7 +11,7 @@ use mftr_sim::jungle::Camp;
 use mftr_sim::map::Map;
 use mftr_sim::world::Team;
 use std::collections::BinaryHeap;
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// The coarse grid's cell (u).
 const CELL: f32 = 80.0;
@@ -53,18 +53,61 @@ pub struct Knowledge {
     fields: Vec<OnceLock<Box<[u16]>>>,
 }
 
-static CACHE: Mutex<Vec<(Weak<Map>, Arc<Knowledge>)>> = Mutex::new(Vec::new());
+/// Knowledge by map content (a custom map is rebuilt for every match, but its knowledge
+/// needn't be): the most recently used few.
+static CACHE: Mutex<Vec<(u64, Arc<Knowledge>)>> = Mutex::new(Vec::new());
+const CACHED_MAPS: usize = 12;
+
+/// A fingerprint of what knowledge is built from: the walls, brush and layout.
+fn fingerprint(map: &Map) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |v: f32| {
+        h ^= v.to_bits() as u64;
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    };
+    eat(map.size.x);
+    eat(map.size.y);
+    for poly in map.walls.iter().chain(map.brush.iter()) {
+        eat(poly.len() as f32);
+        for p in poly {
+            eat(p.x);
+            eat(p.y);
+        }
+    }
+    for lane in &map.layout.lanes {
+        for p in lane.iter().flatten() {
+            eat(p.x);
+            eat(p.y);
+        }
+    }
+    for c in &map.layout.camps {
+        eat(c.pos.x);
+        eat(c.pos.y);
+    }
+    for p in &map.layout.placements {
+        eat(p.pos.x);
+        eat(p.pos.y);
+    }
+    eat(map.layout.wards as u8 as f32);
+    h
+}
 
 impl Knowledge {
-    /// The knowledge of `map`, built on first use and shared while the map lives.
+    /// The knowledge of `map`, built on first use and shared by every match on the same map.
     pub fn of(map: &Arc<Map>) -> Arc<Knowledge> {
+        let key = fingerprint(map);
         let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        cache.retain(|(m, _)| m.strong_count() > 0);
-        if let Some((_, k)) = cache.iter().find(|(m, _)| m.as_ptr() == Arc::as_ptr(map)) {
-            return k.clone();
+        if let Some(i) = cache.iter().position(|(k, _)| *k == key) {
+            let entry = cache.remove(i);
+            let k = entry.1.clone();
+            cache.push(entry);
+            return k;
         }
         let k = Arc::new(Knowledge::build(map));
-        cache.push((Arc::downgrade(map), k.clone()));
+        cache.push((key, k.clone()));
+        if cache.len() > CACHED_MAPS {
+            cache.remove(0);
+        }
         k
     }
 
@@ -183,6 +226,18 @@ impl Knowledge {
             }
         }
         None
+    }
+
+    /// Compute every travel field now (a server can do this before it takes players, so no
+    /// match tick pays for it).
+    pub fn prepare(&self) {
+        for key in 0..self.keys.len() {
+            self.field(key);
+        }
+    }
+
+    pub fn key_count(&self) -> usize {
+        self.keys.len()
     }
 
     fn field(&self, key: usize) -> &[u16] {

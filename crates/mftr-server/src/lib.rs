@@ -1506,6 +1506,8 @@ fn net_worth(u: &mftr_sim::Unit) -> f32 {
 /// A bot match with each team's tier and champions chosen (17 §11's measurements).
 pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOptions) -> BotMatch {
     let mut core = ServerCore::new(ServerConfig { record: true, ..cfg }, 0.0);
+    // As a hosting server does at start: what bots know of the map, ready before the match.
+    mftr_bots::warm_up(core.game.world.map());
     let team = &opts.team;
     assert!(team.len() <= core.bots.len(), "the selected team needs that many bot seats");
     let seats: Vec<PlayerId> = core.bots.players().collect();
