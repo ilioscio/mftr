@@ -338,8 +338,8 @@ legacy bot fell at wave 19 on one seed and barely cleared the campaign on the ot
 tier from Recruit up cleared it on both and was still holding at waves 36–40.
 
 **Nightmare isn't clearly above Elite yet.** The two make the same decisions (only a lone
-gank on a half-dead target is Nightmare's, and an A/B run of it was even: 22–18 with it, 18–22 without); faster
-reactions and better aim alone don't win matches between bots. Its edge has to come from the
+gank on a half-dead target is Nightmare's, and an A/B run of it was even: 22–18 with it, 18–22
+without); faster reactions and better aim alone don't win matches between bots. Its edge has to come from the
 strategy row of §3, counter-jungling and objective trades, which aren't built.
 
 **Dodging** (`tests/diagnose.rs dodging_by_tier`, 18 shots each, the bot walking at the
