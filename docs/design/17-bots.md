@@ -1,6 +1,6 @@
 # 17 — Bots
 
-**Status:** Proposed (D62). This replaces the M2 slice 5 bot (a single list of rules in
+**Status:** Proposed (D62); built, as §12 records. This replaces the M2 slice 5 bot (a single list of rules in
 `mftr-server/src/bots.rs`) with the `mftr-bots` crate foreseen in [04 §6](04-architecture.md).
 The owner's brief: bots carry the PvE experience the game launches on, so they should play
 **better than the reference game's bots**: more nuanced and more strategic, readable and fun
@@ -279,3 +279,84 @@ The `legacy` tier is the old bot, kept as a baseline. The bar for this work:
 - **Each tier beats the one below** in most seeds.
 - **Horde:** Veteran allies clear the campaign.
 - **Reproducible:** replays still re-simulate exactly.
+
+Dev switches: `MFTR_BOTS_OFF=name,name` turns a feature off for an A/B run (`siege`,
+`engage`, `aram-recall`, `lone-gank`). Production servers don't set it.
+
+## 12. As built (2026-10-16)
+
+**Code:** `crates/mftr-bots`, about 6,500 lines in the modules of §2, plus `legacy.rs` (the M2
+bot, kept as the `legacy` tier and the baseline). The server owns one `Bots` per match: it adds
+and removes bots with players, calls `observe` after every step (with the events and the same
+team fog it culls snapshots with) and `think` before the next, and relays the bots' pings to
+their team. `mftr_bots::warm_up` builds a hosted map's knowledge on a thread at start, so the
+first match on a map doesn't pay for it.
+
+**What changed from the plan, and why:**
+- **Commitment by tasks, not scores.** The agent's behaviors are scored as §7 says, but the
+  coach's task carries most of the commitment: a defend, an engage or an answer to a ping holds
+  for a set time (8 s for a defend), and the agent's own pull away from it is a fixed penalty
+  per task. Pure score commitment made junglers flap between camps and lanes.
+- **ARAM is its own coach mode.** The coach calls an **engage** when the fight model passes
+  0.25 (Recruit 0.35) and keeps it for 3 s while it stays above 0.05; a **siege** window (two
+  enemies dead, or one and three of us at the wave) takes priority. Back-liners don't chase
+  past the front line, bots don't flee on low health alone, and they walk home to shop only
+  with gold for an item plus a margin (ARAM's fountain doesn't heal).
+- **Laning is timed, not reactive.** Last hits come from each minion's predicted health when
+  our hit would land, with a wake-up just before the window rather than a think every tick.
+  A swing is committed; a stale attack order gets a Stop. Supports leave last hits to any ally
+  near them, and pushing happens only on purpose (a recall, a roam, a siege) or alone.
+- **Dodges are decided once per cast.** A missile, area or beam inherits the first sighting of
+  the wind-up it came from, so the reaction clock starts at the wind-up and doesn't restart.
+  A dodge aims 45 u past the edge but counts as possible if 10 u clear is reachable in time;
+  Elite and Nightmare dash or blink out of hard crowd control they can't walk out of.
+- **Playing with humans.** Bots answer pings by kind and reach (Attack 9,000 u, Group, On my
+  way and Defend 12,000 u, Assist the nearest within 6,000 u, Danger backs off within 1,800 u
+  for 4 s), and each one that goes answers **On my way**. A human finishing a low champion
+  keeps the kill: bots (Veteran and up) hold their casts and attacks on it. Supports and
+  front-liners peel: their target score rises with the damage a target dealt allies in the
+  last 2 s.
+- **Calls are rate-limited** per team: 6 s between a team's bot calls, the same kind within
+  1,500 u not repeated for 30 s, and **Enemy missing** only after 3–4 s gone.
+- **Order budget.** Each tier has its commands a second (§3) as a refilling budget. An order
+  that repeats what the champion is already doing isn't sent; a bot out of orders thinks again
+  the moment one refills (otherwise a dodge could wait a whole think).
+
+**Measured** (`mftr-tools botmatch`; paired seeds swap sides, lineups shuffled per seed):
+
+| Matchup | ARAM (40 games) | Classic (20 games) |
+|---|---|---|
+| Veteran vs legacy | 33–4 (3 undecided) | 18–2 |
+| Veteran vs Recruit | 27–4 (9) | 17–3 |
+| Elite vs Veteran | 25–11 (4) | 14–6 |
+| Nightmare vs Elite | 17–14 (9) | 9–11; 31–29 over 60 |
+| Nightmare vs legacy | 37–3 | – |
+
+Classic laners take 3–5 CS a minute, about 60% of the minions that die near them (supports and
+junglers bring the team average to about 2.2). **Horde** (two seeds a tier, 40 minutes): the
+legacy bot fell at wave 19 on one seed and barely cleared the campaign on the other; every
+tier from Recruit up cleared it on both and was still holding at waves 36–40.
+
+**Nightmare isn't clearly above Elite yet.** The two make the same decisions (only a lone
+gank on a half-dead target is Nightmare's, and an A/B run of it was even: 22–18 with it, 18–22 without); faster
+reactions and better aim alone don't win matches between bots. Its edge has to come from the
+strategy row of §3, counter-jungling and objective trades, which aren't built.
+
+**Dodging** (`tests/diagnose.rs dodging_by_tier`, 18 shots each, the bot walking at the
+shooter): Ember's Lance (a line from 1,050 u) is dodged 0% by Recruit, 6% by Veteran, 78% by
+Elite and 94% by Nightmare; Bloom (a delayed area at 850 u) 17%, 78%, 89% and 100%.
+
+**Cost:** bots cost 6–12 µs a tick in Classic against 94–100 µs for the simulation, 3–8 µs against
+19–21 µs in ARAM, and 2–4 µs against 11–13 µs in Horde (every champion a bot). The worst bot
+tick in runs on an otherwise idle machine was 70–340 µs; two ARAM runs that overlapped a
+compile saw 6 ms. The knowledge fields for a map are built once (warmed at server start).
+
+**Checks:** unit tests in each module; `tests/behavior.rs` (bots answer a Group ping and say
+On my way, bots call their plans, and an Elite bot leaves a low champion to a human ally);
+`tests/diagnose.rs` (ignored, run by hand: lone last hits, a mid duel, teamfight calibration,
+knowledge cost, a lone jungler, dodging by tier); the server's ping and tier-vote tests; the
+client captures of the lobby's Bots row and a ping answered by four bots.
+
+**Not yet:** counter-jungling (taking the enemy's camps; Nightmare's row in §3) and objective
+trades; vision denial (sweeping or killing the enemy's wards); per-role reports and skillshot
+counts in `botmatch` (it reports per champion; dodging is measured by the diagnostic above).

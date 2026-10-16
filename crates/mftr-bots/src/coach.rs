@@ -537,7 +537,7 @@ impl Coach {
             });
             if !ally_there {
                 // A lone gank only for the top tier, on a target already half dead.
-                if m.strategy < 3 || hurt < 0.6 {
+                if m.strategy < 3 || hurt < 0.6 || crate::tier::off("lone-gank") {
                     continue;
                 }
                 them.hp *= 1.3;
