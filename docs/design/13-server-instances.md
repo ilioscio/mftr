@@ -97,6 +97,7 @@ measurements).
 ```
 mftr-server [--bind ADDR] [--key FILE] [--modes aram,mayhem,hyper,classic]
             [--map FILE.mftrmap]... [--max-matches N] [--replay DIR]
+            [--bot-tier recruit|veteran|elite|nightmare]
 mftr-server --scenario NAME [...]   # one queue, any scenario (development)
 ```
 

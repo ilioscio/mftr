@@ -117,3 +117,50 @@ fn bots_call_their_plans() {
     }
     let _ = Vec2::ZERO;
 }
+
+/// 17 §8: a bot ally leaves a kill to the human finishing it.
+#[test]
+fn bots_leave_the_last_hit_on_a_champion_to_a_human() {
+    let mut w = World::new(3);
+    w.set_map(MapId::Open.shared());
+    w.set_rules(Rules::ARAM);
+    let human = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(2000.0, 2000.0));
+    let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Bastion, Vec2::new(2350.0, 2000.0));
+    w.spawn_champion(PlayerId(2), Team::Blue, ChampionId::Ember, Vec2::new(2000.0, 2250.0));
+    let mut bots = Bots::new(1);
+    bots.add(PlayerId(2), Tier::Elite);
+    let mut pings = Vec::new();
+    step(&mut w, &mut bots, &mut pings);
+    let max = w.unit(enemy).unwrap().stats.max_health;
+    w.unit_mut(enemy).unwrap().state.health = max * 0.12;
+    let attack = mftr_sim::Command {
+        player: PlayerId(0),
+        seq: 1,
+        tick: Tick(w.tick().0 + 1),
+        sub: mftr_sim::SubTick::START,
+        kind: mftr_sim::CommandKind::Attack(enemy),
+    };
+    let mut killer = None;
+    for i in 0..(10 * 30) {
+        let k = Tick(w.tick().0 + 1);
+        let mut cmds = bots.think(&w, k);
+        if i == 0 {
+            cmds.push(mftr_sim::Command { tick: k, ..attack });
+        }
+        w.step(&cmds);
+        let events = w.take_events();
+        let visions = [Vision::of(&w, Team::Blue), Vision::of(&w, Team::Red)];
+        bots.observe(&w, &events, &visions);
+        for e in &events {
+            if let SimEvent::Died { unit, killer: by, .. } = e
+                && *unit == enemy
+            {
+                killer = Some(*by);
+            }
+        }
+        if killer.is_some() {
+            break;
+        }
+    }
+    assert_eq!(killer, Some(human), "the human's kill");
+}

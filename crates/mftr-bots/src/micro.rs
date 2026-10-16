@@ -143,6 +143,19 @@ pub fn pick_target<'w>(a: &Agent, c: &Ctx<'_, 'w>, chase: bool) -> Option<&'w Un
         if human_on_it {
             score *= 1.6;
         }
+        // Peel (17 §7.2): supports and front-liners go for whoever is hurting our team.
+        if me.champion.is_some_and(|ch| Archetype::of(ch).support() || Archetype::of(ch).front()) {
+            let on_us: f32 = c
+                .memory
+                .damage
+                .iter()
+                .filter(|(src, dst, _, at)| {
+                    *src == t.id && c.now.secs_since(*at) < 2.0 && c.b.allies.iter().any(|a| a.id == *dst)
+                })
+                .map(|d| d.2)
+                .sum();
+            score *= 1.0 + (on_us / 250.0).min(1.5);
+        }
         score /= 1.0 + (d - reach).max(0.0) / 500.0;
         // Back-liners don't walk past the front line for a target behind it.
         if back && t.kind == UnitKind::Champion {
@@ -181,11 +194,29 @@ pub fn cast_best(a: &mut Agent, c: &Ctx, target: &Unit, aggressive: bool) -> Opt
     best_cast(a, c, target, aggressive).map(|(_, cmd)| cmd)
 }
 
+/// A human teammate is finishing `t`: it's attacking it, in reach, and `t` is low.
+/// Bot allies leave the kill to them (17 §8: playing with humans).
+pub fn humans_kill(c: &Ctx, t: &Unit) -> bool {
+    if t.kind != UnitKind::Champion || t.state.health > t.stats.max_health * 0.25 {
+        return false;
+    }
+    c.b.allies.iter().any(|ally| {
+        ally.id != c.me.id
+            && !c.is_bot(ally)
+            && ally.state.alive()
+            && matches!(ally.state.order, mftr_sim::Order::Attack(id) if id == t.id)
+            && ally.state.pos.distance(t.state.pos) <= ally.attack.map_or(150.0, |s| s.range) + 150.0
+    })
+}
+
 /// The best ability to cast at `target` (or into a group) and what landing it is worth (damage
 /// after resistances, crowd control valued as the damage that lands meanwhile).
 pub fn best_cast(a: &mut Agent, c: &Ctx, target: &Unit, aggressive: bool) -> Option<(f32, CommandKind)> {
     let me = c.me;
     let now = c.now;
+    if a.p.strategy >= 1 && humans_kill(c, target) {
+        return None;
+    }
     let horde = c.b.world.rules().horde;
     let dps = team_dps(c, me.state.pos);
     let mut best: Option<(f32, CommandKind)> = None;
@@ -343,6 +374,9 @@ pub fn best_cast(a: &mut Agent, c: &Ctx, target: &Unit, aggressive: bool) -> Opt
 pub fn attack(a: &mut Agent, c: &Ctx, t: &Unit, chase: bool) -> Option<CommandKind> {
     let me = c.me;
     let st = &me.state;
+    if a.p.strategy >= 1 && humans_kill(c, t) {
+        return None;
+    }
     let d = st.pos.distance(t.state.pos);
     let my_range = me.attack.map_or(150.0, |s| s.range);
     let reach = my_range + t.gameplay_radius;

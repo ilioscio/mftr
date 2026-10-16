@@ -264,6 +264,10 @@ impl Agent {
             return None;
         }
         if self.tokens < 1.0 {
+            // Out of orders for now: think again as soon as there's one (a dodge can't wait for
+            // the next regular think).
+            let ticks = ((1.0 - self.tokens) / self.p.orders_per_second * mftr_sim::TICK_HZ as f32).ceil() as u32;
+            self.wake_at(SimTime::end_of(Tick(k.0 + ticks.max(1))));
             return None;
         }
         self.tokens -= 1.0;
@@ -317,9 +321,9 @@ impl Agent {
             _ => (c.k.homes[c.b.team as usize] - me.state.pos).normalize_or_zero(),
         };
         let threats = dodge::threats(c.b.world, me, c.memory, now, prefer);
-        self.decided.retain(|(k, ..)| threats.iter().any(|t| t.key == *k));
+        self.decided.retain(|(k, ..)| threats.iter().any(|t| t.root == *k));
         for t in threats {
-            let (react_at, will) = match self.decided.iter().find(|(k, ..)| *k == t.key) {
+            let (react_at, will) = match self.decided.iter().find(|(k, ..)| *k == t.root) {
                 Some(&(_, at, will)) => (at, will),
                 None => {
                     let jitter = (self.rng.next_f32() * 2.0 - 1.0) * self.p.reaction_spread_ms;
@@ -328,7 +332,7 @@ impl Agent {
                     // Hard crowd control is worth more care.
                     let chance = if t.hard { (self.p.dodge + 0.1).min(1.0) } else { self.p.dodge };
                     let will = self.rng.next_f32() < chance;
-                    self.decided.push((t.key, at, will));
+                    self.decided.push((t.root, at, will));
                     (at, will)
                 }
             };
@@ -339,11 +343,49 @@ impl Agent {
                 self.wake_at(react_at);
                 continue;
             }
-            if t.step < 5.0 || !dodge::escapable(me, &t, now) {
+            if t.step < 5.0 {
+                continue;
+            }
+            if !dodge::escapable(me, &t, now) {
+                // Hard crowd control we can't walk out of: the top tiers dash or blink out
+                // (17 §7.3).
+                if t.hard
+                    && self.p.strategy >= 2
+                    && t.hits_in > 0.08
+                    && let Some(cmd) = self.dash_out(c, t.to)
+                {
+                    self.dodging_until = now.plus(SimDuration::from_millis(((t.hits_in + 0.1) * 1000.0) as u64));
+                    return Some(cmd);
+                }
                 continue;
             }
             self.dodging_until = now.plus(SimDuration::from_millis(((t.hits_in + 0.1) * 1000.0) as u64));
             return Some(CommandKind::MoveTo(QPoint::from_vec2(t.to)));
+        }
+        None
+    }
+
+    /// A dash or blink toward `to` (a dodge's way out), as far as it goes, if one is ready and
+    /// lands on open ground: an ability's dash first, the Blink spell last.
+    fn dash_out(&mut self, c: &Ctx, to: Vec2) -> Option<CommandKind> {
+        let me = c.me;
+        let dir = (to - me.state.pos).normalize_or_zero();
+        if dir == Vec2::ZERO {
+            return None;
+        }
+        for slot in [0u8, 1, 2, 3, 5, 4] {
+            if !me.state.can_cast(c.now, slot) {
+                continue;
+            }
+            let range = match me.ability(slot).map(|a| a.effect) {
+                Some(mftr_sim::ability::Effect::Dash(d)) => d.range,
+                Some(mftr_sim::ability::Effect::Blink(b)) => b.range,
+                _ => continue,
+            };
+            let at = me.state.pos + dir * range;
+            if c.b.world.map().walkable(at, 40.0) {
+                return Some(micro::cast(slot, at));
+            }
         }
         None
     }

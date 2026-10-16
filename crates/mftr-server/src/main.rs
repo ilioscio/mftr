@@ -121,8 +121,7 @@ fn main() -> std::io::Result<()> {
                 let name = args.next().expect("--bot-tier needs a tier");
                 base.bot_tier = mftr_server::Tier::by_name(&name)
                     .filter(|t| *t != mftr_server::Tier::Legacy)
-                    .unwrap_or_else(|| panic!("unknown tier {name}: recruit, veteran, elite or nightmare
-{USAGE}"));
+                    .unwrap_or_else(|| panic!("unknown tier {name}: recruit, veteran, elite or nightmare\n{USAGE}"));
             }
             "--key" => key_path = args.next().expect("--key needs a file").into(),
             "--fingerprint" => fingerprint_only = true,

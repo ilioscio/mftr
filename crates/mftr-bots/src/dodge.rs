@@ -10,11 +10,15 @@ use mftr_sim::{SimTime, Unit, Vec2, World};
 
 /// Room left around a dodge (u).
 const MARGIN: f32 = 45.0;
+/// Clearance past the edge that's enough to be missed.
+const TIGHT: f32 = 10.0;
 
 /// Something about to hit a bot.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Threat {
     pub key: ThreatKey,
+    /// The cast it came from (its wind-up's key), so a dodge is decided once per cast.
+    pub root: ThreatKey,
     /// When the team first saw it.
     pub seen_at: SimTime,
     /// Seconds until it hits.
@@ -96,7 +100,7 @@ pub fn threats(world: &World, me: &Unit, memory: &Memory, now: SimTime, prefer: 
     let mut out = Vec::new();
     let mut push = |key: ThreatKey, hits_in: f32, (to, step): (Vec2, f32), hard: bool| {
         if let Some(seen_at) = memory.first_seen(key) {
-            out.push(Threat { key, seen_at, hits_in, to, step, hard });
+            out.push(Threat { key, root: memory.root(key), seen_at, hits_in, to, step, hard });
         }
     };
     for a in world.areas().iter().filter(|a| a.team != me.team) {
@@ -175,5 +179,7 @@ pub fn threats(world: &World, me: &Unit, memory: &Memory, now: SimTime, prefer: 
 pub fn escapable(me: &Unit, t: &Threat, now: SimTime) -> bool {
     let speed = me.state.speed_at(now).max(1.0);
     let free = t.hits_in - kit::locked_for(me, now);
-    t.step / speed <= free + 0.05
+    // The step aims past the edge by MARGIN; only a sliver of it is needed to be missed.
+    let need = (t.step - MARGIN + TIGHT).max(0.0);
+    need / speed <= free + 0.05
 }

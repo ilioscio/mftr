@@ -138,6 +138,14 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 > Stat Anvil steps and up to 16 effects (kind, tenths of a second left, a value: a slow's
 > percent, a shield's points, plates, stacks). Nothing in snapshots changes.
 
+> **Implemented (protocol 26):** pings and the bots' tier ([17](17-bots.md) §8–§9).
+> `Ping { kind, at, target }` (client kind 6: a 3-bit kind, the point, an optional unit) is
+> relayed to the pinger's team and spectators as the event `Ping` (21: kind, point, optional
+> target, the pinger's champion), on the reliable events channel; the server drops pings past
+> one every 0.5 s or five in 5 s, and bots' pings travel the same way. Champion select gains
+> `LobbyAction::Bots(tier)` (a 2-bit tier) and, in co-op, the lobby state's `bots`: the tier
+> that wins, the votes for each and our own.
+
 > **Implemented (S1, protocol 21):** a Hello carries the queue to play (13 §2); without one, the
 > server answers with `Queues` (server kind 5: each queue's mode, Co-op flag, map name, humans
 > and matches; at most 64), unless it offers a single queue. The client picks one and says hello

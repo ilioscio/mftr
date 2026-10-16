@@ -67,7 +67,9 @@ pub enum CampState {
 pub struct Memory {
     pub team: Team,
     pub enemies: Vec<Sighting>,
-    threats: Vec<(ThreatKey, SimTime)>,
+    /// Threats seen: key, when first seen, and the wind-up it came from (itself if none), so
+    /// a missile, area or beam inherits its cast's sighting and the dodge decided on it.
+    threats: Vec<(ThreatKey, SimTime, ThreatKey)>,
     pub camps: Vec<(CampState, SimTime)>,
     /// Enemy wards seen standing: id, where, until when (0: until destroyed).
     pub wards: Vec<(UnitId, Vec2, SimTime)>,
@@ -187,36 +189,46 @@ impl Memory {
         // Threats: when each was first seen (17 §3: a response comes no sooner than this plus
         // the reaction time).
         let enemy = |t: Team| t != team;
-        let mut live: Vec<ThreatKey> = Vec::new();
+        // Each with its caster and when it was fired, to find the wind-up it came from.
+        let mut live: Vec<(ThreatKey, Option<(UnitId, SimTime)>)> = Vec::new();
         for m in world.missiles().iter().filter(|m| enemy(m.team)) {
             let k = ThreatKey::Missile(m.id);
             if self.first_seen(k).is_some() || vision.sees(map, m.position_at(now)) {
-                live.push(k);
+                live.push((k, Some((m.owner, m.spawn_at))));
             }
         }
         for a in world.areas().iter().filter(|a| enemy(a.team)) {
             let k = ThreatKey::Area(a.id);
             if self.first_seen(k).is_some() || vision.sees(map, a.center) {
-                live.push(k);
+                live.push((k, Some((a.owner, a.spawn_at))));
             }
         }
         for c in world.channels().iter().filter(|c| enemy(c.team)) {
             let k = ThreatKey::Beam(c.id);
             if self.first_seen(k).is_some() || visible(c.owner) {
-                live.push(k);
+                live.push((k, Some((c.owner, c.spawn_at))));
             }
         }
         for u in world.units().iter().filter(|u| enemy(u.team) && u.kind == UnitKind::Champion && visible(u.id)) {
             if let Some(c) = u.state.cast {
-                live.push(ThreatKey::Windup(u.id, c.fire_at));
+                live.push((ThreatKey::Windup(u.id, c.fire_at), None));
             }
         }
-        self.threats.retain(|(k, _)| live.contains(k));
-        for k in live {
-            if self.first_seen(k).is_none() {
-                self.threats.push((k, now));
+        let tick = mftr_sim::SUBTICKS as u64;
+        for (k, origin) in &live {
+            if self.first_seen(*k).is_some() {
+                continue;
             }
+            // Fired from a wind-up we saw: the same threat, seen since then.
+            let from = origin.and_then(|(owner, fired)| {
+                self.threats.iter().find(
+                    |(w, ..)| matches!(*w, ThreatKey::Windup(u, at) if u == owner && at.0.abs_diff(fired.0) <= tick),
+                )
+            });
+            let (seen, root) = from.map_or((now, *k), |(_, seen, root)| (*seen, *root));
+            self.threats.push((*k, seen, root));
         }
+        self.threats.retain(|(k, ..)| live.iter().any(|(l, _)| l == k));
 
         // Camps: seen standing or empty; a death seen gives the exact respawn.
         let camps = &map.layout.camps;
@@ -270,7 +282,12 @@ impl Memory {
 
     /// When a threat was first seen (None: not seen, or gone).
     pub fn first_seen(&self, key: ThreatKey) -> Option<SimTime> {
-        self.threats.iter().find(|(k, _)| *k == key).map(|(_, t)| *t)
+        self.threats.iter().find(|(k, ..)| *k == key).map(|(_, t, _)| *t)
+    }
+
+    /// The wind-up a threat came from (itself if none): dodges are decided once per cast.
+    pub fn root(&self, key: ThreatKey) -> ThreatKey {
+        self.threats.iter().find(|(k, ..)| *k == key).map_or(key, |(_, _, r)| *r)
     }
 
     pub fn enemy(&self, id: UnitId) -> Option<&Sighting> {

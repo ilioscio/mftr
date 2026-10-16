@@ -123,6 +123,7 @@ services.mftr = {
 | `modes` | `[ "aram" "mayhem" "hyper" "classic" "horde" ]` | As `--modes`: the existing modes offer Versus and Co-op, or one side with a suffix. `horde`/`horde-coop` offers five blue champions defending against minion waves; `horde-versus` is invalid. Other matches have 10 seats; all use champion select and bots in the empty seats. |
 | `maps` | `[ ]` | Map files from the map editor (`*.mftrmap`): each adds its modes on that map (Classic on a Classic map; ARAM, Mayhem, Hyper and Horde on an ARAM map). |
 | `maxMatches`, `workers` | `32`, one per core | As `--max-matches` and `--workers`. |
+| `botTier` | `"veteran"` | As `--bot-tier`. |
 | `seed` | `1` | As `--seed`. |
 | `replay` | `false` | Record every match into `/var/lib/mftr/server/replays`. |
 | `adoptKeyFrom` | `null` | The name of an older server whose key the main server takes on its first start (see below). |
@@ -195,6 +196,7 @@ that key over the same way, without `adoptKeyFrom`.
 | `--max-matches N` | `32` | Matches running at once, at most. Past it, a player who'd need a new match is told the server is busy, and their client keeps asking. |
 | `--workers N` | one per core | Threads that step the matches. |
 | `--seed N` | `1` | Seeds everything random (each match draws its own seed from it). |
+| `--bot-tier T` | `veteran` | How well bots play: `recruit`, `veteran`, `elite` or `nightmare` (see below). |
 | `--replay DIR` | off | Record every match into DIR, as `<started>-<queue>-<match>.replay`. A file is rewritten every minute, when its match ends and when it stops. |
 | `--scenario NAME` | | For development: offer this one scenario instead, any of the above or `duel` (the Duel Sandbox), `minions`, `dodge`, `empty` (test grounds). With it, `--bots N` adds server bots (they count toward `--max-players N`, default 10: leave a seat for each player) and `--lobby` holds champion select first. A spectating client can watch a match of bots alone. |
 
@@ -203,7 +205,10 @@ that still has a bot's seat to take, or starts a new match. Versus puts them on 
 fewer humans; Co-op puts every human on blue, against bots. Bots take every seat no human has.
 Joining a match in progress, the player chooses a champion (ARAM: dealt, one reroll; Classic:
 picked) and takes over a bot: in the fountain, at its level, with its gold plus a refund of
-its items. When a match ends, its players go to champion select together for the next one. A match
+its items. In Co-op champion select, players vote how well the bots play (Recruit, Veteran,
+Elite or Nightmare; the most votes wins, a tie goes to the easier, `--bot-tier` is where it
+starts); the tier changes only how the bots play, never their gold or stats. Versus fill-ins
+play at `--bot-tier`. When a match ends, its players go to champion select together for the next one. A match
 with no players left stops (one whose players all lost their connection waits 60 s for them
 first). A player who loses their connection keeps their seat for the rest of the match while a
 bot plays their champion, and gets it back when their client reconnects, even from a new

@@ -228,7 +228,9 @@ fn knowledge_cost() {
 #[test]
 #[ignore]
 fn jungler_alone() {
-    for (c, tier) in [(ChampionId::Shade, Tier::Elite), (ChampionId::Rook, Tier::Veteran), (ChampionId::Marrow, Tier::Elite)] {
+    for (c, tier) in
+        [(ChampionId::Shade, Tier::Elite), (ChampionId::Rook, Tier::Veteran), (ChampionId::Marrow, Tier::Elite)]
+    {
         let mut w = World::new(5);
         w.set_map(MapId::Crossroads.shared());
         w.set_rules(Rules::CLASSIC);
@@ -278,5 +280,92 @@ fn jungler_alone() {
             u.state.progress.gold,
             bots.stats()[0].1.mode_ticks
         );
+    }
+}
+
+/// How often each tier dodges a line skillshot (Ember's Lance from 1,050 u, aimed where the bot
+/// stands) and a delayed area (her Bloom, from 850 u), with nothing else going on.
+#[test]
+#[ignore]
+fn dodging_by_tier() {
+    use mftr_sim::{Command, CommandKind, QPoint, SubTick};
+    for tier in [Tier::Recruit, Tier::Veteran, Tier::Elite, Tier::Nightmare] {
+        for slot in [0u8, 1] {
+            let mut w = World::new(9);
+            w.set_map(MapId::Open.shared());
+            w.set_rules(Rules::ARAM);
+            let shooter =
+                w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Ember, mftr_sim::Vec2::new(1000.0, 2000.0));
+            let range = if slot == 0 { 1050.0 } else { 850.0 };
+            let target = w.spawn_champion(
+                PlayerId(0),
+                Team::Blue,
+                ChampionId::Vesper,
+                mftr_sim::Vec2::new(1000.0 + range, 2000.0),
+            );
+            w.unit_mut(shooter).unwrap().state.progress.ranks = [1, 1, 1, 0];
+            let mut bots = Bots::new(4);
+            bots.add(PlayerId(0), tier);
+            let (mut casts, mut hits, mut seq) = (0, 0, 0u32);
+            // A shot every 10 s: off cooldown for both (Lance 4 s, Bloom 9 s).
+            let period = 300;
+            for t in 0..(180 * 30u32) {
+                let k = Tick(w.tick().0 + 1);
+                let mut cmds = bots.think(&w, k);
+                // Keep the scene still: both whole, the target put back in place before each shot.
+                for (id, pos) in [
+                    (shooter, mftr_sim::Vec2::new(1000.0, 2000.0)),
+                    (target, mftr_sim::Vec2::new(1000.0 + range, 2000.0)),
+                ] {
+                    let u = w.unit_mut(id).unwrap();
+                    u.state.health = u.stats.max_health;
+                    if t % period == 0 {
+                        u.state.pos = pos;
+                    }
+                }
+                if t % period == 10 {
+                    let at = w.unit(target).unwrap().state.pos;
+                    if std::env::var("TRACE").is_ok() && t < 400 {
+                        println!(
+                            "  shot at t={t}: target {:.0} away, mode {}",
+                            at.distance(w.unit(shooter).unwrap().state.pos),
+                            bots.describe(PlayerId(0)).unwrap_or_default()
+                        );
+                    }
+                    seq += 1;
+                    cmds.push(Command {
+                        player: PlayerId(1),
+                        seq,
+                        tick: k,
+                        sub: SubTick::START,
+                        kind: CommandKind::Cast { slot, target: QPoint::from_vec2(at) },
+                    });
+                    casts += 1;
+                }
+                // The bot only moves and attacks here (an attack order holds, as in a game, so
+                // it doesn't spend the bot's order budget again and again): drop its casts.
+                cmds.retain(|c| {
+                    c.player != PlayerId(0) || matches!(c.kind, CommandKind::MoveTo(_) | CommandKind::Attack(_))
+                });
+                w.step(&cmds);
+                let events = w.take_events();
+                for e in &events {
+                    if let SimEvent::Damage { source, target: hit, .. } = e
+                        && *source == shooter
+                        && *hit == target
+                    {
+                        hits += 1;
+                    }
+                }
+                let visions = [Vision::of(&w, Team::Blue), Vision::of(&w, Team::Red)];
+                bots.observe(&w, &events, &visions);
+            }
+            println!(
+                "{:<9} {}: {hits} hits of {casts} ({:.0}% dodged)",
+                tier.name(),
+                if slot == 0 { "Lance (line)" } else { "Bloom (area)" },
+                100.0 * (1.0 - hits as f32 / casts.max(1) as f32)
+            );
+        }
     }
 }
