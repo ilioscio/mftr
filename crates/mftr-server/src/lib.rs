@@ -234,6 +234,8 @@ struct Conn {
     spectator: bool,
     /// When this client last got an inspect answer (they're rate limited).
     inspected_at: f64,
+    /// When this client's recent pings were relayed (01 §14: rate limited).
+    pinged: VecDeque<f64>,
 }
 
 /// Fastest a client gets inspect answers (seconds apart): the window asks a few times a second.
@@ -259,7 +261,21 @@ impl Conn {
             token,
             spectator,
             inspected_at: f64::NEG_INFINITY,
+            pinged: VecDeque::new(),
         }
+    }
+
+    /// Whether a ping at `now` is within the limits (`mftr_sim::ping`), and if so note it.
+    fn may_ping(&mut self, now: f64) -> bool {
+        use mftr_sim::ping::{PING_BURST, PING_GAP_S, PING_WINDOW_S};
+        while self.pinged.front().is_some_and(|t| now - t > PING_WINDOW_S) {
+            self.pinged.pop_front();
+        }
+        if self.pinged.back().is_some_and(|t| now - t < PING_GAP_S) || self.pinged.len() >= PING_BURST {
+            return false;
+        }
+        self.pinged.push_back(now);
+        true
     }
 }
 
@@ -296,6 +312,8 @@ pub struct ServerCore {
     cfg: ServerConfig,
     game: Match,
     bots: Bots,
+    /// How well this match's bots play (co-op: as voted in champion select, 17 §9).
+    tier: Tier,
     /// Champion select, until the match starts.
     lobby: Option<Lobby>,
     /// Connections in champion select.
@@ -339,6 +357,7 @@ impl ServerCore {
         Self {
             game,
             bots,
+            tier: cfg.bot_tier,
             lobby,
             pending: BTreeMap::new(),
             dropped: Vec::new(),
@@ -642,6 +661,17 @@ impl ServerCore {
                 self.stats.bytes_out += bytes.len() as u64;
                 out.push((from, bytes));
             }
+            ClientMessage::Ping { kind, at, target } => {
+                // A ping (17 §8): to the pinger's team (and spectators), and its bots.
+                let Some(conn) = self.conns.get_mut(&from) else { return out };
+                conn.last_heard = now;
+                if conn.spectator || !conn.may_ping(now) {
+                    return out;
+                }
+                let (team, unit) = (conn.team, conn.unit);
+                let at = Vec2::new(at.x.clamp(0.0, 65_000.0), at.y.clamp(0.0, 65_000.0));
+                self.relay_ping(team, mftr_sim::ping::Ping { kind, at, target, from: Some(unit) }, true);
+            }
             ClientMessage::Inspect { unit } => {
                 // The inspect window (01 §13): a unit's details, if the asker's team sees it.
                 let Some(conn) = self.conns.get_mut(&from) else { return out };
@@ -745,17 +775,30 @@ impl ServerCore {
         Some((key, bytes))
     }
 
+    /// Send a ping to `team`'s players and every spectator; a human's also goes to its bots.
+    fn relay_ping(&mut self, team: Team, ping: mftr_sim::ping::Ping, human: bool) {
+        for conn in self.conns.values_mut().filter(|c| c.spectator || c.team == team) {
+            conn.events.push_back((conn.next_event_seq, SimEvent::Ping(ping)));
+            conn.next_event_seq += 1;
+        }
+        if human {
+            self.bots.hear(team, ping, &self.game.world);
+        }
+    }
+
     /// Champion select picks (Classic) instead of dealing (ARAM modes).
     fn pick(&self) -> bool {
         matches!(self.cfg.scenario, Scenario::Classic | Scenario::Horde)
     }
 
     fn make_lobby(cfg: &ServerConfig, seed: u64) -> Lobby {
-        if cfg.scenario == Scenario::Horde {
+        let lobby = if cfg.scenario == Scenario::Horde {
             Lobby::blue_only(seed, cfg.max_players, cfg.bots, true)
         } else {
             Lobby::new(seed, cfg.max_players, cfg.bots, cfg.scenario == Scenario::Classic)
-        }
+        };
+        // Co-op humans choose how well the bots play (17 §9).
+        if cfg.coop { lobby.with_bot_vote(cfg.bot_tier) } else { lobby }
     }
 
     /// The seat a new human takes in the match being played (13 §2–3): a bot's that isn't
@@ -864,6 +907,7 @@ impl ServerCore {
             map: String::new(),
             pick: self.pick(),
             midgame: true,
+            bots: None,
         }
     }
 
@@ -886,10 +930,11 @@ impl ServerCore {
     fn start_from_lobby(&mut self, now: f64) -> Vec<(ClientKey, Vec<u8>)> {
         let Some(lobby) = self.lobby.take() else { return Vec::new() };
         let mut out = Vec::new();
+        self.tier = lobby.bot_tier().unwrap_or(self.cfg.bot_tier);
         for slot in lobby.slots() {
             let (unit, team, _) = self.game.join(slot.player, Some(slot.champion));
             if slot.bot {
-                self.bots.add(slot.player, self.cfg.bot_tier);
+                self.bots.add(slot.player, self.tier);
                 continue;
             }
             let Some(key) = self.pending.iter().find(|(_, p)| p.player == slot.player).map(|(k, _)| *k) else {
@@ -951,7 +996,7 @@ impl ServerCore {
         {
             self.queue.retain(|cmd| cmd.player != c.player);
             if self.cfg.scenario.is_match() {
-                self.bots.add(c.player, self.cfg.bot_tier);
+                self.bots.add(c.player, self.tier);
             } else {
                 self.game.leave(c.player);
             }
@@ -969,7 +1014,7 @@ impl ServerCore {
             if !c.spectator {
                 self.queue.retain(|cmd| cmd.player != c.player);
                 if self.cfg.scenario.is_match() {
-                    self.bots.add(c.player, self.cfg.bot_tier);
+                    self.bots.add(c.player, self.tier);
                 }
                 self.dropped.push(Dropped { token: c.token, player: c.player, unit: c.unit, team: c.team, since: now });
             }
@@ -1035,7 +1080,9 @@ impl ServerCore {
         due.extend(self.bots.think(&self.game.world, k));
         let (events, fog) = self.game.step(due);
         self.bots.observe(&self.game.world, &events, &fog.visions);
-        let _pings = self.bots.take_pings();
+        for (team, ping) in self.bots.take_pings() {
+            self.relay_ping(team, ping, false);
+        }
         self.stats.ticks += 1;
 
         let since = ((now - self.tick_time(k)).max(0.0) * 1e6) as u32;
@@ -1896,6 +1943,74 @@ mod tests {
         assert_eq!(core.game().player_count(), 10);
         core.step(t + 1.0 / 30.0);
         assert_eq!(core.world().tick(), Tick(1), "now the clock runs");
+    }
+
+    /// 17 §8: a ping goes to the pinger's team (and spectators), not the enemy's, at most one
+    /// every half second.
+    #[test]
+    fn pings_reach_the_team_and_are_rate_limited() {
+        let cfg = ServerConfig { scenario: Scenario::Aram, max_players: 10, ..Default::default() };
+        let mut core = ServerCore::new(cfg, 0.0);
+        for key in [1, 2, 3] {
+            hello(&mut core, key);
+        }
+        let (t1, t2, t3) = (core.team_of(1).unwrap(), core.team_of(2).unwrap(), core.team_of(3).unwrap());
+        assert!(t1 == t3 && t1 != t2, "1 and 3 play together, 2 against them");
+        let ping = |kind| ClientMessage::Ping { kind, at: Vec2::new(5000.0, 5000.0), target: None };
+        send(&mut core, 1, ping(mftr_sim::ping::PingKind::OnMyWay), 0.1);
+        send(&mut core, 1, ping(mftr_sim::ping::PingKind::Danger), 0.2); // too soon: dropped
+        send(&mut core, 1, ping(mftr_sim::ping::PingKind::Group), 0.8);
+        let mut got: BTreeMap<ClientKey, Vec<mftr_sim::ping::PingKind>> = BTreeMap::new();
+        for (to, b) in core.step(1.0) {
+            if let Ok((_, ServerMessage::Snapshot(s))) = decode_server(&b) {
+                for (_, e) in s.events {
+                    if let SimEvent::Ping(p) = e {
+                        got.entry(to).or_default().push(p.kind);
+                        assert_eq!(p.from, core.conns.get(&1).map(|c| c.unit), "the pinger's champion");
+                    }
+                }
+            }
+        }
+        use mftr_sim::ping::PingKind::{Group, OnMyWay};
+        assert_eq!(got.get(&1), Some(&vec![OnMyWay, Group]), "the pinger sees its own");
+        assert_eq!(got.get(&3), Some(&vec![OnMyWay, Group]), "a teammate");
+        assert_eq!(got.get(&2), None, "never the enemy");
+    }
+
+    /// 17 §9: co-op champion select votes how well the bots play; the most votes wins.
+    #[test]
+    fn coop_champion_select_votes_the_bots_tier() {
+        let cfg =
+            ServerConfig { seed: 4, bots: 10, lobby: true, coop: true, scenario: Scenario::Aram, ..Default::default() };
+        let mut core = ServerCore::new(cfg, 0.0);
+        let state = |msgs: &[ServerMessage]| {
+            msgs.iter()
+                .find_map(|m| match m {
+                    ServerMessage::Lobby(l) => Some((**l).clone()),
+                    _ => None,
+                })
+                .expect("a lobby state")
+        };
+        let l = state(&send(&mut core, 1, hello_msg(0, false), 0.0));
+        let bots = l.bots.expect("co-op shows the vote");
+        assert_eq!((bots.tier, bots.mine), (Tier::Veteran.wire(), None), "the server's default to start");
+        let l = state(&send(&mut core, 1, ClientMessage::Lobby(msg::LobbyAction::Bots(3)), 0.5));
+        assert_eq!(l.bots.unwrap().tier, Tier::Nightmare.wire());
+        assert_eq!(l.bots.unwrap().mine, Some(3));
+        send(&mut core, 1, ClientMessage::Lobby(msg::LobbyAction::Ready(true)), 1.0);
+        let mut t = 1.0;
+        while core.lobby.is_some() && t < 10.0 {
+            t += 1.0 / 30.0;
+            core.step(t);
+        }
+        let bot = core.bots.players().next().expect("bots play");
+        assert_eq!(core.bots.tier(bot), Some(Tier::Nightmare));
+        // Versus has no vote.
+        let mut versus = ServerCore::new(
+            ServerConfig { lobby: true, bots: 10, scenario: Scenario::Aram, ..Default::default() },
+            0.0,
+        );
+        assert!(state(&send(&mut versus, 1, hello_msg(0, false), 0.0)).bots.is_none());
     }
 
     /// A dropped player's champion waits; the token brings the player back to it, even from

@@ -70,6 +70,8 @@ struct Heard {
     at: SimTime,
     /// Bots that already answered it (bit per member index).
     answered: u16,
+    /// When each member got there (it holds the spot a while, then it's done).
+    arrived: [Option<SimTime>; 16],
 }
 
 pub struct Coach {
@@ -99,7 +101,7 @@ pub struct Coach {
 /// How often the coach thinks (ticks).
 const EVERY: u32 = 30;
 /// How long a human's ping is acted on (s).
-const HEARD_FOR: f32 = 12.0;
+const HEARD_FOR: f32 = 45.0;
 
 impl Coach {
     pub fn new(team: Team, mode: Mode, seed: u64) -> Self {
@@ -135,7 +137,7 @@ impl Coach {
     /// A human teammate pinged.
     pub fn hear(&mut self, ping: Ping, now: SimTime) {
         self.heard.retain(|h| now.secs_since(h.at) < HEARD_FOR);
-        self.heard.push(Heard { ping, at: now, answered: 0 });
+        self.heard.push(Heard { ping, at: now, answered: 0, arrived: [None; 16] });
         if ping.kind == PingKind::Missing || ping.kind == PingKind::Danger {
             self.cautions.push((ping.at, now.plus(mftr_sim::SimDuration::from_millis(10_000))));
         }
@@ -668,11 +670,16 @@ impl Coach {
                 })
                 .collect();
             near.sort_by(|a, c| a.1.total_cmp(&c.1));
+            // A danger call is about now; the rest last until each bot has got there and held.
+            if p.kind == PingKind::Danger && now.secs_since(h.at) > 4.0 {
+                continue;
+            }
+            // A human's call reaches across the map (its travel, around walls): bots trust it.
             let (reach, count, secs) = match p.kind {
-                PingKind::Attack => (6500.0, 5, 10.0),
-                PingKind::Group | PingKind::OnMyWay => (7000.0, 5, 12.0),
-                PingKind::Defend => (8000.0, 5, 15.0),
-                PingKind::Assist => (5000.0, 2, 10.0),
+                PingKind::Attack => (9000.0, 5, 12.0),
+                PingKind::Group | PingKind::OnMyWay => (12_000.0, 5, 15.0),
+                PingKind::Defend => (12_000.0, 5, 15.0),
+                PingKind::Assist => (6000.0, 2, 10.0),
                 PingKind::Danger => (1800.0, 5, 4.0),
                 PingKind::Missing | PingKind::Alert => continue,
             };
@@ -691,8 +698,14 @@ impl Coach {
             }
             let lane = knowledge.nearest_lane(p.at).map_or(0, |(l, _)| l);
             for (i, d) in near.into_iter().take(count) {
-                if d > reach {
+                if d > reach || i >= 16 {
                     continue;
+                }
+                if d < 700.0 && h.arrived[i].is_none() {
+                    h.arrived[i] = Some(now);
+                }
+                if h.arrived[i].is_some_and(|t| now.secs_since(t) > secs) {
+                    continue; // been there, held it: done
                 }
                 let m = &members[i];
                 let task = match p.kind {

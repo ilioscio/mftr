@@ -440,6 +440,9 @@ impl Agent {
                 Task::Gank { .. } => -0.15,
                 Task::Engage { .. } => -0.4,
                 Task::Hold { .. } => -0.05,
+                // On the way to a human's call: fight what's on us, not what's on the way.
+                Task::Answer { kind: PingKind::Attack | PingKind::Assist, .. } => -0.2,
+                Task::Answer { .. } if c.memory.damage_on(me.id, 1.5, now) == 0.0 => 0.6,
                 _ => -0.1,
             } - if self.mode == Mode::Fight { 0.15 } else { 0.0 };
             let ally_fighting = c.b.allies.iter().any(|a| {
@@ -629,8 +632,10 @@ impl Agent {
                             self.set_mode(Mode::Travel, now);
                             return self.go(c, at);
                         }
+                        // There: hold the spot, fighting only what comes into reach (an attack
+                        // or assist call chases).
                         self.set_mode(Mode::Fight, now);
-                        micro::fight(self, c, true, None)
+                        micro::fight(self, c, matches!(kind, PingKind::Attack | PingKind::Assist), None)
                     }
                 }
             }
