@@ -7,6 +7,7 @@
 //! no human teammate has (a bot teammate holding it gets theirs in exchange). The match starts
 //! when every human is ready, or when the countdown runs out. Bots fill the remaining slots.
 
+use mftr_bots::Tier;
 use mftr_net::msg::{LobbyAction, LobbySlot, LobbyState};
 use mftr_sim::rng::Pcg32;
 use mftr_sim::{ChampionId, PlayerId, Team};
@@ -25,6 +26,8 @@ pub struct Slot {
     pub rerolls: u8,
     pub ready: bool,
     pub bot: bool,
+    /// A human's vote for the bots' tier (co-op, 17 §9; `Tier::wire`).
+    pub vote: Option<u8>,
 }
 
 impl Slot {
@@ -49,6 +52,8 @@ pub struct Lobby {
     blue_only: bool,
     /// When the match starts (wall clock); set when the first human joins.
     starts_at: Option<f64>,
+    /// Co-op: the bots' tier is voted (17 §9), starting from this one.
+    bot_vote: Option<Tier>,
 }
 
 impl Lobby {
@@ -61,6 +66,7 @@ impl Lobby {
             pick,
             blue_only: false,
             starts_at: None,
+            bot_vote: None,
         };
         for _ in 0..bots.min(max_players) {
             lobby.add(true);
@@ -79,6 +85,36 @@ impl Lobby {
 
     pub fn slots(&self) -> &[Slot] {
         &self.slots
+    }
+
+    /// Let humans vote for the bots' tier, starting from `default` (co-op).
+    pub fn with_bot_vote(mut self, default: Tier) -> Self {
+        self.bot_vote = Some(default);
+        self
+    }
+
+    /// The bots' tier: the most-voted (a tie goes to the easier), else the default; `None`
+    /// where it isn't voted.
+    pub fn bot_tier(&self) -> Option<Tier> {
+        let default = self.bot_vote?;
+        let votes = self.votes();
+        let most = *votes.iter().max().unwrap_or(&0);
+        if most == 0 {
+            return Some(default);
+        }
+        let i = votes.iter().position(|v| *v == most).unwrap_or(1);
+        Tier::from_wire(i as u8).or(Some(default))
+    }
+
+    /// Humans' votes for each tier (Recruit to Nightmare).
+    fn votes(&self) -> [u8; 4] {
+        let mut v = [0u8; 4];
+        for s in self.slots.iter().filter(|s| !s.bot) {
+            if let Some(t) = s.vote {
+                v[(t as usize).min(3)] += 1;
+            }
+        }
+        v
     }
 
     /// Add a human (13 §2) on `team_for_human`'s team, taking a bot's place when the team is
@@ -143,7 +179,7 @@ impl Lobby {
         let player = (0..=u8::MAX).filter(|p| p % 2 == parity).find(|p| !used.contains(p)).map(PlayerId)?;
         let champion = self.draw(team_of(player))?;
         let rerolls = if bot || self.pick { 0 } else { REROLLS };
-        self.slots.push(Slot { player, champion, rerolls, ready: bot, bot });
+        self.slots.push(Slot { player, champion, rerolls, ready: bot, bot, vote: None });
         self.slots.sort_by_key(|s| s.player);
         Some(player)
     }
@@ -183,6 +219,11 @@ impl Lobby {
         let team = self.slots[i].team() as usize;
         match action {
             LobbyAction::Ready(r) => self.slots[i].ready = r,
+            LobbyAction::Bots(t) => {
+                if self.bot_vote.is_some() {
+                    self.slots[i].vote = Some(t.min(3));
+                }
+            }
             LobbyAction::Reroll => {
                 if self.slots[i].rerolls == 0 {
                     return;
@@ -259,6 +300,11 @@ impl Lobby {
             map: String::new(),
             pick: self.pick,
             midgame: false,
+            bots: self.bot_tier().map(|tier| mftr_net::msg::BotsChoice {
+                tier: tier.wire(),
+                votes: self.votes(),
+                mine: self.slots.iter().find(|s| s.player == you).and_then(|s| s.vote),
+            }),
         }
     }
 }

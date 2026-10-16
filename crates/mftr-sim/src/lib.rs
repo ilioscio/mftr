@@ -18,6 +18,7 @@ pub mod lane;
 pub mod map;
 pub mod mapspec;
 pub mod math;
+pub mod ping;
 pub mod projectile;
 pub mod rng;
 pub mod time;

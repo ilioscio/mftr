@@ -88,24 +88,22 @@ fn main() {
             }
         }
         Some("botmatch") => {
-            // M2 slice 5: server bots play ARAM to the end; the replay must re-simulate exactly.
-            let cfg = mftr_server::ServerConfig {
-                seed: num("--seed", 1.0) as u64,
-                bots: num("--bots", 10.0) as u8,
-                scenario: if args.iter().any(|a| a == "--horde") {
-                    Scenario::Horde
-                } else if args.iter().any(|a| a == "--classic") {
-                    Scenario::Classic
-                } else if args.iter().any(|a| a == "--hyper") {
-                    Scenario::Hyper
-                } else if args.iter().any(|a| a == "--mayhem") {
-                    Scenario::Mayhem
-                } else {
-                    Scenario::Aram
-                },
-                ..Default::default()
+            // 17 §11: server bots play whole matches; the replays must re-simulate exactly.
+            let scenario = if args.iter().any(|a| a == "--horde") {
+                Scenario::Horde
+            } else if args.iter().any(|a| a == "--classic") {
+                Scenario::Classic
+            } else if args.iter().any(|a| a == "--hyper") {
+                Scenario::Hyper
+            } else if args.iter().any(|a| a == "--mayhem") {
+                Scenario::Mayhem
+            } else {
+                Scenario::Aram
             };
-            let minutes = num("--minutes", 40.0);
+            let tier = |flag: &str| {
+                get(flag).map(|t| mftr_server::Tier::by_name(&t).unwrap_or_else(|| panic!("unknown tier {t}")))
+            };
+            let both = tier("--tier").unwrap_or(mftr_server::Tier::Veteran);
             let team: Vec<_> = get("--team")
                 .map(|names| {
                     names
@@ -117,76 +115,18 @@ fn main() {
                         .collect()
                 })
                 .unwrap_or_default();
-            let started = std::time::Instant::now();
-            let m = mftr_server::run_bot_match_with_team(cfg, (minutes * 60.0 * 30.0) as u32, &team);
-            let secs = m.ticks as f64 / 30.0;
-            if args.iter().any(|a| a == "--horde") {
-                let cleared = m.horde_waves.last().map_or(0, |w| w.wave);
-                println!(
-                    "Horde: {} waves cleared; {} at {}:{:02}",
-                    cleared,
-                    if m.winner.is_some() { "Base fell" } else { "still defending" },
-                    secs as u32 / 60,
-                    secs as u32 % 60
-                );
-            } else {
-                match m.winner {
-                    Some((team, _)) => println!("{team:?} won after {}:{:02}", secs as u32 / 60, secs as u32 % 60),
-                    None => println!("no winner after {} minutes", minutes),
-                }
-            }
-            println!(
-                "champion deaths {}  structures destroyed {}  simulated in {:.1} s",
-                m.champion_kills,
-                m.structures_destroyed,
-                started.elapsed().as_secs_f64()
-            );
-            if m.monsters_killed != [0, 0] {
-                println!("jungle monsters killed: blue {}, red {}", m.monsters_killed[0], m.monsters_killed[1]);
-            }
-            if !m.horde_waves.is_empty() {
-                println!("Horde clears (wallet + inventory value, per champion):");
-                for w in &m.horde_waves {
-                    let s = w.tick.0 / 30;
-                    let gold: Vec<u32> = w.build_gold.iter().map(|g| g.round() as u32).collect();
-                    println!(
-                        "  wave {:>2}  {:>2}:{:02}  levels {:?}  gold {:?}  Base {:.0}",
-                        w.wave,
-                        s / 60,
-                        s % 60,
-                        w.levels,
-                        gold,
-                        w.base_health
-                    );
-                }
-                println!(
-                    "campaign {}",
-                    if m.horde_waves.iter().any(|w| w.wave >= mftr_sim::horde::GOAL) {
-                        "won; continued into endless"
-                    } else {
-                        "not cleared"
-                    }
-                );
-            }
-            for (t, team, kind, tier) in &m.falls {
-                let s = t.0 / 30;
-                println!("  {:>2}:{:02}  {team:?} {kind:?} (tier {tier})", s / 60, s % 60);
-            }
-            if let Some(path) = get("--replay") {
-                std::fs::write(&path, m.replay.to_text()).expect("write replay");
-                println!("replay written to {path}");
-            }
-            let check = m.replay.verify();
-            println!(
-                "replay: {} ticks, {} hashes checked, {}",
-                check.ticks,
-                check.hashes_checked,
-                match check.mismatch {
-                    None => "all match".to_string(),
-                    Some((t, a, b)) => format!("MISMATCH at tick {}: {a:016x} vs {b:016x}", t.0),
-                }
-            );
-            if check.mismatch.is_some() {
+            let cfg = mftr_tools::botmatch::BotmatchConfig {
+                scenario,
+                seed: num("--seed", 1.0) as u64,
+                seeds: num("--seeds", 1.0) as u64,
+                minutes: num("--minutes", 40.0),
+                team,
+                tiers: [tier("--blue").unwrap_or(both), tier("--red").unwrap_or(both)],
+                replay: get("--replay"),
+                trace: get("--trace").map(|p| p.parse().expect("--trace PLAYER")),
+                trace_falls: args.iter().any(|a| a == "--trace-falls"),
+            };
+            if !mftr_tools::botmatch::run(&cfg) {
                 std::process::exit(1);
             }
         }
@@ -353,7 +293,7 @@ fn main() {
             );
             eprintln!("       mftr-tools blind-report FILE.tsv...");
             eprintln!(
-                "       mftr-tools botmatch [--horde|--mayhem|--hyper|--classic] [--team NAME,...] [--seed N] [--minutes N]"
+                "       mftr-tools botmatch [--horde|--mayhem|--hyper|--classic] [--team NAME,...] [--seed N] [--seeds N] [--minutes N] [--tier|--blue|--red recruit|veteran|elite|nightmare|legacy]"
             );
             eprintln!("       mftr-tools pack validate FILE.glb|DIR...");
             eprintln!("       mftr-tools sfx build [sounds.ron|DIR...]");

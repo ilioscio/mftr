@@ -4,6 +4,7 @@
 //!
 //! Usage: mftr-server [--bind 0.0.0.0:7777] [--key FILE] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,...]
 //!                    [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR]
+//!                    [--bot-tier recruit|veteran|elite|nightmare]
 //!        mftr-server --scenario NAME [--bots N] [--lobby] [--max-players N] [--map FILE.mftrmap] [...]
 //!        mftr-server [--key FILE] --fingerprint
 //!
@@ -18,7 +19,8 @@
 //! map, the ARAM modes on an ARAM map. `--max-matches N` caps the instances running at once;
 //! `--workers N` threads step them (default: one per core). `--replay DIR` records every match
 //! into DIR (rewritten every minute and when a match ends); check one with
-//! `mftr-tools replay FILE`.
+//! `mftr-tools replay FILE`. `--bot-tier` (default veteran) is how well bots play (17 §3): the
+//! starting choice of co-op champion select's vote, and the tier of Versus fill-ins.
 //!
 //! `--scenario NAME` (duel, aram, mayhem, hyper, classic, horde, minions, dodge, empty) offers that
 //! scenario alone, for development: `--bots N` adds server bots (they count toward
@@ -34,7 +36,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,horde,...] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|horde|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]";
+const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,horde,...] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR] [--bot-tier recruit|veteran|elite|nightmare]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|horde|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]";
 /// Instances running at once, by default.
 const MAX_MATCHES: usize = 32;
 
@@ -115,6 +117,12 @@ fn main() -> std::io::Result<()> {
             }
             "--bots" => bots = Some(args.next().and_then(|v| v.parse().ok()).expect("--bots needs a number")),
             "--lobby" => lobby = true,
+            "--bot-tier" => {
+                let name = args.next().expect("--bot-tier needs a tier");
+                base.bot_tier = mftr_server::Tier::by_name(&name)
+                    .filter(|t| *t != mftr_server::Tier::Legacy)
+                    .unwrap_or_else(|| panic!("unknown tier {name}: recruit, veteran, elite or nightmare\n{USAGE}"));
+            }
             "--key" => key_path = args.next().expect("--key needs a file").into(),
             "--fingerprint" => fingerprint_only = true,
             "--replay" => {
@@ -209,6 +217,25 @@ fn main() -> std::io::Result<()> {
     for q in &queues {
         println!("  {}", q.slug());
     }
+
+    // What bots know of each hosted map, built on a thread of its own before players come.
+    let maps: Vec<std::sync::Arc<mftr_sim::map::Map>> = queues
+        .iter()
+        .map(|q| match &q.map {
+            Some(text) => {
+                let spec = mftr_sim::mapspec::MapSpec::parse(text).expect("the map file reads");
+                let map = mftr_sim::mapspec::build(&spec, mftr_sim::map::MapId::Custom);
+                let map = if q.scenario == Scenario::Horde { mftr_sim::map::for_horde(map) } else { map };
+                std::sync::Arc::new(map)
+            }
+            None => q.scenario.map().shared(),
+        })
+        .collect();
+    std::thread::spawn(move || {
+        for map in &maps {
+            mftr_bots::warm_up(map);
+        }
+    });
 
     let clock = Instant::now();
     let now = || clock.elapsed().as_secs_f64();

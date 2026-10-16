@@ -240,7 +240,7 @@ edges, at a speed the player sets; Esc closes settings, then the shop, then open
 | Shop | G |
 | Camera lock toggle / center (hold) | Y / Space |
 | Scroll the camera | Bump the screen edges, arrow keys, or drag with the middle mouse button |
-| Ping wheel | (to be bound; G is the shop) |
+| Ping | Alt + left click (smart: an enemy, attack it; an ally, assist; the ground, look here); Alt + drag for the wheel of eight; Alt + click the minimap |
 
 **Inspecting a unit** (*as built*, as in the reference game, with more): left-click any unit
 in sight (the cursor turns teal over an ally to invite it) and a movable window opens with its
@@ -259,3 +259,13 @@ closes it.
 ## 14. Communication
 
 Context pings (danger, on my way, missing, assist, objective timers, item/spell cooldowns via alt-click). Team chat on by default; all-chat off by default. Pings are rate-limited.
+
+**Pings, as built** (protocol 26, [17 §8](17-bots.md#8-pings)): eight kinds: look here, danger,
+on my way, assist me, enemy missing, attack, defend and group. A ping is a point, optionally on
+a unit. Alt + click pings smart (an enemy: attack it; an ally: assist; the ground: look here);
+Alt + drag opens a wheel, and the drag's direction picks the kind (group at the top, then
+clockwise on my way, assist, attack, danger, missing, defend, look here); Alt + click on the
+minimap pings "look here" there. Only the pinger's team (and spectators) see it: a pulsing ring
+and its call on the ground for 3.5 s, a ring on the minimap, a line in the feed ("Ember: On
+my way") and a sound per kind. At most one ping every 0.5 s and five in 5 s per player. Bots
+ping too, and answer humans' pings.

@@ -82,6 +82,8 @@ var match_banner_age := 0.0
 var match_banner_subtitle := "A new match starts shortly"
 var horde_status := {}
 var notices := []                       # kill feed: { text, age }
+var pings := []                         # team pings (17 §8): { kind, at (units), target, text, age }
+var _ping_gesture := {}                 # Alt held on the ground: { start (screen), at (units) }
 # A3 (10 §6): champion models from content packs. Until champions ship their own, they all wear
 # the shared template (tinted with their identity color). F3 toggles the placeholder shapes.
 var champion_model: MftrModel = null     # the shared template
@@ -259,6 +261,8 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-ward":
 			_shot_ward = true
+		elif args[i] == "--shot-ping":
+			_shot_ping = true
 		elif args[i] == "--shot-goto" and i + 1 < args.size():
 			var xy := args[i + 1].split(",")
 			_shot_goto = Vector2(float(xy[0]), float(xy[1]))
@@ -514,6 +518,7 @@ var _shot_tour_i := 0
 var _shot_tour_at := 0.0
 var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
 var _shot_settings := -1                  # `--shot-settings N`: open Settings on tab N
+var _shot_ping := false                    # `--shot-ping`: ping, then hold the wheel open for the capture
 var _shot_inspect := ""                   # `--shot-inspect self|ally|enemy|minion|monster|turret`: open the inspect window on one
 var _shot_tab_hover := ""                 # `--tab-hover augment|item`: show one's tooltip in it
 var _shot_tab := false                    # `--shot-tab`: hold the match breakdown open
@@ -564,6 +569,7 @@ func _update_shot(delta: float) -> void:
 		_shot_timer += delta
 		if _shot_timer > 0.6 and _shot_timer - delta <= 0.6:
 			client.lobby_reroll()
+			client.lobby_bots(2)
 		elif _shot_timer > 3.0:
 			get_viewport().get_texture().get_image().save_png(_shot_path)
 			print("MFTR: saved screenshot to ", _shot_path)
@@ -574,6 +580,10 @@ func _update_shot(delta: float) -> void:
 	_shot_timer += delta
 	if _shot_inspect != "" and _inspect_id < 0 and _shot_timer > _shot_at - 1.5:
 		_shot_open_inspect()
+	if _shot_ping and _shot_timer > _shot_at - 2.0 and _shot_timer - delta <= _shot_at - 2.0:
+		var c := client.own_position()
+		client.ping("group", c + (client.map_geometry().size / 2.0 - c).normalized() * 600.0, -1)
+		_ping_gesture = {"start": overlay.size / 2.0 + Vector2(220, -60), "at": c}
 	# Everything aims toward the arena's center, whichever side we spawned on.
 	var own := client.own_position()
 	var size: Vector2 = client.map_geometry().size
@@ -1371,6 +1381,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if menu_panel != null or (pause_panel != null and pause_panel.visible):
 		return
+	# Pings (17 §8, 01 §14): Alt + click pings smart (an enemy: attack it; an ally: assist;
+	# the ground: look here); Alt + drag opens the wheel and the drag's direction picks one.
+	if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		var mb := event as InputEventMouseButton
+		if mb.pressed and mb.alt_pressed and client.phase() == "playing" and not client.is_spectator():
+			var at = _cursor_ground()
+			if at != null:
+				_ping_gesture = {"start": mb.position, "at": at}
+			return
+		if not mb.pressed and not _ping_gesture.is_empty():
+			_finish_ping(mb.position)
+			return
 	if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_MIDDLE:
 		cam.drag(event.is_pressed(), (event as InputEventMouseButton).position)
 		return
@@ -2821,6 +2843,114 @@ func _unit_world_pos(id: int):
 	return null
 
 
+const PING_COLORS := {
+	"alert": Color(1.0, 0.85, 0.3), "danger": Color(1.0, 0.3, 0.25), "on_my_way": Color(0.4, 0.75, 1.0),
+	"assist": Color(1.0, 0.62, 0.2), "missing": Color(1.0, 0.85, 0.3), "attack": Color(1.0, 0.42, 0.3),
+	"defend": Color(0.45, 0.7, 1.0), "group": Color(0.35, 0.95, 0.8),
+}
+const PING_SHORT := {
+	"alert": "!", "danger": "DANGER", "on_my_way": "ON MY WAY", "assist": "ASSIST", "missing": "?",
+	"attack": "ATTACK", "defend": "DEFEND", "group": "GROUP",
+}
+## The wheel, clockwise from the top.
+const PING_WHEEL := ["group", "on_my_way", "assist", "attack", "danger", "missing", "defend", "alert"]
+const PING_LIFE := 3.5
+
+
+## The wheel's choice for a drag from `start` to `pos` (none for a click).
+func _ping_choice(start: Vector2, pos: Vector2) -> String:
+	var d := pos - start
+	if d.length() < 24.0:
+		return ""
+	var i := int(round(fposmod(d.angle() + PI / 2.0, TAU) / (TAU / 8.0))) % 8
+	return PING_WHEEL[i]
+
+
+## Alt released: ping what the gesture chose.
+func _finish_ping(pos: Vector2) -> void:
+	var g := _ping_gesture
+	_ping_gesture = {}
+	var kind := _ping_choice(g.start, pos)
+	var id := _pick_unit(g.at)
+	var unit := id >= 0 and id != client.own_unit_id() and remote_info.has(id)
+	var target := -1
+	if kind == "":
+		if unit:
+			target = id
+			kind = "assist" if remote_info[id].ally else "attack"
+		else:
+			kind = "alert"
+	elif unit and kind in ["attack", "defend", "assist"]:
+		target = id
+	client.ping(kind, g.at, target)
+
+
+## A ping arrived: on the ground and the minimap for a few seconds, in the feed, with its sound.
+func _add_ping(n: Dictionary) -> void:
+	pings.append({"kind": n.ping, "at": n.at, "target": n.target, "age": 0.0})
+	if pings.size() > 8:
+		pings.pop_front()
+	var who := _name_of(n.from) if n.from >= 0 else "Someone"
+	var text: String = n.text
+	if n.target >= 0 and remote_info.has(n.target) and n.ping in ["attack", "defend", "assist"]:
+		text += " " + _name_of(n.target)
+	notices.append({"text": "%s: %s" % [who, text], "age": 0.0})
+	if champion_model != null:
+		var table := _sfx_table("")
+		sfx.play_flat(table.get("ping." + String(n.ping), table.get("ping.alert", [])))
+
+
+## Pings on the ground: a ring that pulses then fades, the call above it; and the wheel while
+## Alt is held.
+func _draw_pings(font: Font) -> void:
+	var k := _hud_k()
+	var bold := _bold_font()
+	var labels: Array[Vector2] = []
+	# Newest first: answers to one call land on one spot and share its label.
+	for j in range(pings.size() - 1, -1, -1):
+		var p: Dictionary = pings[j]
+		var at: Vector2 = p.at
+		if p.target >= 0 and remote_info.has(p.target):
+			at = remote_info[p.target].pos
+		var s = _screen(_to_world(at))
+		if s == null:
+			continue
+		var c: Color = PING_COLORS.get(p.kind, Color.WHITE)
+		var fade := clampf((PING_LIFE - p.age) / 0.6, 0.0, 1.0)
+		var pulse := fmod(p.age, 1.0)
+		overlay.draw_arc(s, (14.0 + 34.0 * pulse) * k, 0.0, TAU, 40, Color(c, (1.0 - pulse) * fade), 3.0 * k)
+		overlay.draw_arc(s, 12.0 * k, 0.0, TAU, 32, Color(c, fade), 4.0 * k)
+		overlay.draw_circle(s, 5.0 * k, Color(c, fade))
+		var label: String = PING_SHORT.get(p.kind, "!")
+		var fs := roundi(15.0 * k)
+		var top: Vector2 = s - Vector2(0, 26.0 * k)
+		if labels.any(func(q: Vector2): return q.distance_to(top) < 40.0 * k):
+			continue
+		labels.append(top)
+		overlay.draw_string_outline(bold, top - Vector2(80, 0), label, HORIZONTAL_ALIGNMENT_CENTER, 160, fs, maxi(3, fs / 4), Color(0, 0, 0, 0.85 * fade))
+		overlay.draw_string(bold, top - Vector2(80, 0), label, HORIZONTAL_ALIGNMENT_CENTER, 160, fs, Color(c, fade))
+	if _ping_gesture.is_empty():
+		return
+	var center: Vector2 = _ping_gesture.start
+	var chosen := _ping_choice(center, overlay.get_local_mouse_position())
+	overlay.draw_circle(center, 96.0 * k, Color(0.03, 0.04, 0.06, 0.55))
+	overlay.draw_arc(center, 96.0 * k, 0.0, TAU, 48, Color(Hud.GOLD, 0.6), 1.5 * k)
+	for i in PING_WHEEL.size():
+		var kind: String = PING_WHEEL[i]
+		var dir := Vector2.from_angle(-PI / 2.0 + TAU * i / 8.0)
+		var pos := center + dir * 64.0 * k
+		var c: Color = PING_COLORS[kind]
+		var on := kind == chosen
+		overlay.draw_circle(pos, (17.0 if on else 13.0) * k, Color(c, 0.95 if on else 0.6))
+		var fs := roundi((13.0 if on else 11.0) * k)
+		var text: String = PING_SHORT[kind]
+		overlay.draw_string_outline(bold, pos + Vector2(-60, -20.0 * k), text, HORIZONTAL_ALIGNMENT_CENTER, 120, fs, 3, Color(0, 0, 0, 0.9))
+		overlay.draw_string(bold, pos + Vector2(-60, -20.0 * k), text, HORIZONTAL_ALIGNMENT_CENTER, 120, fs, Color.WHITE if on else Color(1, 1, 1, 0.8))
+	overlay.draw_circle(center, 4.0 * k, Color.WHITE)
+	var hint := "release to ping" if chosen != "" else "drag to choose · release here: smart ping"
+	overlay.draw_string(font, center + Vector2(-120, 118.0 * k), hint, HORIZONTAL_ALIGNMENT_CENTER, 240, roundi(12.0 * k), Hud.DIM)
+
+
 func _name_of(id: int) -> String:
 	if id == client.own_unit_id():
 		return "You"
@@ -2895,6 +3025,9 @@ func _update_combat_text(delta: float) -> void:
 		elif n.kind == "blinked":
 			_blink_marks(_to_world(n.from), _to_world(n.to))
 			continue
+		elif n.kind == "ping":
+			_add_ping(n)
+			continue
 		elif n.unit == client.own_unit_id():
 			text = "You respawned"
 		if text != "":
@@ -2908,6 +3041,9 @@ func _update_combat_text(delta: float) -> void:
 	for n in notices:
 		n.age += delta
 	notices = notices.filter(func(n): return n.age < 4.0)
+	for p in pings:
+		p.age += delta
+	pings = pings.filter(func(p): return p.age < PING_LIFE)
 
 
 ## Click indicator: a ring that collapses over ~0.1 s (familiar feel, R01 §6).
@@ -2988,6 +3124,7 @@ func _draw_overlay() -> void:
 		var bold := _bold_font()
 		overlay.draw_string_outline(bold, s + Vector2(-80, 0), f.text, HORIZONTAL_ALIGNMENT_CENTER, 160, fs, maxi(4, fs / 5), Color(0, 0, 0, 0.85 * c.a))
 		overlay.draw_string(bold, s + Vector2(-80, 0), f.text, HORIZONTAL_ALIGNMENT_CENTER, 160, fs, c)
+	_draw_pings(font)
 	_draw_ability_bar(font)
 	_draw_top_right(font)
 	if _chips.size() > remote_info.size() + 32:
@@ -5145,6 +5282,42 @@ var _last_lobby := {}                     # the lobby as last seen, for the load
 var _portraits_seen := 0                  # portraits rendered so far (rebuilds the lobby)
 
 
+const BOT_TIERS := ["Recruit", "Veteran", "Elite", "Nightmare"]
+const BOT_TIER_HINTS := [
+	"Slow to react, often misses; learns the ropes with you.",
+	"Plays the lanes, groups up, takes objectives.",
+	"Tracks cooldowns, kites, ganks and wards.",
+	"Reacts as fast as a sharp player; full teamwork.",
+]
+
+
+## The bots' tier in co-op champion select: a button per tier with its votes, the winning one
+## lit, ours marked.
+func _lobby_bots_row(bots: Dictionary, horde: bool) -> Control:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 8)
+	var label := Label.new()
+	label.text = "ALLY BOTS" if horde else "BOTS"
+	label.theme_type_variation = "HeaderLabel"
+	row.add_child(label)
+	var votes: PackedInt32Array = bots.get("votes", PackedInt32Array())
+	for i in BOT_TIERS.size():
+		var b := Button.new()
+		var n: int = votes[i] if i < votes.size() else 0
+		b.text = BOT_TIERS[i] + ("  ·  %d" % n if n > 0 else "")
+		b.toggle_mode = true
+		b.button_pressed = bots.get("mine", -1) == i
+		b.theme_type_variation = "PrimaryButton" if bots.get("tier", 1) == i else "Button"
+		b.custom_minimum_size = Vector2(118, 36)
+		b.focus_mode = Control.FOCUS_NONE
+		b.tooltip_text = BOT_TIER_HINTS[i] + "\nEvery tier gets the same gold and stats: only how well it plays changes."
+		var tier := i
+		b.pressed.connect(func(): client.lobby_bots(tier); _lobby_refresh = 0.0)
+		row.add_child(b)
+	return row
+
+
 func _update_lobby(delta: float, phase: String) -> void:
 	if phase != "lobby":
 		if lobby_panel != null:
@@ -5182,7 +5355,7 @@ func _update_lobby(delta: float, phase: String) -> void:
 		_lobby_timer.text = "%d" % ceili(l.starts_in)
 	# Rebuild only when something but the countdown changed, so buttons keep their hover and
 	# a click isn't lost to a rebuild.
-	var sig := str(l.slots) + str(l.bench) + str(_portraits_seen)
+	var sig := str(l.slots) + str(l.bench) + str(_portraits_seen) + str(l.get("bots", {}))
 	if sig == _lobby_sig:
 		return
 	_lobby_sig = sig
@@ -5334,6 +5507,10 @@ func _update_lobby(delta: float, phase: String) -> void:
 	ready.pressed.connect(func(): client.lobby_ready(not _lobby_ready); _lobby_refresh = 0.0)
 	actions.add_child(ready)
 	center.add_child(actions)
+	# Co-op: how well the bots play (17 §9), voted; the most votes wins, a tie the easier.
+	var bots: Dictionary = l.get("bots", {})
+	if not bots.is_empty():
+		center.add_child(_lobby_bots_row(bots, l.get("mode", "") == "Mayhem: Horde"))
 	mid.add_child(center)
 
 	var theirs := VBoxContainer.new()
@@ -6105,6 +6282,9 @@ func _build_minimap(geo: Dictionary) -> void:
 		if not client.is_spectator():
 			client.move_to(p)
 			_show_click_marker(_to_world(p), Color(0.45, 0.75, 1.0)))
+	minimap.ping.connect(func(p: Vector2):
+		if not client.is_spectator():
+			client.ping("alert", p, -1))
 	RenderingServer.global_shader_parameter_set("fog_size", geo.size * UNITS_TO_METERS)
 
 
@@ -6112,6 +6292,7 @@ func _update_minimap(delta: float, playing: bool) -> void:
 	if minimap == null:
 		return
 	minimap.visible = playing and settings.minimap_shown and blind_state != "rating" and loading_panel == null
+	minimap.pings = pings.map(func(p): return {"pos": p.at, "color": PING_COLORS.get(p.kind, Color.WHITE), "age": p.age})
 	_fog_refresh -= delta
 	if playing and _fog_refresh <= 0.0 and not _terrain_pending:
 		_fog_refresh = 0.15

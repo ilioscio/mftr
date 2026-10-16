@@ -1,6 +1,5 @@
-//! Basic server-side bots (M2 slice 5): fill empty slots so a match can be played (and tested)
-//! with fewer than ten humans. A bot plays through ordinary commands, exactly like a client,
-//! so replays record it like anyone else. It only uses what its team can see.
+//! The M2 slice 5 bot (the `legacy` tier, 17 §11): kept unchanged as the baseline the new bots
+//! are measured against. Not offered to players.
 //!
 //! Behavior: follow its minion wave down the lane, staying out of enemy turret range unless
 //! allied minions are tanking; fight enemy champions in reach with its whole kit; heal and
@@ -48,7 +47,7 @@ enum Role {
     Jungle,
 }
 
-pub struct Bot {
+pub struct LegacyBot {
     pub player: PlayerId,
     rng: Pcg32,
     seq: u32,
@@ -59,7 +58,7 @@ pub struct Bot {
     now: Tick,
 }
 
-impl Bot {
+impl LegacyBot {
     pub fn new(player: PlayerId, seed: u64) -> Self {
         Self {
             player,
@@ -599,7 +598,7 @@ mod tests {
     use mftr_sim::map::MapId;
     use mftr_sim::world::Rules;
 
-    fn horde() -> (World, Vec<Bot>) {
+    fn horde() -> (World, Vec<LegacyBot>) {
         let mut w = World::new(7);
         w.set_map(MapId::HordeBridge.shared());
         w.set_rules(Rules::HORDE);
@@ -608,12 +607,12 @@ mod tests {
         for (i, champion) in ChampionId::ALL[..5].iter().enumerate() {
             let player = PlayerId(i as u8);
             w.spawn_champion(player, Team::Blue, *champion, w.map().layout.champion_spawn[0]);
-            bots.push(Bot::new(player, 7));
+            bots.push(LegacyBot::new(player, 7));
         }
         (w, bots)
     }
 
-    fn step(w: &mut World, bots: &mut [Bot]) {
+    fn step(w: &mut World, bots: &mut [LegacyBot]) {
         let k = Tick(w.tick().0 + 1);
         let cmds: Vec<Command> = bots.iter_mut().flat_map(|b| b.think(w, k)).collect();
         w.step(&cmds);

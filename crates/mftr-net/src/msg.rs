@@ -10,6 +10,7 @@ use crate::packet::PacketHeader;
 use mftr_sim::ability::{Beam, Cc, Damage, DamageKind, LineSkillshot, Pulses, SLOTS};
 use mftr_sim::items::INVENTORY;
 use mftr_sim::map::MapId;
+use mftr_sim::ping::{Ping, PingKind};
 use mftr_sim::world::{BufferedCast, DamageOrigin, EchoCast, MAX_PATH, Path, Progress, Recovery, Rules, Trade, UNDO};
 use mftr_sim::{
     Area, AttackWindup, Bolt, Cast, ChampionId, Channel, Command, CommandKind, DashMove, MinionKind, Missile, Order,
@@ -69,6 +70,12 @@ pub enum ClientMessage {
         hash: u64,
         have: u32,
     },
+    /// A ping for the team (17 §8): what, where, on which unit.
+    Ping {
+        kind: PingKind,
+        at: Vec2,
+        target: Option<UnitId>,
+    },
     /// The details of a unit for the inspect window (01 §13), asked a few times a second while
     /// it's open; the server answers with `Inspect` if the unit is visible to the asker.
     Inspect {
@@ -84,6 +91,17 @@ pub enum LobbyAction {
     /// Swap with a champion on the team bench.
     Take(ChampionId),
     Ready(bool),
+    /// Vote for how well the bots play (co-op, 17 §9): a tier, 0–3 (Recruit to Nightmare).
+    Bots(u8),
+}
+
+/// The bots' tier in a co-op champion select (17 §9): the most-voted (a tie goes to the easier),
+/// the votes for each tier, and our own vote.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BotsChoice {
+    pub tier: u8,
+    pub votes: [u8; 4],
+    pub mine: Option<u8>,
 }
 
 /// One player in champion select.
@@ -115,6 +133,8 @@ pub struct LobbyState {
     /// Joining a match in progress (13 §3): only our own slot is ours to change; the match
     /// goes on meanwhile.
     pub midgame: bool,
+    /// Co-op: how well the bots will play, and the votes (17 §9). `None` in Versus.
+    pub bots: Option<BotsChoice>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1050,6 +1070,17 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             w.write_u32(*xp);
             write_time(w, *at);
         }
+        SimEvent::Ping(p) => {
+            w.write(21, 5);
+            w.write(p.kind.wire() as u64, 3);
+            write_vec2(w, p.at);
+            for id in [p.target, p.from] {
+                w.write_bool(id.is_some());
+                if let Some(id) = id {
+                    w.write_u32(id.0);
+                }
+            }
+        }
         SimEvent::PlatesBroken { unit, count, at } => {
             w.write(17, 5);
             w.write_u32(unit.0);
@@ -1128,6 +1159,13 @@ fn read_event_of(kind: u64, r: &mut BitReader) -> Result<SimEvent, DecodeError> 
         14 => SimEvent::Healed { unit: unit(r)?, amount: read_finite(r)?, at: read_time(r)? },
         15 => SimEvent::MatchEnded { winner: read_team(r)?, at: read_time(r)? },
         16 => SimEvent::Reward { unit: unit(r)?, gold: read_finite(r)?, xp: r.read_u32()?, at: read_time(r)? },
+        21 => {
+            let kind = PingKind::from_wire(r.read(3)? as u8).ok_or(DecodeError::Invalid("ping kind"))?;
+            let at = read_vec2(r)?;
+            let target = if r.read_bool()? { Some(unit(r)?) } else { None };
+            let from = if r.read_bool()? { Some(unit(r)?) } else { None };
+            SimEvent::Ping(Ping { kind, at, target, from })
+        }
         17 => SimEvent::PlatesBroken { unit: unit(r)?, count: r.read(3)? as u8, at: read_time(r)? },
         18 => SimEvent::HordeWon { at: read_time(r)? },
         19 => SimEvent::BeamStarted(read_channel(r)?),
@@ -1761,6 +1799,10 @@ pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
                     w.write(2, 2);
                     w.write_bool(*r);
                 }
+                LobbyAction::Bots(t) => {
+                    w.write(3, 2);
+                    w.write(*t as u64 & 3, 2);
+                }
             }
             w.finish()
         }
@@ -1773,6 +1815,16 @@ pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
         ClientMessage::Inspect { unit } => {
             let mut w = begin(header, 5);
             w.write_u32(unit.0);
+            w.finish()
+        }
+        ClientMessage::Ping { kind, at, target } => {
+            let mut w = begin(header, 6);
+            w.write(kind.wire() as u64, 3);
+            write_vec2(&mut w, *at);
+            w.write_bool(target.is_some());
+            if let Some(t) = target {
+                w.write_u32(t.0);
+            }
             w.finish()
         }
     }
@@ -1808,10 +1860,17 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
             0 => LobbyAction::Reroll,
             1 => LobbyAction::Take(read_champion(&mut r)?.ok_or(DecodeError::Invalid("champion"))?),
             2 => LobbyAction::Ready(r.read_bool()?),
+            3 => LobbyAction::Bots(r.read(2)? as u8),
             _ => return Err(DecodeError::Invalid("lobby action")),
         }),
         4 => ClientMessage::MapRequest { hash: r.read_u64()?, have: r.read_u32()? },
         5 => ClientMessage::Inspect { unit: UnitId(r.read_u32()?) },
+        6 => {
+            let kind = PingKind::from_wire(r.read(3)? as u8).ok_or(DecodeError::Invalid("ping kind"))?;
+            let at = read_vec2(&mut r)?;
+            let target = if r.read_bool()? { Some(UnitId(r.read_u32()?)) } else { None };
+            ClientMessage::Ping { kind, at, target }
+        }
         _ => return Err(DecodeError::Invalid("message kind")),
     };
     Ok((header, msg))
@@ -2170,6 +2229,15 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             for b in map.bytes() {
                 w.write_u8(b);
             }
+            w.write_bool(l.bots.is_some());
+            if let Some(b) = l.bots {
+                w.write(b.tier as u64 & 3, 2);
+                for v in b.votes {
+                    w.write(v.min(15) as u64, 4);
+                }
+                w.write_bool(b.mine.is_some());
+                w.write(b.mine.unwrap_or(0) as u64 & 3, 2);
+            }
             w.finish()
         }
     }
@@ -2361,7 +2429,29 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             }
             let bytes = (0..len).map(|_| r.read_u8()).collect::<Result<Vec<u8>, _>>()?;
             let map = String::from_utf8(bytes).map_err(|_| DecodeError::Invalid("map name"))?;
-            ServerMessage::Lobby(Box::new(LobbyState { you, slots, bench, starts_in_ms, mode, map, pick, midgame }))
+            let bots = if r.read_bool()? {
+                let tier = r.read(2)? as u8;
+                let mut votes = [0u8; 4];
+                for v in votes.iter_mut() {
+                    *v = r.read(4)? as u8;
+                }
+                let has = r.read_bool()?;
+                let mine = r.read(2)? as u8;
+                Some(BotsChoice { tier, votes, mine: has.then_some(mine) })
+            } else {
+                None
+            };
+            ServerMessage::Lobby(Box::new(LobbyState {
+                you,
+                slots,
+                bench,
+                starts_in_ms,
+                mode,
+                map,
+                pick,
+                midgame,
+                bots,
+            }))
         }
         _ => return Err(DecodeError::Invalid("message kind")),
     };
@@ -2443,8 +2533,21 @@ mod tests {
             map: "Crossroads".into(),
             pick: true,
             midgame: true,
+            bots: Some(BotsChoice { tier: 2, votes: [0, 1, 2, 0], mine: Some(2) }),
         }));
         assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
+        let vote = ClientMessage::Lobby(LobbyAction::Bots(3));
+        assert_eq!(decode_client(&encode_client(&hdr(), &vote)).unwrap().1, vote);
+    }
+
+    /// 17 §8: a ping, every kind, with and without a target.
+    #[test]
+    fn pings_round_trip() {
+        for (i, kind) in PingKind::ALL.into_iter().enumerate() {
+            let target = (i % 2 == 0).then_some(UnitId(77 + i as u32));
+            let msg = ClientMessage::Ping { kind, at: Vec2::new(100.0 * i as f32, 4321.75), target };
+            assert_eq!(decode_client(&encode_client(&hdr(), &msg)).unwrap().1, msg);
+        }
     }
 
     /// Facing travels in 10 bits: every direction comes back within half a step (0.18°).
@@ -2786,6 +2889,13 @@ mod tests {
             SimEvent::MatchEnded { winner: Team::Red, at: SimTime(99_000) },
             SimEvent::Reward { unit: UnitId(3), gold: 21.5, xp: 60, at: SimTime(99_001) },
             SimEvent::HordeWon { at: SimTime(99_002) },
+            SimEvent::Ping(Ping {
+                kind: PingKind::OnMyWay,
+                at: Vec2::new(1234.5, 6789.25),
+                target: Some(UnitId(12)),
+                from: Some(UnitId(3)),
+            }),
+            SimEvent::Ping(Ping { kind: PingKind::Group, at: Vec2::new(10.0, 20.0), target: None, from: None }),
         ];
         let snap = Snapshot {
             horde: Some(HordeStatus {

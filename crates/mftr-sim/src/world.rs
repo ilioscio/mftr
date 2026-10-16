@@ -1466,6 +1466,9 @@ pub enum SimEvent {
         at: SimTime,
     },
     /// Gold and experience earned (sent to the earner only).
+    /// A team ping (17 §8). Never simulated: the server relays players' and bots' pings to
+    /// their team on the events channel.
+    Ping(crate::ping::Ping),
     Reward {
         unit: UnitId,
         gold: f32,

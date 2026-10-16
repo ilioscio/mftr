@@ -72,6 +72,32 @@
             (wave: "square", freq: (196.0, 190.0), env: (0.0, 0.05, 0.4), gain: 0.5, duty: 0.125),
             (wave: "sine", freq: (98.0, 92.0), env: (0.0, 0.05, 0.5), gain: 0.8, punch: 0.5),
         ]),
+        // Pings (17 §8), played flat: bright and short so they cut through a fight, each kind
+        // its own contour. Look here: a double chirp.
+        (name: "ping_alert", events: ["ping.alert"], volume: 0.5, echo: (delay: 0.08, feedback: 0.2), layers: [
+            (wave: "sine", freq: (1320.0, 1320.0), env: (0.0, 0.04, 0.08), gain: 0.5),
+            (wave: "sine", freq: (1760.0, 1760.0), env: (0.0, 0.04, 0.12), gain: 0.45, delay: 0.09),
+        ]),
+        // Danger: a low two-tone warning.
+        (name: "ping_danger", events: ["ping.danger"], volume: 0.55, crush: (bits: 9, hold: 1), layers: [
+            (wave: "square", freq: (440.0, 440.0), env: (0.0, 0.09, 0.05), gain: 0.35, duty: 0.3, lowpass: (2600.0, 2000.0)),
+            (wave: "square", freq: (330.0, 330.0), env: (0.0, 0.12, 0.12), gain: 0.35, duty: 0.3, lowpass: (2600.0, 2000.0), delay: 0.13),
+        ]),
+        // Coming / gather / defend: a rising sweep.
+        (name: "ping_coming", events: ["ping.on_my_way", "ping.group", "ping.defend"], volume: 0.45, echo: (delay: 0.07, feedback: 0.25), layers: [
+            (wave: "triangle", freq: (660.0, 1320.0), env: (0.01, 0.1, 0.1), gain: 0.5),
+            (wave: "sine", freq: (990.0, 1980.0), env: (0.01, 0.08, 0.1), gain: 0.25, delay: 0.04),
+        ]),
+        // Attack / assist: a sharp metallic strike.
+        (name: "ping_attack", events: ["ping.attack", "ping.assist"], volume: 0.5, layers: [
+            (wave: "metal", freq: (2400.0, 1800.0), env: (0.0, 0.02, 0.18), gain: 0.4),
+            (wave: "square", freq: (880.0, 660.0), env: (0.0, 0.05, 0.1), gain: 0.3, duty: 0.25, lowpass: (4000.0, 2500.0)),
+        ]),
+        // Enemy missing: a questioning rise and fall.
+        (name: "ping_missing", events: ["ping.missing"], volume: 0.45, layers: [
+            (wave: "sine", freq: (880.0, 1320.0), env: (0.0, 0.08, 0.04), gain: 0.5),
+            (wave: "sine", freq: (1320.0, 990.0), env: (0.0, 0.08, 0.12), gain: 0.45, delay: 0.12),
+        ]),
         // The match's end, played flat when a Base falls: a brassy rising arpeggio into a held
         // major chord with a timpani roll for victory; a falling minor line for defeat.
         (name: "victory", events: ["match.victory"], volume: 0.7, echo: (delay: 0.11, feedback: 0.25), layers: [

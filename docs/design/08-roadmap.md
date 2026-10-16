@@ -1034,6 +1034,35 @@ critical information it lacks.
 - **Checked:** round-trip and visibility tests; captures of the window on ourselves, an enemy,
   a minion, a turret and a camp in a Classic match.
 
+## B — Bots v2 (after I)
+
+The owner's call: PvE is what the game launches on, so bots should play better than the
+reference game's: more nuanced, more strategic, honest about what they know, and cheap enough
+to keep many matches on a server ([17](17-bots.md), D62).
+
+### Status (2026-10-16): ✅ built (awaiting the owner's review)
+- **`mftr-bots`:** a team coach (tasks, roles, engage calls, sieges, defenses, ganks), an agent
+  per bot (behaviors held by their task) and micro (timed last hits, trades, kiting, combos from
+  a hit-probability model, dodging after a reaction delay, peel). Bots see only their team's
+  vision and remember what they saw. The M2 bot stays as the `legacy` tier.
+- **Four honest tiers** (Recruit, Veteran, Elite, Nightmare): the same gold and stats; they
+  differ in reaction, aim, think rate, order budget and decisions. Co-op champion select votes
+  the tier (the most votes wins, a tie the easier); `--bot-tier` (NixOS `botTier`) sets the
+  default and the tier for Versus fill-ins and dropped players.
+- **Pings** (protocol 26): eight kinds, Alt + click (smart) or Alt + drag (the wheel), on the
+  ground and the minimap with sounds. Bots answer human calls and announce their own plans,
+  rate-limited.
+- **`mftr-tools botmatch`:** tier against tier on paired seeds, with CS, worth, damage, pings,
+  time per mode and bot cost; `--trace` and `--trace-falls` for one bot's decisions.
+- **Measured:** Veteran beats the old bot 33–4 in ARAM and 18–2 in Classic; each tier
+  beats the one below (ARAM 27–4 and 25–11, Classic 17–3 and 14–6) except Nightmare over Elite,
+  which is about even (ARAM 17–14, Classic 31–29 over 60 games) until its strategic edges
+  (counter-jungling, objective trades) are built. Every tier clears the Horde campaign; the old
+  bot fell at wave 19 on one of two seeds. Bots cost about a tenth of the simulation in Classic
+  (6–12 µs a tick against 94–100 µs). Dodging by tier, Recruit to Nightmare: lines 0–94%, areas
+  17–100% (17 §12).
+- **Not yet:** counter-jungling, objective trades and vision denial (17 §12).
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

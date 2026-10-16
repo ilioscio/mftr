@@ -481,7 +481,36 @@ impl MatchClient {
             slots.push(&e.to_variant());
         }
         d.set("slots", &slots);
+        if let Some(b) = l.bots {
+            let mut bots = VarDictionary::new();
+            bots.set("tier", b.tier as i64);
+            let votes: PackedInt32Array = b.votes.iter().map(|v| *v as i32).collect();
+            bots.set("votes", &votes);
+            bots.set("mine", b.mine.map_or(-1, |m| m as i64));
+            d.set("bots", &bots);
+        }
         d
+    }
+
+    /// Vote for how well the bots play (co-op champion select, 17 §9): 0 Recruit, 1 Veteran,
+    /// 2 Elite, 3 Nightmare.
+    #[func]
+    fn lobby_bots(&mut self, tier: i64) {
+        self.lobby_action(mftr_net::msg::LobbyAction::Bots(tier.clamp(0, 3) as u8));
+    }
+
+    /// Ping for the team (17 §8): `kind` "alert", "danger", "on_my_way", "assist", "missing",
+    /// "attack", "defend" or "group"; at a ground point, on unit `target` (or -1).
+    #[func]
+    fn ping(&mut self, kind: GString, at: Vector2, target: i64) {
+        let Some(kind) = ping_from_key(&kind.to_string()) else { return };
+        if self.session.phase() != Phase::Playing {
+            return;
+        }
+        let now = self.now();
+        let target = (target >= 0).then_some(mftr_sim::world::UnitId(target as u32));
+        let p = self.session.ping_packet(kind, mftr_sim::Vec2::new(at.x, at.y), target);
+        self.transmit(p, now);
     }
 
     #[func]
@@ -856,6 +885,14 @@ impl MatchClient {
                     d.set("unit", unit.0 as i64);
                     d.set("from", Vector2::new(from.x, from.y));
                     d.set("to", Vector2::new(to.x, to.y));
+                }
+                Notice::Ping(p) => {
+                    d.set("kind", "ping");
+                    d.set("ping", ping_key(p.kind));
+                    d.set("text", p.kind.text());
+                    d.set("at", Vector2::new(p.at.x, p.at.y));
+                    d.set("target", p.target.map_or(-1, |t| t.0 as i64));
+                    d.set("from", p.from.map_or(-1, |t| t.0 as i64));
                 }
             }
             out.push(&d.to_variant());
@@ -2183,6 +2220,25 @@ fn icon_kind(a: &mftr_sim::ability::Ability) -> &'static str {
 
 /// An augment for the client: `{ id, name, tier, text, glyph }`, the glyph naming its icon (its
 /// mechanic, or for a stat augment its main stat).
+/// A ping kind's key for GDScript (icons, colors, sounds).
+fn ping_key(k: mftr_sim::ping::PingKind) -> &'static str {
+    use mftr_sim::ping::PingKind as P;
+    match k {
+        P::Alert => "alert",
+        P::Danger => "danger",
+        P::OnMyWay => "on_my_way",
+        P::Assist => "assist",
+        P::Missing => "missing",
+        P::Attack => "attack",
+        P::Defend => "defend",
+        P::Group => "group",
+    }
+}
+
+fn ping_from_key(key: &str) -> Option<mftr_sim::ping::PingKind> {
+    mftr_sim::ping::PingKind::ALL.into_iter().find(|k| ping_key(*k) == key)
+}
+
 /// An inspected unit's effect, worded: `(key, name, text, mood)`.
 fn effect_text(e: &mftr_net::msg::InfoEffect) -> (&'static str, String, String, &'static str) {
     use mftr_net::msg::InfoEffectKind as K;

@@ -195,6 +195,8 @@ pub enum Notice {
         gold: f32,
         xp: u32,
     },
+    /// A teammate (or a bot) pinged (17 §8).
+    Ping(mftr_sim::ping::Ping),
 }
 
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
@@ -1135,6 +1137,7 @@ impl ClientSession {
                 SimEvent::Blinked { unit, from, to, .. } if unit != self.unit => {
                     self.notices.push(Notice::Blinked { unit, from, to })
                 }
+                SimEvent::Ping(p) => self.notices.push(Notice::Ping(p)),
                 _ => {}
             }
         }
@@ -1541,6 +1544,13 @@ impl ClientSession {
     pub fn inspect_packet(&mut self, unit: UnitId) -> Vec<u8> {
         let h = self.header();
         let bytes = msg::encode_client(&h, &ClientMessage::Inspect { unit });
+        self.finish_packet(bytes)
+    }
+
+    /// A ping for the team (17 §8): what, where, on which unit (the server says who sent it).
+    pub fn ping_packet(&mut self, kind: mftr_sim::ping::PingKind, at: Vec2, target: Option<UnitId>) -> Vec<u8> {
+        let h = self.header();
+        let bytes = msg::encode_client(&h, &ClientMessage::Ping { kind, at, target });
         self.finish_packet(bytes)
     }
 

@@ -9,6 +9,7 @@ extends Control
 
 signal look(point: Vector2, held: bool)   # game units; held = the button is still down
 signal move_to(point: Vector2)
+signal ping(point: Vector2)                 # Alt + click: a ping there (17 §8)
 
 const BASE_WIDTH := 380.0                # px at 100% for a 2:1 map (a square one gets 250)
 const MARGIN := 14.0
@@ -20,6 +21,7 @@ var terrain: Texture2D = null            # a top-down render of the map, when th
 var fog_texture: ImageTexture = null
 var icons: Array = []                    # [{ pos, kind, team: "own"/"ally"/"enemy", champion, color }]
 var view_poly := PackedVector2Array()    # the camera's view on the ground, game units
+var pings: Array = []                    # [{ pos, color, age }]: team pings, as rings
 var _fog: TextureRect
 var _layer: Control
 var _held := false
@@ -167,6 +169,13 @@ func _draw_icons() -> void:
 					var letter: String = i.champion.substr(0, 1)
 					var fs := int(maxf(9.0, 12.0 * k))
 					_layer.draw_string(font, p + Vector2(-r, fs * 0.36), letter, HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, fs, Color.WHITE)
+	# Pings: a ring that shrinks onto the spot, then a steady dot.
+	for p in pings:
+		var c: Color = p.color
+		var at := to_px(p.pos)
+		var shrink := clampf(1.0 - p.age / 0.6, 0.0, 1.0)
+		_layer.draw_arc(at, maxf(4.0, (6.0 + 22.0 * shrink) * k), 0.0, TAU, 24, Color(c, 0.9), 2.0)
+		_layer.draw_circle(at, maxf(2.5, 3.5 * k), c)
 	# The camera's view on the ground.
 	if view_poly.size() == 4:
 		var px := PackedVector2Array()
@@ -185,7 +194,11 @@ func _draw_icons() -> void:
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_LEFT:
+		if mb.button_index == MOUSE_BUTTON_LEFT and mb.alt_pressed:
+			if mb.pressed:
+				ping.emit(_clamped(mb.position))
+			accept_event()
+		elif mb.button_index == MOUSE_BUTTON_LEFT:
 			_held = mb.pressed
 			look.emit(_clamped(mb.position), mb.pressed)
 			accept_event()

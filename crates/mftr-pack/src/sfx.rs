@@ -29,6 +29,8 @@ pub const ACTIONS: &[&str] = &["attack", "q", "w", "e", "r", "d", "f", "*"];
 pub const PHASES: &[&str] = &["cast", "release", "impact", "detonate", "start", "land", "fire"];
 pub const UNIT_EVENTS: &[&str] = &["foot", "death", "respawn", "recall", "emote"];
 pub const MATCH_EVENTS: &[&str] = &["victory", "defeat"];
+/// Pings (17 §8): `ping.<kind>`.
+pub const PING_EVENTS: &[&str] = &["alert", "danger", "on_my_way", "assist", "missing", "attack", "defend", "group"];
 
 #[derive(Clone, Debug, DeRon)]
 pub struct SfxFile {
@@ -77,6 +79,8 @@ fn event_ok(event: &str) -> Result<(), String> {
         Some(("unit", what)) => Err(format!("unknown unit event `{what}` (allowed: {})", UNIT_EVENTS.join(", "))),
         Some(("match", what)) if MATCH_EVENTS.contains(&what) => Ok(()),
         Some(("match", what)) => Err(format!("unknown match event `{what}` (allowed: {})", MATCH_EVENTS.join(", "))),
+        Some(("ping", what)) if PING_EVENTS.contains(&what) => Ok(()),
+        Some(("ping", what)) => Err(format!("unknown ping `{what}` (allowed: {})", PING_EVENTS.join(", "))),
         Some((action, phase)) => {
             if !ACTIONS.contains(&action) {
                 Err(format!("unknown action `{action}`"))
@@ -86,7 +90,7 @@ fn event_ok(event: &str) -> Result<(), String> {
                 Ok(())
             }
         }
-        None => Err("events are `<action>.<phase>`, `unit.<what>`, `match.<what>` or `cc.hard`".into()),
+        None => Err("events are `<action>.<phase>`, `unit.<what>`, `match.<what>`, `ping.<kind>` or `cc.hard`".into()),
     }
 }
 

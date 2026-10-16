@@ -242,6 +242,15 @@ in
       '';
     };
 
+    botTier = mkOption {
+      type = types.enum [ "recruit" "veteran" "elite" "nightmare" ];
+      default = "veteran";
+      description = ''
+        How well bots play (design doc 17 §3): where co-op champion select's vote starts, and
+        the tier of bots that fill Versus seats or play for dropped players.
+      '';
+    };
+
     workers = mkOption {
       type = types.nullOr types.ints.positive;
       default = null;
@@ -337,6 +346,7 @@ in
           "--seed" (toString cfg.seed)
           "--modes" (lib.concatStringsSep "," cfg.modes)
           "--max-matches" (toString cfg.maxMatches)
+          "--bot-tier" cfg.botTier
         ]
         ++ lib.optionals (cfg.workers != null) [ "--workers" (toString cfg.workers) ]
         ++ lib.concatMap (m: [ "--map" "${m}" ]) cfg.maps
