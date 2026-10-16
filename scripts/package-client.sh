@@ -32,17 +32,23 @@ fi
 
 # The champion packs (A3, A4): the client reads them from `art/` next to the executable through
 # mftr-pack, never as Godot resources, so they ship as plain files beside the game: every
-# `export/` folder of the shared library, the champions, the lane minions and the map props (models, clips, VFX,
-# sounds), and the item icons (SVG).
+# `export/` folder of the shared library, the champions, the lane minions, the jungle monsters and the map
+# props (models, clips, VFX, sounds), and the item icons (SVG).
 copy_packs() {
   local dest="$1"
   rm -rf "$dest"
-  for d in art/library/*/export art/champions/*/export art/minions/*/export art/props/*/export art/items/icons; do
+  for d in art/library/*/export art/champions/*/export art/minions/*/export art/monsters/*/export art/props/*/export art/items/icons; do
     [ -d "$d" ] || continue
     mkdir -p "$dest/${d#art/}"
     cp -R "$d/." "$dest/${d#art/}/"
   done
   [ -f "$dest/library/biped/export/biped_library.glb" ] || { echo "packs missing from $dest" >&2; exit 1; }
+  # Every pack the repo exports ships (the rigs are references for authoring, not the game's): a
+  # new kind of pack left off the list above fails here instead of shipping placeholders.
+  for d in art/*/*/export; do
+    case "$d" in art/rigs/*) continue ;; esac
+    [ -d "$dest/${d#art/}" ] || { echo "$d is not packaged: add it to copy_packs" >&2; exit 1; }
+  done
 }
 case "$platform" in
   macos)
