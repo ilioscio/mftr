@@ -101,6 +101,13 @@ fn detail(cfg: &BotmatchConfig, m: &BotMatch, secs: f64) {
             println!("{:>110}{}", "", pct.join(" "));
         }
     }
+    let calls: Vec<String> = mftr_sim::ping::PingKind::ALL
+        .iter()
+        .zip(m.pings)
+        .filter(|(_, n)| *n > 0)
+        .map(|(k, n)| format!("{} {n}", k.text()))
+        .collect();
+    println!("bot pings: {}", if calls.is_empty() { "none".to_string() } else { calls.join(", ") });
     let c = &m.cost;
     let n = c.ticks.max(1) as f64;
     println!(

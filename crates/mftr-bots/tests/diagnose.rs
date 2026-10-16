@@ -223,3 +223,60 @@ fn knowledge_cost() {
         println!("{id:?}: built in {built:?}, all fields in {:?} ({} keys)", t.elapsed(), k.key_count());
     }
 }
+
+/// A jungler alone on the map: how its clear goes.
+#[test]
+#[ignore]
+fn jungler_alone() {
+    for (c, tier) in [(ChampionId::Shade, Tier::Elite), (ChampionId::Rook, Tier::Veteran), (ChampionId::Marrow, Tier::Elite)] {
+        let mut w = World::new(5);
+        w.set_map(MapId::Crossroads.shared());
+        w.set_rules(Rules::CLASSIC);
+        w.start_match();
+        let home = w.map().layout.champion_spawn[0];
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, c, home);
+        let mut bots = Bots::new(3);
+        bots.add(PlayerId(0), tier);
+        let mut monsters = 0;
+        let mut deaths = 0;
+        let mut first_clear = None;
+        for t in 0..(10 * 60 * 30) {
+            let events = step(&mut w, &mut bots);
+            for e in &events {
+                if let SimEvent::Died { unit, killer, .. } = e {
+                    if *killer == me && w.unit(*unit).is_some_and(|u| u.kind == UnitKind::Monster) {
+                        monsters += 1;
+                        if monsters == 1 {
+                            first_clear = Some(t / 30);
+                        }
+                    }
+                    if *unit == me {
+                        deaths += 1;
+                    }
+                }
+            }
+            if std::env::var("TRACE").is_ok() && t % (15 * 30) == 0 {
+                let u = w.unit(me).unwrap();
+                println!(
+                    "  {:>3} s: lvl {} hp {:.0}/{:.0} gold {:.0} at ({:.0},{:.0}) {}",
+                    t / 30,
+                    u.state.progress.level,
+                    u.state.health,
+                    u.stats.max_health,
+                    u.state.progress.gold,
+                    u.state.pos.x,
+                    u.state.pos.y,
+                    bots.describe(PlayerId(0)).unwrap_or_default()
+                );
+            }
+        }
+        let u = w.unit(me).unwrap();
+        println!(
+            "{c:?} ({}): 10 min: level {}, {monsters} monsters (first at {first_clear:?} s), {deaths} deaths, gold+items {:.0}, modes {:?}",
+            tier.name(),
+            u.state.progress.level,
+            u.state.progress.gold,
+            bots.stats()[0].1.mode_ticks
+        );
+    }
+}

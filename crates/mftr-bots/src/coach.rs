@@ -96,6 +96,10 @@ pub struct Coach {
     focus: Option<(usize, SimTime)>,
     /// The team's last call to go in, and when.
     engaged: Option<(Vec2, SimTime)>,
+    /// Recent bot calls (kind, where, when), so none repeats.
+    recent: Vec<(PingKind, Vec2, SimTime)>,
+    /// Tasks held for a while once given (defenses), until when.
+    sticky: Vec<(PlayerId, Task, SimTime)>,
 }
 
 /// How often the coach thinks (ticks).
@@ -122,6 +126,8 @@ impl Coach {
             rng: Pcg32::new(seed ^ 0x0063_6f61_6368, team as u64),
             focus: None,
             engaged: None,
+            recent: Vec::new(),
+            sticky: Vec::new(),
         }
     }
 
@@ -161,6 +167,22 @@ impl Coach {
             Mode::Horde => self.horde(b, knowledge, members),
             Mode::Open => members.iter().map(|m| (m.player, Task::Group { at: b.world.map().size * 0.5 })).collect(),
         };
+        // A defense, once given, holds a few seconds over a bot's ordinary task (no flapping
+        // between the camp and the turret every second).
+        for (player, task) in tasks.iter_mut() {
+            if let Some((_, held, until)) = self.sticky.iter().find(|(p, ..)| p == player)
+                && *until > now
+                && matches!(task, Task::Lane(_) | Task::Jungle | Task::Group { .. })
+            {
+                *task = *held;
+            }
+        }
+        self.sticky.retain(|(_, _, until)| *until > now);
+        for (player, task) in &tasks {
+            if matches!(task, Task::Defend { .. }) && !self.sticky.iter().any(|(p, ..)| p == player) {
+                self.sticky.push((*player, *task, now.plus(mftr_sim::SimDuration::from_millis(8000))));
+            }
+        }
         self.answer_pings(b, knowledge, members, &mut tasks);
         self.announce(b, memory, knowledge, members, &tasks);
         self.wards = self.ward_spots(b, knowledge, members);
@@ -366,10 +388,13 @@ impl Coach {
                     .iter()
                     .filter(|m| Self::unit(b, m).is_some_and(|u| u.state.alive() && u.state.pos.distance(at) < 1800.0))
                     .count();
+                // A wave alone isn't worth the jungler's time while the lanes are being played.
+                let minions_only = threat == 0;
                 let mut helpers: Vec<&Member> = members
                     .iter()
                     .filter(|m| m.bot && alive(m) && pos(m).distance(at) >= 1800.0)
-                    .filter(|m| knowledge.travel(pos(m), at) < 340.0 * 22.0)
+                    .filter(|m| knowledge.travel(pos(m), at) < 340.0 * if minions_only { 14.0 } else { 22.0 })
+                    .filter(|m| !(minions_only && !mid_game && is_jungler(m.player)))
                     .collect();
                 // The lane's own laner first, then by distance.
                 let own = |m: &Member| role_of(m.player).and_then(|r| r.lane()).map(|l| l.min(lanes - 1)) == Some(lane);
@@ -511,7 +536,10 @@ impl Coach {
                     && b.unit(a.unit).is_some_and(|u| u.state.alive() && u.state.pos.distance(e.state.pos) < 1500.0)
             });
             if !ally_there {
-                // A lone gank needs a much better fight.
+                // A lone gank only for the top tier, on a target already half dead.
+                if m.strategy < 3 || hurt < 0.6 {
+                    continue;
+                }
                 them.hp *= 1.3;
             }
             let o = fight::outcome(&us, &them);
@@ -788,9 +816,13 @@ impl Coach {
             let Some(lane) = self.role(m.player).and_then(|r| r.lane()) else { continue };
             let Some(u) = b.unit(m.unit).filter(|u| u.state.alive()) else { continue };
             for (id, l, at) in memory.vanished.iter().copied() {
+                // Gone a few seconds (not a step into brush), and still gone.
+                let gone = now.secs_since(at);
                 if l == Some(lane.min(knowledge.lanes.len().saturating_sub(1)))
-                    && now.secs_since(at) < 1.2
+                    && (3.0..4.2).contains(&gone)
                     && let Some(s) = memory.enemy(id)
+                    && s.alive
+                    && !s.visible
                     && s.pos.distance(u.state.pos) < 2200.0
                 {
                     let p = Ping { kind: PingKind::Missing, at: s.pos, target: None, from: Some(m.unit) };
@@ -803,7 +835,12 @@ impl Coach {
     /// Queue a bot's ping, within the team's and the bot's limits (`ack`: an answer to a human,
     /// which always goes out if the bot may ping at all).
     fn send(&mut self, m: &Member, p: Ping, now: SimTime, ack: bool) {
-        if !ack && now.secs_since(self.last_ping) < 3.0 && self.last_ping.0 != 0 {
+        if !ack && now.secs_since(self.last_ping) < 6.0 && self.last_ping.0 != 0 {
+            return;
+        }
+        // The same call about the same place isn't repeated for a while.
+        self.recent.retain(|(_, _, t)| now.secs_since(*t) < 30.0);
+        if !ack && self.recent.iter().any(|(k, at, _)| *k == p.kind && at.distance(p.at) < 1500.0) {
             return;
         }
         if let Some((_, at)) = self.bot_pinged.iter().find(|(q, _)| *q == m.player)
@@ -815,6 +852,7 @@ impl Coach {
             return;
         }
         self.last_ping = now;
+        self.recent.push((p.kind, p.at, now));
         match self.bot_pinged.iter_mut().find(|(q, _)| *q == m.player) {
             Some(e) => e.1 = now,
             None => self.bot_pinged.push((m.player, now)),

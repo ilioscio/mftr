@@ -1473,6 +1473,8 @@ pub struct BotMatch {
     pub champions: Vec<ChampionReport>,
     /// What the bots cost, against the simulation.
     pub cost: BotCost,
+    /// Pings the bots sent, by kind (`PingKind as usize`).
+    pub pings: [u32; 8],
 }
 
 /// One champion's match, for the measurements (17 §11).
@@ -1584,6 +1586,7 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
     let mut falls = Vec::new();
     let mut horde_waves = Vec::new();
     let mut cost = BotCost::default();
+    let mut pings = [0u32; 8];
     let mut winner = None;
     for _ in 0..max_ticks {
         let k = core.game.world.tick().next();
@@ -1593,7 +1596,9 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
         let (events, fog) = core.game.step(due);
         let t2 = std::time::Instant::now();
         core.bots.observe(&core.game.world, &events, &fog.visions);
-        core.bots.take_pings();
+        for (_, p) in core.bots.take_pings() {
+            pings[p.kind as usize] += 1;
+        }
         let t3 = std::time::Instant::now();
         let bots_us = ((t1 - t0) + (t3 - t2)).as_secs_f64() * 1e6;
         cost.ticks += 1;
@@ -1823,6 +1828,7 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
         horde_waves,
         champions,
         cost,
+        pings,
     }
 }
 
