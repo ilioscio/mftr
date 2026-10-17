@@ -150,8 +150,9 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
     let mut lengths = Vec::new();
     let mut cost = (0.0f64, 0.0f64, 0.0f64, 0u64);
     let mut ok = true;
-    // Per tier (0: --blue's, 1: --red's): kills, deaths, cs/min, worth@15, champions.
-    let mut side = [[0f64; 5]; 2];
+    // Per tier (0: --blue's, 1: --red's): kills, deaths, cs/min, worth@15, champions, enemy
+    // camps taken, structures taken.
+    let mut side = [[0f64; 7]; 2];
     let games = cfg.seeds * if paired { 2 } else { 1 };
     for game in 0..games {
         let seed = cfg.seed + if paired { game / 2 } else { game };
@@ -201,6 +202,11 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
             s[2] += c.cs as f64 / (m.ticks as f64 / 1800.0).max(0.1);
             s[3] += c.worth[1] as f64;
             s[4] += 1.0;
+            s[5] += c.monsters_theirs as f64;
+        }
+        for f in &m.falls {
+            // A structure of `f.1`'s fell: the other side took it.
+            side[!tier_of(f.1) as usize][6] += 1.0;
         }
         if games > 1 {
             let towers = |team: Team| m.falls.iter().filter(|f| f.1 == team).count();
@@ -237,12 +243,14 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
             let s = side[i];
             let k = s[4].max(1.0);
             println!(
-                "  {:<9} per champion: kills {:.1}  deaths {:.1}  CS/min {:.1}  worth@15 {:.0}",
+                "  {:<9} per champion: kills {:.1}  deaths {:.1}  CS/min {:.1}  worth@15 {:.0}  |  a game: structures {:.1}, enemy monsters {:.1}",
                 tier.name(),
                 s[0] / k,
                 s[1] / k,
                 s[2] / k,
-                s[3] / k
+                s[3] / k,
+                s[6] / n,
+                s[5] / n
             );
         }
         let t = cost.3.max(1) as f64;

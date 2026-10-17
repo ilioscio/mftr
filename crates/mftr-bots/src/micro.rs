@@ -194,6 +194,24 @@ pub fn cast_best(a: &mut Agent, c: &Ctx, target: &Unit, aggressive: bool) -> Opt
     best_cast(a, c, target, aggressive).map(|(_, cmd)| cmd)
 }
 
+/// Whether every escape `t` has (its dashes and blinks, the spell too) is down, as far as the
+/// team can tell: casts it saw and the cooldowns they imply. Only the top tier tracks spells, so
+/// for the others a Blink spell always counts as ready.
+pub fn escapes_down(a: &Agent, c: &Ctx, t: &Unit) -> bool {
+    let mut any = false;
+    for slot in 0..mftr_sim::ability::SLOTS as u8 {
+        let Some(ab) = t.ability(slot) else { continue };
+        if !matches!(ab.effect, mftr_sim::ability::Effect::Dash(_) | mftr_sim::ability::Effect::Blink(_)) {
+            continue;
+        }
+        any = true;
+        if c.memory.ready(t, slot, c.now, a.p.tracking) {
+            return false;
+        }
+    }
+    any
+}
+
 /// A human teammate is finishing `t`: it's attacking it, in reach, and `t` is low.
 /// Bot allies leave the kill to them (17 §8: playing with humans).
 pub fn humans_kill(c: &Ctx, t: &Unit) -> bool {

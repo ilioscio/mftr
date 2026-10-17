@@ -35,18 +35,13 @@ pub fn next_camp(a: &Agent, c: &Ctx) -> Option<usize> {
     let mut best: Option<(f32, usize)> = None;
     for (i, camp) in c.k.camps.iter().enumerate() {
         let ours = c.k.side_of(camp.pos) == Some(team);
-        if !ours {
-            // Counter-jungling: their jungler seen far from here lately, and nobody of theirs near.
-            if a.p.strategy < 3 {
-                continue;
-            }
-            let safe = c.memory.danger(camp.pos, 2200.0, c.now) < 0.35;
-            if !safe {
-                continue;
-            }
-        }
         let Some(at) = up_at(c, i) else { continue };
         let travel = c.k.travel(me.state.pos, camp.pos) / speed;
+        // Counter-jungling (the top tier): their jungler seen lately too far away to come back in
+        // time (or dead), and nobody of theirs able to reach the camp before it's cleared.
+        if !ours && !(a.p.strategy >= 3 && invade_safe(c, camp.pos, travel)) {
+            continue;
+        }
         let wait = (at.secs_since(c.now) - travel).max(0.0);
         if wait > 25.0 {
             continue;
@@ -58,6 +53,23 @@ pub fn next_camp(a: &Agent, c: &Ctx) -> Option<usize> {
         }
     }
     best.map(|(_, i)| i)
+}
+
+/// Whether taking an enemy camp at `at`, `travel` s away, is safe: we're healthy, their
+/// jungler can't be there before we're done (seen within 20 s, or dead), and no other enemy
+/// seen within 8 s can be there before we've started (laners leave lane only when they see us).
+fn invade_safe(c: &Ctx, at: mftr_sim::Vec2, travel: f32) -> bool {
+    const CLEAR: f32 = 12.0;
+    if crate::tier::off("invade") || c.me.state.health < c.me.stats.max_health * 0.6 {
+        return false;
+    }
+    let mem = c.memory;
+    let Some(j) = mem.their_jungler() else { return false };
+    let jungler_far = !j.alive || {
+        let since = c.now.secs_since(j.seen_at);
+        j.seen_at.0 != 0 && since < 20.0 && j.pos.distance(at) / 345.0 - since > travel + CLEAR
+    };
+    jungler_far && mem.earliest_at(at, c.now, 8.0, c.k.homes, c.b.team, true) > travel + 4.0
 }
 
 /// The camp's monsters standing (that we can see).

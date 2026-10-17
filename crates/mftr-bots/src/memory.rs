@@ -38,6 +38,8 @@ pub struct Sighting {
     pub haste: f32,
     /// Its strength when last seen (everything assumed ready), for fights it may join unseen.
     pub power: Power,
+    /// It took Claim, the jungler's spell (public, as spells are on the scoreboard).
+    pub jungler: bool,
 }
 
 /// A threat a bot may dodge, by what it is.
@@ -123,11 +125,13 @@ impl Memory {
                         cast_at: [SimTime(0); SLOTS],
                         haste: 0.0,
                         power: Power::default(),
+                        jungler: false,
                     });
                     self.enemies.len() - 1
                 }
             };
             let s = &mut self.enemies[i];
+            s.jungler = u.state.progress.spell_f == mftr_sim::ability::SPELL_CLAIM;
             let was_visible = s.visible;
             s.visible = u.state.alive() && visible(u.id);
             if s.visible {
@@ -326,6 +330,45 @@ impl Memory {
         })
     }
 
+    /// The soonest enemy champion `p` could see (s from now): dead ones when they'd get there from
+    /// their fountain, missing ones by how far they were last seen and how long ago (at most
+    /// `old` s ago: older sightings count as anywhere). `except_jungler` leaves out the jungler.
+    pub fn earliest_at(
+        &self,
+        p: Vec2,
+        now: SimTime,
+        old: f32,
+        homes: [Vec2; 2],
+        team: Team,
+        except_jungler: bool,
+    ) -> f32 {
+        let speed = 345.0;
+        let home = homes[1 - team as usize];
+        self.enemies
+            .iter()
+            .filter(|s| !(except_jungler && s.jungler))
+            .map(|s| {
+                if !s.alive {
+                    let back = s.respawn_at.map_or(0.0, |t| t.secs_since(now).max(0.0));
+                    return back + home.distance(p) / speed;
+                }
+                if s.visible {
+                    return s.pos.distance(p) / speed;
+                }
+                let since = if s.seen_at.0 == 0 { f32::MAX } else { now.secs_since(s.seen_at) };
+                if since > old {
+                    return 0.0;
+                }
+                (s.pos.distance(p) / speed - since).max(0.0)
+            })
+            .fold(f32::MAX, f32::min)
+    }
+
+    /// The enemy jungler's sighting, if the team knows who it is.
+    pub fn their_jungler(&self) -> Option<&Sighting> {
+        self.enemies.iter().find(|s| s.jungler)
+    }
+
     /// How many enemy champions could be within `r` of `p` now: those seen there, plus a share
     /// of each missing one by how much of the area it could have reached overlaps (17 §6).
     pub fn danger(&self, p: Vec2, r: f32, now: SimTime) -> f32 {
@@ -373,5 +416,53 @@ pub fn velocity(u: &Unit, now: SimTime) -> Vec2 {
     match u.state.heading() {
         Some(h) => (h - u.state.pos).normalize_or_zero() * u.state.speed_at(now),
         None => Vec2::ZERO,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sighting(id: u32, pos: Vec2, seen_at: SimTime, jungler: bool) -> Sighting {
+        Sighting {
+            id: UnitId(id),
+            champion: ChampionId::Ember,
+            pos,
+            vel: Vec2::ZERO,
+            seen_at,
+            visible: false,
+            health: 1000.0,
+            max_health: 1000.0,
+            level: 6,
+            items: [0; INVENTORY],
+            alive: true,
+            respawn_at: None,
+            cast_at: [SimTime(0); SLOTS],
+            haste: 0.0,
+            power: Power::default(),
+            jungler,
+        }
+    }
+
+    #[test]
+    fn earliest_arrival_counts_distance_time_and_the_dead() {
+        let secs = |s: f32| SimTime((s * mftr_sim::time::SUBTICKS_PER_SECOND as f32) as u64);
+        let homes = [Vec2::new(0.0, 0.0), Vec2::new(10_000.0, 0.0)];
+        let now = secs(100.0);
+        let camp = Vec2::new(6900.0, 0.0);
+        let mut m = Memory::new(Team::Blue);
+        // The jungler, seen 4 s ago 6,900 u away: 20 s of walking left, less the 4 s.
+        m.enemies.push(sighting(1, Vec2::ZERO, secs(96.0), true));
+        assert!((m.earliest_at(camp, now, 8.0, homes, Team::Blue, false) - 16.0).abs() < 0.1);
+        assert_eq!(m.earliest_at(camp, now, 8.0, homes, Team::Blue, true), f32::MAX);
+        assert_eq!(m.their_jungler().map(|s| s.id), Some(UnitId(1)));
+        // A laner not seen for longer than `old` could be anywhere.
+        m.enemies.push(sighting(2, Vec2::new(-5000.0, 0.0), secs(80.0), false));
+        assert_eq!(m.earliest_at(camp, now, 8.0, homes, Team::Blue, true), 0.0);
+        // Dead: its respawn plus the walk from its fountain.
+        m.enemies[1].alive = false;
+        m.enemies[1].respawn_at = Some(secs(110.0));
+        let t = m.earliest_at(camp, now, 8.0, homes, Team::Blue, true);
+        assert!((t - (10.0 + 3100.0 / 345.0)).abs() < 0.1, "{t}");
     }
 }

@@ -280,8 +280,11 @@ The `legacy` tier is the old bot, kept as a baseline. The bar for this work:
 - **Horde:** Veteran allies clear the campaign.
 - **Reproducible:** replays still re-simulate exactly.
 
-Dev switches: `MFTR_BOTS_OFF=name,name` turns a feature off for an A/B run (`siege`,
-`engage`, `aram-recall`, `lone-gank`). Production servers don't set it.
+Dev switches, for A/B runs (production servers set neither):
+- `MFTR_BOTS_OFF=name,name` turns a feature off: `siege`, `engage`, `aram-recall`,
+  `lone-gank`, and Nightmare's `trade`, `base`, `invade` and `trapped` (§12).
+- `MFTR_BOTS_TUNE=tier.field=value,...` overrides a tier's number (any field of `Params`, e.g.
+  `nightmare.think_fight=4`), to find which ones matter.
 
 ## 12. As built (2026-10-16)
 
@@ -321,42 +324,72 @@ first match on a map doesn't pay for it.
 - **Order budget.** Each tier has its commands a second (§3) as a refilling budget. An order
   that repeats what the champion is already doing isn't sent; a bot out of orders thinks again
   the moment one refills (otherwise a dodge could wait a whole think).
+- **Defense decides Classic.** Matches between good bots end in base races, so defending is
+  where tiers separate. Every structure that can be hurt is a candidate (once a Gatehouse is
+  down, the base turrets can be hurt alongside each lane's own). The most urgent is served
+  first, each bot defends one at most, and a laner isn't pulled off its own turret to another
+  lane's. Inner structures (tier 3 and in) draw defenders from anywhere on the map: Veteran
+  sends one more than the attackers, Elite two more.
+- **Nightmare's edges** are decisions, not reflexes. An experiment that set each of its
+  numbers back to Elite's in turn (reaction, think rate, aim, tracking, ability use) moved
+  nothing: between bots, faster hands don't win matches. So the top tier gets:
+  - **Base defense:** a Gatehouse or base structure with an enemy at it brings every bot
+    home, except one about to finish the enemy's base.
+  - **Objective trades:** an outer turret (tier 1–2) that two or more enemies are taking and
+    the fight model says can't be held isn't fed. The bots that would come take the next
+    structure in a lane with no enemy seen or likely near instead.
+  - **Trapped targets:** it tracks spells as well as abilities, so it knows when a laner's
+    dashes and Blink are all down. Then a smaller edge in the fight model (0.15 rather than
+    0.35) is enough to go all in.
+  - **Counter-jungling:** its jungler takes an enemy camp when the enemy jungler was seen
+    within 20 s too far away to come back in time (or is dead), and no other enemy seen in
+    the last 8 s could get there first. By honest information that's rare: the enemy jungler
+    is seldom in sight.
+  - **Lone ganks** on a half-dead target.
 
 **Measured** (`mftr-tools botmatch`; paired seeds swap sides, lineups shuffled per seed):
 
-| Matchup | ARAM (40 games) | Classic (20 games) |
+| Matchup | ARAM | Classic |
 |---|---|---|
-| Veteran vs legacy | 33–4 (3 undecided) | 18–2 |
-| Veteran vs Recruit | 27–4 (9) | 17–3 |
-| Elite vs Veteran | 25–11 (4) | 14–6 |
-| Nightmare vs Elite | 17–14 (9) | 9–11; 31–29 over 60 |
-| Nightmare vs legacy | 37–3 | – |
+| Veteran vs legacy | 33–4 (3 undecided) | 37–3 |
+| Nightmare vs legacy | 37–3 | 39–1 |
+| Veteran vs Recruit | 27–4 (9) | 37–3 |
+| Elite vs Veteran | 25–11 (4) | 30–10; 59–21 over 80 |
+| Nightmare vs Elite | 19–15 (6) | 23–17; 50–30 over 80 |
+
+Each cell is 40 games (seeds 1–20, sides swapped); the 80-game totals add seeds 201–220.
+Classic Nightmare vs Elite with all of Nightmare's own rules off was 23–17 on seeds 201–220
+(27–13 with them).
 
 Classic laners take 3–5 CS a minute, about 60% of the minions that die near them (supports and
 junglers bring the team average to about 2.2). **Horde** (two seeds a tier, 40 minutes): the
 legacy bot fell at wave 19 on one seed and barely cleared the campaign on the other; every
 tier from Recruit up cleared it on both and was still holding at waves 36–40.
 
-**Nightmare isn't clearly above Elite yet.** The two make the same decisions (only a lone
-gank on a half-dead target is Nightmare's, and an A/B run of it was even: 22–18 with it, 18–22
-without); faster reactions and better aim alone don't win matches between bots. Its edge has to come from the
-strategy row of §3, counter-jungling and objective trades, which aren't built.
+**ARAM** separates Nightmare from Elite least (19–15): it's one lane of teamfights, where
+the two play alike. Its macro edges are Classic's.
 
 **Dodging** (`tests/diagnose.rs dodging_by_tier`, 18 shots each, the bot walking at the
 shooter): Ember's Lance (a line from 1,050 u) is dodged 0% by Recruit, 6% by Veteran, 78% by
 Elite and 94% by Nightmare; Bloom (a delayed area at 850 u) 17%, 78%, 89% and 100%.
 
-**Cost:** bots cost 6–12 µs a tick in Classic against 94–100 µs for the simulation, 3–8 µs against
-19–21 µs in ARAM, and 2–4 µs against 11–13 µs in Horde (every champion a bot). The worst bot
-tick in runs on an otherwise idle machine was 70–340 µs; two ARAM runs that overlapped a
-compile saw 6 ms. The knowledge fields for a map are built once (warmed at server start).
+**Cost:** bots cost 6–14 µs a tick in Classic against about 100 µs for the simulation,
+3–8 µs against about 19 µs in ARAM, and 2–4 µs against 11–14 µs in Horde (every champion a
+bot). The worst bot tick on an otherwise idle machine was 61–443 µs; runs sharing the machine
+with others see the scheduler's pauses as worst ticks of many milliseconds. The knowledge
+fields for a map are built once (warmed at server start).
 
-**Checks:** unit tests in each module; `tests/behavior.rs` (bots answer a Group ping and say
+**Checks:** unit tests in each module (`memory.rs`: when an enemy could reach a point);
+`tests/behavior.rs` (bots answer a Group ping and say
 On my way, bots call their plans, and an Elite bot leaves a low champion to a human ally);
 `tests/diagnose.rs` (ignored, run by hand: lone last hits, a mid duel, teamfight calibration,
 knowledge cost, a lone jungler, dodging by tier); the server's ping and tier-vote tests; the
 client captures of the lobby's Bots row and a ping answered by four bots.
 
-**Not yet:** counter-jungling (taking the enemy's camps; Nightmare's row in §3) and objective
-trades; vision denial (sweeping or killing the enemy's wards); per-role reports and skillshot
-counts in `botmatch` (it reports per champion; dodging is measured by the diagnostic above).
+`botmatch` also reports, per tier and game, the structures taken and the monsters killed on
+the enemy's side.
+
+**Not yet:** vision denial (sweeping or killing the enemy's wards), which would also feed
+counter-jungling the sightings it needs; ARAM edges for Nightmare; per-role reports and
+skillshot counts in `botmatch` (it reports per champion; dodging is measured by the diagnostic
+above).
