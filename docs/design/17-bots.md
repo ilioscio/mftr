@@ -290,6 +290,14 @@ Dev switches, for A/B runs (production servers set neither):
   `lone-gank`, and Nightmare's `trade`, `base`, `invade` and `trapped` (§12).
 - `MFTR_BOTS_TUNE=tier.field=value,...` overrides a tier's number (any field of `Params`, e.g.
   `nightmare.think_fight=4`), to find which ones matter.
+- `MFTR_BOTS_PERSONA=kind` makes every bot one persona (§13); `MFTR_BOTS_OFF=personas` makes
+  them all the even-keeled baseline.
+
+On a one-lane map `botmatch` also reports how the teams stood, in the units of the reference
+footage (R07): the gap between the teams' median champions and where the front was, the time
+the front spent between the outer turrets and each team behind its own, and kills a minute.
+Per persona it reports K/D/A, damage a minute, time dead and the relics taken (and at what
+health).
 
 ## 12. As built (2026-10-16)
 
@@ -398,3 +406,142 @@ the enemy's side.
 counter-jungling the sightings it needs; ARAM edges for Nightmare; per-role reports and
 skillshot counts in `botmatch` (it reports per champion; dodging is measured by the diagnostic
 above).
+
+## 13. Personas, and play like people's (2026-10-18)
+
+The tiers made bots strong, and the owner found them no fun: risk-averse and inhuman, huddled
+under their turrets. One recorded ARAM: Mayhem match of the reference game, between players of
+about plat to low diamond rank, set the bar ([R07](reference/R07-video-aram-match.md)).
+
+**What people do that the bots didn't:**
+- **They fight in the middle:** the median gap between the teams was 0.19 of the
+  center-to-Base line (about 900 u), and each team was behind its own outer turret 25% of the
+  time.
+- **They fight more:** 6.6 kills a minute, and a 19-minute match.
+- **They turn a won fight into a tower.**
+- **They don't walk back to shop.**
+- **They dive and chase.**
+- **They leave a relic to whoever needs it.**
+- **They play differently from each other.**
+
+The map was part of it: The Bridge's outer turrets stood so close to the center that 450 u of
+open ground lay between their reaches, and it had no brush at all (R07 §1).
+
+**Personas** (`persona.rs`): each bot rolls one when it first plays a champion, from the
+match's seed, and keeps it all game. A tier is how well a bot plays; a persona is how it likes
+to play. Personas change choices, never hands: reaction, aim and reads stay the tier's.
+
+| Persona | Nerve | Greed | Vision | Flair | Plays like |
+|---|---|---|---|---|---|
+| Daredevil | 0.8 | 0.2 | 0.2 | 0.5 | starts fights, dives, chases |
+| Carry | 0.25 | 0.8 | 0.2 | 0.3 | farms, finishes, takes the relic |
+| Guardian | 0.05 | −0.8 | 0.9 | 0.2 | peels, leaves the relic, wards |
+| Cautious | −0.6 | 0 | 0.6 | 0.1 | waits for an edge, backs off early |
+| Trickster | 0.4 | 0.1 | 0.4 | 0.9 | waits in brush, comes from it |
+| Steady | 0.1 | 0 | 0.4 | 0.3 | the even-keeled team player |
+
+- **The roll:**
+  - Weights 18/20/14/12/15/21%, leaning by class. An enchanter is three times as likely to
+    be a guardian.
+  - A marksman, mage or assassin leans carry. A tank or bruiser leans daredevil.
+  - Each trait is then jittered by up to ±0.15, so no two daredevils are alike.
+- **Nerve** (risk appetite) moves:
+  - the bar to fight (−0.22 × nerve) and to fight beside a teammate;
+  - when a losing fight is left, and when a laner gives ground;
+  - how long a chase lasts (overchase × (1 + 0.6 × nerve));
+  - the health it flees at where the fountain heals;
+  - how sure a turret dive must be (0.45 − 0.2 × nerve). Veteran daredevils dive too.
+  - In the coach, the team's average nerve lowers the bar to engage (−0.12 × nerve). A bold
+    ARAM team pushes on a single kill.
+- **Greed** (selfish or selfless) moves:
+  - the health a relic is taken at (below 65% + 20% × greed);
+  - target choice: a selfish persona weighs hurt targets and kills more. A selfless one peels
+    whatever its class.
+  - **Charity:** unless it's selfish (or below 30%), a bot leaves a relic to a teammate at least
+    20 points lower who is about as close.
+  - Bots still leave a low champion to a human who's finishing it (§12), whatever their
+    persona.
+- **Vision:** Classic wards. Above 0.6 it carries a control ward, above 0.85 two, from Veteran
+  up; supports and junglers keep theirs from Elite.
+- **Flair:** in ARAM, while the team waits, a persona with flair stands in brush near the spot,
+  not past the front. It comes out of the brush when someone walks by.
+
+**For every persona, after the footage:**
+- **A step back, not the turret:** on maps whose fountain doesn't heal, a bot losing a fight
+  backs off 700 u while it has health (above 30%, less with nerve) rather than to its turret.
+- **Waiting in the open:** between waves, the ARAM coach holds the team short of the center
+  instead of at its outer turret.
+- **Towers after a won fight** (ARAM): on a siege, a bot in reach of the structure hits it while our
+  wave takes its shots (two minions in its range, or no one to defend it), unless it's being
+  hit hard. Before, it traded with whoever came to defend and the towers stood: one match had
+  204 deaths and 2 structures in 40 minutes.
+- **Shopping when dead:** in ARAM, a bot walks back to shop only with 3,000 gold to spend
+  (1,800 before). It shops when it dies, as players do.
+
+**The Bridge, re-laid** (12 §1, R07 §1):
+- **Turrets:** the outer turrets stand a third of the way from the center to the Base, 3,000 u
+  apart (they were 2,000). All four lane structures move to match (`ARAM_STRUCTURE_SHARES`,
+  also the default for new ARAM maps).
+- **Relics:** two to a side, one in front of the outer turret and one between it and the inner.
+- **Brush:** six patches to a side, in alcoves along both walls.
+- **Rocks:** two to a side in the open middle.
+- **Brush tracing fixed:** the outline tracer dropped every point of a smooth outline with
+  nothing pinned, so lone brush patches vanished. Crossroads gets back the 11 of its 18 it had
+  lost.
+- **Protocol 27:** clients build the map themselves.
+
+**Measured:**
+- **Spacing:** ARAM, 12 seeds a tier, the same tier on both sides; the reference is R07's
+  match.
+
+  | | Before | New map | New map and personas | Reference |
+  |---|---|---|---|---|
+  | Kills a minute | 3.8–4.1 | 5.4–5.9 | 5.7–6.1 | 6.6 |
+  | Behind own outer turret | 37–40% | 28–34% | 29–33% | 25% |
+  | Median gap between the teams | 0.28–0.31 | 0.23–0.27 | 0.23–0.27 | 0.19 |
+  | Front, 10th/50th/90th | −0.27/0.00/0.43 | −0.30/0.04/0.42 | −0.31/0.04/0.43 | −0.42/0.12/0.50 |
+  | Match length | 29–32 min | 30–32 min | 27–28 min | 19 min |
+
+  The teams' gap at the 90th percentile stays 0.6–0.8 against the reference's 0.38. Teams
+  walking out at the start, and the ones respawning walking back, make most of it.
+- **Personas,** ARAM, Elite against Elite over 20 seeds (200 bots):
+
+  | Persona | Kills | Deaths | Assists | Damage/min | Relics/10 min | Health at a relic |
+  |---|---|---|---|---|---|---|
+  | Carry | 19.4 | 16.8 | 32.9 | 1,472 | 4.8 | 52% |
+  | Steady | 17.0 | 15.8 | 33.3 | 1,354 | 3.2 | 43% |
+  | Cautious | 17.8 | 13.7 | 33.6 | 1,394 | 4.0 | 42% |
+  | Daredevil | 16.0 | 17.7 | 30.8 | 1,166 | 3.3 | 47% |
+  | Guardian | 13.7 | 16.8 | 35.4 | 944 | 3.0 | 38% |
+  | Trickster | 12.4 | 19.6 | 33.6 | 952 | 3.7 | 50% |
+
+  - Carries take the kills and the relics.
+  - Guardians take the assists and leave relics for the lowest.
+  - The cautious die least.
+  - Daredevils and tricksters die most: their risks don't always pay, as people's don't.
+  - Elite against Elite, kills a minute were 5.9 with personas off and on; match length 26:08
+    off, 28:09 on. Personas change how bots play more than how much they fight.
+- **The ladder** (40 games a cell, seeds 1–20, sides swapped):
+
+  | Matchup | ARAM | Classic |
+  |---|---|---|
+  | Veteran vs legacy | 34–5 | 38–2 |
+  | Veteran vs Recruit | 36–2 | 37–3 |
+  | Elite vs Veteran | 24–9 | 24–16; 51–29 over 80 |
+  | Nightmare vs Elite | 16–14 (10 undecided) | 22–18; 48–32 over 80 |
+
+  - The 80-game totals add seeds 201–220. Before: Elite over Veteran 59–21, Nightmare over Elite
+    50–30.
+  - Elite's Classic edge narrowed, with personas off too (24–16 on seeds 1–20). That points to
+    Crossroads' recovered brush, not the personas.
+  - Classic's Veteran rows were played before the siege rule was limited to ARAM.
+  - Every tier still clears the Horde campaign on both seeds (waves 29–40 by the 40-minute
+    cap).
+
+**Not yet:**
+- **Brush for every persona:** only flair uses it. Brush checks before walking past it, and
+  hiding from a chase, would make everyone read more like a player.
+- **Baits and flanks:** flair waits in brush but doesn't bait, or come at a fight from the
+  side.
+- **More footage:** one match is one lobby. The owner has more recorded, which would show
+  which of R07's numbers are ARAM's and which were these ten players'.

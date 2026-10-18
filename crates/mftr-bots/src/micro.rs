@@ -34,7 +34,8 @@ pub fn team_dps(c: &Ctx, at: Vec2) -> f32 {
 /// A turret of theirs covers `p` and standing there isn't worth its shots. It's fine while two
 /// or more of our minions are in its range to take them (and it isn't already shooting us);
 /// otherwise it's a dive, worth it only to kill a champion with the fight clearly ours (and
-/// only for the tiers that dive).
+/// only for the tiers that dive, and Veteran daredevils). How clear depends on the persona's
+/// nerve (17 §13).
 pub fn turret_unsafe(c: &Ctx, p: Vec2) -> bool {
     let me = c.me;
     c.b.enemy_turrets_covering(p, 120.0).any(|t| {
@@ -46,11 +47,12 @@ pub fn turret_unsafe(c: &Ctx, p: Vec2) -> bool {
         if tanks >= 2 {
             return false;
         }
-        if c.strategy < 2 || !c.b.enemies.iter().any(|e| e.state.pos.distance(t.state.pos) < range + 200.0) {
+        let dives = c.strategy >= 2 || (c.strategy >= 1 && c.persona.nerve > 0.6);
+        if !dives || !c.b.enemies.iter().any(|e| e.state.pos.distance(t.state.pos) < range + 200.0) {
             return true;
         }
         let (us, them) = c.b.engagement(t.state.pos, 1100.0, Some(c.memory));
-        fight::outcome(&us, &them) < 0.45
+        fight::outcome(&us, &them) < 0.45 - 0.2 * c.persona.nerve
     })
 }
 
@@ -121,7 +123,7 @@ pub fn pick_target<'w>(a: &Agent, c: &Ctx<'_, 'w>, chase: bool) -> Option<&'w Un
     for t in foes(c) {
         let d = me.state.pos.distance(t.state.pos);
         let reach = my_range + t.gameplay_radius;
-        let limit = if chase { 1300.0 } else { reach + 280.0 };
+        let limit = if chase { 1300.0 + 300.0 * c.persona.nerve } else { reach + 280.0 };
         if d > limit {
             continue;
         }
@@ -130,9 +132,11 @@ pub fn pick_target<'w>(a: &Agent, c: &Ctx<'_, 'w>, chase: bool) -> Option<&'w Un
         }
         let share = t.state.health / t.stats.max_health.max(1.0);
         let threat = c.b.enemy_power(t.id).map_or(60.0, |p| p.dps.total());
-        let mut score = (1.0 + threat / 150.0) * (1.0 + 2.0 * (1.0 - share));
+        // A selfish persona goes for the hurt and the kills (17 §13).
+        let greed = c.persona.greed;
+        let mut score = (1.0 + threat / 150.0) * (1.0 + (2.0 + greed.max(0.0)) * (1.0 - share));
         if burst_on(me, t, c) >= t.state.health {
-            score *= 2.5; // a kill now
+            score *= 2.5 + greed; // a kill now
         }
         let focus = c.memory.damage_on(t.id, 2.0, c.now);
         score *= 1.0 + (focus / t.stats.max_health.max(1.0)).min(1.0);
@@ -143,8 +147,10 @@ pub fn pick_target<'w>(a: &Agent, c: &Ctx<'_, 'w>, chase: bool) -> Option<&'w Un
         if human_on_it {
             score *= 1.6;
         }
-        // Peel (17 §7.2): supports and front-liners go for whoever is hurting our team.
-        if me.champion.is_some_and(|ch| Archetype::of(ch).support() || Archetype::of(ch).front()) {
+        // Peel (17 §7.2): supports and front-liners go for whoever is hurting our team, and so
+        // does a selfless persona of any class (17 §13).
+        let peels = me.champion.is_some_and(|ch| Archetype::of(ch).support() || Archetype::of(ch).front());
+        if peels || greed < -0.4 {
             let on_us: f32 = c
                 .memory
                 .damage
@@ -210,6 +216,18 @@ pub fn escapes_down(a: &Agent, c: &Ctx, t: &Unit) -> bool {
         }
     }
     any
+}
+
+/// A teammate who needs the health relic at `at` more than we do (at `share` of our health):
+/// clearly more hurt, alive, and about as close to it, or close enough to come for it.
+pub fn needs_more(c: &Ctx, at: Vec2, share: f32) -> bool {
+    let mine = c.me.state.pos.distance(at);
+    c.b.allies.iter().any(|a| {
+        a.id != c.me.id
+            && a.state.alive()
+            && a.state.health / a.stats.max_health.max(1.0) + 0.2 < share
+            && a.state.pos.distance(at) < (mine + 500.0).max(1500.0)
+    })
 }
 
 /// A human teammate is finishing `t`: it's attacking it, in reach, and `t` is low.

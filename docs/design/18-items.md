@@ -1,6 +1,6 @@
 # 18 — Items
 
-**Status:** Proposed (D63). This replaces the first item set (D35: 29 items, two passives,
+**Status:** Proposed (D64). This replaces the first item set (D35: 29 items, two passives,
 potions and a control ward as the only actives) with a full shop: starters, components, epics,
 legendaries, boots, a support quest and jungle companions, ~75 items in all. Every number is a
 *(start)* value.
@@ -351,7 +351,7 @@ hatchling.
   per tick over that tick's damage events, so one hit never triggers another's item effects.
 - **Heals and shields** go through one function each, which applies Wounds, healing received
   and heal and shield power.
-- **Wire (protocol 27):** the own champion's state carries `Gear` and `Fx` (one bit each when
+- **Wire (protocol 28):** the own champion's state carries `Gear` and `Fx` (one bit each when
   empty, unset times one bit), damage events a crit flag, missiles the item that fired them,
   dash strikes a 4-bit slot (8 + the inventory slot for an item's), other units three display
   flags (in stasis, Wounded, burning), and a new event `ItemUsed` (22: unit, item, time,

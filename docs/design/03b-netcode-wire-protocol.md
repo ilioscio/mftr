@@ -138,12 +138,16 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 > Stat Anvil steps and up to 16 effects (kind, tenths of a second left, a value: a slow's
 > percent, a shield's points, plates, stacks). Nothing in snapshots changes.
 
-> **Implemented (protocol 27):** items ([18](18-items.md) §10). The own champion's state adds
+> **Implemented (protocol 28):** items ([18](18-items.md) §10). The own champion's state adds
 > its item state (`Gear`: active and passive cooldowns, Tally, the quest's gold and charges,
 > hatchling food) and timed item effects (`Fx`: Wounds, burns, Sunder, Expose, speed buffs,
 > stasis, Petrify, marks), each one bit when empty. `Damage` events carry a crit bit, missiles
 > the item that fired them (8 bits), a dash strike's slot is 4 bits. Other units' flags add
 > stasis, Wounded and burning. New event `ItemUsed` (22): unit, item, time, point, sequence.
+
+> **Protocol 27:** nothing on the wire changed; the built-in maps did (The Bridge re-laid after
+> the reference ARAM, and brush that tracing used to drop, 17 §13). Clients build the map the
+> server plays from their own copy, so older clients can't join.
 
 > **Implemented (protocol 26):** pings and the bots' tier ([17](17-bots.md) §8–§9).
 > `Ping { kind, at, target }` (client kind 6: a 3-bit kind, the point, an optional unit) is

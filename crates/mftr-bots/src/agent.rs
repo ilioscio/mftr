@@ -12,6 +12,7 @@ use crate::knowledge::Knowledge;
 use crate::laning;
 use crate::memory::{Memory, ThreatKey};
 use crate::micro;
+use crate::persona::Persona;
 use crate::shop;
 use crate::tier::{Params, Tier};
 use mftr_sim::ping::PingKind;
@@ -45,6 +46,8 @@ pub struct Ctx<'a, 'w> {
     /// Champions played by bots (everyone else is human).
     pub bots: &'a [UnitId],
     pub role: Option<Role>,
+    /// The bot's persona (17 §13).
+    pub persona: Persona,
 }
 
 impl Ctx<'_, '_> {
@@ -88,6 +91,9 @@ pub struct Agent {
     skew: f32,
     wake: Option<SimTime>,
     pub stats: AgentStats,
+    /// The kind of player it plays as (17 §13), rolled once it knows its champion.
+    pub persona: Option<Persona>,
+    persona_rng: Pcg32,
 }
 
 impl Agent {
@@ -111,6 +117,17 @@ impl Agent {
             skew: 0.0,
             wake: None,
             stats: AgentStats::default(),
+            persona: None,
+            persona_rng: Pcg32::new(seed ^ 0x7065_7273_6f6e, player.0 as u64 + 7),
+        }
+    }
+
+    /// Its persona, rolled the first time it plays a champion (and kept all match).
+    pub fn persona_for(&mut self, champion: Option<mftr_sim::ChampionId>) -> Persona {
+        match (self.persona, champion) {
+            (Some(p), _) => p,
+            (None, Some(c)) => *self.persona.insert(Persona::roll(&mut self.persona_rng, Some(c))),
+            (None, None) => Persona::STEADY,
         }
     }
 
@@ -227,8 +244,12 @@ impl Agent {
         let physical = shop::physical_share(c.memory.enemies.iter().map(|s| s.champion));
         let classic = !c.k.camps.is_empty() && rules.passive_gold < 3.0;
         let potions = if classic && c.b.secs < 18.0 * 60.0 { 2 } else { 0 };
-        let wards = if classic && c.b.world.map().layout.wards && self.p.strategy >= 2 && c.b.secs > 240.0 {
-            matches!(c.role, Some(Role::Support | Role::Jungle)) as u8
+        // Supports and junglers ward from Elite up; a persona that likes vision does from
+        // Veteran up, and carries more (17 §13).
+        let vision = c.persona.vision;
+        let wards = if classic && c.b.world.map().layout.wards && c.b.secs > 240.0 && self.p.strategy >= 1 {
+            let role = (self.p.strategy >= 2 && matches!(c.role, Some(Role::Support | Role::Jungle))) as u8;
+            role + (vision > 0.6) as u8 + (vision > 0.85) as u8
         } else {
             0
         };
@@ -448,16 +469,23 @@ impl Agent {
         // Without a fountain to heal at (ARAM), a champion kept alive at low health is a
         // champion short in every fight: it stays in, behind its team, and flees only when
         // nearly dead (dying sends it home whole, and to the shop).
-        let low = heals_home && (share < self.p.retreat_health || share < 0.1);
+        let nerve = c.persona.nerve;
+        let retreat_health = self.p.retreat_health * (1.0 - 0.35 * nerve);
+        let low = heals_home && (share < retreat_health || share < 0.1);
         let hit = c.memory.damage_on(me.id, 1.5, now) > me.stats.max_health * 0.04;
         let in_reach = near.iter().any(|e| {
             let reach = c.b.enemy_power(e.id).map_or(500.0, |p| p.range) + 150.0;
             e.state.pos.distance(st.pos) < reach
         });
-        let losing = local < -0.35 && in_reach && (hit || share < 0.5) && (heals_home || local < -0.55 || share < 0.3);
+        // A bold persona stays in a losing fight longer; a timid one leaves sooner (17 §13).
+        let losing = local < -0.35 - 0.2 * nerve
+            && in_reach
+            && (hit || share < 0.5 - 0.15 * nerve)
+            && (heals_home || local < -0.55 - 0.2 * nerve || share < 0.3 - 0.12 * nerve);
+        let overchase = self.p.overchase * (1.0 + 0.6 * nerve).max(0.3);
         // The team's call to go in holds unless we're about to die.
-        let committed_fight = (self.mode == Mode::Fight && now.secs_since(self.mode_since) < self.p.overchase)
-            || (matches!(task, Task::Engage { .. }) && share > self.p.retreat_health);
+        let committed_fight = (self.mode == Mode::Fight && now.secs_since(self.mode_since) < overchase)
+            || (matches!(task, Task::Engage { .. }) && share > retreat_health);
         if ((low && (!near.is_empty() || danger > 0.5 || share < 0.12)) || (losing && !committed_fight))
             && !(horde && c.b.enemy_minions.is_empty() && near.is_empty())
         {
@@ -476,6 +504,17 @@ impl Agent {
             return Some(cmd);
         }
 
+        // Pushing with the team in ARAM: hit the structure while our wave takes its shots, as
+        // players do after a won fight, instead of trading with whoever comes to defend it
+        // (17 §13). Classic's sieges keep their own timing (its defenses decide its matches).
+        if let Task::Siege { lane } = task
+            && c.k.lanes.len() == 1
+            && let Some(cmd) = self.hit_structure(c, lane)
+        {
+            self.set_mode(Mode::Siege, now);
+            return Some(cmd);
+        }
+
         // Fight what's in front of us when the fight is ours, a kill is on, or a teammate is
         // fighting next to us.
         if !near.is_empty() || horde {
@@ -489,7 +528,8 @@ impl Agent {
                 Task::Answer { kind: PingKind::Attack | PingKind::Assist, .. } => -0.2,
                 Task::Answer { .. } if c.memory.damage_on(me.id, 1.5, now) == 0.0 => 0.6,
                 _ => -0.1,
-            } - if self.mode == Mode::Fight { 0.15 } else { 0.0 };
+            } - if self.mode == Mode::Fight { 0.15 } else { 0.0 }
+                - 0.22 * nerve;
             let ally_fighting = c.b.allies.iter().any(|a| {
                 a.id != me.id
                     && a.state.alive()
@@ -499,8 +539,8 @@ impl Agent {
             let kill = near.iter().any(|e| {
                 e.state.health * 1.05 < micro::team_burst(c, e, 900.0) && !micro::turret_unsafe(c, e.state.pos)
             });
-            let overchase = self.mode == Mode::Fight && now.secs_since(self.mode_since) < self.p.overchase;
-            let fight = local >= threshold || kill || (ally_fighting && local > -0.3) || overchase;
+            let overchase = self.mode == Mode::Fight && now.secs_since(self.mode_since) < overchase;
+            let fight = local >= threshold || kill || (ally_fighting && local > -0.3 - 0.15 * nerve) || overchase;
             let in_lane = matches!(task, Task::Lane(_));
             if fight && (!in_lane || (local > 0.35 && share > 0.5) || kill || ally_fighting) {
                 let chase = !matches!(task, Task::Lane(_) | Task::Hold { .. }) || kill;
@@ -511,8 +551,12 @@ impl Agent {
             }
         }
 
-        // Health relics (maps that have them), when hurt and it's safe to take one.
-        if share < 0.65
+        // Health relics (maps that have them), when hurt and it's safe to take one. How hurt
+        // depends on the persona: a selfish one takes it early, a selfless one late, and unless
+        // it's selfish it leaves the relic to a teammate who needs it more and can get there
+        // (17 §13: players hold a relic for whoever's lowest).
+        let greed = c.persona.greed;
+        if share < 0.65 + 0.2 * greed
             && let Some(r) =
                 c.b.relics
                     .iter()
@@ -522,6 +566,7 @@ impl Agent {
                     .filter(|r| {
                         !c.b.enemies.iter().any(|e| e.state.pos.distance(r.state.pos) < r.state.pos.distance(st.pos))
                     })
+                    .filter(|r| share < 0.3 || greed > 0.5 || !micro::needs_more(c, r.state.pos, share))
                     .min_by(|a, b| a.state.pos.distance(st.pos).total_cmp(&b.state.pos.distance(st.pos)))
         {
             self.set_mode(Mode::Travel, now);
@@ -641,6 +686,11 @@ impl Agent {
                     self.set_mode(Mode::Fight, now);
                     return Some(cmd);
                 }
+                // A playful persona waits in brush by the spot, to come out of it (17 §13).
+                if !horde && let Some(b) = self.lurk(c, at) {
+                    self.set_mode(Mode::Travel, now);
+                    return self.go(c, b);
+                }
                 if st.pos.distance(at) > 700.0 {
                     self.set_mode(Mode::Travel, now);
                     let range_back = me.champion.is_some_and(|ch| Archetype::of(ch).back()) as u8 as f32 * 200.0;
@@ -695,19 +745,28 @@ impl Agent {
         let st = &me.state;
         self.set_mode(Mode::Retreat, now);
         let home = c.k.homes[c.b.team as usize];
-        let safe =
+        let turret =
             c.b.ally_structures
                 .iter()
                 .filter(|s| s.kind == UnitKind::Turret)
                 .filter(|s| s.state.pos.distance(home) < st.pos.distance(home) + 200.0)
                 .min_by(|a, b| a.state.pos.distance(st.pos).total_cmp(&b.state.pos.distance(st.pos)))
                 .map_or(home, |s| s.state.pos + (home - s.state.pos).normalize_or_zero() * 250.0);
+        // Without a fountain that heals (ARAM), a champion with health left backs off a few
+        // steps out of the fight and comes back, rather than hiding at its turret (17 §13).
+        let heals_home = c.k.fountains[c.b.team as usize].is_some() && c.b.world.map().layout.fountain_heals;
+        let share = st.health / me.stats.max_health.max(1.0);
+        let step = st.pos + (home - st.pos).normalize_or_zero() * 700.0;
+        let safe =
+            if !heals_home && share > 0.3 - 0.1 * c.persona.nerve && step.distance(st.pos) < turret.distance(st.pos) {
+                step
+            } else {
+                turret
+            };
         if let Some(cmd) = micro::escape(self, c, safe) {
             return Some(cmd);
         }
         let near = c.b.enemies.iter().any(|e| e.state.pos.distance(st.pos) < 1500.0);
-        let heals_home = c.k.fountains[c.b.team as usize].is_some() && c.b.world.map().layout.fountain_heals;
-        let share = st.health / me.stats.max_health.max(1.0);
         if !near
             && heals_home
             && share < 0.45
@@ -749,6 +808,58 @@ impl Agent {
         self.go(c, if heals_home && !near { home } else { safe })
     }
 
+    /// The lane's next enemy structure to hit now, on a siege: in reach, its shots on our minions
+    /// (two or more under it) or nothing there to defend it, not shooting us, and nobody hitting
+    /// us hard. A bold persona keeps hitting it through some damage.
+    fn hit_structure(&self, c: &Ctx, lane: usize) -> Option<CommandKind> {
+        if self.p.strategy < 1 {
+            return None;
+        }
+        let me = c.me;
+        let st = &me.state;
+        let t = c.b.lanes.get(lane)?.their_target.and_then(|id| c.b.unit(id))?;
+        let reach = me.attack.map_or(150.0, |s| s.range) + t.gameplay_radius;
+        if st.pos.distance(t.state.pos) > reach + 150.0 || !t.targetable() {
+            return None;
+        }
+        if t.kind == UnitKind::Turret {
+            if t.state.order == mftr_sim::Order::Attack(me.id) {
+                return None;
+            }
+            let range = t.attack.map_or(775.0, |a| a.range);
+            let tanks = c.b.ally_minions.iter().filter(|m| m.state.pos.distance(t.state.pos) <= range).count();
+            if tanks < 2 && !micro::siege_window(c, t) {
+                return None;
+            }
+        }
+        let hurt = c.memory.damage_on(me.id, 1.5, c.now) / me.stats.max_health.max(1.0);
+        if hurt > 0.06 + 0.08 * c.persona.nerve.max(0.0) {
+            return None;
+        }
+        Some(CommandKind::Attack(t.id))
+    }
+
+    /// Brush to wait in near the team's spot `at`, for a persona with flair (17 §13): a patch
+    /// within reach of the spot, not past the front, with no enemy in sight near it. Others
+    /// (and anyone hurt, or with a fight already on) stand with the team.
+    fn lurk(&self, c: &Ctx, at: Vec2) -> Option<Vec2> {
+        let st = &c.me.state;
+        if c.persona.flair < 0.5 || st.health < c.me.stats.max_health * 0.6 {
+            return None;
+        }
+        if c.b.enemies.iter().any(|e| e.state.pos.distance(st.pos) < 1100.0) {
+            return None;
+        }
+        let home = c.k.homes[c.b.team as usize];
+        let reach = 600.0 + 500.0 * c.persona.flair;
+        c.k.brush
+            .iter()
+            .filter(|(b, _)| b.distance(at) < reach && b.distance(home) < at.distance(home) + 350.0)
+            .filter(|(b, _)| !c.b.enemies.iter().any(|e| e.state.pos.distance(*b) < 900.0))
+            .min_by(|(a, _), (b, _)| a.distance(at).total_cmp(&b.distance(at)))
+            .map(|(b, _)| *b)
+    }
+
     /// Recall when it's safe and worth it: hurt, or rich enough for a real item, with the wave
     /// handled.
     fn maybe_recall(&mut self, c: &Ctx, share: f32, danger: f32) -> Option<CommandKind> {
@@ -770,11 +881,12 @@ impl Agent {
         if !heals && crate::tier::off("aram-recall") {
             return None;
         }
-        // Without healing at home (ARAM), only a real purchase is worth the walk back.
+        // Without healing at home (ARAM), players shop when they die and seldom walk back: only
+        // a big purchase is worth leaving the fight (17 §13).
         let rich = if heals {
             st.progress.gold >= next_cost.max(1100.0) + 150.0 * (self.p.strategy as f32)
         } else {
-            self.p.strategy >= 1 && st.progress.gold >= next_cost.max(1800.0) + 300.0
+            self.p.strategy >= 1 && st.progress.gold >= next_cost.max(3000.0) + 300.0
         };
         let hurt = heals && share < 0.38;
         if !(hurt || rich) {

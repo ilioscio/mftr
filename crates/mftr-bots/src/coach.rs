@@ -61,6 +61,8 @@ pub struct Member {
     /// The bot's strategic reach (`Params::strategy`) and ping habit.
     pub strategy: u8,
     pub pings: f32,
+    /// The bot's persona's risk appetite (17 §13; 0 for humans).
+    pub nerve: f32,
 }
 
 /// A human ping the coach is acting on.
@@ -660,15 +662,18 @@ impl Coach {
             }
         }
         let o = fight::outcome(&us, &them);
-        // A clear edge to start a fight; kept briefly while it stays ours.
+        // A clear edge to start a fight; kept briefly while it stays ours. A team of bold
+        // personas starts fights on a thinner edge, a timid one waits for more (17 §13).
         let holding = self.engaged.is_some_and(|(_, at)| now.secs_since(at) < 3.0);
+        let bots: Vec<f32> = members.iter().filter(|m| m.bot).map(|m| m.nerve).collect();
+        let nerve = bots.iter().sum::<f32>() / bots.len().max(1) as f32;
         let bar = if holding {
             0.05
         } else if strategy >= 1 {
             0.25
         } else {
             0.35
-        };
+        } - if holding { 0.0 } else { 0.12 * nerve };
         if o > bar {
             if !holding {
                 self.engaged = Some((center, now));
@@ -696,12 +701,24 @@ impl Coach {
             .iter()
             .filter(|s| !s.alive && s.respawn_at.is_some_and(|t| t.secs_since(b.now) > 8.0))
             .count();
-        let push =
-            strategy >= 1 && (dead >= 2 || (dead >= 1 && b.lanes[0].our_count >= 3)) && !crate::tier::off("siege");
+        // A bold team pushes on one kill (17 §13).
+        let bots: Vec<f32> = members.iter().filter(|m| m.bot).map(|m| m.nerve).collect();
+        let nerve = bots.iter().sum::<f32>() / bots.len().max(1) as f32;
+        let push = strategy >= 1
+            && (dead >= 2 || (dead >= 1 && (b.lanes[0].our_count >= 3 || nerve > 0.35)))
+            && !crate::tier::off("siege");
         let engage =
             if crate::tier::off("engage") { None } else { self.engage_call(b, memory, members, front, strategy) };
-        // Hold the wave: a team that gives it up loses its towers to it.
-        let wait = front;
+        // Hold the wave: a team that gives it up loses its towers to it. Between waves, wait in
+        // the open short of the center, as players do, rather than back at the turret (17 §13).
+        let v = &b.lanes[0];
+        let wait = if v.ours.is_none() && v.theirs.is_none() {
+            let mid = knowledge.lane_length(0, self.team) * 0.5 - 450.0;
+            let turret = v.our_turret.map_or(0.0, |(d, _)| d + 400.0);
+            knowledge.lane_point(0, self.team, mid.max(turret))
+        } else {
+            front
+        };
         members
             .iter()
             .filter(|m| m.bot)

@@ -2,7 +2,7 @@
 //! them (17 §11): who wins, how each champion did, what the bots cost; every replay must
 //! re-simulate exactly.
 
-use mftr_server::{BotMatch, BotMatchOptions, Scenario, ServerConfig, Tier};
+use mftr_server::{BotMatch, BotMatchOptions, Scenario, ServerConfig, Spacing, Tier};
 use mftr_sim::{ChampionId, Team};
 
 pub struct BotmatchConfig {
@@ -276,6 +276,39 @@ fn detail(cfg: &BotmatchConfig, m: &BotMatch, secs: f64) {
     );
 }
 
+/// How the teams stood on a one-lane map (17 §13): the gap between their medians and where the
+/// front (the point between them) was, as 10th/50th/90th percentiles in half Base-to-Base
+/// lengths, the share of time the front was between the outer turrets, and the share each
+/// team's median was behind its own outer turret. The reference footage (plat to low diamond
+/// ARAM) measured gap 0.04/0.19/0.38, front -0.42/0.12/0.50, between 65%, behind 25%.
+fn spacing_line(all: &[Spacing], kills: u32, ticks: u64) -> Option<String> {
+    let outer = all.first()?.outer_turret;
+    let samples: Vec<[f32; 4]> = all.iter().flat_map(|s| s.samples.iter().copied()).collect();
+    if samples.is_empty() {
+        return None;
+    }
+    let pct = |mut v: Vec<f32>| {
+        v.sort_by(f32::total_cmp);
+        let at = |q: f32| v[((v.len() as f32 * q) as usize).min(v.len() - 1)];
+        format!("{:.2}/{:.2}/{:.2}", at(0.1), at(0.5), at(0.9))
+    };
+    let n = samples.len() as f32;
+    let between = samples.iter().filter(|[b, r, ..]| ((b + r) * 0.5).abs() < outer).count() as f32 / n;
+    let behind =
+        samples.iter().map(|[b, r, ..]| (*b < -outer) as u32 + (*r > outer) as u32).sum::<u32>() as f32 / (2.0 * n);
+    // The same gap with four or more alive on each side: teams at full strength.
+    let full: Vec<f32> = samples.iter().filter(|s| s[2] >= 4.0 && s[3] >= 4.0).map(|[b, r, ..]| r - b).collect();
+    Some(format!(
+        "spacing: gap {} ({} with 4+ alive each)  front {}  between outer turrets {:.0}%  behind own {:.0}%  kills/min {:.1}",
+        pct(samples.iter().map(|[b, r, ..]| r - b).collect()),
+        if full.is_empty() { "-".to_string() } else { pct(full) },
+        pct(samples.iter().map(|[b, r, ..]| (b + r) * 0.5).collect()),
+        between * 100.0,
+        behind * 100.0,
+        kills as f64 / (ticks as f64 / 1800.0).max(0.1)
+    ))
+}
+
 /// The champions for a seed: the ones asked for, else the roster shuffled by the seed (so a
 /// series measures the bots, not one lineup).
 fn lineup(cfg: &BotmatchConfig, seed: u64) -> Vec<ChampionId> {
@@ -311,6 +344,11 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
     // Per tier (0: --blue's, 1: --red's): kills, deaths, cs/min, worth@15, champions, enemy
     // camps taken, structures taken.
     let mut side = [[0f64; 7]; 2];
+    let mut spacings = Vec::new();
+    // Per persona (17 §13): champions, kills, deaths, assists, damage dealt, seconds dead,
+    // relics, health share at a relic summed, minutes played.
+    let mut personas: Vec<(&'static str, [f64; 9])> = Vec::new();
+    let mut kills = 0u32;
     let games = cfg.seeds * if paired { 2 } else { 1 };
     let mut report = ItemReport::default();
     for game in 0..games {
@@ -354,11 +392,44 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
         }
         lengths.push(m.ticks);
         report.add(&m);
+        kills += m.champion_kills;
+        spacings.extend(m.spacing.clone());
+        if games == 1
+            && let Some(line) = spacing_line(&spacings, kills, m.ticks as u64)
+        {
+            println!("{line}");
+        }
         cost.0 += m.cost.bots_us;
         cost.1 = cost.1.max(m.cost.bots_worst_us);
         cost.2 += m.cost.sim_us;
         cost.3 += m.cost.ticks as u64;
         for c in &m.champions {
+            if let Some(name) = c.persona {
+                let i = match personas.iter().position(|(n, _)| *n == name) {
+                    Some(i) => i,
+                    None => {
+                        personas.push((name, [0.0; 9]));
+                        personas.len() - 1
+                    }
+                };
+                let v = &mut personas[i].1;
+                for (j, x) in [
+                    1.0,
+                    c.kills as f64,
+                    c.deaths as f64,
+                    c.assists as f64,
+                    c.damage_dealt as f64,
+                    c.dead_secs as f64,
+                    c.relics as f64,
+                    c.relic_share as f64,
+                    m.ticks as f64 / 1800.0,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    v[j] += x;
+                }
+            }
             let s = &mut side[tier_of(c.team) as usize];
             s[0] += c.kills as f64;
             s[1] += c.deaths as f64;
@@ -414,6 +485,26 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
                 s[3] / k,
                 s[6] / n,
                 s[5] / n
+            );
+        }
+        if let Some(line) = spacing_line(&spacings, kills, lengths.iter().map(|t| *t as u64).sum()) {
+            println!("  {line}");
+        }
+        personas.sort_by_key(|(n, _)| *n);
+        for (name, v) in &personas {
+            let n = v[0].max(1.0);
+            let minutes = v[8].max(0.1);
+            println!(
+                "  {:<9} x{:<3} K/D/A {:.1}/{:.1}/{:.1}  damage/min {:>4.0}  dead {:>2.0}%  relics/10 min {:.1} (at {:.0}% health)",
+                name,
+                v[0],
+                v[1] / n,
+                v[2] / n,
+                v[3] / n,
+                v[4] / minutes,
+                v[5] / (minutes * 60.0) * 100.0,
+                v[6] / minutes * 10.0,
+                if v[6] > 0.0 { v[7] / v[6] * 100.0 } else { 0.0 }
             );
         }
         let t = cost.3.max(1) as f64;

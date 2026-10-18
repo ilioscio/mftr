@@ -848,8 +848,8 @@ mod tests {
         assert_eq!(got, [GEOMETRY_CROSSROADS, GEOMETRY_BRIDGE], "{got:#018x?}");
     }
 
-    const GEOMETRY_CROSSROADS: u64 = 0x6277_b7c8_01c8_6368;
-    const GEOMETRY_BRIDGE: u64 = 0x0428_bc04_0f06_2fdc;
+    const GEOMETRY_CROSSROADS: u64 = 0xf8ce_3467_b709_f935;
+    const GEOMETRY_BRIDGE: u64 = 0x9422_f18b_4d24_8c3e;
 
     #[test]
     fn geometry_basics() {

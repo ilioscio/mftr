@@ -68,7 +68,7 @@ func _init() -> void:
 	check(opened == ed.DEFAULT_MAPS.size(), "every default map loads from the dropdown (%d of %d)" % [opened, ed.DEFAULT_MAPS.size()])
 	# ARAM maps (12 §1): The Bridge opens as one, relics and rocks round-trip.
 	ed._open_text(MftrMaps.bridge(), "")
-	check(ed.spec.kind == "aram" and ed.spec.relics.size() == 2 and ed.spec.rocks.size() == 1, "The Bridge opens as an ARAM map with its relics and rock")
+	check(ed.spec.kind == "aram" and ed.spec.relics.size() == 2 and ed.spec.rocks.size() == 2 and ed.spec.grass.size() == 6, "The Bridge opens as an ARAM map with its relics, rocks and brush")
 	check(MftrMaps.problems(ed.to_text()).is_empty(), "The Bridge writes back without problems")
 	check(ed.built.has("base_court") and ed.built.relics.size() == 4 and float(ed.built.fountain_radius) == 600.0, "its base court, four relics and small fountains are drawn")
 	check(ed.tool_buttons.camp.disabled and not ed.tool_buttons.relic.disabled, "ARAM maps have no camp tool but a relic tool")
@@ -80,7 +80,7 @@ func _init() -> void:
 	ed._press(Vector2(4200, 5800), false, false)
 	ed._rebuild_now()
 	var back2: Dictionary = MftrMaps.parse(ed.to_text())
-	check(back2.ok and back2.kind == "aram" and back2.relics.size() == 3 and back2.rocks.size() == 2, "relics and rocks read back")
+	check(back2.ok and back2.kind == "aram" and back2.relics.size() == 3 and back2.rocks.size() == 3, "relics and rocks read back")
 	ed._new_map()
 	check(ed.spec.kind == "aram", "a new map keeps the kind")
 	ed._set_kind("classic")

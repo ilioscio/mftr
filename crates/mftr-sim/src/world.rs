@@ -7437,8 +7437,10 @@ mod tests {
 
     /// The Bridge built from its spec (12 §1, E6): its walls are traced, so they differ a little
     /// from the hand-built polygons it replaced. Minions count the stretch from their spawn to
-    /// the first waypoint as their lane.
-    const GOLDEN_HASH_BRIDGE: u64 = 0x0368_74ac_a841_886a;
+    /// the first waypoint as their lane. Re-laid after the reference ARAM (17 §13): turrets
+    /// farther apart, relics in front of and behind the outer turrets, brush along the walls.
+    /// The item overhaul (18) changed what the canary's random purchases do.
+    const GOLDEN_HASH_BRIDGE: u64 = 0x2cb6_7e95_b31d_e0bb;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
