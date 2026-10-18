@@ -1475,6 +1475,30 @@ pub struct BotMatch {
     pub cost: BotCost,
     /// Pings the bots sent, by kind (`PingKind as usize`).
     pub pings: [u32; 8],
+    /// Where the teams stood on a one-lane map (ARAM), once a second (17 §11).
+    pub spacing: Option<Spacing>,
+}
+
+/// Where the teams stood on a one-lane map, once a second: each team's median living champion
+/// along the line from blue's Base (-1) to red's (1), center 0. Comparable with the reference
+/// footage measured the same way (17 §13).
+#[derive(Clone, Debug, Default)]
+pub struct Spacing {
+    /// (blue's median, red's median, blue alive, red alive), seconds with both teams alive on
+    /// the map.
+    pub samples: Vec<[f32; 4]>,
+    /// The outer turrets on that scale (blue's at minus this).
+    pub outer_turret: f32,
+}
+
+impl Spacing {
+    /// Where `p` lies on the scale.
+    fn place(bases: [Vec2; 2], p: Vec2) -> f32 {
+        let center = (bases[0] + bases[1]) * 0.5;
+        let half = bases[0].distance(bases[1]) * 0.5;
+        let dir = (bases[1] - bases[0]).normalize_or_zero();
+        (p - center).dot(dir) / half.max(1.0)
+    }
 }
 
 /// One champion's match, for the measurements (17 §11).
@@ -1504,6 +1528,11 @@ pub struct ChampionReport {
     pub taken_minions: f32,
     pub taken_structures: f32,
     pub stats: Option<mftr_bots::agent::AgentStats>,
+    /// The bot's persona (17 §13), if it's a bot that rolled one.
+    pub persona: Option<&'static str>,
+    /// Health relics it took, and its health share before each, summed.
+    pub relics: u16,
+    pub relic_share: f32,
 }
 
 /// Time spent in bots and in the simulation over a bot match (microseconds).
@@ -1584,12 +1613,32 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
     let mut dealt: Vec<(UnitId, f32, f32)> = Vec::new();
     let mut taken_other: Vec<(UnitId, f32, f32)> = Vec::new();
     let mut dead: Vec<(UnitId, u32)> = Vec::new();
+    let mut relics_by: Vec<(UnitId, u16, f32)> = Vec::new();
+    let mut relics_up: Vec<(UnitId, bool)> = Vec::new();
     let mut worth: Vec<(UnitId, [f32; 3])> = Vec::new();
     let mut falls = Vec::new();
     let mut horde_waves = Vec::new();
     let mut cost = BotCost::default();
     let mut pings = [0u32; 8];
     let mut winner = None;
+    let base = |team: Team| {
+        core.game.world.units().iter().find(|u| u.kind == UnitKind::Base && u.team == team).map(|u| u.state.pos)
+    };
+    let one_lane = core.game.world.map().layout.lanes.len() == 1 && !core.game.world.rules().horde;
+    let mut spacing = match (base(Team::Blue), base(Team::Red)) {
+        (Some(b), Some(r)) if one_lane => {
+            let outer = core
+                .game
+                .world
+                .units()
+                .iter()
+                .filter(|u| u.kind == UnitKind::Turret && u.team == Team::Blue && u.tier == 1)
+                .map(|u| -Spacing::place([b, r], u.state.pos))
+                .fold(0.0f32, f32::max);
+            Some((Spacing { samples: Vec::new(), outer_turret: outer }, [b, r]))
+        }
+        _ => None,
+    };
     for _ in 0..max_ticks {
         let k = core.game.world.tick().next();
         let t0 = std::time::Instant::now();
@@ -1747,6 +1796,60 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
                 core.bots.describe(p).unwrap_or_default()
             );
         }
+        // Relics taken this tick: the champion on it, and its health before the heal.
+        for r in core.game.world.units().iter().filter(|u| u.kind == UnitKind::Relic) {
+            let up = r.state.alive() && r.state.respawn_at.is_none();
+            let was = relics_up.iter().find(|(id, _)| *id == r.id).map(|(_, u)| *u);
+            if was == Some(true) && !up {
+                let taker = core
+                    .game
+                    .world
+                    .units()
+                    .iter()
+                    .filter(|c| c.kind == UnitKind::Champion && c.state.alive())
+                    .min_by(|a, b| a.state.pos.distance(r.state.pos).total_cmp(&b.state.pos.distance(r.state.pos)));
+                if let Some(c) = taker {
+                    let healed: f32 = events
+                        .iter()
+                        .filter_map(|e| match e {
+                            SimEvent::Healed { unit, amount, .. } if *unit == c.id => Some(*amount),
+                            _ => None,
+                        })
+                        .sum();
+                    let share = ((c.state.health - healed) / c.stats.max_health.max(1.0)).clamp(0.0, 1.0);
+                    match relics_by.iter_mut().find(|(id, ..)| *id == c.id) {
+                        Some(e) => {
+                            e.1 += 1;
+                            e.2 += share;
+                        }
+                        None => relics_by.push((c.id, 1, share)),
+                    }
+                }
+            }
+            match relics_up.iter_mut().find(|(id, _)| *id == r.id) {
+                Some(e) => e.1 = up,
+                None => relics_up.push((r.id, up)),
+            }
+        }
+        if let Some((sp, bases)) = spacing.as_mut()
+            && k.0.is_multiple_of(mftr_sim::TICK_HZ)
+        {
+            let median = |team: Team| {
+                let mut v: Vec<f32> = core
+                    .game
+                    .world
+                    .units()
+                    .iter()
+                    .filter(|u| u.kind == UnitKind::Champion && u.team == team && u.state.alive())
+                    .map(|u| Spacing::place(*bases, u.state.pos))
+                    .collect();
+                v.sort_by(f32::total_cmp);
+                v.get(v.len() / 2).map(|m| (*m, v.len() as f32))
+            };
+            if let (Some((b, nb)), Some((r, nr))) = (median(Team::Blue), median(Team::Red)) {
+                sp.samples.push([b, r, nb, nr]);
+            }
+        }
         for u in core.game.world.units().iter().filter(|u| u.kind == UnitKind::Champion) {
             if !u.state.alive() {
                 match dead.iter_mut().find(|(id, _)| *id == u.id) {
@@ -1823,6 +1926,9 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
                 taken_minions: taken_other.iter().find(|(id, ..)| *id == u.id).map_or(0.0, |d| d.1),
                 taken_structures: taken_other.iter().find(|(id, ..)| *id == u.id).map_or(0.0, |d| d.2),
                 stats: stats.iter().find(|(q, _)| *q == player).map(|(_, s)| *s),
+                persona: core.bots.persona(player).map(|p| p.name()),
+                relics: relics_by.iter().find(|(id, ..)| *id == u.id).map_or(0, |r| r.1),
+                relic_share: relics_by.iter().find(|(id, ..)| *id == u.id).map_or(0.0, |r| r.2),
             })
         })
         .collect();
@@ -1838,6 +1944,7 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
         champions,
         cost,
         pings,
+        spacing: spacing.map(|(s, _)| s),
     }
 }
 

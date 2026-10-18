@@ -16,20 +16,24 @@ A map is one of two **kinds** (`kind aram` in the file; Classic without it):
   fountain heals; outer turrets have plates; wards. Crossroads is one.
 - **ARAM:** one lane whose start is the base, no jungle camps or great objectives, health
   relics, a fountain that doesn't heal, ARAM's minion pacing. The Bridge is one
-  (`maps/bridge.mftrmap`, drawn in its old lane coordinates so its fountain, Base, turrets,
-  relics and brush stand where they did).
+  (`maps/bridge.mftrmap`, drawn in its lane's coordinates). It's laid out after the
+  reference ARAM ([R07](reference/R07-video-aram-match.md), 17 §13):
+  - the outer turrets a third of the way from the center to the Base, 3,000 u apart;
+  - a relic in front of each outer turret and one behind it;
+  - six patches of brush to a side, in alcoves along the walls;
+  - two rocks to a side in the open middle.
 
 | Part | Drawn as | Notes |
 |---|---|---|
 | **Size** | a preset | Classic: Small 10,000, Medium 14,500 (the default), Large 16,000 u square. ARAM: 9,000, 10,607 (The Bridge), 12,000 |
 | **Season** | a preset | Summer (the default), Autumn, Winter: how the map is dressed ([15 §9](15-map-art-direction.md#9-seasons)): its ground, cliffs, light, flora and fauna. `season autumn` in the file; summer without it. Players may choose another; it never changes play |
 | **Base** | fixed | Classic: blue's corner (bottom left): fountain, Base, two base turrets. ARAM: the lane's start, The Bridge's spacing along it (fountain 300 u in, champions 450, Base 1,250, base turrets side by side at 1,650, minion waves from 1,700) in a round court. Turned for red |
-| **Lanes** (1–5) | a line with a width | From blue's base to the river line. Lanes pair up down the river line (top with bottom; a middle lane with itself): each runs on into its partner's half, turned, so paired lanes end at matching spots (the editor snaps them; a middle lane ends at the center). Each gets outer, inner and gatehouse turrets and a Gatehouse, placed along it and draggable along it |
+| **Lanes** (1–5) | a line with a width | From blue's base to the river line. Lanes pair up down the river line (top with bottom; a middle lane with itself): each runs on into its partner's half, turned, so paired lanes end at matching spots (the editor snaps them; a middle lane ends at the center). Each gets outer, inner and gatehouse turrets and a Gatehouse, placed along it and draggable along it. On an ARAM lane they start where The Bridge has them: at 39%, 48%, 58% and 75% of the way from its start to the center |
 | **River** | lines with widths | Must lie along the river line (top-left to bottom-right corner) |
 | **Jungle paths** | lines with widths | Must connect to a lane, the river or the base |
 | **Clearings** | circles | Open ground (a camp's clearing is added automatically) |
 | **Camps** | points | Each carves a clearing around itself, so it's always reachable |
-| **Tall grass** | lines with widths | Brush |
+| **Tall grass** | lines with widths | Brush. A patch is traced as drawn, whatever its size (a smooth outline with nothing pinned used to lose every point, and the patch with it) |
 | **Great objectives** | points | In the river. Pairs turn through the map's center (one toward each end of the river, like the reference's Baron and Dragon): 2 or 4. A single one only on a 1-lane map. Classic only |
 | **Rocks** | circles | Small walls in the open, for cover. Added as exact octagons, not traced (a traced outline that small would be simplified away) |
 | **Health relics** | points | ARAM only. Neutral; each has its turned twin |

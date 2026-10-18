@@ -45,8 +45,10 @@ pub const MIN_JUNGLE_SHARE: f32 = 0.05;
 /// Default structure spots along a lane, as shares of its length from the base: the Gatehouse,
 /// the gatehouse turret, the inner turret, the outer turret.
 pub const STRUCTURE_SHARES: [f32; 4] = [0.08, 0.16, 0.45, 0.78];
-/// The same on an ARAM lane, measured from its start (the back of the base): The Bridge's.
-pub const ARAM_STRUCTURE_SHARES: [f32; 4] = [0.367, 0.45, 0.65, 0.833];
+/// The same on an ARAM lane, measured from its start (the back of the base): The Bridge's,
+/// after the reference ARAM (17 §13): the outer turrets a third of the way from the center to
+/// the Base, so the open ground between them is where teams fight.
+pub const ARAM_STRUCTURE_SHARES: [f32; 4] = [0.392, 0.475, 0.583, 0.747];
 /// An ARAM base is the start of its lane. Distances along it from its first point: the
 /// fountain (and its radius), where champions appear, the Base, its two turrets (side by side,
 /// this far either side of the lane) and where minion waves start. The Bridge's.
@@ -771,14 +773,17 @@ fn smooth(corners: &[(i32, i32, bool)], tolerance: f32) -> Vec<Vec2> {
         }
         pts = next;
     }
-    // Drop near-straight points (never pinned ones), one pass.
+    // Drop near-straight points (never pinned ones), one pass. Each is measured from the last
+    // point kept, so an outline with nothing pinned (a grass patch) keeps its first point:
+    // measured from neighbors alone, every point of a smooth loop would go.
     let m = pts.len();
+    let anchored = pts.iter().any(|p| p.1);
     let mut out: Vec<Vec2> = Vec::with_capacity(m);
     for i in 0..m {
         let (p, pin) = pts[i];
         let prev = out.last().copied().unwrap_or(pts[(i + m - 1) % m].0);
         let next = pts[(i + 1) % m].0;
-        if pin || crate::map::dist_point_segment(p, prev, next) >= tolerance {
+        if pin || (out.is_empty() && !anchored) || crate::map::dist_point_segment(p, prev, next) >= tolerance {
             out.push(p);
         }
     }

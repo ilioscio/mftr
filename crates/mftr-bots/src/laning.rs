@@ -125,7 +125,8 @@ pub fn window(m: &Unit, hits: &[(f32, f32)], dmg: f32) -> Option<(f32, Option<f3
 /// how far: their attack's reach, or a lunge's when it's up (what can't be dodged; skillshots
 /// are dodged instead), and a step more.
 pub fn keep_away<'w>(a: &Agent, c: &Ctx<'_, 'w>) -> Vec<(&'w Unit, f32)> {
-    if a.local >= -0.1 {
+    // A bold persona gives ground later (17 §13).
+    if a.local >= -0.1 - 0.25 * c.persona.nerve {
         return Vec::new();
     }
     let tracking = a.p.tracking;
@@ -278,7 +279,8 @@ fn spot(c: &Ctx, lane: usize, cautious: bool) -> Vec2 {
     let v = &c.b.lanes[lane];
     let range = me.attack.map_or(150.0, |s| s.range);
     let ranged = range > 300.0;
-    let back = if cautious { 450.0 } else { 0.0 };
+    // A timid persona stands a little farther back (17 §13).
+    let back = if cautious { 450.0 } else { 0.0 } + 250.0 * (-c.persona.nerve).max(0.0);
     let d = match (v.ours, v.theirs) {
         (Some((o, _)), Some((t, _))) if t - o < 700.0 => {
             // Waves meeting: behind the clash.
@@ -479,11 +481,12 @@ fn trade(a: &mut Agent, c: &Ctx) -> Option<CommandKind> {
     let o = fight::outcome(&us, &them) + a.read_noise();
     // Its way out known to be down (the top tier tracks spells): a smaller edge kills it.
     let trapped = a.p.strategy >= 3 && !crate::tier::off("trapped") && micro::escapes_down(a, c, e);
-    let bar = if trapped { 0.15 } else { 0.35 };
-    if o > bar && share(me) > 0.5 && a.p.strategy >= 1 {
+    let nerve = c.persona.nerve;
+    let bar = if trapped { 0.15 } else { 0.35 } - 0.15 * nerve;
+    if o > bar && share(me) > 0.5 - 0.1 * nerve && a.p.strategy >= 1 {
         return micro::fight(a, c, true, Some(e.id));
     }
-    if share(me) + 0.12 < share(e) {
+    if share(me) + 0.12 + 0.1 * nerve < share(e) {
         return None;
     }
     // What hitting it costs: their minions near us turn on us for a couple of seconds, and

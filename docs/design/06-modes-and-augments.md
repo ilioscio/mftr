@@ -30,7 +30,7 @@ Mode(
 | **Custom games** | any | Any mode plus rule overrides, bots, spectators, tournament settings | M2 onward |
 
 ### ARAM specifics
-- **The Bridge:** one lane, both teams' turrets plus Gatehouse plus Base, narrow sides with brush, and **health relics** that respawn on a timer.
+- **The Bridge:** one lane, both teams' turrets plus Gatehouse plus Base, brush in alcoves along both walls, and **health relics** that respawn on a timer, one in front of each outer turret and one behind it. The outer turrets stand well apart, so the open middle is where fights happen ([12 §1](12-map-editor.md), [R07](reference/R07-video-aram-match.md)).
 - Random champion assignment from each player's pool (in open source, everyone owns everything, so the pool is the full roster minus server-disabled champions), with **rerolls** and a shared **bench** to swap from.
 - Faster passive gold, starting gold for an early full item, and a **Mark** utility spell (throw, then recast to dash).
 

@@ -20,6 +20,7 @@ pub mod laning;
 pub mod legacy;
 pub mod memory;
 pub mod micro;
+pub mod persona;
 pub mod shop;
 pub mod tier;
 
@@ -126,6 +127,14 @@ impl Bots {
         })
     }
 
+    /// A bot's persona (17 §13), once it has rolled one (its first think as a champion).
+    pub fn persona(&self, player: PlayerId) -> Option<persona::Persona> {
+        self.seats.iter().find(|s| s.player == player).and_then(|s| match &s.brain {
+            Brain::Agent(a) => a.persona,
+            Brain::Legacy(_) => None,
+        })
+    }
+
     /// What a bot is up to, for traces: its mode, the coach's task and its role.
     pub fn describe(&self, player: PlayerId) -> Option<String> {
         let seat = self.seats.iter().find(|s| s.player == player)?;
@@ -136,7 +145,8 @@ impl Bots {
             .flatten()
             .find_map(|m| m.coach.task(player).map(|t| (Some(t), m.coach.role(player))))
             .unwrap_or((None, None));
-        Some(format!("{:?} {:?} {:?}", a.mode, role, task))
+        let persona = a.persona.map_or("-", |p| p.name());
+        Some(format!("{:?} {:?} {:?} {persona}", a.mode, role, task))
     }
 
     /// Each bot's counters (17 §11).
@@ -277,6 +287,7 @@ impl Bots {
                 else {
                     continue;
                 };
+                let persona = agent.persona_for(me.champion);
                 let ctx = Ctx {
                     b: &board,
                     memory: &mind.memory,
@@ -287,6 +298,7 @@ impl Bots {
                     strategy: agent.p.strategy,
                     bots: &bots,
                     role: mind.coach.role(seat.player),
+                    persona,
                 };
                 let (menu, action) = agent.think(&ctx, k);
                 for kind in [menu, action].into_iter().flatten() {
@@ -313,12 +325,12 @@ impl Bots {
             .filter_map(|u| {
                 let player = u.owner?;
                 let seat = self.seats.iter().find(|s| s.player == player);
-                let (bot, strategy, pings) = match seat.map(|s| &s.brain) {
-                    Some(Brain::Agent(a)) => (true, a.p.strategy, a.p.pings),
-                    Some(Brain::Legacy(_)) => (false, 0, 0.0),
-                    None => (false, 0, 0.0),
+                let (bot, strategy, pings, nerve) = match seat.map(|s| &s.brain) {
+                    Some(Brain::Agent(a)) => (true, a.p.strategy, a.p.pings, a.persona.map_or(0.0, |p| p.nerve)),
+                    Some(Brain::Legacy(_)) => (false, 0, 0.0, 0.0),
+                    None => (false, 0, 0.0, 0.0),
                 };
-                Some(Member { player, unit: u.id, champion: u.champion?, bot, strategy, pings })
+                Some(Member { player, unit: u.id, champion: u.champion?, bot, strategy, pings, nerve })
             })
             .collect();
         out.sort_by_key(|m| m.player);

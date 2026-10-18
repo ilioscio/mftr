@@ -1073,6 +1073,15 @@ to keep many matches on a server ([17](17-bots.md), D62).
     worst tick under 0.5 ms.
   - Dodging by tier, Recruit to Nightmare: lines 0–94%, areas 17–100% (17 §12).
 - **Not yet:** vision denial; ARAM edges for Nightmare (17 §12).
+- **Personas and play like people's** (17 §13, after one recorded ARAM match, R07):
+  - each bot rolls a persona (daredevil, carry, guardian, cautious, trickster, steady) that
+    moves its risk, selfishness, warding and brush play;
+  - ARAM bots hold the middle, back off a step rather than to the turret, take towers after won
+    fights and shop when they die;
+  - The Bridge's turrets stand farther apart, a relic sits each side of each outer turret, and
+    it has brush (traced patches no longer vanish).
+  - **Measured:** kills a minute 3.8–4.1 → 5.7–6.1 (the reference match: 6.6); time behind the
+    own outer turret 37–40% → 29–33% (25%).
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
