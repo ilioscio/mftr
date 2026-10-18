@@ -96,6 +96,22 @@ const MAP_PROPS: [&str; 19] = [
     "bush_winter",
 ];
 
+/// Every item in the catalog has its model (18 §8): a prop pack at `art/items/<key>`, the key
+/// its name in snake case, valid and in the item budget.
+#[test]
+fn every_item_has_a_model() {
+    for it in mftr_sim::items::CATALOG.iter() {
+        let key: String = it.name.to_lowercase().replace('\'', "").replace(' ', "_");
+        let f = format!("items/{key}/export/{key}.glb");
+        let r = validate_file(&art(&f));
+        assert!(r.findings.is_empty(), "{f}: {:#?}", r.findings);
+        let loaded = mftr_pack::load_file(&art(&f)).unwrap();
+        assert_eq!(loaded.kind, "prop", "{f}");
+        let tris = loaded.model.triangles();
+        assert!((100..=1500).contains(&tris), "{f}: {tris} triangles");
+    }
+}
+
 /// A prop is static: its model loads (one `root` bone, no clips), and the same model claiming to
 /// be a prop while carrying a biped skeleton and clips is refused.
 #[test]

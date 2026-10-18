@@ -206,6 +206,10 @@ Two per champion, chosen before the match. *(start)* list:
 - **Consumables, as built:** a Health Potion (50 gold) heals 120 over 15 s, up to 5 stacked in a
   slot; the Refillable Flask (150, one per champion) heals 100 over 12 s, twice, and refills
   wherever its holder can shop. Items' actives go on 1–6.
+- **The full shop, as built** ([18](18-items.md), D64): ~75 items in tiers (starters,
+  components, epics, legendaries, boots, consumables), the support quest (the Pilgrim's Ledger
+  growing into a lantern) and the jungle's hatchlings; crit, penetration, anti-heal,
+  omnivamp and tenacity; ten actives on 1–6, quick-cast at the cursor.
 
 ## 12. Death, respawn & recall
 

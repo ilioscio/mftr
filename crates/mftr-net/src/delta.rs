@@ -204,6 +204,9 @@ mod tests {
             dashing: false,
             slowed: false,
             recovering: false,
+            encased: false,
+            wounded: false,
+            burning: false,
             attack_variant: 0,
             facing: 0,
         }

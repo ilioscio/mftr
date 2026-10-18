@@ -68,6 +68,8 @@ pub struct MissileRender {
     pub hard_cc: bool,
     /// The caster (for the spawn streak from its drawn hand, 03a §7).
     pub owner: UnitId,
+    /// The item whose active fired it (0: an ability).
+    pub item: u8,
 }
 
 /// An enemy missile as the player sees it, for scripted dodgers (dodge rig bot).
@@ -320,14 +322,15 @@ impl MissileBook {
                         unconfirmed: false,
                         hard_cc: m.spec.cc.is_hard(),
                         owner: m.owner,
+                        item: m.item,
                     });
                 }
                 return;
             }
             let (pos, dir, radius) = (pos_at(m, at), m.dir, m.spec.radius);
             let hard_cc = m.spec.cc.is_hard();
-            let owner = m.owner;
-            out.push(MissileRender { key, side, pos, dir, radius, impact: false, unconfirmed, hard_cc, owner });
+            let (owner, item) = (m.owner, m.item);
+            out.push(MissileRender { key, side, pos, dir, radius, impact: false, unconfirmed, hard_cc, owner, item });
         };
         let hits = self.self_hits(own_radius, history, last, interceptions);
         let option = self.own_display;
@@ -431,6 +434,7 @@ mod tests {
             power: 50.0,
             shot,
             slot: 0,
+            item: 0,
         };
         let mut book = MissileBook::default();
         for (id, shot, tick) in [(10, 0, 1), (11, 1, 2), (12, mftr_sim::augments::ECHO_SHOT, 3)] {

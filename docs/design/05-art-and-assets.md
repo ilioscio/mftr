@@ -115,7 +115,10 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 - Ability and item icons as SVG: a strong silhouette shape plus an element/color code. Many can share motifs.
   **As built:** item icons are `art/items/icons/<name>.svg`, drawn on a backdrop in their tier's
   colors (components slate, upgrades teal, legendaries gold on purple); an item without one gets
-  its main stat's glyph. Planned: icons rendered from item models.
+  its main stat's glyph. **Now (18 §8):** every item is a model (`art/items/<key>`, a prop
+  pack), and the client renders its icon from it like a portrait, on the tier's backdrop
+  (starters and role items bronze, components slate, epics teal, legendaries gold on violet,
+  boots and hatchlings green); the SVGs stand in until a render is ready.
 - **Champion portraits** are rendered by the client from each champion's own model (its idle
   pose, a warm key and cool rim light, a backdrop in its identity color), so they follow every
   change to a model: a bust, a round crop, a minimap icon and a full-body card. They're used in

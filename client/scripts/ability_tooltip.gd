@@ -24,6 +24,10 @@ const C_UP := "8fe36f"
 
 # Status icons, 24×24 SVG, drawn inline at the text's height.
 const ICONS := {
+	# Item effects (18): a cracked heart (Wounds), a flame (a burn), an amber crystal (stasis).
+	"wounds": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M12 21C5 15.5 2.5 12 2.5 8.4A4.9 4.9 0 0 1 12 6.3a4.9 4.9 0 0 1 9.5 2.1C21.5 12 19 15.5 12 21z" fill="#b8323c" stroke="#3a0b10" stroke-width="1.2" stroke-linejoin="round"/><path d="M12.4 6.6l-2 4.2 3.2 1.6-2.3 4.4" fill="none" stroke="#1a0507" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+	"burn": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M12 22c-4.4 0-7-2.9-7-6.6 0-4.3 3.6-6.2 4.3-10.4 2.9 1.9 3.6 4.4 3.3 6.4 1.2-.6 2-1.9 2.2-3.5 2.4 2 4.2 4.7 4.2 7.7 0 3.6-2.6 6.4-7 6.4z" fill="#ff8a2a" stroke="#6a2a00" stroke-width="1.2" stroke-linejoin="round"/><path d="M12 21c-1.9 0-3-1.2-3-2.8 0-1.9 1.6-2.6 2-4.4 1.7 1.2 4 2.6 4 4.6 0 1.5-1.2 2.6-3 2.6z" fill="#ffd24a"/></svg>',
+	"stasis": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M12 2l6 5-1.5 11L12 22l-4.5-4L6 7z" fill="#e8a83a" stroke="#5a3a00" stroke-width="1.2" stroke-linejoin="round"/><path d="M12 2v20M6 7l6 3 6-3" fill="none" stroke="#fff0b8" stroke-width="1" opacity=".8"/></svg>',
 	# A dizzy star.
 	"stun": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M12 2l2.6 6.3 6.8.5-5.2 4.4 1.6 6.6L12 16.3 6.2 19.8l1.6-6.6L2.6 8.8l6.8-.5z" fill="#ffd24a" stroke="#7a5a00" stroke-width="1.2" stroke-linejoin="round"/></svg>',
 	# Chains around a boot: two linked rings.

@@ -208,9 +208,14 @@ keeps a commitment bonus and a minimum time, so it doesn't dither:
 - **Blink:** to live through a fight it would otherwise die in, or to dodge a big crowd-control
   shot (Elite and up), or to finish a kill just out of reach (Elite and up).
 - **Barrier:** when incoming damage would kill. **Potions:** below 65% outside the fountain.
-- **Shopping:** the champion's build path, with its defensive item chosen against the enemy's
-  damage mix. Classic starters include potions; supports and junglers add control wards. Stat
-  Anvils once the build is complete.
+- **Shopping:** the champion's build path, with its boots and defensive legendary chosen
+  against the enemy's damage mix ([18](18-items.md) §9). A jungler starts on a hatchling, a
+  support on the Pilgrim's Ledger and takes its lantern when the quest is done; a starter is
+  sold for room late. Classic starters include potions; supports and junglers add control
+  wards. Stat Anvils once the build is complete.
+- **Item actives:** by rule: Encase about to die, Petrify through a burst, Embrace when allies
+  are hurt, Absolve on a held or dying ally, Reaping Arc, Bloodletting and Quake with enemies in
+  reach, Plunge and Surge onto a champion worth chasing, Fleet to chase or flee.
 - **Augments:** scored by how well each fits the champion (its stat profile and kit), rerolling
   the worst offer when none fits.
 - **Wards:** the coach keeps a list of spots that matter now: river brush near a laner, jungle

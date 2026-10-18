@@ -377,6 +377,7 @@ version = "0.15.0"
 name = "mftr-tools"
 version = "0.15.0"
 dependencies = [
+ "mftr-bots",
  "mftr-client",
  "mftr-net",
  "mftr-pack",
