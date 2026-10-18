@@ -537,7 +537,8 @@ pub fn support(a: &mut Agent, c: &Ctx) -> Option<CommandKind> {
 /// Item actives by rule (18 §9): Encase about to die, Petrify and Embrace through a burst,
 /// Absolve on a held or dying ally, Reaping Arc, Bloodletting and Quake with enemies in reach,
 /// Plunge and Surge onto a champion worth chasing (`local`: how the fight reads), Fleet to
-/// chase or flee.
+/// chase or flee. The persona moves the bars (17 §14): a timid one saves itself sooner, a bold
+/// one goes in on a thinner edge, a selfless one shields allies for less.
 pub fn actives(c: &Ctx, local: f32) -> Option<CommandKind> {
     use mftr_sim::items::{self, Active};
     let me = c.me;
@@ -549,6 +550,7 @@ pub fn actives(c: &Ctx, local: f32) -> Option<CommandKind> {
     let max = me.stats.max_health.max(1.0);
     let share = st.health / max;
     let hit = c.memory.damage_on(me.id, 2.0, now) / max;
+    let (nerve, greed) = (c.persona.nerve, c.persona.greed);
     let champs = |r: f32| foes(c).filter(move |e| e.kind == UnitKind::Champion && e.state.pos.distance(st.pos) <= r);
     let any_near = |r: f32| {
         foes(c)
@@ -564,24 +566,27 @@ pub fn actives(c: &Ctx, local: f32) -> Option<CommandKind> {
         let Some(item) = items::item(id) else { continue };
         let use_it = CommandKind::UseItem(slot as u8);
         match item.active {
-            Active::Encase { .. } if share < 0.22 && hit > 0.1 => return Some(use_it),
-            Active::Petrify { .. } if share < 0.45 && hit > 0.08 => return Some(use_it),
+            Active::Encase { .. } if share < 0.22 - 0.08 * nerve && hit > 0.1 => return Some(use_it),
+            Active::Petrify { .. } if share < 0.45 - 0.1 * nerve && hit > 0.08 => return Some(use_it),
             Active::ReapingArc { radius, .. } if any_near(radius).count() >= 2 || champs(radius).next().is_some() => {
                 return Some(use_it);
             }
             Active::Bloodletting { radius, .. } if champs(radius).next().is_some() => return Some(use_it),
             Active::Quake { radius, .. }
-                if champs(radius).count() >= 2 || (share < 0.5 && champs(radius).next().is_some()) =>
+                if champs(radius).count() >= 2
+                    || (share < 0.5 && champs(radius).next().is_some())
+                    || (nerve > 0.5 && local > 0.0 && champs(radius).next().is_some()) =>
             {
                 return Some(use_it);
             }
             Active::Embrace { radius, .. } => {
-                let hurt =
-                    c.b.allies
-                        .iter()
-                        .filter(|a| a.state.alive() && a.state.pos.distance(st.pos) <= radius)
-                        .filter(|a| c.memory.damage_on(a.id, 2.0, now) / a.stats.max_health.max(1.0) > 0.12)
-                        .count();
+                let hurt = c
+                    .b
+                    .allies
+                    .iter()
+                    .filter(|a| a.state.alive() && a.state.pos.distance(st.pos) <= radius)
+                    .filter(|a| c.memory.damage_on(a.id, 2.0, now) / a.stats.max_health.max(1.0) > 0.12 + 0.05 * greed)
+                    .count();
                 if hurt >= 1 && champs(1000.0).next().is_some() {
                     return Some(use_it);
                 }
@@ -600,9 +605,9 @@ pub fn actives(c: &Ctx, local: f32) -> Option<CommandKind> {
                     return Some(at(slot, a.state.pos));
                 }
             }
-            Active::Plunge { range, .. } if local > 0.1 => {
+            Active::Plunge { range, .. } if local > 0.1 - 0.25 * nerve => {
                 let prey = champs(range + 65.0)
-                    .filter(|e| e.state.health / e.stats.max_health.max(1.0) < 0.45)
+                    .filter(|e| e.state.health / e.stats.max_health.max(1.0) < 0.45 + 0.15 * nerve.max(0.0))
                     .min_by(|a, b| a.state.health.total_cmp(&b.state.health));
                 if let Some(e) = prey {
                     return Some(at(slot, e.state.pos));
@@ -610,14 +615,15 @@ pub fn actives(c: &Ctx, local: f32) -> Option<CommandKind> {
             }
             Active::Surge { .. } => {
                 if let Some(e) = champs(650.0).min_by(|a, b| a.state.health.total_cmp(&b.state.health))
-                    && (local > -0.2 || share > 0.6)
+                    && (local > -0.2 - 0.2 * nerve || share > 0.6)
                 {
                     return Some(at(slot, e.state.pos));
                 }
             }
             Active::Fleet { .. } => {
-                let fleeing = share < 0.3 && champs(900.0).next().is_some();
-                let chasing = local > 0.2 && champs(1300.0).any(|e| e.state.health / e.stats.max_health.max(1.0) < 0.3);
+                let fleeing = share < 0.3 - 0.15 * nerve && champs(900.0).next().is_some();
+                let chasing = local > 0.2 - 0.2 * nerve
+                    && champs(1300.0).any(|e| e.state.health / e.stats.max_health.max(1.0) < 0.3);
                 if fleeing || chasing {
                     return Some(use_it);
                 }

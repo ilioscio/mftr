@@ -333,7 +333,8 @@ enemy's damage, the defensive legendary by the enemy's damage as today), and use
 rule: Encase when about to die, Fleet and Surge to chase or escape, Reaping Arc and Bloodletting
 with enemies in reach, Quake when engaged, Petrify and Embrace when allies take burst, Absolve
 on a stunned ally, Plunge on a killable champion. Supports run the quest; junglers buy a
-hatchling.
+hatchling. Each bot's persona picks its legendaries, boots, starter, lantern and hatchling, and
+moves when it uses actives (17 §14); the steady persona keeps these balanced paths.
 
 ## 10. Implementation notes
 

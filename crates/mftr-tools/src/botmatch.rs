@@ -346,8 +346,8 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
     let mut side = [[0f64; 7]; 2];
     let mut spacings = Vec::new();
     // Per persona (17 §13): champions, kills, deaths, assists, damage dealt, seconds dead,
-    // relics, health share at a relic summed, minutes played.
-    let mut personas: Vec<(&'static str, [f64; 9])> = Vec::new();
+    // relics, health share at a relic summed, minutes played, games won.
+    let mut personas: Vec<(&'static str, [f64; 10])> = Vec::new();
     let mut kills = 0u32;
     let games = cfg.seeds * if paired { 2 } else { 1 };
     let mut report = ItemReport::default();
@@ -408,7 +408,7 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
                 let i = match personas.iter().position(|(n, _)| *n == name) {
                     Some(i) => i,
                     None => {
-                        personas.push((name, [0.0; 9]));
+                        personas.push((name, [0.0; 10]));
                         personas.len() - 1
                     }
                 };
@@ -423,6 +423,7 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
                     c.relics as f64,
                     c.relic_share as f64,
                     m.ticks as f64 / 1800.0,
+                    m.winner.is_some_and(|(t, _)| t == c.team) as u8 as f64,
                 ]
                 .into_iter()
                 .enumerate()
@@ -495,9 +496,10 @@ pub fn run(cfg: &BotmatchConfig) -> bool {
             let n = v[0].max(1.0);
             let minutes = v[8].max(0.1);
             println!(
-                "  {:<9} x{:<3} K/D/A {:.1}/{:.1}/{:.1}  damage/min {:>4.0}  dead {:>2.0}%  relics/10 min {:.1} (at {:.0}% health)",
+                "  {:<9} x{:<3} won {:>2.0}%  K/D/A {:.1}/{:.1}/{:.1}  damage/min {:>4.0}  dead {:>2.0}%  relics/10 min {:.1} (at {:.0}% health)",
                 name,
                 v[0],
+                v[9] / n * 100.0,
                 v[1] / n,
                 v[2] / n,
                 v[3] / n,
