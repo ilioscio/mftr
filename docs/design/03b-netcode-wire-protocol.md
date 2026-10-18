@@ -138,6 +138,10 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 > Stat Anvil steps and up to 16 effects (kind, tenths of a second left, a value: a slow's
 > percent, a shield's points, plates, stacks). Nothing in snapshots changes.
 
+> **Protocol 27:** nothing on the wire changed; the built-in maps did (The Bridge re-laid after
+> the reference ARAM, and brush that tracing used to drop, 17 §13). Clients build the map the
+> server plays from their own copy, so older clients can't join.
+
 > **Implemented (protocol 26):** pings and the bots' tier ([17](17-bots.md) §8–§9).
 > `Ping { kind, at, target }` (client kind 6: a 3-bit kind, the point, an optional unit) is
 > relayed to the pinger's team and spectators as the event `Ping` (21: kind, point, optional
