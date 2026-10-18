@@ -4,6 +4,7 @@
 //! Stat Anvils.
 
 use crate::kit::{self, Archetype, Role, use_of};
+use crate::persona::Kind;
 use mftr_sim::ability::Effect as Shape;
 use mftr_sim::augments::{self, Effect};
 use mftr_sim::items::{self, *};
@@ -225,20 +226,18 @@ pub fn level_up(c: ChampionId, p: &Progress) -> Option<u8> {
     basics.iter().copied().find(|s| p.ranks[*s as usize] == 0).or(basics.first().copied())
 }
 
-/// The champion's build path for its role (18 §9): a jungler starts on a hatchling, a support
-/// on the Pilgrim's Ledger; boots and the defensive items answer the enemy's damage
+/// The champion's build path for its role and its persona (18 §9, 17 §14): a jungler starts
+/// on a hatchling, a support on the Pilgrim's Ledger; the persona picks the legendaries, boots
+/// and starter (`builds`); boots and the defensive items answer the enemy's damage
 /// (`physical`: the share of it that's physical).
-pub fn path(c: ChampionId, physical: f32, role: Option<Role>) -> Vec<u8> {
-    use Archetype as A;
+pub fn path(c: ChampionId, physical: f32, role: Option<Role>, persona: Kind) -> Vec<u8> {
     let base = items::build_path(c);
-    let mut p = base.to_vec();
+    // `MFTR_BOTS_OFF=persona-builds`: every persona on the balanced path (an A/B switch).
+    let persona = if crate::tier::off("persona-builds") { Kind::Steady } else { persona };
+    let mut p = crate::builds::path(c, persona, base, physical);
     let starter = p.iter().position(|id| items::item(*id).is_some_and(|i| i.tier == items::Tier::Starter));
     let role_start = match role {
-        Some(Role::Jungle) => Some(match Archetype::of(c) {
-            A::Tank | A::Warden | A::Bruiser => BARKLING,
-            A::Assassin | A::Skirmisher => FLINTLING,
-            _ => WINDLING,
-        }),
+        Some(Role::Jungle) => Some(crate::builds::hatchling(c, persona)),
         Some(Role::Support) => Some(PILGRIMS_LEDGER),
         _ => None,
     };
@@ -316,15 +315,6 @@ fn shuffled(c: ChampionId, base: &[u8], seed: u64) -> Vec<u8> {
     out
 }
 
-/// The lantern a support takes when its quest is done (18 §6).
-pub fn lantern(c: ChampionId) -> u8 {
-    match Archetype::of(c) {
-        Archetype::Enchanter | Archetype::Mage | Archetype::Artillery | Archetype::Battlemage => SUNWARD_LANTERN,
-        Archetype::Tank | Archetype::Warden => BULWARK_LANTERN,
-        _ => HUNTERS_LANTERN,
-    }
-}
-
 /// The inventory after buying `ids` in order from nothing (recipes consume their components).
 fn simulate(ids: &[u8]) -> Vec<u8> {
     let mut inv: Vec<u8> = Vec::new();
@@ -387,18 +377,18 @@ pub fn next_item(path: &[u8], held: &[u8; INVENTORY]) -> Option<u8> {
 
 /// What to buy now, if anything (one purchase per call). `physical`: the enemy's physical share;
 /// `potions`, `wards`: how many the role wants on hand.
-pub fn buy(u: &Unit, physical: f32, potions: u8, wards: u8, role: Option<Role>) -> Option<CommandKind> {
+pub fn buy(u: &Unit, physical: f32, potions: u8, wards: u8, role: Option<Role>, persona: Kind) -> Option<CommandKind> {
     let c = u.champion?;
     let p = &u.state.progress;
     let gold = p.gold;
     // The quest done: the Astrolabe becomes a lantern, for free.
     if p.items.contains(&PILGRIMS_ASTROLABE) && p.gear.quest >= items::quest::DONE {
-        return Some(CommandKind::Buy(lantern(c)));
+        return Some(CommandKind::Buy(crate::builds::lantern(c, persona)));
     }
     let free = p.items.iter().filter(|i| **i == 0).count();
     let count =
         |id: u8| -> u8 { p.items.iter().zip(p.charges).filter(|(i, _)| **i == id).map(|(_, n)| n.max(1)).sum() };
-    let path = path(c, physical, role);
+    let path = path(c, physical, role, persona);
     if let Some(next) = next_item(&path, &p.items)
         && let Some((cost, used)) = items::price(next, &p.items)
         && cost <= gold
@@ -462,26 +452,26 @@ mod tests {
     }
 
     fn path_for_test(c: ChampionId, role: Option<Role>) -> Vec<u8> {
-        path(c, 0.5, role)
+        path(c, 0.5, role, Kind::Steady)
     }
 
     #[test]
     fn roles_change_the_start() {
-        assert_eq!(path(ChampionId::Bastion, 0.5, Some(Role::Jungle))[0], BARKLING);
-        assert_eq!(path(ChampionId::Shade, 0.5, Some(Role::Jungle))[0], FLINTLING);
-        assert_eq!(path(ChampionId::Ember, 0.5, Some(Role::Mid))[0], SQUIRES_RING);
-        assert_eq!(lantern(ChampionId::Lumen), SUNWARD_LANTERN);
-        assert_eq!(lantern(ChampionId::Cairn), BULWARK_LANTERN);
+        assert_eq!(path(ChampionId::Bastion, 0.5, Some(Role::Jungle), Kind::Steady)[0], BARKLING);
+        assert_eq!(path(ChampionId::Shade, 0.5, Some(Role::Jungle), Kind::Steady)[0], FLINTLING);
+        assert_eq!(path(ChampionId::Ember, 0.5, Some(Role::Mid), Kind::Steady)[0], SQUIRES_RING);
+        assert_eq!(crate::builds::lantern(ChampionId::Lumen, Kind::Steady), SUNWARD_LANTERN);
+        assert_eq!(crate::builds::lantern(ChampionId::Cairn, Kind::Steady), BULWARK_LANTERN);
     }
 
     #[test]
     fn defenses_answer_the_enemys_damage() {
-        let p = path(ChampionId::Bastion, 0.9, None);
+        let p = path(ChampionId::Bastion, 0.9, None, Kind::Steady);
         assert!(p.contains(&BRIARHIDE_PLATE) && !p.contains(&WARDSTONE_MANTLE));
         assert!(p.contains(&IRONSHOD_BOOTS));
-        let p = path(ChampionId::Bastion, 0.1, None);
+        let p = path(ChampionId::Bastion, 0.1, None, Kind::Steady);
         assert!(p.contains(&WARDSTONE_MANTLE) && p.contains(&STALWART_SABATONS));
-        assert_eq!(path(ChampionId::Ember, 0.5, None), items::build_path(ChampionId::Ember));
+        assert_eq!(path(ChampionId::Ember, 0.5, None, Kind::Steady), items::build_path(ChampionId::Ember));
     }
 
     #[test]

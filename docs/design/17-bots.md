@@ -291,7 +291,8 @@ Dev switches, for A/B runs (production servers set neither):
 - `MFTR_BOTS_TUNE=tier.field=value,...` overrides a tier's number (any field of `Params`, e.g.
   `nightmare.think_fight=4`), to find which ones matter.
 - `MFTR_BOTS_PERSONA=kind` makes every bot one persona (§13); `MFTR_BOTS_OFF=personas` makes
-  them all the even-keeled baseline.
+  them all the even-keeled baseline, and `MFTR_BOTS_OFF=persona-builds` keeps their play but
+  puts every persona on the balanced build (§14).
 
 On a one-lane map `botmatch` also reports how the teams stood, in the units of the reference
 footage (R07): the gap between the teams' median champions and where the front was, the time
@@ -545,3 +546,135 @@ to play. Personas change choices, never hands: reaction, aim and reads stay the 
   side.
 - **More footage:** one match is one lobby. The owner has more recorded, which would show
   which of R07's numbers are ARAM's and which were these ten players'.
+
+## 14. Builds by persona (2026-10-18)
+
+The item overhaul ([18](18-items.md)) gave each class 3–7 legendaries that are real choices,
+balanced with bots on one path per champion. A player's build says as much about them as their
+play, so each persona now builds its own way (`builds.rs`).
+
+**The rule:**
+- **Steady** keeps the champion's balanced path (`items::build_path`) exactly.
+- **The other personas** put their class's legendaries in their own order and keep the path's
+  count (at least three). The champion's own legendaries fill in after. Boots, starter, lantern
+  and hatchling are the persona's too.
+- **Assembly:** the starter, Boots, the first legendary from its components up, the boots
+  upgrade (without a second Boots), then the rest.
+- **Still answering the enemy:** boots and the resist legendary still answer the enemy's
+  damage. A persona that wants defensive boots gets Ironshod or Stalwart by it, and Wardstone
+  and Briarhide swap past the same lines as before.
+
+| Class | Daredevil | Carry | Guardian | Cautious | Trickster |
+|---|---|---|---|---|---|
+| Mage | Windstride, Inferno, Grimoire; Swift; Tally Charm | Grimoire, Hollow Scepter, Inferno; Spellstriders; Tally Charm | Blightcaller, Amber, Inferno; Sage | Amber, Inferno, Windstride; defensive | Windstride, Hollow Scepter, Grimoire; Swift |
+| Marksman | Gale Saber, Crimson Fang, Starsteel | Starsteel, Fanfire, Titanbane | Titanbane, Crimson Fang | Crimson Fang, Gale Saber, Starsteel; defensive | Gale Saber, Fanfire, Starsteel; Swift |
+| Assassin | Shrikeblade, Duskfang, Veilrunner; Swift | Duskfang, Shrikeblade, Veilrunner | Shrikeblade, Lionheart, Duskfang; defensive | Veilrunner, Duskfang, Lionheart; defensive | Veilrunner, Duskfang, Shrikeblade; Swift |
+| Fighter | Threefold, Bloodletter's, Lionheart; Swift | Reaping Cleaver, Sundering Axe, Threefold | Lionheart, Kinship Locket, Bloodletter's; defensive | Lionheart, Bloodletter's, Sundering; defensive | Threefold, Reaping Cleaver, Sundering; Swift |
+| Tank | Stonewall, Furnace, Stoneskin; defensive | Furnace, Briarhide, Heartstone; defensive | Kinship Locket, Stonewall, Wardstone; Sage | Heartstone, Stoneskin, Wardstone; defensive | Stonewall, Furnace, Briarhide; Swift |
+| Enchanter | Kinship Locket, Windstride, Inferno; Swift | Inferno, Grimoire, Chalice | Chalice, Kinship Locket, Wardstone | Kinship Locket, Chalice, Amber; defensive | Windstride, Chalice, Inferno; Swift |
+
+(Boots the champion's own unless named; "defensive" is Ironshod or Stalwart by the enemy's
+damage.)
+
+- **Why these:**
+  - The daredevil buys what gets it in and keeps it there: dashes and engage actives, sticking
+    power, sustain mid-fight.
+  - The carry buys the amplifiers first. A carry or daredevil mage snowballs on the Tally Charm.
+  - The guardian buys what helps the team: the Locket and the Chalice where the class can
+    carry them, anti-heal, tank-shredding, Quake's peel.
+  - The cautious buys what keeps it alive: Encase, Lionheart, Crimson Fang's shield,
+    Veilrunner's Fleet, Heartstone.
+  - The trickster buys burst and mobility.
+- **Support lanterns:** a daredevil or trickster takes the Hunter's Lantern unless it's an
+  enchanter. A guardian or cautious front-liner takes the Bulwark. Others keep their class's.
+- **Jungle hatchlings:** a daredevil raises a Flintling (Claim on champions), a trickster a
+  Windling (speed to roam), a guardian or cautious bot a Barkling (its shield). Others keep
+  their class's.
+- **Actives follow the persona:**
+  - Encase and Petrify come sooner for the timid (Encase below 22% − 8 points × nerve).
+  - Plunge goes onto healthier targets and on a thinner edge for the bold.
+  - Surge and Fleet's chase go in on worse odds; Fleet's escape comes sooner for the timid.
+  - Quake opens a fight for a daredevil (one champion in reach, the fight even or better).
+  - Embrace shields smaller bursts for the selfless.
+
+**Measured** (Elite against Elite, `botmatch --items`; 120 ARAM games and 30 Classic, persona
+builds on and then off with `MFTR_BOTS_OFF=persona-builds`, same seeds):
+
+- **The match doesn't move:**
+  - ARAM ran 19:44 against 19:38 and 6.4 kills a minute against 6.5.
+  - Classic's quest stages (Astrolabe 12:37 against 12:51) and hatchlings (8:20 against 8:37)
+    are where they were.
+- **Personas stay level:** each persona's ARAM win rate is within 4 points of the same persona
+  on the balanced builds, about the method's resolution.
+
+  | Persona | Balanced builds | Persona builds |
+  |---|---|---|
+  | Daredevil | 51% | 55% |
+  | Carry | 51% | 53% |
+  | Steady | 51% | 51% |
+  | Cautious | 47% | 46% |
+  | Guardian | 50% | 46% |
+  | Trickster | 48% | 45% |
+
+  Thirty Classic games are too few to read a persona from.
+- **The whole catalog plays:** six items the balanced paths never bought are now built
+  (Threefold Brand, Reaping Cleaver, Blightcaller Tome, Heartstone, Stoneskin Ward, the Tally
+  Charm: 43–131 holders each in ARAM). In ARAM their holders won 43–56%, inside their classes'
+  ranges.
+- **Within a class, ARAM:**
+
+  | Class | Holders' win rates | Lowest |
+  |---|---|---|
+  | Fighters | 44–53% | |
+  | Mages | 44–55% | Amber Reliquary |
+  | Marksmen | 66–76% | Gale Saber |
+  | Assassins | 28–34% | |
+  | Tanks | 33–61% | Stonewall Aegis (33%, taken first by bold tanks), Briarhide Plate (35%); Wardstone Mantle at 61% |
+
+  - Assassins sit low because of Shade, as 18 §12 found.
+  - The tanks' spread was there on the balanced builds too (37–61%).
+  - A class's items now also differ by who buys them, so a low one may be its buyers' play as
+    much as the item.
+- **Sides:** red won 56–59% of those 120 matches, but over the 1,600 below the sides were even
+  (blue 46–52%): those seeds, not the map.
+
+**The extended pass** (`botmatch --items`, now with a line per champion). It ran 400 ARAM
+Elite mirrors at a time, on persona builds and on shuffled builds (each bot's legendaries drawn
+from its class, so an item's results aren't its champion's).
+
+- **Items within a class:**
+  - Fighters (43–52%), assassins (39–41%), marksmen (61–71%) and mages (49–57%) were each
+    level.
+  - Tanks spread 12 points: Stonewall Aegis 39% against Briarhide's 51%.
+  - Kinship Locket was 43% against Purifying Chalice's 52%.
+  - Both were buffed (18 §12). After the buffs the tanks' legendaries sit within 7 points of
+    each other, and the Locket reads 63–65% against the Chalice's 54–57%. Those are ~125
+    holders each (only Lumen builds support items on shuffled builds), so ±4.5.
+- **Champions were the real outlier:**
+
+  | Champion | Before | After |
+  |---|---|---|
+  | Vesper | 87% | 71–77% |
+  | Quill, Ember, Lumen | 52–54% | 55–60% |
+  | Wren | 48% | 54–56% |
+  | Rook | 48% | 46–48% |
+  | Marrow | 41% | 38–39% |
+  | Bastion | 39% | 36% |
+  | Cairn | 39% | 31–37% |
+  | Shade | 36% | 32–37% |
+
+  - **Vesper** dealt 3,000 damage a minute and died 5 times a match (the next champion: 2,100
+    and 7.5). She now has a 525 attack range (575: the longest), 61 base AD (66), Longshot at
+    0.9 AD (1.1), Tumble every 9 s (7 s), and Snare Net 2 s faster a rank instead of 3.
+  - What didn't help, and was left out:
+    - Longshot's cooldown, Snare Net's root and cooldown and Shrapnel's ratio (no change in
+      400 games);
+    - +60 health and +4 resists on Bastion, Cairn and Shade (+2 points);
+    - a calmer daredevil.
+- **What's left is how bots play the front line, not numbers:**
+  - Back-line ranged champions win.
+  - Front-liners lose, whatever their stats.
+  - The daredevil, who dives, stays at 44–46%.
+  - Bot front-liners walk into poke and die reaching their targets. The fix is in engage
+    timing, peel and how melee picks its moment (§7.2), a piece of its own.
+

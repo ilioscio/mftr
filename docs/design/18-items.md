@@ -123,9 +123,9 @@ The passives and actives are built from a small set of shapes, so a modded item 
 | **Plunge** | Dash to the enemy champion nearest the cursor; bonus damage, and more of yours on it for 3 s | Unit, 500 | 60 s | Shrikeblade |
 | **Encase** | Stasis: invulnerable and untargetable, unable to act, 2.5 s | Self | 120 s | Amber Reliquary |
 | **Surge** | Dash 275 toward the cursor and fire a fan of 5 bolts | Direction | 40 s | Windstride Belt |
-| **Quake** | Slow enemies around you 55% for 2 s | Self | 90 s | Stonewall Aegis |
+| **Quake** | Slow enemies around you 55% for 2 s | Self | 60 s | Stonewall Aegis |
 | **Petrify** | A big shield for 2.5 s; you deal 60% less damage meanwhile | Self | 90 s | Stoneskin Ward |
-| **Embrace** | Shield yourself and nearby allied champions | Self | 90 s | Kinship Locket |
+| **Embrace** | Shield yourself and nearby allied champions | Self | 85 s | Kinship Locket |
 | **Absolve** | Cleanse an ally (stuns, roots, slows; not knock-ups or pulls), heal them, speed them | Ally nearest the cursor, 650 | 120 s | Purifying Chalice |
 | **Ward** | Place a stealth ward; charges refill at the fountain | Point | — | Pilgrim's Astrolabe, the lanterns |
 
@@ -236,7 +236,7 @@ resist %), HSP (heal & shield power %), regen (HP/s).
 | 21 | Heartstone | 3000 | 800 HP, 1 regen | **Warmth:** after 6 s without taking damage, regenerate 3% max HP a second | Titan Belt, Vital Crystal | health stacker |
 | 22 | Briarhide Plate | 2700 | 70 AR, 350 HP | **Thorns:** an attacker takes 10 + 15% bonus AR magic and 40% Wounds | Chain Coat, Vital Crystal | anti-attack sustain |
 | 69 | Furnace Plate | 2800 | 450 HP, 45 AR | **Smolder:** while in combat, 15 + 1.5% bonus HP magic a second to enemies within 325 | Titan Belt, Chain Coat | waveclear tank |
-| 70 | Stonewall Aegis | 2800 | 450 HP, 60 AR | Crits deal 30% less to you; **Active: Quake** slow enemies within 500 by 55% for 2 s (90 s) | Chain Coat, Titan Belt | anti-crit |
+| 70 | Stonewall Aegis | 2800 | 550 HP, 60 AR | Crits deal 30% less to you; **Active: Quake** slow enemies within 500 by 55% for 2 s (60 s) | Chain Coat, Titan Belt | anti-crit |
 | 23 | Wardstone Mantle | 2800 | 60 MR, 400 HP, 10 AH, 2 regen | +25% healing and shields received | Spellward Mantle, Glowing Garnet | sustain tank |
 | 71 | Stoneskin Ward | 3000 | 60 AR, 60 MR, 15 AH | **Active: Petrify** a shield of 100 + 100% bonus HP for 2.5 s; you deal 60% less damage meanwhile (90 s) | Chain Coat, Spellward Mantle, Focus Charm | frontline |
 
@@ -244,7 +244,7 @@ resist %), HSP (heal & shield power %), regen (HP/s).
 
 | ID | Name | Cost | Stats | Mechanic | Recipe |
 |---|---|---|---|---|---|
-| 72 | Kinship Locket | 2500 | 200 HP, 30 AR, 30 MR, 10 AH | **Active: Embrace** shield you and allied champions within 800 for 120 + 10/level, 2.5 s (90 s) | Glowing Garnet, Padded Vest, Warding Cloak |
+| 72 | Kinship Locket | 2500 | 200 HP, 30 AR, 30 MR, 10 AH | **Active: Embrace** shield you and allied champions within 800 for 140 + 11/level, 2.5 s (85 s) | Glowing Garnet, Padded Vest, Warding Cloak |
 | 73 | Purifying Chalice | 2300 | 50 MR, 15 AH, 15% HSP, 1 regen | **Active: Absolve** on the ally nearest the cursor (650; else you): cleanse, heal 100 + 10% missing HP, +40% MS fading over 2 s (120 s) | Spellward Mantle, Focus Charm |
 
 ### Boots
@@ -333,7 +333,8 @@ enemy's damage, the defensive legendary by the enemy's damage as today), and use
 rule: Encase when about to die, Fleet and Surge to chase or escape, Reaping Arc and Bloodletting
 with enemies in reach, Quake when engaged, Petrify and Embrace when allies take burst, Absolve
 on a stunned ally, Plunge on a killable champion. Supports run the quest; junglers buy a
-hatchling.
+hatchling. Each bot's persona picks its legendaries, boots, starter, lantern and hatchling, and
+moves when it uses actives (17 §14); the steady persona keeps these balanced paths.
 
 ## 10. Implementation notes
 
@@ -431,6 +432,14 @@ hatchling.
 | Stonewall Aegis | 400 HP | 450 HP | last among tanks |
 | The quest | Tithe 15 gold, a charge per 10 s, only for hits; stages at 500 and 1,500 | 18 gold, 8 s, healing and shielding allies counts; 400 and 1,000 | bots reached the Astrolabe at 18:30 and never finished; enchanters, who heal, starved |
 | Hatchlings | grown at 20 | 32 | grew up at 5:37 |
+
+**After persona builds (17 §14):** 400 shuffled ARAM games put each item against its class
+without its champion:
+
+| Item | Was | Now | Why |
+|---|---|---|---|
+| Stonewall Aegis | 450 HP; Quake every 90 s | 550 HP; every 60 s | last among tanks, 39% against 45–51% |
+| Kinship Locket | Embrace 120 + 10/level, every 90 s | 140 + 11/level, every 85 s | 43% against the Chalice's 52% on the same champions |
 
 **Pacing after (40 classic games, ~23 minutes each):** supports reach the Astrolabe at 12:17
 and finish the quest at 19:04 (45 of 80 within the match); hatchlings grow up at 8:03. Bots use

@@ -76,7 +76,7 @@ fn crits_multiply_attacks_and_are_flagged() {
     w.step(&[command(0, 1, 2, CommandKind::Attack(them))]);
     let hits = damage_on(&run(&mut w, 90), them);
     assert!(!hits.is_empty());
-    let ad = 66.0 + 65.0;
+    let ad = 61.0 + 65.0;
     for (amount, crit, _) in hits {
         assert!(crit);
         close(amount, ad * 2.15 * 100.0 / 122.0);

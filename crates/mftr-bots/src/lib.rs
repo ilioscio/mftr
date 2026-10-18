@@ -10,6 +10,7 @@
 pub mod agent;
 pub mod aim;
 pub mod board;
+pub mod builds;
 pub mod coach;
 pub mod dodge;
 pub mod fight;

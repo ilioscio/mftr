@@ -138,6 +138,10 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 > Stat Anvil steps and up to 16 effects (kind, tenths of a second left, a value: a slow's
 > percent, a shield's points, plates, stacks). Nothing in snapshots changes.
 
+> **Protocol 29:** nothing on the wire changed; the game's numbers did (Vesper, Stonewall Aegis
+> and Kinship Locket, the balance pass of 17 §14). Clients predict with their own copy, so
+> older clients can't join.
+
 > **Implemented (protocol 28):** items ([18](18-items.md) §10). The own champion's state adds
 > its item state (`Gear`: active and passive cooldowns, Tally, the quest's gold and charges,
 > hatchling food) and timed item effects (`Fx`: Wounds, burns, Sunder, Expose, speed buffs,

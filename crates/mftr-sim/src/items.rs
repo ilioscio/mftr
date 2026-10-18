@@ -1005,13 +1005,13 @@ pub static CATALOG: [Item; 75] = [
     },
     Item {
         passives: one(Passive::CritCut(0.3)),
-        active: Active::Quake { radius: 500.0, slow: 55, ms: 2000, cooldown_ms: 90_000 },
+        active: Active::Quake { radius: 500.0, slow: 55, ms: 2000, cooldown_ms: 60_000 },
         ..it(
             STONEWALL_AEGIS,
             "Stonewall Aegis",
             2800.0,
             Legendary,
-            Bonus { health: 450.0, armor: 60.0, ..b() },
+            Bonus { health: 550.0, armor: 60.0, ..b() },
             &[CHAIN_COAT, TITAN_BELT],
         )
     },
@@ -1036,7 +1036,7 @@ pub static CATALOG: [Item; 75] = [
     },
     // ---- Legendary: supports.
     Item {
-        active: Active::Embrace { base: 120.0, per_level: 10.0, radius: 800.0, ms: 2500, cooldown_ms: 90_000 },
+        active: Active::Embrace { base: 140.0, per_level: 11.0, radius: 800.0, ms: 2500, cooldown_ms: 85_000 },
         ..it(
             KINSHIP_LOCKET,
             "Kinship Locket",
