@@ -112,6 +112,10 @@ pub fn burst_on(me: &Unit, t: &Unit, c: &Ctx) -> f32 {
     dmg
 }
 
+/// How much more a diver wants a back-line carry, and how much farther it reaches for one.
+const DIVE_WEIGHT: f32 = 1.6;
+const DIVE_REACH: f32 = 400.0;
+
 /// Pick the target to fight: how quickly we kill it, how much it hurts us, who allies (a human
 /// above all) already hit, and the cost of reaching it.
 pub fn pick_target<'w>(a: &Agent, c: &Ctx<'_, 'w>, chase: bool) -> Option<&'w Unit> {
@@ -119,11 +123,19 @@ pub fn pick_target<'w>(a: &Agent, c: &Ctx<'_, 'w>, chase: bool) -> Option<&'w Un
     let horde = c.b.world.rules().horde;
     let my_range = me.attack.map_or(150.0, |s| s.range);
     let back = me.champion.is_some_and(|ch| Archetype::of(ch).back());
+    // Divers go for the carries behind the front line (17 §15): assassins, bruisers and
+    // skirmishers, and any daredevil.
+    let diver = me.champion.is_some_and(|ch| {
+        matches!(Archetype::of(ch), Archetype::Assassin | Archetype::Bruiser | Archetype::Skirmisher)
+    }) || c.persona.nerve > 0.6;
     let mut best: Option<(f32, &Unit)> = None;
     for t in foes(c) {
         let d = me.state.pos.distance(t.state.pos);
         let reach = my_range + t.gameplay_radius;
-        let limit = if chase { 1300.0 + 300.0 * c.persona.nerve } else { reach + 280.0 };
+        let carry = t.kind == UnitKind::Champion && t.champion.is_some_and(|ch| Archetype::of(ch).back());
+        let dive = diver && carry && !crate::tier::off("dive");
+        let limit =
+            if chase { 1300.0 + 300.0 * c.persona.nerve + if dive { DIVE_REACH } else { 0.0 } } else { reach + 280.0 };
         if d > limit {
             continue;
         }
@@ -162,7 +174,10 @@ pub fn pick_target<'w>(a: &Agent, c: &Ctx<'_, 'w>, chase: bool) -> Option<&'w Un
                 .sum();
             score *= 1.0 + (on_us / 250.0).min(1.5);
         }
-        score /= 1.0 + (d - reach).max(0.0) / 500.0;
+        if dive {
+            score *= DIVE_WEIGHT;
+        }
+        score /= 1.0 + (d - reach).max(0.0) / if dive { 1500.0 } else { 500.0 };
         // Back-liners don't walk past the front line for a target behind it.
         if back && t.kind == UnitKind::Champion {
             let shielded = c.b.enemies.iter().any(|f| {
@@ -630,6 +645,35 @@ pub fn actives(c: &Ctx, local: f32) -> Option<CommandKind> {
             }
             _ => {}
         }
+    }
+    None
+}
+
+/// Drop out of sight in a veil (Shade's Veil Step, 01 §8) when the enemy is focusing us: a short
+/// dash away from them, so the cloud lands just out of their reach and their attacks lose us.
+/// A bold persona waits for more damage first.
+pub fn veil(c: &Ctx) -> Option<CommandKind> {
+    let me = c.me;
+    let st = &me.state;
+    if st.stunned_until > c.now || st.dash.is_some() || st.cast.is_some() || c.b.world.veiled(me) {
+        return None;
+    }
+    let max = me.stats.max_health.max(1.0);
+    let focused = c.memory.damage_on(me.id, 1.5, c.now) / max > 0.15 + 0.08 * c.persona.nerve.max(0.0);
+    let near: Vec<&Unit> = c.b.enemies.iter().copied().filter(|e| e.state.pos.distance(st.pos) < 700.0).collect();
+    if near.is_empty() || !(focused || st.health / max < 0.35) {
+        return None;
+    }
+    for slot in 0..4u8 {
+        let Some(ab) = me.ability(slot) else { continue };
+        let Effect::Dash(d) = ab.effect else { continue };
+        if !d.veil.some() || !st.can_cast(c.now, slot) {
+            continue;
+        }
+        let center = near.iter().fold(Vec2::ZERO, |s, e| s + e.state.pos) * (1.0 / near.len() as f32);
+        let away = (st.pos - center).normalize_or_zero();
+        let away = if away == Vec2::ZERO { (c.k.homes[c.b.team as usize] - st.pos).normalize_or_zero() } else { away };
+        return Some(cast(slot, st.pos + away * d.range.min(300.0)));
     }
     None
 }

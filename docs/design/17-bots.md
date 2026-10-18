@@ -678,3 +678,38 @@ from its class, so an item's results aren't its champion's).
   - Bot front-liners walk into poke and die reaching their targets. The fix is in engage
     timing, peel and how melee picks its moment (§7.2), a piece of its own.
 
+
+## 15. The front line (2026-10-18)
+
+After §14, back-line ranged champions won ARAM and front-liners lost, whatever their stats:
+Bastion 36%, Cairn 31–37%, Shade 32–37%, Marrow 38%, and the diving daredevil 44–46%. Each
+idea below was tried for this pass and measured over 400 ARAM Elite mirrors (seeds 2001–2400).
+
+| Tried | What it does | Front-liners |
+|---|---|---|
+| Fight reads by reach | A fighter's damage counts by how much of a fight it spends in reach, so a melee fighter that must walk in reads weaker | +1–2 points |
+| Melee patience | Outside a called engage, melee waits for a clearer edge and leaves a bad fight sooner | none |
+| Divers go for carries | Assassins, bruisers, skirmishers and daredevils weigh back-line carries ×1.6 and reach 400 u farther for them | none |
+| Fewer dodges | The same matches at Veteran (78% of areas dodged) and Recruit (17%) | tanks 31–36% at every tier |
+| No collision with minions | Champions walk through minions (an experiment only) | none |
+| Shade's veil | 01 §8. Bots veil when focused (15% of their health in 1.5 s, more for the bold) or below 35% with enemies near | Shade 34–36% |
+
+- **Where front-liners die:** a temporary death log (1,047 deaths over 8 matches) showed them
+  dying in team fights, not alone. About 2.4 allies were within 1,500 u, against 3.2
+  enemies.
+- **Only champion numbers have moved win rates** (Vesper's in §14). The front line's deficit is
+  in what the kits contribute to a fight between bots, not in how bots decide. Bots are
+  equally good shots on both sides, so a ranged kit's safe damage outweighs a tank's soak and
+  crowd control.
+- **The veil works as built:** in one match Shade veiled 33 times and was hidden from the
+  enemy on 95% of veiled ticks (turrets saw the rest). It keeps Shade alive but adds no
+  damage.
+- **Kept:** divers going for carries, because that's how players dive and it makes fights
+  livelier, and bots using the veil.
+- **Left out:** the reach-weighted reads and melee patience. They made melee bots more
+  passive for no gain, against what 17 §13 is for.
+
+**Next:** front-line kits. Tanks' crowd control should hold fights in place (longer roots and
+knock-ups, a team engage) and Shade needs damage, measured the same way. Players may value
+the tanks more than bots do: their crowd control lands on players who dodge less than Elite
+bots, and their peel saves real carries.
