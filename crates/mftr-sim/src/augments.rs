@@ -128,7 +128,7 @@ const fn ms(v: u64) -> SimDuration {
 pub const VAULT: Ability = Ability {
     name: "Vault",
     cooldown: ms(25_000),
-    effect: Shape::Dash(Dash { range: 550.0, speed: 1400.0 }),
+    effect: Shape::Dash(Dash { range: 550.0, speed: 1400.0, veil: crate::veil::VeilSpec::NONE }),
     reaction: ReactionClass::None,
     per_rank: RankScaling::NONE,
     transforms: Transforms::NONE,

@@ -146,6 +146,15 @@ Epic monsters are secured with the jungler's **Claim** utility spell (Smite-equi
   - **Warding Totem:** 2 charges, one back every 2:00, and it starts with 1.
   - **Sweeping Lens:** reveals and disables enemy stealth wards within 450 u of its champion for 6 s, on a 90 s cooldown.
 - The Bridge (ARAM) has no wards and no trinkets.
+- **Veils** (Shade's Veil Step, D65): the dash leaves a cloud of smoke 300 u across where it
+  lands, for 3 s.
+  - **Inside it:** Shade is hidden from the enemy. Attack orders on it end, and nothing can
+    newly target it; skillshots and areas still hit what they touch.
+  - **Showing itself:** attacking, casting, using an item or dealing damage from inside
+    shows it for 0.75 s.
+  - **Seeing in:** turrets see into the cloud within their range, and so does a control
+    ward's reveal.
+  - **The cloud:** everyone sees it. Shade's own team sees Shade faded inside it.
 - Vision is computed **on the server** and only visible entities are sent to each team. Map hacks are impossible by construction (see [03](03-netcode.md#10-fog-of-war-culling)).
 
 ## 9. Champions

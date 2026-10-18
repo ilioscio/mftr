@@ -13,6 +13,7 @@ use crate::ability::{
 };
 use crate::combat::stat_at_level;
 use crate::time::SimDuration;
+use crate::veil::VeilSpec;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ChampionId {
@@ -346,7 +347,7 @@ pub const VESPER: ChampionDef = ChampionDef {
         Ability {
             name: "Tumble",
             cooldown: ms(9000),
-            effect: Effect::Dash(Dash { range: 325.0, speed: 1000.0 }),
+            effect: Effect::Dash(Dash { range: 325.0, speed: 1000.0, veil: VeilSpec::NONE }),
             reaction: ReactionClass::None,
             per_rank: ranks(0.0, 600),
             transforms: Transforms::NONE,
@@ -616,7 +617,12 @@ pub const SHADE: ChampionDef = ChampionDef {
         Ability {
             name: "Veil Step",
             cooldown: ms(12_000),
-            effect: Effect::Dash(Dash { range: 400.0, speed: 1400.0 }),
+            // Dash, then a cloud where Shade lands: hidden inside it while it lasts.
+            effect: Effect::Dash(Dash {
+                range: 400.0,
+                speed: 1400.0,
+                veil: VeilSpec { radius: 300.0, duration: ms(3000) },
+            }),
             reaction: ReactionClass::None,
             per_rank: ranks(0.0, 1000),
             transforms: Transforms::NONE,
@@ -676,7 +682,7 @@ pub const QUILL: ChampionDef = ChampionDef {
         Ability {
             name: "Recoil",
             cooldown: ms(12_000),
-            effect: Effect::Dash(Dash { range: 300.0, speed: 1200.0 }),
+            effect: Effect::Dash(Dash { range: 300.0, speed: 1200.0, veil: VeilSpec::NONE }),
             reaction: ReactionClass::None,
             per_rank: ranks(0.0, 1000),
             transforms: Transforms::NONE,

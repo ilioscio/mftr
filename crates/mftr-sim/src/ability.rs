@@ -189,11 +189,13 @@ impl Beam {
     }
 }
 
-/// A dash toward a point at fixed speed: ignores units, slides along walls (D11).
+/// A dash toward a point at fixed speed: ignores units, slides along walls (D11). With a veil,
+/// it leaves a cloud where it lands that hides its caster (`veil`, Shade's Veil Step).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Dash {
     pub range: f32,
     pub speed: f32,
+    pub veil: crate::veil::VeilSpec,
 }
 
 /// An instant teleport toward a point, landing short of walls.

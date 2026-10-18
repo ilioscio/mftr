@@ -1320,6 +1320,23 @@ impl MatchClient {
         out
     }
 
+    /// Veils (Shade's clouds, 01 §9) to draw now: `[{ owner, ours, center, radius, progress }]`,
+    /// progress 0 when the cloud forms to 1 when it fades.
+    #[func]
+    fn veils(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for (owner, ours, center, radius, progress) in self.session.veils_render(self.now()) {
+            let mut d = VarDictionary::new();
+            d.set("owner", owner.0 as i64);
+            d.set("ours", ours);
+            d.set("center", Vector2::new(center.x, center.y));
+            d.set("radius", radius);
+            d.set("progress", progress);
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
     #[func]
     fn dash_action(&self, champion: GString) -> GString {
         let Some(c) = ChampionId::by_name(&champion.to_string()) else { return GString::new() };
@@ -1652,6 +1669,7 @@ impl MatchClient {
             d.set("encased", u.encased);
             d.set("wounded", u.wounded);
             d.set("burning", u.burning);
+            d.set("veiled", u.veiled);
             if let Some((p, dir)) = u.windup {
                 d.set("windup", p);
                 d.set("windup_dir", Vector2::new(dir.x, dir.y));

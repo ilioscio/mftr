@@ -205,6 +205,8 @@ pub struct RemoteUnit {
     pub encased: bool,
     pub wounded: bool,
     pub burning: bool,
+    /// Hidden in its veil from the enemy (sent to its own team, which still sees it).
+    pub veiled: bool,
     /// Basic attacks started, modulo 4: picks the attack animation (10 §5.2).
     pub attack_variant: u8,
     /// Facing angle, 10 bits (see [`facing_to_wire`]).
@@ -1103,6 +1105,15 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             w.write(*count as u64, 3);
             write_time(w, *at);
         }
+        SimEvent::Veiled { unit, team, center, radius, from, until } => {
+            w.write(23, 5);
+            w.write_u32(unit.0);
+            write_team(w, *team);
+            write_vec2(w, *center);
+            w.write(radius.round().clamp(0.0, 1023.0) as u64, 10);
+            write_time(w, *from);
+            write_time(w, *until);
+        }
     }
 }
 
@@ -1193,6 +1204,14 @@ fn read_event_of(kind: u64, r: &mut BitReader) -> Result<SimEvent, DecodeError> 
             at: read_time(r)?,
             point: read_vec2(r)?,
             seq: r.read_u32()?,
+        },
+        23 => SimEvent::Veiled {
+            unit: unit(r)?,
+            team: read_team(r)?,
+            center: read_vec2(r)?,
+            radius: r.read(10)? as f32,
+            from: read_time(r)?,
+            until: read_time(r)?,
         },
         _ => return Err(DecodeError::Invalid("event kind")),
     })
@@ -1799,6 +1818,7 @@ fn write_update(w: &mut BitWriter, u: &UnitUpdate) {
             o.encased,
             o.wounded,
             o.burning,
+            o.veiled,
         ] {
             w.write_bool(f);
         }
@@ -1842,6 +1862,7 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         encased: false,
         wounded: false,
         burning: false,
+        veiled: false,
         attack_variant: 0,
         facing: 0,
     };
@@ -1882,7 +1903,7 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         o.plates = r.read(3)? as u8;
     }
     if mask & delta::FLAGS != 0 {
-        let mut f = [false; 12];
+        let mut f = [false; 13];
         for b in f.iter_mut() {
             *b = r.read_bool()?;
         }
@@ -1899,6 +1920,7 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
             o.encased,
             o.wounded,
             o.burning,
+            o.veiled,
         ] = f;
         o.attack_variant = r.read(2)? as u8;
     }
@@ -2975,6 +2997,14 @@ mod tests {
             }),
             // And the rarer events (a full snapshot carries one of each of the rest).
             SimEvent::ItemUsed { unit: UnitId(3), item: 65, at: SimTime(6_400), point: Vec2::new(1.5, -2.25), seq: 77 },
+            SimEvent::Veiled {
+                unit: UnitId(4),
+                team: Team::Blue,
+                center: Vec2::new(2500.0, 3250.5),
+                radius: 300.0,
+                from: SimTime(7_000),
+                until: SimTime(12_760),
+            },
             SimEvent::MatchEnded { winner: Team::Red, at: SimTime(99_000) },
             SimEvent::HordeWon { at: SimTime(99_002) },
             SimEvent::Ping(Ping {
@@ -3117,6 +3147,7 @@ mod tests {
             encased: true,
             wounded: false,
             burning: true,
+            veiled: true,
             attack_variant: 3,
             facing: 1001,
         };
