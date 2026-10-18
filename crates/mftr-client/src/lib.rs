@@ -145,6 +145,8 @@ pub struct RemoteRender {
     pub encased: bool,
     pub wounded: bool,
     pub burning: bool,
+    /// Hidden in its veil from the enemy (an ally we still see).
+    pub veiled: bool,
     /// A structure that can't be hurt yet.
     pub protected: bool,
     /// A champion channeling a recall.
@@ -361,6 +363,9 @@ pub struct ClientSession {
     instant_casts: Vec<(UnitId, u8)>,
     /// Item actives used since the last take: `(unit, item, point)` (18 §4), confirmed.
     item_uses: Vec<(UnitId, u8, Vec2)>,
+    /// Veils (Shade's clouds) on the ground: `(owner, team, center, radius, from, until)`, in
+    /// ticks.
+    veils: Vec<(UnitId, Team, Vec2, f32, f64, f64)>,
     notices: Vec<Notice>,
     /// Latest own blink already announced (re-simulation replays it).
     last_own_blink: SimTime,
@@ -435,6 +440,7 @@ impl ClientSession {
             inspected: None,
             instant_casts: Vec::new(),
             item_uses: Vec::new(),
+            veils: Vec::new(),
             notices: Vec::new(),
             last_own_blink: SimTime(0),
         }
@@ -1140,6 +1146,11 @@ impl ClientSession {
                     crit: false,
                 }),
                 SimEvent::ItemUsed { unit, item, point, .. } => self.item_uses.push((unit, item, point)),
+                SimEvent::Veiled { unit, team, center, radius, from, until } => {
+                    // One cloud per caster; drop the ones long gone.
+                    self.veils.retain(|v| v.0 != unit && v.5 + 30.0 > from.as_ticks());
+                    self.veils.push((unit, team, center, radius, from.as_ticks(), until.as_ticks()));
+                }
                 SimEvent::Reward { unit, gold, xp, .. } if unit == self.unit => {
                     self.notices.push(Notice::Reward { gold, xp })
                 }
@@ -1494,6 +1505,7 @@ impl ClientSession {
                     encased: l.encased,
                     wounded: l.wounded,
                     burning: l.burning,
+                    veiled: l.veiled,
                     protected: l.protected,
                     recalling: l.recalling,
                     plates: l.plates,
@@ -1603,6 +1615,19 @@ impl ClientSession {
     /// Item actives used since the last call: `(unit, item, point)`.
     pub fn take_item_uses(&mut self) -> Vec<(UnitId, u8, Vec2)> {
         std::mem::take(&mut self.item_uses)
+    }
+
+    /// Veils to draw now: `(owner, ours, center, radius, progress)`, progress from 0 when the
+    /// cloud forms to 1 when it fades (drawn at the time remote units are).
+    pub fn veils_render(&self, now: f64) -> Vec<(UnitId, bool, Vec2, f32, f32)> {
+        let Some(t) = self.interp_time(now) else { return Vec::new() };
+        self.veils
+            .iter()
+            .filter(|v| t >= v.4 && t < v.5)
+            .map(|&(owner, team, center, radius, from, until)| {
+                (owner, team == self.team, center, radius, ((t - from) / (until - from).max(1e-3)) as f32)
+            })
+            .collect()
     }
 
     /// Kills and respawns since the last call.

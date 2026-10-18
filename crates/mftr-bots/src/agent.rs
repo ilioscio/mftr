@@ -426,6 +426,9 @@ impl Agent {
         if let Some(cmd) = micro::actives(c, self.local) {
             return Some(cmd);
         }
+        if let Some(cmd) = micro::veil(c) {
+            return Some(cmd);
+        }
         micro::support(self, c)
     }
 

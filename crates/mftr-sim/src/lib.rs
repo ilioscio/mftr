@@ -23,6 +23,7 @@ pub mod ping;
 pub mod projectile;
 pub mod rng;
 pub mod time;
+pub mod veil;
 pub mod vision;
 pub mod wards;
 pub mod world;

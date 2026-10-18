@@ -8,6 +8,8 @@
 //! - Structures and relics are always visible to everyone, like structures in the reference game.
 //! - Wards (M4) are vision sources too. An enemy stealth ward is seen only where a control ward
 //!   or a sweep reveals it, and gives its own team no vision there.
+//! - An enemy hidden in its own veil (`veil`, Shade's Veil Step) is seen only where a control
+//!   ward reveals it or one of our turrets can shoot it.
 
 use crate::map::Map;
 use crate::math::Vec2;
@@ -39,6 +41,8 @@ pub struct Vision {
     sources: Vec<(Vec2, f32, Option<u8>)>,
     /// Where the team reveals enemy stealth wards (control wards, sweeps).
     reveal: Vec<(Vec2, f32)>,
+    /// Enemies hidden in their veils from this team (sorted).
+    veiled: Vec<crate::world::UnitId>,
 }
 
 impl Vision {
@@ -55,7 +59,25 @@ impl Vision {
             .map(|u| (u.state.pos, vision_radius(u.kind), map.brush_at(u.state.pos)))
             .collect();
         let reveal = crate::wards::revealers(world.units(), team, now);
-        Vision { team, sources, reveal }
+        let mut veiled = Vec::new();
+        if !world.veils().is_empty() {
+            // Our turrets see into a veil they can shoot into.
+            let turrets: Vec<(Vec2, f32)> = world
+                .units()
+                .iter()
+                .filter(|u| u.team == team && u.kind == UnitKind::Turret && u.state.alive())
+                .map(|u| (u.state.pos, u.attack.map_or(775.0, |a| a.range)))
+                .collect();
+            veiled = world
+                .units()
+                .iter()
+                .filter(|u| u.team != team && world.veiled(u))
+                .filter(|u| !covered(&reveal, u.state.pos) && !covered(&turrets, u.state.pos))
+                .map(|u| u.id)
+                .collect();
+            veiled.sort();
+        }
+        Vision { team, sources, reveal, veiled }
     }
 
     /// Whether the team sees the point `p`.
@@ -77,6 +99,9 @@ impl Vision {
         // An enemy stealth ward only where we reveal it.
         if unit.ward == Some(WardKind::Stealth) {
             return covered(&self.reveal, unit.state.pos);
+        }
+        if self.veiled.binary_search(&unit.id).is_ok() {
+            return false;
         }
         self.sees(map, unit.state.pos)
     }

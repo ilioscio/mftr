@@ -138,6 +138,13 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 > Stat Anvil steps and up to 16 effects (kind, tenths of a second left, a value: a slow's
 > percent, a shield's points, plates, stacks). Nothing in snapshots changes.
 
+> **Protocol 30:** veils (Shade's Veil Step, 01 §8). A new event `Veiled` (23: the caster,
+> its team, the cloud's center and radius, when it forms and fades) goes to everyone; others'
+> display flags gain `veiled` (the caster's own team sees it faded); a veiled caster is culled
+> from the enemy like anything it can't see. `ItemUsed` now reaches the other clients that see
+> its user, and a change to the Encase, Wounds or burning flags alone is now sent (both were
+> dropped since protocol 28).
+
 > **Protocol 29:** nothing on the wire changed; the game's numbers did (Vesper, Stonewall Aegis
 > and Kinship Locket, the balance pass of 17 §14). Clients predict with their own copy, so
 > older clients can't join.

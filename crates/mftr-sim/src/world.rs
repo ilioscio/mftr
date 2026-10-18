@@ -1522,6 +1522,15 @@ pub enum SimEvent {
         count: u8,
         at: SimTime,
     },
+    /// A dash with a veil (Veil Step) leaves a cloud where it lands, from `from` to `until`.
+    Veiled {
+        unit: UnitId,
+        team: Team,
+        center: Vec2,
+        radius: f32,
+        from: SimTime,
+        until: SimTime,
+    },
 }
 
 pub const CHAMPION_MOVE_SPEED: f32 = 325.0;
@@ -1689,6 +1698,8 @@ pub struct World {
     /// The match on a lane map (waves, aggression, winner); idle on sandbox maps.
     game: MatchState,
     rules: Rules,
+    /// Clouds that hide their casters (`veil`).
+    veils: Vec<crate::veil::Veil>,
 }
 
 impl World {
@@ -1710,6 +1721,7 @@ impl World {
             game: MatchState::default(),
             rules: Rules::SANDBOX,
             map: MapId::Open.shared(),
+            veils: Vec::new(),
         }
     }
 
@@ -2101,6 +2113,16 @@ impl World {
         &self.hidden[team as usize]
     }
 
+    /// The clouds on the ground (`veil`).
+    pub fn veils(&self) -> &[crate::veil::Veil] {
+        &self.veils
+    }
+
+    /// Whether `unit` is hidden in its own veil now.
+    pub fn veiled(&self, unit: &Unit) -> bool {
+        crate::veil::veiled(&self.veils, unit, SimTime::end_of(self.tick))
+    }
+
     pub fn set_hidden(&mut self, team: Team, mut ids: Vec<UnitId>) {
         ids.sort();
         self.hidden[team as usize] = ids;
@@ -2184,8 +2206,10 @@ impl World {
             hidden,
             game,
             rules,
+            veils,
             ..
         } = self;
+        let first_event = events.len();
         let rules = *rules;
         let map: &Map = map;
 
@@ -2521,6 +2545,7 @@ impl World {
             }
         }
         gear::tick(units, prediction, s0, s1, events);
+        crate::veil::update(veils, &events[first_event..], s1);
         for u in units.iter_mut().filter(|u| u.state.alive()) {
             let max = u.stats.max_health;
             if u.state.health < max && u.stats.health_regen > 0.0 {
@@ -2588,6 +2613,7 @@ impl World {
             }
         }
         self.game.hash_into(&mut h);
+        crate::veil::hash_into(&self.veils, &mut h);
         h.write_u32(self.next_missile);
         for m in &self.missiles {
             h.write_u32(m.id);
@@ -3568,6 +3594,16 @@ fn try_cast(
             st.face(dir);
             st.detour = None;
             events.push(SimEvent::Dashed { unit: id, from: st.pos, to, at: t, end_at });
+            if d.veil.some() {
+                events.push(SimEvent::Veiled {
+                    unit: id,
+                    team,
+                    center: to,
+                    radius: d.veil.radius,
+                    from: end_at,
+                    until: end_at.plus(d.veil.duration),
+                });
+            }
         }
         Effect::Lunge(l) => {
             if st.rooted_until > t {
@@ -5822,6 +5858,42 @@ mod tests {
         assert!((s.shield - (150.0 - lance)).abs() < 1e-3 && s.health == 600.0, "{s:?}");
         run_until_quiet(&mut w, 60);
         assert_eq!(w.unit(enemy).unwrap().state.shield, 0.0, "expired after 2.5 s");
+    }
+
+    /// 01 §9: Veil Step leaves a cloud where Shade lands. The enemy loses sight of it there (the
+    /// server hides it, and an attack order on it ends), its own team still sees it, acting from
+    /// inside shows it for a moment, and when the cloud fades it's seen again.
+    #[test]
+    fn veil_step_hides_its_caster() {
+        let mut w = World::new(1);
+        let shade = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Shade, Vec2::new(1000.0, 1000.0));
+        let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Vesper, Vec2::new(1500.0, 1000.0));
+        w.step(&[attack(1, 1, 1, shade)]);
+        w.step(&[cast_slot(0, 1, 2, 0, 2, (600.0, 1000.0))]); // Veil Step
+        let ev = w.take_events();
+        assert!(
+            ev.iter().any(|e| matches!(e, SimEvent::Veiled { unit, radius, .. } if *unit == shade && *radius == 300.0))
+        );
+        run_until_quiet(&mut w, 15);
+        let seen = |w: &World, team| crate::vision::Vision::of(w, team).sees_unit(w.map(), w.unit(shade).unwrap());
+        assert!(!seen(&w, Team::Red), "hidden in its veil");
+        assert!(seen(&w, Team::Blue), "its team still sees it");
+        assert!(w.veiled(w.unit(shade).unwrap()));
+        // The server hides it from the enemy: the attack order on it ends.
+        w.set_hidden(Team::Red, vec![shade]);
+        run_until_quiet(&mut w, 2);
+        assert_eq!(w.unit(enemy).unwrap().state.order, Order::Idle, "aggro dropped");
+        // Casting from inside shows it, for a moment.
+        let k = w.tick().0 + 1;
+        w.step(&[cast_slot(0, 2, k, 0, 1, (700.0, 1000.0))]); // Fan of Blades
+        w.take_events();
+        assert!(seen(&w, Team::Red), "acting shows it");
+        run_until_quiet(&mut w, 30);
+        assert!(!seen(&w, Team::Red), "hidden again");
+        // The cloud fades.
+        run_until_quiet(&mut w, 75);
+        assert!(w.veils().is_empty());
+        assert!(seen(&w, Team::Red), "seen once the cloud is gone");
     }
 
     #[test]

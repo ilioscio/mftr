@@ -26,7 +26,7 @@ pub const STATIC: u8 = 1; // kind, team, radii, champion: only when a unit is ne
 pub const POS: u8 = 2;
 pub const MOTION: u8 = 4; // heading target, speed and facing
 pub const VITALS: u8 = 8; // health, max health, shield, level, plates
-pub const FLAGS: u8 = 16; // casting, attacking, stunned, rooted, dashing, protected, slowed, recovering, recalling, attack variant
+pub const FLAGS: u8 = 16; // casting, attacking, stunned, rooted, dashing, protected, slowed, recovering, recalling, encased, wounded, burning, veiled, attack variant
 pub const ALL: u8 = STATIC | POS | MOTION | VITALS | FLAGS;
 
 /// One unit in a delta snapshot: `mask` says which groups of `unit` are meaningful.
@@ -53,9 +53,23 @@ pub fn coast(base: &RemoteUnit, ticks: u32) -> QPoint {
     QPoint::from_vec2(p + to * (step / len))
 }
 
-fn flags(u: &RemoteUnit) -> ([bool; 9], u8) {
+fn flags(u: &RemoteUnit) -> ([bool; 13], u8) {
     (
-        [u.casting, u.attacking, u.stunned, u.rooted, u.dashing, u.protected, u.slowed, u.recovering, u.recalling],
+        [
+            u.casting,
+            u.attacking,
+            u.stunned,
+            u.rooted,
+            u.dashing,
+            u.protected,
+            u.slowed,
+            u.recovering,
+            u.recalling,
+            u.encased,
+            u.wounded,
+            u.burning,
+            u.veiled,
+        ],
         u.attack_variant,
     )
 }
@@ -137,7 +151,21 @@ pub fn apply(base: Option<&RemoteUnit>, update: Option<&UnitUpdate>, ticks: u32)
     }
     if u.mask & FLAGS != 0 {
         (
-            [r.casting, r.attacking, r.stunned, r.rooted, r.dashing, r.protected, r.slowed, r.recovering, r.recalling],
+            [
+                r.casting,
+                r.attacking,
+                r.stunned,
+                r.rooted,
+                r.dashing,
+                r.protected,
+                r.slowed,
+                r.recovering,
+                r.recalling,
+                r.encased,
+                r.wounded,
+                r.burning,
+                r.veiled,
+            ],
             r.attack_variant,
         ) = flags(n);
     }
@@ -207,6 +235,7 @@ mod tests {
             encased: false,
             wounded: false,
             burning: false,
+            veiled: false,
             attack_variant: 0,
             facing: 0,
         }

@@ -247,6 +247,8 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-charge":
 			_shot_charge = true
+		elif args[i] == "--shot-veil":
+			_shot_veil = true
 		elif args[i] == "--shot-recall":
 			_shot_recall = true
 		elif args[i] == "--shot-claim":
@@ -542,6 +544,7 @@ var _shot_tab_hover := ""                 # `--tab-hover augment|item`: show one
 var _shot_tab := false                    # `--shot-tab`: hold the match breakdown open
 var _shot_numbers := false                # `--shot-numbers`: sample damage numbers, for review
 var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
+var _shot_veil := false                   # `--shot-veil`: cast E (Shade's Veil Step) instead of Q
 var _shot_recall := false                 # `--shot-recall`: walk out, then recall 3 s before the shot
 var _shot_claim := false                 # `--shot-claim`: take Claim in F at the start
 var _start_editor := false               # `--map-editor`: open the map editor at start
@@ -619,7 +622,7 @@ func _update_shot(delta: float) -> void:
 		client.cast(1, own + inward * 700.0 + side * 200.0)
 		_shot_moved = true
 	elif _shot_moved and _shot_timer > 1.4 and _shot_timer - delta <= 1.4:
-		client.cast(0, own + inward * 800.0 - side * 250.0)
+		client.cast(2 if _shot_veil else 0, own + inward * 800.0 - side * 250.0)
 		client.move_to(own + inward * 600.0 - side * 500.0)
 		_show_click_marker(_to_world(own + inward * 600.0 - side * 500.0), OWN_COLOR)
 	elif _shot_moved and _shot_timer > 1.7 and _shot_timer - delta <= 1.7:
@@ -1700,6 +1703,7 @@ func _process(delta: float) -> void:
 	_update_hover()
 	_update_missiles()
 	_update_areas()
+	_update_veils()
 	_update_beams()
 	_update_bolts()
 	_update_combat_text(delta)
@@ -2907,6 +2911,78 @@ func _update_areas() -> void:
 		if not seen.has(key):
 			area_nodes[key].queue_free()
 			area_nodes.erase(key)
+
+
+## Veils (Shade's Veil Step, 01 §9): a cloud of smoke where the dash lands, seen by everyone.
+## Its caster, hidden in it from the enemy, shows faded to its own team.
+var veil_nodes := {}                    # owner unit id -> MeshInstance3D
+const VEIL_SMOKE := Color(0.22, 0.2, 0.3)
+
+
+func _update_veils() -> void:
+	var live := {}
+	for v in client.veils():
+		var owner: int = int(v.owner)
+		live[owner] = v
+		var center := Vector3(v.center.x * UNITS_TO_METERS, 0.0, v.center.y * UNITS_TO_METERS)
+		var r: float = float(v.radius) * UNITS_TO_METERS
+		var node: MeshInstance3D = veil_nodes.get(owner)
+		if node == null:
+			node = MeshInstance3D.new()
+			var puff := SphereMesh.new()
+			puff.radius = 1.0
+			puff.height = 2.0
+			puff.radial_segments = 12
+			puff.rings = 6
+			node.mesh = puff
+			var mat := _unshaded(VEIL_SMOKE, 0.0)
+			mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+			node.material_override = mat
+			add_child(node)
+			veil_nodes[owner] = node
+			var ramp := PackedColorArray([Color(0.5, 0.48, 0.6, 0.8), Color(0.3, 0.28, 0.38, 0.5), Color(0.15, 0.14, 0.2, 0.0)])
+			vfx.play({"kit": "dust", "ramp": ramp, "count": 28, "speed": 2.5, "size": 1.4, "lifetime": 1.2}, center)
+		# A low dome on the ground: billows in, holds, thins out at the end, with smoke drifting
+		# off it.
+		var p: float = float(v.progress)
+		var fade: float = clampf(p / 0.06, 0.0, 1.0) * clampf((1.0 - p) / 0.2, 0.0, 1.0)
+		node.position = center
+		node.scale = Vector3(r, r * 0.45, r)
+		(node.material_override as StandardMaterial3D).albedo_color.a = 0.55 * fade
+		var next: float = float(node.get_meta("puff_at", 0.0))
+		var now_s := Time.get_ticks_msec() / 1000.0
+		if now_s >= next and fade > 0.3:
+			node.set_meta("puff_at", now_s + 0.35)
+			var a := randf() * TAU
+			var at := center + Vector3(cos(a), 0, sin(a)) * r * randf_range(0.2, 0.85)
+			var smoke := PackedColorArray([Color(0.42, 0.4, 0.52, 0.55), Color(0.28, 0.26, 0.36, 0.35), Color(0.15, 0.14, 0.2, 0.0)])
+			vfx.play({"kit": "dust", "ramp": smoke, "count": 6, "speed": 0.8, "size": 1.6, "lifetime": 1.6}, at)
+	for owner in veil_nodes.keys():
+		if not live.has(owner):
+			veil_nodes[owner].queue_free()
+			veil_nodes.erase(owner)
+	# Allies hidden in their veils show faded: remotes by the server's flag, our own champion
+	# while it stands in its own cloud.
+	var own_id: int = client.own_unit_id()
+	if own_body != null:
+		var mine = live.get(own_id)
+		var inside: bool = mine != null and mine.ours and Vector2(own_body.position.x, own_body.position.z).distance_to(Vector2(mine.center.x, mine.center.y) * UNITS_TO_METERS) <= float(mine.radius) * UNITS_TO_METERS
+		_set_faded(own_body, inside)
+	for id in remote_bodies:
+		_set_faded(remote_bodies[id], bool(remote_info.get(id, {}).get("veiled", false)))
+
+
+## Fade a body (an ally hidden in its veil) or bring it back.
+func _set_faded(body: Node3D, faded: bool) -> void:
+	if bool(body.get_meta("faded", false)) == faded:
+		return
+	body.set_meta("faded", faded)
+	var stack: Array = [body]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is GeometryInstance3D:
+			(n as GeometryInstance3D).transparency = 0.6 if faded else 0.0
+		stack.append_array(n.get_children())
 
 
 var bolt_nodes := {}                    # key -> MeshInstance3D

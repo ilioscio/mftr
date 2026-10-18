@@ -1133,6 +1133,7 @@ impl ServerCore {
                     encased: st.fx.encased(s1),
                     wounded: st.fx.wounds_until > s1,
                     burning: st.fx.burn_until > s1,
+                    veiled: self.game.world.veiled(u),
                     attack_variant: st.attacks & 3,
                     facing: mftr_net::msg::facing_to_wire(st.facing),
                 };
@@ -1218,7 +1219,10 @@ impl ServerCore {
             for e in &events {
                 let ok = match *e {
                     SimEvent::CastStarted { unit, .. }
+                    | SimEvent::ItemUsed { unit, .. }
                     | SimEvent::AttackLaunched(mftr_sim::Bolt { owner: unit, .. }) => seen_i.contains(&unit),
+                    // A cloud is seen by everyone (its caster isn't, inside it).
+                    SimEvent::Veiled { .. } => true,
                     SimEvent::Damage { target: unit, .. }
                     | SimEvent::Died { unit, .. }
                     | SimEvent::Respawned { unit, .. }

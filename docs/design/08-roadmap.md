@@ -233,7 +233,7 @@ Four more placeholder champions (original kits, D36), so all six M2 archetypes e
 | **Bastion** | Tank / engage (melee) | Grapple: pulling skillshot | Bulwark: self shield | Tremor: slowing nova | Upheaval: delayed knock-up area |
 | **Rook** | Bruiser (melee) | Cleave: nova | Second Wind: missing-health heal | Lunge: slowing targeted dash | Shockwave: slowing skillshot |
 | **Lumen** | Enchanter | Mending Light: ally heal | Aegis: ally shield | Lull: slowing skillshot | Binding Halo: delayed root area |
-| **Shade** | Assassin (melee) | Shadow Step: lunge | Fan of Blades: slowing nova | Veil Step: dash | Execution: lunge |
+| **Shade** | Assassin (melee) | Shadow Step: lunge | Fan of Blades: slowing nova | Veil Step: dash that leaves a veil (hidden in its cloud, 01 §8) | Execution: lunge |
 
 - **New shapes:** slows, knock-ups, pulls (forced movement), self-centered novas, area CC, ally heals and shields, and lunges (targeted dashes that strike on arrival). Melee champions reuse the minions' melee hits, now with on-hit items and life steal.
 - **Rules:** point-and-click effects never carry hard CC (test-enforced), so every stun, root, knock-up and pull can be dodged. All hard-CC skillshots and areas pass the D10 reaction budget.
