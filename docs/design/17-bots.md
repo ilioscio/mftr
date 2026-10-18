@@ -635,7 +635,46 @@ builds on and then off with `MFTR_BOTS_OFF=persona-builds`, same seeds):
   - The tanks' spread was there on the balanced builds too (37–61%).
   - A class's items now also differ by who buys them, so a low one may be its buyers' play as
     much as the item.
-- **Sides:** red won 56–59% of these mirror ARAM matches, with and without persona builds.
-  That's worth a look of its own (the map, the camera's cant or the new items), not the
-  builds.
+- **Sides:** red won 56–59% of those 120 matches, but over the 1,600 below the sides were even
+  (blue 46–52%): those seeds, not the map.
+
+**The extended pass** (`botmatch --items`, now with a line per champion). It ran 400 ARAM
+Elite mirrors at a time, on persona builds and on shuffled builds (each bot's legendaries drawn
+from its class, so an item's results aren't its champion's).
+
+- **Items within a class:**
+  - Fighters (43–52%), assassins (39–41%), marksmen (61–71%) and mages (49–57%) were each
+    level.
+  - Tanks spread 12 points: Stonewall Aegis 39% against Briarhide's 51%.
+  - Kinship Locket was 43% against Purifying Chalice's 52%.
+  - Both were buffed (18 §12). After the buffs the tanks' legendaries sit within 7 points of
+    each other, and the Locket reads 63–65% against the Chalice's 54–57%. Those are ~125
+    holders each (only Lumen builds support items on shuffled builds), so ±4.5.
+- **Champions were the real outlier:**
+
+  | Champion | Before | After |
+  |---|---|---|
+  | Vesper | 87% | 71–77% |
+  | Quill, Ember, Lumen | 52–54% | 55–60% |
+  | Wren | 48% | 54–56% |
+  | Rook | 48% | 46–48% |
+  | Marrow | 41% | 38–39% |
+  | Bastion | 39% | 36% |
+  | Cairn | 39% | 31–37% |
+  | Shade | 36% | 32–37% |
+
+  - **Vesper** dealt 3,000 damage a minute and died 5 times a match (the next champion: 2,100
+    and 7.5). She now has a 525 attack range (575: the longest), 61 base AD (66), Longshot at
+    0.9 AD (1.1), Tumble every 9 s (7 s), and Snare Net 2 s faster a rank instead of 3.
+  - What didn't help, and was left out:
+    - Longshot's cooldown, Snare Net's root and cooldown and Shrapnel's ratio (no change in
+      400 games);
+    - +60 health and +4 resists on Bastion, Cairn and Shade (+2 points);
+    - a calmer daredevil.
+- **What's left is how bots play the front line, not numbers:**
+  - Back-line ranged champions win.
+  - Front-liners lose, whatever their stats.
+  - The daredevil, who dives, stays at 44–46%.
+  - Bot front-liners walk into poke and die reaching their targets. The fix is in engage
+    timing, peel and how melee picks its moment (§7.2), a piece of its own.
 

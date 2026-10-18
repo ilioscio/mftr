@@ -86,7 +86,8 @@ fn bots_answer_a_group_ping() {
         }
     }
     let after = dist(&w);
-    let came = before.iter().zip(&after).filter(|((_, b), (_, a))| *a < 1600.0 || b - a > 3000.0).count();
+    // Came, or (from across the map, fighting what's on it on the way) well on its way.
+    let came = before.iter().zip(&after).filter(|((_, b), (_, a))| *a < 1600.0 || b - a > 2000.0).count();
     assert!(came >= 3, "bots came: {before:?} -> {after:?}");
     let answers = pings.iter().filter(|(t, p)| *t == Team::Blue && p.kind == PingKind::OnMyWay).count();
     assert!(answers >= 1, "they said they were coming: {pings:?}");

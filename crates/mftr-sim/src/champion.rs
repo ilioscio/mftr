@@ -304,13 +304,13 @@ pub const VESPER: ChampionDef = ChampionDef {
         health_regen: 1.4,
         armor: 28.0,
         magic_resist: 30.0,
-        attack_damage: 66.0,
+        attack_damage: 61.0,
         ability_power: 0.0,
         move_speed: 325.0,
         ..Stats::NONE
     },
     growth: growth(96.0, 4.4, 1.3, 3.2),
-    attack: AttackSpec { range: 575.0, attack_speed: 0.8, windup_fraction: 0.18, bolt_speed: 2200.0 },
+    attack: AttackSpec { range: 525.0, attack_speed: 0.8, windup_fraction: 0.18, bolt_speed: 2200.0 },
     abilities: [
         Ability {
             name: "Longshot",
@@ -320,7 +320,7 @@ pub const VESPER: ChampionDef = ChampionDef {
                 speed: 2000.0,
                 radius: 30.0,
                 range: 1150.0,
-                damage: Damage { kind: DamageKind::Physical, base: 40.0, ad_ratio: 1.1, ap_ratio: 0.0 },
+                damage: Damage { kind: DamageKind::Physical, base: 40.0, ad_ratio: 0.9, ap_ratio: 0.0 },
                 cc: Cc::None,
             }),
             reaction: ReactionClass::Poke,
@@ -345,7 +345,7 @@ pub const VESPER: ChampionDef = ChampionDef {
         },
         Ability {
             name: "Tumble",
-            cooldown: ms(7000),
+            cooldown: ms(9000),
             effect: Effect::Dash(Dash { range: 325.0, speed: 1000.0 }),
             reaction: ReactionClass::None,
             per_rank: ranks(0.0, 600),
@@ -363,7 +363,7 @@ pub const VESPER: ChampionDef = ChampionDef {
                 cc: Cc::Root(ms(1500)),
             }),
             reaction: ReactionClass::HardCc,
-            per_rank: ranks(60.0, 3000),
+            per_rank: ranks(60.0, 2000),
             transforms: Transforms::LINE,
         },
     ],

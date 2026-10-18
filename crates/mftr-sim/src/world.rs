@@ -5497,15 +5497,18 @@ mod tests {
         w.step(&[attack(0, 1, 1, enemy)]);
         let mut ev = w.take_events();
         ev.extend(run_until_quiet(&mut w, 150)); // 5 s
-        let reach = 575.0 + 65.0;
+        let reach = 525.0 + 65.0;
         let p = w.unit(me).unwrap().state.pos;
         assert!((p.distance(Vec2::new(1900.0, 1000.0)) - reach).abs() < 1.0, "stops at range: {p:?}");
         let hits = damage_to(&ev, enemy);
-        // Walk 260 u (0.8 s), wind up 0.225 s, fly 575 u at 2200 u/s: first hit at ~1.29 s,
+        // Walk 310 u (0.95 s), wind up 0.225 s, fly 525 u at 2200 u/s: first hit at ~1.42 s,
         // then one every 1.25 s.
         assert_eq!(hits.len(), 3, "{hits:?}");
-        assert!((hits[0].0.0 as f32 - (1536.0 + 432.0 + 575.0 / 2200.0 * 1920.0)).abs() < 2.0, "{hits:?}");
-        let per_hit = 66.0 * 100.0 / 122.0;
+        assert!(
+            (hits[0].0.0 as f32 - (310.0 / 325.0 * 1920.0 + 432.0 + 525.0 / 2200.0 * 1920.0)).abs() < 2.0,
+            "{hits:?}"
+        );
+        let per_hit = 61.0 * 100.0 / 122.0;
         assert!(hits.iter().all(|(_, a)| (a - per_hit).abs() < 1e-3), "{hits:?}");
         let gaps: Vec<u64> = hits.windows(2).map(|h| h[1].0.0 - h[0].0.0).collect();
         assert!(gaps.iter().all(|g| *g == 2400), "attack period 1.25 s: {gaps:?}");
@@ -5825,9 +5828,9 @@ mod tests {
     fn root_stops_movement_but_not_attacks() {
         let mut w = World::new(1);
         w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
-        let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Vesper, Vec2::new(1600.0, 1000.0));
+        let enemy = w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Vesper, Vec2::new(1580.0, 1000.0));
         let me = UnitId(1);
-        w.step(&[cast_slot(0, 1, 1, 0, 3, (1600.0, 1000.0))]); // Snare Net
+        w.step(&[cast_slot(0, 1, 1, 0, 3, (1580.0, 1000.0))]); // Snare Net
         let ev = run_until_quiet(&mut w, 30);
         assert!(ev.iter().any(|e| matches!(e, SimEvent::MissileHit { target, .. } if *target == enemy)));
         let rooted = w.unit(enemy).unwrap().state;
@@ -6872,7 +6875,7 @@ mod tests {
         }
         w.step(&[]);
         let u = w.unit(me).unwrap();
-        assert_eq!(u.stats.attack_damage, 66.0 + 15.0);
+        assert_eq!(u.stats.attack_damage, 61.0 + 15.0);
         assert_eq!(u.stats.ability_power, 70.0);
         let spec = u.attack.unwrap();
         assert!((spec.attack_speed - 0.8 * (1.0 + 0.12 + 0.40)).abs() < 1e-6);
@@ -6886,7 +6889,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        let physical = 81.0 * 100.0 / 122.0;
+        let physical = 76.0 * 100.0 / 122.0;
         let magic = (20.0 + 0.25 * 70.0) * 100.0 / 130.0;
         assert!(hits.len() >= 6, "{hits:?}");
         for pair in hits.chunks(2) {
@@ -7439,8 +7442,9 @@ mod tests {
     /// from the hand-built polygons it replaced. Minions count the stretch from their spawn to
     /// the first waypoint as their lane. Re-laid after the reference ARAM (17 §13): turrets
     /// farther apart, relics in front of and behind the outer turrets, brush along the walls.
-    /// The item overhaul (18) changed what the canary's random purchases do.
-    const GOLDEN_HASH_BRIDGE: u64 = 0x2cb6_7e95_b31d_e0bb;
+    /// The item overhaul (18) changed what the canary's random purchases do; the balance pass
+    /// after persona builds (17 §14) changed Vesper and two items.
+    const GOLDEN_HASH_BRIDGE: u64 = 0xc858_de23_595b_cbbb;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.
@@ -7510,6 +7514,7 @@ mod tests {
     }
 
     /// Recorded on x86_64-pc-windows-msvc when facing, follow-throughs and the input buffer
-    /// joined the state (A2). CI checks Linux, macOS (aarch64) and Windows.
-    const GOLDEN_HASH: u64 = 0xe606_4e94_327a_2611;
+    /// joined the state (A2). CI checks Linux, macOS (aarch64) and Windows. Vesper changed in
+    /// the balance pass after persona builds (17 §14).
+    const GOLDEN_HASH: u64 = 0xe259_02e2_01ed_091f;
 }
