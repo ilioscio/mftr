@@ -130,6 +130,8 @@ func _ready() -> void:
 	add_child(portraits)
 	portraits.setup(func(c: String): return _portrait_model(c), champion_model, CHAMPION_COLORS)
 	portraits.rendered.connect(_on_portrait)
+	portraits.rendered.connect(ItemIcons.on_rendered)
+	ItemIcons.renderer = portraits
 	vfx = preload("res://scripts/vfx.gd").new()
 	add_child(vfx)
 	sfx = preload("res://scripts/sfx.gd").new()
@@ -189,6 +191,9 @@ func _ready() -> void:
 			_shot_shop = true
 		elif args[i] == "--dump-portraits" and i + 1 < args.size():
 			_dump_portraits(args[i + 1])
+			return
+		elif args[i] == "--dump-item-icons" and i + 1 < args.size():
+			_dump_item_icons(args[i + 1])
 			return
 		elif args[i] == "--shop-pick" and i + 1 < args.size():
 			_shop_pick = int(args[i + 1])
@@ -466,7 +471,20 @@ func _portrait_model(key: String) -> MftrModel:
 			return _monster_model(parts[1])
 		"prop":
 			return _prop_model(parts[1])
+		"item":
+			return _item_model(parts[1])
 	return null
+
+
+var item_models := {}                    # item key -> MftrModel (or null without a pack)
+
+
+## An item's model (`art/items/<key>/export/<key>.glb`, 18 §8), loaded once; null without one.
+func _item_model(key: String) -> MftrModel:
+	if not item_models.has(key):
+		var path := _art_path("items/%s/export/%s.glb" % [key, key])
+		item_models[key] = MftrModel.load(path) if FileAccess.file_exists(path) else null
+	return item_models[key]
 
 
 ## A lane minion's pack (`art/minions/<kind>/export/<kind>.glb`, A5), loaded once per kind;
@@ -809,6 +827,31 @@ func _dump_portraits(dir: String) -> void:
 			if t != null:
 				t.get_image().save_png("%s/%s_%s.png" % [dir, n.to_lower(), kind])
 	print("MFTR: portraits saved to ", dir)
+	get_tree().quit()
+
+
+## Every item's icon as the game draws it (18 §8): rendered from its model, on its tier's
+## backdrop, in a sheet of 10 columns, catalog order.
+func _dump_item_icons(path: String) -> void:
+	ItemIcons.art_root = _art_root()
+	var all: Array = client.item_list()
+	var keys := all.map(func(it): return "item:" + ItemIcons.key_of(it.name))
+	portraits.prepare(keys)
+	for k in keys:
+		while not portraits.is_done(k):
+			portraits.portrait(k)
+			await portraits.rendered
+	var cols := 10
+	var cell := 132
+	var sheet := Image.create(cols * cell, ((all.size() + cols - 1) / cols) * cell, false, Image.FORMAT_RGBA8)
+	sheet.fill(Color(0.05, 0.06, 0.08))
+	for i in all.size():
+		var img: Image = ItemIcons.icon(all[i]).get_image()
+		img.clear_mipmaps()
+		img.convert(Image.FORMAT_RGBA8)
+		sheet.blend_rect(img, Rect2i(0, 0, img.get_width(), img.get_height()), Vector2i((i % cols) * cell + 2, (i / cols) * cell + 2))
+	sheet.save_png(path)
+	print("MFTR: item icons saved to ", path)
 	get_tree().quit()
 
 
@@ -1330,6 +1373,71 @@ func _update_hover() -> void:
 	hovered_body = target
 
 
+## An item active's effect (18 §4), in its own colors: rings for what reaches around the user
+## (Reaping Arc steel, Bloodletting crimson, Quake earth, Embrace gold), a flash and the amber
+## shell for Encase (kept up by `_show_item_effects`), stone for Petrify, wind for Fleet, a
+## strike for Plunge, a flare for Surge, a column of light on Absolve's ally.
+func _play_item_use(use: Dictionary) -> void:
+	var body = _body_of(int(use.unit))
+	if body == null or not _models_shown(body):
+		return
+	var pos: Vector3 = body.global_position
+	var aim: Vector3 = _to_world(use.point)
+	var m := UNITS_TO_METERS
+	var ramp := func(cols: Array) -> PackedColorArray: return PackedColorArray(cols)
+	match String(use.name):
+		"Reaping Arc":
+			vfx.play({"kit": "shock", "ramp": ramp.call([Color(1, 0.95, 0.9), Color(0.85, 0.3, 0.25), Color(0.35, 0.1, 0.08)]), "lifetime": 0.3, "size": 1.2}, pos, Vector3.ZERO, 350.0 * m)
+			vfx.play({"kit": "burst", "ramp": ramp.call([Color(1, 0.9, 0.85), Color(0.7, 0.72, 0.78), Color(0.3, 0.3, 0.34)]), "count": 18, "speed": 5.0, "size": 0.9}, pos + Vector3(0, 0.8, 0))
+		"Bloodletting":
+			vfx.play({"kit": "shock", "ramp": ramp.call([Color(1, 0.55, 0.5), Color(0.75, 0.08, 0.12), Color(0.3, 0.02, 0.05)]), "lifetime": 0.4, "size": 1.4}, pos, Vector3.ZERO, 450.0 * m)
+			vfx.play({"kit": "burst", "ramp": ramp.call([Color(1, 0.4, 0.4), Color(0.6, 0.05, 0.1), Color(0.25, 0.0, 0.03)]), "count": 26, "speed": 4.0, "size": 1.0}, pos + Vector3(0, 0.9, 0))
+		"Quake":
+			vfx.play({"kit": "shock", "ramp": ramp.call([Color(0.9, 0.8, 0.6), Color(0.55, 0.42, 0.28), Color(0.25, 0.2, 0.14)]), "lifetime": 0.6, "size": 1.6}, pos, Vector3.ZERO, 500.0 * m)
+			vfx.play({"kit": "crack", "ramp": ramp.call([Color(0.35, 0.3, 0.25), Color(0.22, 0.19, 0.16), Color(0.14, 0.12, 0.1)]), "count": 7, "size": 1.4, "lifetime": 1.6}, pos)
+		"Embrace":
+			vfx.play({"kit": "shock", "ramp": ramp.call([Color(1, 0.97, 0.8), Color(0.95, 0.8, 0.4), Color(0.5, 0.4, 0.15)]), "lifetime": 0.7, "size": 1.1}, pos, Vector3.ZERO, 800.0 * m)
+		"Encase":
+			vfx.play({"kit": "flash", "ramp": ramp.call([Color(1, 0.95, 0.7), Color(1.0, 0.7, 0.25), Color(0.6, 0.35, 0.05)]), "count": 8, "size": 0.9}, pos + Vector3(0, 1.0, 0))
+		"Petrify":
+			vfx.play({"kit": "burst", "ramp": ramp.call(STONE_CHIPS), "count": 22, "size": 1.1, "speed": 3.5, "lifetime": 0.7}, pos + Vector3(0, 0.8, 0))
+			vfx.play({"kit": "crack", "ramp": ramp.call([Color(0.3, 0.3, 0.32), Color(0.2, 0.2, 0.22), Color(0.14, 0.14, 0.15)]), "count": 5, "size": 1.0, "lifetime": 1.2}, pos)
+		"Fleet":
+			vfx.play({"kit": "dust", "ramp": ramp.call([Color(0.85, 0.9, 1.0, 0.8), Color(0.55, 0.6, 0.75, 0.5), Color(0.3, 0.32, 0.4, 0.0)]), "count": 16, "speed": 2.0, "size": 0.8}, pos)
+		"Plunge":
+			vfx.play({"kit": "flash", "ramp": ramp.call([Color(1, 1, 1), Color(0.75, 0.6, 1.0), Color(0.3, 0.15, 0.5)]), "count": 6, "size": 0.8}, aim + Vector3(0, 1.0, 0))
+		"Surge":
+			vfx.play({"kit": "flare", "ramp": ramp.call([Color(1, 0.95, 1.0), Color(0.7, 0.45, 1.0), Color(0.3, 0.1, 0.55)]), "count": 16, "speed": 4.0, "size": 0.9}, pos + Vector3(0, 0.8, 0), (aim - pos).normalized())
+		"Absolve":
+			vfx.play({"kit": "pillar", "ramp": ramp.call([Color(1, 1, 0.95), Color(0.9, 0.95, 0.75), Color(0.5, 0.6, 0.4, 0.0)]), "count": 40, "speed": 1.6, "size": 0.9}, aim)
+		_:
+			return
+	_sfx_play(own_status.get("champion", "") if body == own_body else remote_info.get(int(use.unit), {}).get("champion", ""), ["item.release", "unit.release"], pos)
+
+
+## Item effects on a body (18): the amber shell of stasis around it while it lasts.
+func _show_item_effects(body: Node3D, encased: bool) -> void:
+	var shell: MeshInstance3D = body.get_node_or_null("Encase")
+	if shell == null:
+		if not encased:
+			return
+		shell = MeshInstance3D.new()
+		shell.name = "Encase"
+		var gem := SphereMesh.new()
+		gem.radius = 0.85
+		gem.height = 2.4
+		gem.radial_segments = 6
+		gem.rings = 3
+		shell.mesh = gem
+		shell.position = Vector3(0, 1.05, 0)
+		var mat := _unshaded(Color(1.0, 0.68, 0.22), 0.42)
+		mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		shell.material_override = mat
+		body.add_child(shell)
+	shell.visible = encased
+
+
 func _make_shield_bubble() -> MeshInstance3D:
 	var bubble := MeshInstance3D.new()
 	bubble.name = "Shield"
@@ -1571,9 +1679,13 @@ func _process(delta: float) -> void:
 		# Titan and Pebble: the model grows and shrinks with the hitbox (honest hitboxes).
 		own_body.scale = Vector3.ONE * (float(own_status.get("hitbox", CHAMPION_RADIUS_U)) / CHAMPION_RADIUS_U)
 		_update_camera(delta, dead)
-		_show_statuses(own_body, own_status.get("stunned", false), own_status.get("rooted", false), own_status.get("shield", 0.0), own_status.get("slowed", false))
+		_show_statuses(own_body, own_status.get("stunned", false) and not own_status.get("encased", false), own_status.get("rooted", false), own_status.get("shield", 0.0), own_status.get("slowed", false))
+		_show_item_effects(own_body, own_status.get("encased", false))
 		_show_recall(own_body, own_status.get("recall", 0.0) > 0.0, ALLY_COLOR, own_status.get("champion", ""))
 		_animate(own_body, own_status, delta)
+	# Item actives (18 §4): each one's effect where it happened, for everyone.
+	for use in client.take_item_uses():
+		_play_item_use(use)
 	# Casts without a windup (A6): the drive never shows them, so play them on the event.
 	for c in client.take_instant_casts():
 		var caster = _body_of(int(c.unit))
@@ -1785,7 +1897,9 @@ func _update_remotes(delta: float) -> void:
 				aim_len = float(info.reach)
 				aim_width = float(info.radius) * 2.0
 		_show_windup(body, u.get("windup", -1.0), u.get("windup_dir", Vector2.ZERO), aim_len, aim_width)
-		_show_statuses(body, u.stunned, u.rooted, u.shield, u.get("slowed", false))
+		var encased: bool = u.get("encased", false)
+		_show_statuses(body, u.stunned and not encased, u.rooted, u.shield, u.get("slowed", false))
+		_show_item_effects(body, encased)
 		if u.champion != "":
 			_show_recall(body, u.get("recalling", false), ALLY_COLOR if u.ally else ENEMY_COLOR, u.champion)
 		if u.champion != "" or ((u.minion or u.kind == "monster") and body.has_meta("rig")):
@@ -2981,13 +3095,19 @@ func _update_combat_text(delta: float) -> void:
 			continue
 		var color: Color = {"physical": Color(1.0, 0.62, 0.24), "magic": Color(0.45, 0.68, 1.0), "true": Color(1, 1, 1)}.get(c.kind, Color(1.0, 0.62, 0.24))
 		var text := "%d" % roundi(total)
+		var crit: bool = c.get("crit", false)
 		if c.heal:
 			color = Color(0.42, 0.95, 0.5)
 			text = "+" + text
 		elif c.target == me:
 			color = Color(1.0, 0.3, 0.28)
 			text = "-" + text
-		var size := clampf(19.0 + total / 28.0, 19.0, 34.0)
+		elif crit:
+			# A critical strike (18 §3.1): hotter, bigger, with a mark.
+			color = Color(1.0, 0.78, 0.2)
+		if crit and not c.heal:
+			text += "!"
+		var size := clampf(19.0 + total / 28.0, 19.0, 34.0) * (1.3 if crit else 1.0)
 		floaters.append({ "pos": p, "text": text, "color": color, "age": 0.0, "size": size, "drift": randf_range(-0.6, 0.6), "life": 1.0 })
 	for n in client.take_notices():
 		var text := ""
@@ -3134,7 +3254,8 @@ func _draw_overlay() -> void:
 
 
 ## Over a champion's bar: its name (enemies and allies; not our own), and an icon for each
-## status it's under (stunned, rooted, slowed) to the bar's right, the icons the tooltips use.
+## status it's under (stasis, stunned, rooted, slowed, Wounds, burning) to the bar's right, the
+## icons the tooltips use.
 func _draw_unit_label(font: Font, world: Vector3, size: Vector2, name: String, ally: bool, u: Dictionary) -> void:
 	var s = _screen(world)
 	if s == null:
@@ -3146,9 +3267,11 @@ func _draw_unit_label(font: Font, world: Vector3, size: Vector2, name: String, a
 		Hud.text(overlay, font, s + Vector2(-w.x / 2.0, -w.y - 4.0 * k), name, roundi(13.0 * k), c, HORIZONTAL_ALIGNMENT_CENTER, w.x)
 	var x: float = s.x + w.x / 2.0 + 4.0 * k
 	var ic := 16.0 * k
-	for status in ["stunned", "rooted", "slowed"]:
-		if u.get(status, false):
-			var kind: String = {"stunned": "stun", "rooted": "root", "slowed": "slow"}[status]
+	var encased: bool = u.get("encased", false)
+	for status in ["encased", "stunned", "rooted", "slowed", "wounded", "burning"]:
+		# Stasis holds a champion still too: show only the stasis.
+		if u.get(status, false) and not (encased and status == "stunned"):
+			var kind: String = {"encased": "stasis", "stunned": "stun", "rooted": "root", "slowed": "slow", "wounded": "wounds", "burning": "burn"}[status]
 			overlay.draw_texture_rect(AbilityTooltip.icon(kind), Rect2(Vector2(x, s.y - w.y - (ic - w.y) / 2.0), Vector2(ic, ic)), false)
 			x += ic + 2.0 * k
 
@@ -3596,15 +3719,37 @@ const STAT_COLORS := {
 ## An item's tooltip: icon and name, its cost, its stats colored by stat, its passive and active.
 func _item_tooltip(t: RichTextLabel, it: Dictionary, charges: int, key: String) -> void:
 	t.add_image(ItemIcons.icon(it), 36, 36)
-	var tier_color: String = ["d6dbe2", "8fd8c8", "f2d27a"][clampi(int(it.tier), 0, 2)]
-	t.append_text("  [font_size=19][b][color=#%s]%s[/color][/b][/font_size]" % [tier_color, it.name])
-	t.append_text("\n[color=#ffd56b]%d gold[/color]" % it.cost)
+	t.append_text("  [font_size=19][b][color=#%s]%s[/color][/b][/font_size]" % [ItemIcons.name_color(int(it.tier)), it.name])
+	t.append_text("\n[color=#ffd56b]%d gold[/color][color=#8a93a0]   ·   %s[/color]" % [it.cost, it.get("group", "")])
 	if it.get("consumable", false) and key != "":
 		t.append_text("[color=#8a93a0]   ·   %d charge%s   ·   [%s][/color]" % [charges, "" if charges == 1 else "s", key])
+	elif it.has("active") and key != "":
+		t.append_text("[color=#8a93a0]   ·   [%s][/color]" % key)
+	var progress := _item_progress(it)
+	if progress != "":
+		t.append_text("\n[color=#c9a24a]%s[/color]" % progress)
 	t.append_text("\n")
 	for line in it.get("lines", []):
 		var c: String = STAT_COLORS.get(line.kind, "d6dbe2")
 		t.append_text("\n[color=#%s]%s[/color]" % [c, line.text])
+
+
+## What an item has built up, in words: Tally stacks, the quest's gold, a hatchling's food.
+func _item_progress(it: Dictionary) -> String:
+	match it.get("name", ""):
+		"Tally Charm":
+			return "Tally: %d stacks" % int(own_status.get("tally", 0))
+		"Pilgrim's Ledger":
+			return "Quest: %d / %d gold" % [int(own_status.get("quest", 0)), int(own_status.get("quest_stage", 500))]
+		"Pilgrim's Astrolabe":
+			var done: int = own_status.get("quest_done", 1500)
+			var q: int = own_status.get("quest", 0)
+			return "Quest: done, upgrade it in the shop" if q >= done else "Quest: %d / %d gold" % [q, done]
+		"Windling", "Barkling", "Flintling":
+			var food: int = own_status.get("food", 0)
+			var grown: int = own_status.get("grown_at", 20)
+			return "Grown up" if food >= grown else "Fed: %d / %d" % [food, grown]
+	return ""
 
 
 ## An augment's tooltip: its name in its tier's color, the tier, what it does, its progress.
@@ -4749,7 +4894,7 @@ func _build_shop() -> void:
 	shop_panel = PanelContainer.new()
 	shop_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	shop_panel.position = Vector2(16, 64)
-	shop_panel.custom_minimum_size = Vector2(1000, 0)
+	shop_panel.custom_minimum_size = Vector2(1180, 0)
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 14)
@@ -4788,35 +4933,44 @@ func _build_shop() -> void:
 	body.add_theme_constant_override("separation", 14)
 	v.add_child(body)
 
-	# The items, by tier.
+	# The items, by tier (18 §2): starters and consumables, components, epics, legendaries (in
+	# the catalog's order: fighters, assassins, marksmen, mages, tanks, supports), then boots and
+	# the role items this map has (the support quest, the hatchlings).
 	var grids := VBoxContainer.new()
 	grids.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grids.add_theme_constant_override("separation", 6)
+	grids.add_theme_constant_override("separation", 4)
 	body.add_child(grids)
-	var tiers := ["CONSUMABLES  ·  use with 1–6", "COMPONENTS", "UPGRADES AND BOOTS", "LEGENDARY"]
+	var sections := [
+		["STARTERS AND CONSUMABLES  ·  use with 1–6", [0, 5]],
+		["COMPONENTS", [1]],
+		["EPIC", [2]],
+		["LEGENDARY", [3]],
+		["BOOTS AND ROLE ITEMS", [4, 6, 7]],
+	]
 	var catalog: Array = client.shop_catalog()
 	for it in catalog:
 		item_names[it.id] = it.name
 		_catalog[it.id] = it
 	if _shop_pick == 0 and catalog.size() > 0:
 		_shop_pick = catalog[catalog.size() - 1].id
-	for group in 4:
+	for section in sections:
+		var tiers: Array = section[1]
+		var shown := catalog.filter(func(it): return tiers.has(int(it.tier)) and it.get("buyable", true))
+		if shown.is_empty():
+			continue
 		var l := Label.new()
-		l.text = tiers[group]
+		l.text = section[0]
 		l.theme_type_variation = "HeaderLabel"
 		grids.add_child(l)
 		var grid := GridContainer.new()
-		grid.columns = 8
-		grid.add_theme_constant_override("h_separation", 6)
-		grid.add_theme_constant_override("v_separation", 6)
+		grid.columns = 12
+		grid.add_theme_constant_override("h_separation", 5)
+		grid.add_theme_constant_override("v_separation", 5)
 		grids.add_child(grid)
-		for it in catalog:
-			var consumable: bool = it.get("consumable", false)
-			if (group == 0) != consumable or (group > 0 and it.tier != group - 1):
-				continue
+		for it in shown:
 			var id: int = it.id
 			var b := Button.new()
-			b.custom_minimum_size = Vector2(66, 84)
+			b.custom_minimum_size = Vector2(58, 74)
 			_tight(b)
 			b.icon = ItemIcons.icon(it)
 			b.expand_icon = true
@@ -4930,6 +5084,8 @@ func _update_shop(delta: float) -> void:
 		shop_anvil.tooltip_text = "From level %d: a Silver, Gold or Prismatic anvil offers three stats; keep one for the match.%s" % [need, "" if level >= need else "  (You're level %d.)" % level]
 	for it in client.shop_catalog():
 		_catalog[it.id] = it
+		if not shop_buttons.has(it.id):
+			continue  # not sold (the Astrolabe comes from the quest)
 		var b: Button = shop_buttons[it.id]
 		b.text = "%d" % it.price
 		b.tooltip_text = "%s  ·  %d gold\n%s" % [it.name, it.price, it.stats]
@@ -5201,6 +5357,23 @@ func _draw_inventory(font: Font, origin: Vector2, k: float) -> void:
 		var n: int = charges[slot] if slot < charges.size() else 0
 		if id != 0 and _catalog.get(id, {}).get("consumable", false):
 			Hud.text(overlay, _bold_font(), Vector2(box.position.x, box.end.y - 3.0 * k), "%d" % n, roundi(14.0 * k), Color.WHITE if n > 0 else Color(1, 0.4, 0.35), HORIZONTAL_ALIGNMENT_RIGHT, box.size.x - 3.0 * k)
+		# An active on cooldown (18 §4): the sweep and the seconds left, as on abilities.
+		var cds: Array = own_status.get("item_cooldowns", [])
+		var cd: float = cds[slot] if slot < cds.size() else 0.0
+		if id != 0 and cd > 0.0:
+			var total: float = _catalog.get(id, {}).get("active_cooldown", cd)
+			Hud.cooldown_sweep(overlay, box, cd / maxf(total, 0.01))
+			Hud.text(overlay, _bold_font(), box.position + Vector2(0, box.size.y / 2.0 + 6.0 * k), "%d" % ceili(cd), roundi(15.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, box.size.x)
+		# What an item builds up: Tally stacks, a hatchling's food.
+		var counter := ""
+		match item_names.get(id, ""):
+			"Tally Charm":
+				counter = "%d" % int(own_status.get("tally", 0))
+			"Windling", "Barkling", "Flintling":
+				var food: int = own_status.get("food", 0)
+				counter = "★" if food >= int(own_status.get("grown_at", 20)) else "%d" % food
+		if counter != "":
+			Hud.text(overlay, _bold_font(), Vector2(box.position.x, box.end.y - 3.0 * k), counter, roundi(13.0 * k), Color(1.0, 0.85, 0.45), HORIZONTAL_ALIGNMENT_RIGHT, box.size.x - 3.0 * k)
 	# The trinket (maps with wards): a seventh box right of the items.
 	if own_status.get("wards", false):
 		var tb := Rect2(origin + Vector2(3.0 * (I.x + gap) + 4.0 * k, (I.y + gap) / 2.0), I)

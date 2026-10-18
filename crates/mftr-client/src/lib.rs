@@ -141,6 +141,10 @@ pub struct RemoteRender {
     pub rooted: bool,
     pub dashing: bool,
     pub slowed: bool,
+    /// Item effects (18): in stasis, under Wounds, burning.
+    pub encased: bool,
+    pub wounded: bool,
+    pub burning: bool,
     /// A structure that can't be hurt yet.
     pub protected: bool,
     /// A champion channeling a recall.
@@ -167,6 +171,8 @@ pub struct CombatText {
     pub absorbed: f32,
     /// A heal (relic) rather than damage.
     pub heal: bool,
+    /// A critical strike (18 §3.1).
+    pub crit: bool,
 }
 
 /// Kills and respawns of units this client knows about.
@@ -353,6 +359,8 @@ pub struct ClientSession {
     /// Casts with no windup (supports, shields, blinks) since the last take: `(unit, slot)`.
     /// Their animation can only start on the confirmed event (A6).
     instant_casts: Vec<(UnitId, u8)>,
+    /// Item actives used since the last take: `(unit, item, point)` (18 §4), confirmed.
+    item_uses: Vec<(UnitId, u8, Vec2)>,
     notices: Vec<Notice>,
     /// Latest own blink already announced (re-simulation replays it).
     last_own_blink: SimTime,
@@ -426,6 +434,7 @@ impl ClientSession {
             horde: None,
             inspected: None,
             instant_casts: Vec::new(),
+            item_uses: Vec::new(),
             notices: Vec::new(),
             last_own_blink: SimTime(0),
         }
@@ -1074,7 +1083,7 @@ impl ClientSession {
                 SimEvent::BeamInterrupted { id, at } => self.effects.on_beam_interrupted(id, at),
                 SimEvent::AttackLaunched(b) => self.effects.on_bolt(b, self.unit, self.team),
                 SimEvent::AttackLanded { id, at, .. } => self.effects.on_bolt_landed(id, at),
-                SimEvent::Damage { source, target, origin, kind, amount, absorbed, at } => {
+                SimEvent::Damage { source, target, origin, kind, amount, absorbed, crit, at } => {
                     if source == self.unit {
                         self.stats.damage_dealt += (amount + absorbed) as f64;
                     }
@@ -1098,7 +1107,16 @@ impl ClientSession {
                             absorbed,
                         });
                     }
-                    self.combat_text.push(CombatText { target, source, origin, kind, amount, absorbed, heal: false });
+                    self.combat_text.push(CombatText {
+                        target,
+                        source,
+                        origin,
+                        kind,
+                        amount,
+                        absorbed,
+                        heal: false,
+                        crit,
+                    });
                 }
                 SimEvent::Died { unit, killer, at, .. } => {
                     if unit == self.unit {
@@ -1119,7 +1137,9 @@ impl ClientSession {
                     amount,
                     absorbed: 0.0,
                     heal: true,
+                    crit: false,
                 }),
+                SimEvent::ItemUsed { unit, item, point, .. } => self.item_uses.push((unit, item, point)),
                 SimEvent::Reward { unit, gold, xp, .. } if unit == self.unit => {
                     self.notices.push(Notice::Reward { gold, xp })
                 }
@@ -1471,6 +1491,9 @@ impl ClientSession {
                     rooted: l.rooted,
                     dashing: l.dashing,
                     slowed: l.slowed,
+                    encased: l.encased,
+                    wounded: l.wounded,
+                    burning: l.burning,
                     protected: l.protected,
                     recalling: l.recalling,
                     plates: l.plates,
@@ -1575,6 +1598,11 @@ impl ClientSession {
     /// Instant casts since the last call (see `instant_casts`).
     pub fn take_instant_casts(&mut self) -> Vec<(UnitId, u8)> {
         std::mem::take(&mut self.instant_casts)
+    }
+
+    /// Item actives used since the last call: `(unit, item, point)`.
+    pub fn take_item_uses(&mut self) -> Vec<(UnitId, u8, Vec2)> {
+        std::mem::take(&mut self.item_uses)
     }
 
     /// Kills and respawns since the last call.

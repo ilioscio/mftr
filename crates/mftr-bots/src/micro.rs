@@ -516,6 +516,100 @@ pub fn support(a: &mut Agent, c: &Ctx) -> Option<CommandKind> {
     None
 }
 
+/// Item actives by rule (18 §9): Encase about to die, Petrify and Embrace through a burst,
+/// Absolve on a held or dying ally, Reaping Arc, Bloodletting and Quake with enemies in reach,
+/// Plunge and Surge onto a champion worth chasing (`local`: how the fight reads), Fleet to
+/// chase or flee.
+pub fn actives(c: &Ctx, local: f32) -> Option<CommandKind> {
+    use mftr_sim::items::{self, Active};
+    let me = c.me;
+    let now = c.now;
+    let st = &me.state;
+    if st.stunned_until > now || st.dash.is_some() || st.cast.is_some() {
+        return None;
+    }
+    let max = me.stats.max_health.max(1.0);
+    let share = st.health / max;
+    let hit = c.memory.damage_on(me.id, 2.0, now) / max;
+    let champs = |r: f32| foes(c).filter(move |e| e.kind == UnitKind::Champion && e.state.pos.distance(st.pos) <= r);
+    let any_near = |r: f32| {
+        foes(c)
+            .chain(c.b.enemy_minions.iter().copied())
+            .chain(c.b.monsters.iter().copied())
+            .filter(move |e| e.targetable() && e.state.pos.distance(st.pos) <= r + e.gameplay_radius)
+    };
+    let at = |slot: usize, p: Vec2| CommandKind::UseItemAt { slot: slot as u8, target: QPoint::from_vec2(p) };
+    for (slot, id) in st.progress.items.iter().copied().enumerate() {
+        if st.progress.gear.ready[slot] > now {
+            continue;
+        }
+        let Some(item) = items::item(id) else { continue };
+        let use_it = CommandKind::UseItem(slot as u8);
+        match item.active {
+            Active::Encase { .. } if share < 0.22 && hit > 0.1 => return Some(use_it),
+            Active::Petrify { .. } if share < 0.45 && hit > 0.08 => return Some(use_it),
+            Active::ReapingArc { radius, .. } if any_near(radius).count() >= 2 || champs(radius).next().is_some() => {
+                return Some(use_it);
+            }
+            Active::Bloodletting { radius, .. } if champs(radius).next().is_some() => return Some(use_it),
+            Active::Quake { radius, .. }
+                if champs(radius).count() >= 2 || (share < 0.5 && champs(radius).next().is_some()) =>
+            {
+                return Some(use_it);
+            }
+            Active::Embrace { radius, .. } => {
+                let hurt =
+                    c.b.allies
+                        .iter()
+                        .filter(|a| a.state.alive() && a.state.pos.distance(st.pos) <= radius)
+                        .filter(|a| c.memory.damage_on(a.id, 2.0, now) / a.stats.max_health.max(1.0) > 0.12)
+                        .count();
+                if hurt >= 1 && champs(1000.0).next().is_some() {
+                    return Some(use_it);
+                }
+            }
+            Active::Absolve { range, .. } => {
+                // Held for a while yet (not a knock-up), or dying under fire.
+                let soon = now.plus(mftr_sim::SimDuration::from_millis(500));
+                let held =
+                    c.b.allies.iter().filter(|a| a.state.alive() && a.state.pos.distance(st.pos) <= range).find(|a| {
+                        let low = a.state.health / a.stats.max_health.max(1.0) < 0.3;
+                        let stuck = (a.state.stunned_until > soon && a.state.fx.airborne_until <= now)
+                            || a.state.rooted_until > soon;
+                        stuck || (low && c.memory.damage_on(a.id, 1.5, now) > 0.0)
+                    });
+                if let Some(a) = held {
+                    return Some(at(slot, a.state.pos));
+                }
+            }
+            Active::Plunge { range, .. } if local > 0.1 => {
+                let prey = champs(range + 65.0)
+                    .filter(|e| e.state.health / e.stats.max_health.max(1.0) < 0.45)
+                    .min_by(|a, b| a.state.health.total_cmp(&b.state.health));
+                if let Some(e) = prey {
+                    return Some(at(slot, e.state.pos));
+                }
+            }
+            Active::Surge { .. } => {
+                if let Some(e) = champs(650.0).min_by(|a, b| a.state.health.total_cmp(&b.state.health))
+                    && (local > -0.2 || share > 0.6)
+                {
+                    return Some(at(slot, e.state.pos));
+                }
+            }
+            Active::Fleet { .. } => {
+                let fleeing = share < 0.3 && champs(900.0).next().is_some();
+                let chasing = local > 0.2 && champs(1300.0).any(|e| e.state.health / e.stats.max_health.max(1.0) < 0.3);
+                if fleeing || chasing {
+                    return Some(use_it);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Get away toward `safe`: crowd-control the nearest chaser, else dash or blink that way.
 pub fn escape(a: &mut Agent, c: &Ctx, safe: Vec2) -> Option<CommandKind> {
     let me = c.me;

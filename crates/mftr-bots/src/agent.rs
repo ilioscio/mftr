@@ -232,13 +232,13 @@ impl Agent {
         } else {
             0
         };
-        if let Some(cmd) = shop::buy(me, physical, potions, wards) {
+        if let Some(cmd) = shop::buy(me, physical, potions, wards, c.role) {
             return Some(cmd);
         }
         if rules.augments
             && p.level >= mftr_sim::anvils::MIN_LEVEL
             && p.gold >= mftr_sim::anvils::COST + 200.0
-            && shop::next_item(&shop::path(champ, physical), &p.items).is_none()
+            && shop::next_item(&shop::path(champ, physical, c.role), &p.items).is_none()
         {
             return Some(CommandKind::BuyAnvil);
         }
@@ -402,6 +402,9 @@ impl Agent {
                 return Some(CommandKind::UseItem(slot as u8));
             }
         }
+        if let Some(cmd) = micro::actives(c, self.local) {
+            return Some(cmd);
+        }
         micro::support(self, c)
     }
 
@@ -425,7 +428,7 @@ impl Agent {
 
         // Horde, between waves: home to heal or shop, then the coach's spot.
         if horde && c.b.world.game().next_wave_at.is_some() {
-            let gold_ready = shop::next_item(&shop::path(me.champion?, 0.5), &st.progress.items)
+            let gold_ready = shop::next_item(&shop::path(me.champion?, 0.5, c.role), &st.progress.items)
                 .and_then(|n| mftr_sim::items::price(n, &st.progress.items))
                 .is_some_and(|(cost, _)| cost <= st.progress.gold);
             let far = c.k.fountains[c.b.team as usize].is_some_and(|f| f.distance(st.pos) > 600.0);
@@ -761,7 +764,7 @@ impl Agent {
             return None;
         }
         let champ = me.champion?;
-        let next_cost = shop::next_item(&shop::path(champ, 0.5), &st.progress.items)
+        let next_cost = shop::next_item(&shop::path(champ, 0.5, c.role), &st.progress.items)
             .and_then(|n| mftr_sim::items::price(n, &st.progress.items))
             .map_or(f32::MAX, |(cost, _)| cost);
         if !heals && crate::tier::off("aram-recall") {

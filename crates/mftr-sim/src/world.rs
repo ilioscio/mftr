@@ -24,9 +24,9 @@ use crate::ability::{
 use crate::augments;
 use crate::champion::{AttackSpec, ChampionId, Stats};
 use crate::collision::{Obstacle, choose_detour, constrained_move};
-use crate::combat::resist_multiplier;
+use crate::gear::{self, Hitter};
 use crate::hash::{StateHasher, StateSink};
-use crate::items::{self, INVENTORY};
+use crate::items::{self, Active, INVENTORY, Passive};
 use crate::lane::{self, MatchState, Seen};
 use crate::map::{Map, MapId};
 use crate::math::{QPoint, Vec2};
@@ -38,6 +38,9 @@ use std::sync::Arc;
 #[cfg(test)]
 #[path = "world_horde_tests.rs"]
 mod horde_tests;
+#[cfg(test)]
+#[path = "world_item_tests.rs"]
+mod item_tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PlayerId(pub u8);
@@ -198,8 +201,8 @@ pub struct Progress {
     pub items: [u8; INVENTORY],
     /// Charges of each slot's consumable (stacked potions, a flask's charges); 0 otherwise.
     pub charges: [u8; INVENTORY],
-    /// When the Lifeline passive is ready again (item cooldowns survive death).
-    pub lifeline_ready: SimTime,
+    /// Item cooldowns, stacks and the support quest (18; they survive death).
+    pub gear: crate::gear::Gear,
     /// Trades that can still be undone, oldest first (`undo_len` valid). Cleared when the
     /// shop closes (01 §11: undo until you leave the fountain).
     pub undo: [Trade; UNDO],
@@ -276,7 +279,7 @@ impl Progress {
         streak: 0,
         items: [0; INVENTORY],
         charges: [0; INVENTORY],
-        lifeline_ready: SimTime(0),
+        gear: crate::gear::Gear::NONE,
         undo: [Trade { items: [0; INVENTORY], charges: [0; INVENTORY], gold: 0.0 }; UNDO],
         undo_len: 0,
         augments: [0; augments::SLOTS],
@@ -321,7 +324,7 @@ impl Progress {
         for c in self.charges {
             h.write_u8(c);
         }
-        h.write_u64(self.lifeline_ready.0);
+        h.write_u64(self.gear.passive_ready[crate::gear::RALLY].0);
         h.write_u8(self.undo_len);
         for t in &self.undo[..self.undo_len as usize] {
             for i in t.items {
@@ -363,6 +366,7 @@ impl Progress {
             h.write_u64(self.insight_until.0);
             h.write_u64(self.cinder_until.0);
         }
+        self.gear.hash_into(h);
         // Without a trinket (maps without wards), the hash is what it was before them.
         if self.trinket != 0 || self.trinket_charges != 0 || self.trinket_ready.0 != 0 || self.sweep_until.0 != 0 {
             h.write_u8(self.trinket);
@@ -388,6 +392,7 @@ impl Progress {
             hyper: self.hyper,
             anvil: self.anvil,
             insight: self.insight_until.0 != 0,
+            tally: self.gear.tally,
         };
         (self.level, self.items, self.augments, growth)
     }
@@ -400,6 +405,7 @@ impl Progress {
         }
         self.items.swap(a, b);
         self.charges.swap(a, b);
+        self.gear.ready.swap(a, b);
         for t in &mut self.undo[..self.undo_len as usize] {
             t.items.swap(a, b);
             t.charges.swap(a, b);
@@ -581,6 +587,8 @@ pub struct UnitState {
     /// Recalling (01 §12): home to the fountain at this instant, unless something cancels it
     /// first. 0 when not recalling.
     pub recall_until: SimTime,
+    /// Timed item effects (18): Wounds, burns, Sunder, speed buffs, stasis.
+    pub fx: crate::gear::Fx,
 }
 
 /// A cast waiting to repeat (Echo): lines fly again from the caster's position then, areas land
@@ -626,6 +634,7 @@ impl UnitState {
             potion_rate: 0.0,
             potion_until: SimTime(0),
             recall_until: SimTime(0),
+            fx: crate::gear::Fx::NONE,
         }
     }
 
@@ -669,13 +678,16 @@ impl UnitState {
         }
     }
 
-    /// Movement speed at `at`, after any slow (then the soft caps and floor, 02 §9).
+    /// Movement speed at `at`, after item speed buffs and any slow (then the soft caps and
+    /// floor, 02 §9).
     pub fn speed_at(&self, at: SimTime) -> f32 {
-        if self.slow > 0 && self.slowed_until > at {
-            crate::combat::soft_capped_move_speed(self.move_speed * (1.0 - self.slow as f32 / 100.0))
-        } else {
-            self.move_speed
+        let (mul, flat) = self.fx.speed(at);
+        let slowed = self.slow > 0 && self.slowed_until > at;
+        if !slowed && mul == 1.0 && flat == 0.0 {
+            return self.move_speed;
         }
+        let slow = if slowed { 1.0 - self.slow as f32 / 100.0 } else { 1.0 };
+        crate::combat::soft_capped_move_speed((self.move_speed + flat) * mul * slow)
     }
 
     /// Apply a slow: the strongest one applies; an equal one extends it (02 §9).
@@ -985,6 +997,7 @@ impl UnitState {
         if self.recalling() {
             h.write_u64(self.recall_until.0);
         }
+        self.fx.hash_into(h);
     }
 }
 
@@ -1045,6 +1058,8 @@ pub struct Unit {
     /// The level, items and augments `stats` and `attack` were computed for (champions:
     /// recomputed when any of them changes).
     pub stats_for: StatsKey,
+    /// In stasis (Encase, 18 §4): untargetable. Recomputed every tick from `state.fx`.
+    pub encased: bool,
 }
 
 impl Unit {
@@ -1074,6 +1089,7 @@ impl Unit {
             placed_by: None,
             champion_damage_taken: 1.0,
             stats_for: (1, [0; INVENTORY], [0; augments::SLOTS], augments::Growth::NONE),
+            encased: false,
         }
     }
 
@@ -1133,7 +1149,10 @@ impl Unit {
     /// Can be hit by skillshots, areas and attacks: alive, not a protected structure, not the
     /// dodge rig's shooter or a relic.
     pub fn targetable(&self) -> bool {
-        !matches!(self.kind, UnitKind::RigTurret | UnitKind::Relic) && self.state.alive() && !self.protected
+        !matches!(self.kind, UnitKind::RigTurret | UnitKind::Relic)
+            && self.state.alive()
+            && !self.protected
+            && !self.encased
     }
 }
 
@@ -1221,6 +1240,8 @@ pub struct Missile {
     pub shot: u8,
     /// The ability slot that fired it (0–5).
     pub slot: u8,
+    /// The item whose active fired it (0: an ability).
+    pub item: u8,
 }
 
 impl Missile {
@@ -1427,6 +1448,8 @@ pub enum SimEvent {
         kind: DamageKind,
         amount: f32,
         absorbed: f32,
+        /// A critical strike (18 §3.1).
+        crit: bool,
         at: SimTime,
     },
     Died {
@@ -1483,6 +1506,15 @@ pub enum SimEvent {
     /// The Horde campaign was won; the same champions continue into endless survival.
     HordeWon {
         at: SimTime,
+    },
+    /// An item's active was used (18 §4): its effect plays for everyone. `point` is where it
+    /// was aimed (the user's position for self actives); `seq` the command's.
+    ItemUsed {
+        unit: UnitId,
+        item: u8,
+        at: SimTime,
+        point: Vec2,
+        seq: u32,
     },
     /// A turret lost `count` plates (`lane::PLATES`).
     PlatesBroken {
@@ -1581,7 +1613,7 @@ enum Fired {
         power: f32,
         at: SimTime,
     },
-    /// A lunge arriving at its target.
+    /// A lunge arriving at its target (or an item's dash: `item` not 0).
     Strike {
         owner: UnitId,
         slot: u8,
@@ -1589,6 +1621,20 @@ enum Fired {
         power: f32,
         kind: DamageKind,
         cc: Cc,
+        at: SimTime,
+        item: u8,
+    },
+    /// The part of a self-centered item active that reaches others (18 §4).
+    ItemNova {
+        owner: UnitId,
+        item: u8,
+        at: SimTime,
+    },
+    /// An item active on an ally (Absolve).
+    ItemSupport {
+        owner: UnitId,
+        target: UnitId,
+        item: u8,
         at: SimTime,
     },
     /// A ward to place (server: spawned after this tick's movement).
@@ -2103,6 +2149,7 @@ impl World {
                 augments::update_draft(&mut u.state.progress);
             }
             u.refresh_stats(); // level-ups, purchases and augments
+            u.encased = u.state.fx.encased(s0);
             if u.state.progress.undo_len > 0 && !can_shop(u, &self.map, &self.rules) {
                 u.state.progress.undo_len = 0; // left the fountain: trades are final
             }
@@ -2330,7 +2377,14 @@ impl World {
                 }
                 continue;
             }
-            if matches!(f, Fired::Strike { .. } | Fired::Support { .. } | Fired::Claim { .. }) {
+            if matches!(
+                f,
+                Fired::Strike { .. }
+                    | Fired::Support { .. }
+                    | Fired::Claim { .. }
+                    | Fired::ItemNova { .. }
+                    | Fired::ItemSupport { .. }
+            ) {
                 direct.push(f);
                 continue;
             }
@@ -2373,6 +2427,8 @@ impl World {
                 | Fired::Strike { .. }
                 | Fired::Support { .. }
                 | Fired::Claim { .. }
+                | Fired::ItemNova { .. }
+                | Fired::ItemSupport { .. }
                 | Fired::Ward { .. } => {}
             }
         }
@@ -2381,16 +2437,17 @@ impl World {
             melee.sort_by_key(|m| (m.3, m.0));
             let mut landed = Vec::new();
             for (owner, target, power, at) in melee {
-                let amp = damage_amp(units, owner, target, false, rng);
-                if let Some(u) = units.iter_mut().find(|u| u.id == target) {
-                    let dealt =
-                        deal_damage(u, owner, DamageOrigin::Attack, power * amp, DamageKind::Physical, at, events);
+                if let Some(dealt) = land_attack(units, owner, target, power, DamageKind::Physical, at, rng, events) {
                     landed.push((owner, target, dealt, at));
                 }
             }
             on_hit(units, &landed, events);
-            resolve_direct(units, &mut direct, rng, s1, events);
-            resolve_effects(units, missiles, areas, channels, bolts, struck, rng, &start_pos, s0, s1, events);
+            let mut held = resolve_direct(units, &mut direct, rng, s1, events);
+            held.extend(resolve_effects(
+                units, missiles, areas, channels, bolts, struck, rng, &start_pos, s0, s1, events,
+            ));
+            bulwark(units, &held, events);
+            gear::after_damage(units, events, first_event);
             let had_winner = game.winner.is_some();
             crate::jungle::aggro(units, &events[first_event..], map);
             note_outcomes(units, game, &events[first_event..], s1);
@@ -2441,15 +2498,18 @@ impl World {
             }
             if st.alive() && st.potion_until > s0 {
                 let secs = (st.potion_until.min(s1).0 - s0.0) as f32 / SUBTICKS_PER_SECOND as f32;
-                st.health = (st.health + st.potion_rate * secs).min(u.stats.max_health);
+                let gain = st.potion_rate * secs * gear::heal_factor(u, s1);
+                let st = &mut u.state;
+                st.health = (st.health + gain).min(u.stats.max_health);
             }
+            let st = &mut u.state;
             if st.potion_until <= s1 {
                 st.potion_rate = 0.0;
             }
             if can_shop(u, map, &rules) {
                 let p = &mut u.state.progress;
                 for s in 0..INVENTORY {
-                    if let Some((_, _, most, true)) = items::consumable(p.items[s]) {
+                    if let Some((most, true)) = items::stackable(p.items[s]) {
                         p.charges[s] = most;
                     }
                 }
@@ -2460,10 +2520,12 @@ impl World {
                 u.state.progress.gold += rules.passive_gold * TICK_DT;
             }
         }
+        gear::tick(units, prediction, s0, s1, events);
         for u in units.iter_mut().filter(|u| u.state.alive()) {
             let max = u.stats.max_health;
             if u.state.health < max && u.stats.health_regen > 0.0 {
-                u.state.health = (u.state.health + u.stats.health_regen * TICK_DT).min(max);
+                let gain = u.stats.health_regen * TICK_DT * gear::heal_factor(u, s1);
+                u.state.health = (u.state.health + gain).min(max);
             }
             if u.state.shield > 0.0 && u.state.shield_until <= s1 {
                 u.state.shield = 0.0;
@@ -2689,6 +2751,7 @@ fn deliver(unit: &Unit, c: EchoCast, t: SimTime, echo: bool, fired: &mut Vec<Fir
                 power,
                 shot: first_shot,
                 slot: c.slot,
+                item: 0,
             };
             fired.push(Fired::Missile(base));
             if d.multishot && tf.accepts(Transforms::MULTISHOT) {
@@ -2792,17 +2855,40 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
                 target.range,
                 target.max_health,
             );
-            // Spellblade: an armed attack adds the base attack damage, and disarms.
+            let passives = gear::of(unit);
+            // Spellblade (the augment's or an item's): an armed attack adds a share of the base
+            // attack damage, and disarms.
             if unit.state.spellblade_until > t
                 && let Some(c) = unit.champion
             {
-                power += c.def().stats_at(unit.state.progress.level).attack_damage;
+                let base = c.def().stats_at(unit.state.progress.level).attack_damage;
+                let augment: f32 = if augments::mods(&unit.state.progress.augments).spellblade { 1.0 } else { 0.0 };
+                let item = match passives.find(|p| matches!(p, Passive::Spellblade { .. })) {
+                    Some((Passive::Spellblade { base_ad }, _)) => base_ad,
+                    _ => 0.0,
+                };
+                power += base * augment.max(item);
                 unit.state.spellblade_until = SimTime(0);
+                if item > 0.0 {
+                    unit.state.progress.gear.passive_ready[gear::SPELLBLADE] = t.plus(gear::SPELLBLADE_COOLDOWN);
+                }
+            }
+            // Every third attack (Gale Saber).
+            if let Some((Passive::ThirdHit { base, bonus_ad }, _)) =
+                passives.find(|p| matches!(p, Passive::ThirdHit { .. }))
+                && unit.state.attacks.is_multiple_of(3)
+            {
+                power += base + bonus_ad * gear::bonus_ad(unit);
+            }
+            // Quicken: attacking grants speed.
+            if let Some((Passive::Quicken { speed, ms }, _)) = passives.find(|p| matches!(p, Passive::Quicken { .. })) {
+                unit.state.fx.quick = speed as u8;
+                unit.state.fx.quick_until = t.plus(SimDuration::from_millis(ms));
             }
             if atk.bolt_speed <= 0.0 {
                 fired.push(Fired::Melee { owner: id, target: w.target, power, at: t });
             } else {
-                fired.push(Fired::Bolt(Bolt {
+                let bolt = Bolt {
                     id: 0,
                     owner: id,
                     team,
@@ -2813,7 +2899,28 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
                     launched_at: t,
                     power,
                     kind: if share { DamageKind::True } else { DamageKind::Physical },
-                }));
+                };
+                fired.push(Fired::Bolt(bolt));
+                // Fanfire: more bolts at the enemies nearest the target, for a share.
+                if let Some((Passive::Fanfire { targets, share, radius }, _)) =
+                    passives.find(|p| matches!(p, Passive::Fanfire { .. }))
+                {
+                    let mut near: Vec<&Target> = roster
+                        .iter()
+                        .filter(|r| r.team != team && r.id != w.target && r.id != id)
+                        .filter(|r| matches!(r.kind, UnitKind::Champion | UnitKind::Minion | UnitKind::Monster))
+                        .filter(|r| (r.pos - target.pos).length() <= radius + r.radius)
+                        .collect();
+                    near.sort_by(|a, b| {
+                        (a.pos - target.pos)
+                            .length_sq()
+                            .total_cmp(&(b.pos - target.pos).length_sq())
+                            .then(a.id.cmp(&b.id))
+                    });
+                    for r in near.into_iter().take(targets as usize) {
+                        fired.push(Fired::Bolt(Bolt { target: r.id, power: power * share, ..bolt }));
+                    }
+                }
             }
         }
     }
@@ -2821,6 +2928,16 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
         && d.end_at == t
     {
         if let Some((target, slot)) = d.strike
+            && slot >= ITEM_STRIKE
+        {
+            // An item's dash (Plunge): its strike.
+            let item = unit.state.progress.items.get((slot - ITEM_STRIKE) as usize).copied().unwrap_or(0);
+            if let Some(Active::Plunge { base, bonus_ad, .. }) = items::item(item).map(|i| i.active) {
+                let power = base + bonus_ad * gear::bonus_ad(unit);
+                let kind = DamageKind::Physical;
+                fired.push(Fired::Strike { owner: id, slot, target, power, kind, cc: Cc::None, at: t, item });
+            }
+        } else if let Some((target, slot)) = d.strike
             && let Some(a) = unit.ability(slot)
             && let Effect::Lunge(l) = a.effect
         {
@@ -2829,7 +2946,7 @@ fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fire
             if slot < 3 && augments::mods(&unit.state.progress.augments).fundamentals {
                 power *= augments::FUNDAMENTALS_AMP;
             }
-            fired.push(Fired::Strike { owner: id, slot, target, power, kind: l.damage.kind, cc: l.cc, at: t });
+            fired.push(Fired::Strike { owner: id, slot, target, power, kind: l.damage.kind, cc: l.cc, at: t, item: 0 });
         }
         unit.state.dash = None;
         unit.state.detour = None;
@@ -2927,24 +3044,11 @@ fn apply_command(
                 }
             }
         }
-        CommandKind::UseItemAt { slot, target } if map.layout.wards && st.alive() => {
-            let s = slot as usize;
-            let p = &mut st.progress;
-            if s < INVENTORY && items::placeable(p.items[s]) && p.charges[s] > 0 {
-                let pos = crate::wards::placement(st.pos, target.to_vec2());
-                if map.walkable(pos, 1.0) {
-                    p.charges[s] -= 1;
-                    if p.charges[s] == 0 {
-                        p.items[s] = 0;
-                    }
-                    let (id, team) = (unit.id, unit.team);
-                    let kind = crate::wards::WardKind::Control;
-                    ctx.fired.push(Fired::Ward { owner: id, team, kind, pos, expires: SimTime(0) });
-                }
-            }
+        CommandKind::UseItemAt { slot, target } => {
+            use_item(unit, slot, Some(target.to_vec2()), t, c.seq, map, ctx, events)
         }
         // Not on this map, dead, or not a champion.
-        CommandKind::UseTrinket(_) | CommandKind::UseItemAt { .. } => {}
+        CommandKind::UseTrinket(_) => {}
         CommandKind::ChooseTrinket(k) => {
             let p = &mut st.progress;
             if may_shop && map.layout.wards && k <= crate::wards::TRINKET_LENS && p.trinket != k {
@@ -2999,7 +3103,7 @@ fn apply_command(
         }
         CommandKind::Buy(_) | CommandKind::Sell(_) | CommandKind::Undo => shop(unit, c.kind, map, rules),
         CommandKind::SwapItems { a, b } => st.progress.swap_items(a as usize, b as usize),
-        CommandKind::UseItem(slot) => use_item(unit, slot, t),
+        CommandKind::UseItem(slot) => use_item(unit, slot, None, t, c.seq, map, ctx, events),
         CommandKind::BuyAnvil if rules.augments && may_shop => {
             let p = &mut st.progress;
             if p.level >= crate::anvils::MIN_LEVEL && p.gold >= crate::anvils::COST && p.anvil_offer[0] == 0 {
@@ -3043,8 +3147,13 @@ fn shop(unit: &mut Unit, kind: CommandKind, map: &Map, rules: &Rules) {
         return;
     }
     let p = &mut unit.state.progress;
+    let shopper = items::Shopper {
+        wards: map.layout.wards,
+        claim: p.spell_f == crate::ability::SPELL_CLAIM,
+        quest: p.gear.quest,
+    };
     match kind {
-        CommandKind::Buy(id) if items::stackable(id).is_some() => {
+        CommandKind::Buy(id) if items::sold_by_charge(id) => {
             // Potions and control wards stack in a slot (up to its charges); a flask is one per
             // champion, full. Control wards only where wards are allowed.
             let (Some(item), Some((most, refills))) = (items::item(id), items::stackable(id)) else { return };
@@ -3066,24 +3175,30 @@ fn shop(unit: &mut Unit, kind: CommandKind, map: &Map, rules: &Rules) {
             p.gold -= item.cost;
         }
         CommandKind::Buy(id) => {
-            let (Some(item), Some((cost, used))) = (items::item(id), items::price(id, &p.items)) else { return };
+            let Some((cost, used)) = items::price(id, &p.items) else { return };
             let mut inv = p.items;
             for s in used {
                 inv[s] = 0;
             }
-            // One pair of boots; a free slot once the components are gone.
-            let boots = inv.iter().any(|i| items::item(*i).is_some_and(|i| i.boots));
+            // 18 §2: one starter, boots, support item and hatchling; one of each legendary.
+            if !items::may_buy(id, &inv, shopper) {
+                return;
+            }
             let Some(slot) = inv.iter().position(|i| *i == 0) else { return };
-            if cost > p.gold || (item.boots && boots) {
+            if cost > p.gold {
                 return;
             }
             inv[slot] = id;
             p.push_trade(Trade { items: p.items, charges: p.charges, gold: -cost });
-            // Slots whose item changed hold no charges.
+            // Slots whose item changed hold no charges; an item with charges (a lantern's
+            // wards) comes full.
             for ((c, new), old) in p.charges.iter_mut().zip(inv).zip(p.items) {
                 if new != old {
                     *c = 0;
                 }
+            }
+            if let Some((most, _)) = items::stackable(id) {
+                p.charges[slot] = most;
             }
             p.items = inv;
             p.gold -= cost;
@@ -3096,7 +3211,7 @@ fn shop(unit: &mut Unit, kind: CommandKind, map: &Map, rules: &Rules) {
             {
                 // A stack of potions sells by the potion; anything else whole.
                 let n = match items::stackable(item.id) {
-                    Some((_, false)) => charges[s].max(1) as f32,
+                    Some((_, false)) if items::sold_by_charge(item.id) => charges[s].max(1) as f32,
                     _ => 1.0,
                 };
                 let refund = item.cost * n * items::SELL_REFUND;
@@ -3146,24 +3261,235 @@ fn place_ward(
     units.push(ward_unit(id, kind, team, pos, owner, expires));
 }
 
-/// Drink the consumable in `slot` at `t`: it heals over time from now (a second one while one
-/// runs adds its time). A potion stack shrinks by one and is gone at zero; a flask keeps its
-/// slot and refills at the fountain.
-fn use_item(unit: &mut Unit, slot: u8, t: SimTime) {
-    let st = &mut unit.state;
+/// Windstride Belt's bolts (Surge, 18 §4): a fan of these.
+pub const SURGE_BOLT: LineSkillshot = LineSkillshot {
+    windup: SimDuration(0),
+    speed: 1500.0,
+    radius: 40.0,
+    range: 750.0,
+    damage: crate::ability::Damage::NONE,
+    cc: Cc::None,
+};
+/// (cos, sin) of −40° to 40° in 10° steps: Surge's fan (no trigonometry in the sim).
+const FAN: [(f32, f32); 9] = [
+    (0.766_044_4, -0.642_787_6),
+    (0.866_025_4, -0.5),
+    (0.939_692_6, -0.342_020_15),
+    (0.984_807_8, -0.173_648_18),
+    (1.0, 0.0),
+    (0.984_807_8, 0.173_648_18),
+    (0.939_692_6, 0.342_020_15),
+    (0.866_025_4, 0.5),
+    (0.766_044_4, 0.642_787_6),
+];
+/// Item dashes' speeds (Plunge, Surge).
+pub const PLUNGE_SPEED: f32 = 1500.0;
+pub const SURGE_SPEED: f32 = 1200.0;
+/// A dash strike's slot for the item in inventory slot `s` (`DashMove::strike`).
+pub const ITEM_STRIKE: u8 = 8;
+
+/// Use the item in `slot` at `t` (18 §4), aimed at `point` (the cursor) when it's aimed:
+/// drink a potion, place a ward, or use an active. Actives with a cooldown need a champion
+/// free of stuns, stasis and dashes; they start their cooldown and tell everyone
+/// (`SimEvent::ItemUsed`). What touches the user happens now (predicted); what touches others
+/// is fired for phase 3.
+#[allow(clippy::too_many_arguments)]
+fn use_item(
+    unit: &mut Unit,
+    slot: u8,
+    point: Option<Vec2>,
+    t: SimTime,
+    seq: u32,
+    map: &Map,
+    ctx: CastContext,
+    events: &mut Vec<SimEvent>,
+) {
     let s = slot as usize;
-    if !st.alive() || s >= INVENTORY || st.progress.charges[s] == 0 {
+    if s >= INVENTORY || !unit.state.alive() || unit.kind != UnitKind::Champion {
         return;
     }
-    let Some((heal, duration_ms, _, refills)) = items::consumable(st.progress.items[s]) else { return };
-    st.progress.charges[s] -= 1;
-    if st.progress.charges[s] == 0 && !refills {
-        st.progress.items[s] = 0;
+    let id = unit.state.progress.items[s];
+    let Some(item) = items::item(id) else { return };
+    let (uid, team, level) = (unit.id, unit.team, unit.state.progress.level);
+    match item.active {
+        Active::None => return,
+        Active::Consumable { heal, duration_ms, refills, .. } => {
+            // Drink: it heals over time from now (a second one while one runs adds its time).
+            // A potion stack shrinks by one and is gone at zero; a flask keeps its slot.
+            let st = &mut unit.state;
+            if st.progress.charges[s] == 0 {
+                return;
+            }
+            st.progress.charges[s] -= 1;
+            if st.progress.charges[s] == 0 && !refills {
+                st.progress.items[s] = 0;
+            }
+            let duration = SimDuration::from_millis(duration_ms);
+            let rate = heal / duration.0 as f32 * SUBTICKS_PER_SECOND as f32;
+            st.potion_until = if st.potion_until > t { st.potion_until.plus(duration) } else { t.plus(duration) };
+            st.potion_rate = st.potion_rate.max(rate);
+            return;
+        }
+        Active::ControlWard { .. } | Active::StealthWard { .. } => {
+            // A ward at the cursor (maps with wards); control wards are used up.
+            let control = matches!(item.active, Active::ControlWard { .. });
+            let st = &mut unit.state;
+            let Some(q) = point else { return };
+            if !map.layout.wards || st.progress.charges[s] == 0 {
+                return;
+            }
+            let pos = crate::wards::placement(st.pos, q);
+            if !map.walkable(pos, 1.0) {
+                return;
+            }
+            st.progress.charges[s] -= 1;
+            if control && st.progress.charges[s] == 0 {
+                st.progress.items[s] = 0;
+            }
+            let (kind, expires) = if control {
+                (crate::wards::WardKind::Control, SimTime(0))
+            } else {
+                (crate::wards::WardKind::Stealth, t.plus(crate::wards::stealth_life(level)))
+            };
+            ctx.fired.push(Fired::Ward { owner: uid, team, kind, pos, expires });
+            return;
+        }
+        _ => {}
     }
-    let duration = SimDuration::from_millis(duration_ms);
-    let rate = heal / duration.0 as f32 * SUBTICKS_PER_SECOND as f32;
-    st.potion_until = if st.potion_until > t { st.potion_until.plus(duration) } else { t.plus(duration) };
-    st.potion_rate = st.potion_rate.max(rate);
+    let Some(cooldown) = item.active.cooldown() else { return };
+    let st = &unit.state;
+    if st.progress.gear.ready[s] > t || st.stunned_until > t || st.dash.is_some() {
+        return;
+    }
+    let here = st.pos;
+    let aim = point.unwrap_or(here);
+    match item.active {
+        Active::ReapingArc { .. } => {
+            // The attack timer resets: the next attack can start at once.
+            unit.state.attack_ready_at = unit.state.attack_ready_at.min(t);
+            ctx.fired.push(Fired::ItemNova { owner: uid, item: id, at: t });
+        }
+        Active::Bloodletting { .. } | Active::Quake { .. } => {
+            ctx.fired.push(Fired::ItemNova { owner: uid, item: id, at: t });
+        }
+        Active::Fleet { pct, ms, .. } => unit.state.fx.hasten(pct, t.plus(SimDuration::from_millis(ms)), 0, t),
+        Active::Plunge { range, .. } => {
+            let st = &unit.state;
+            if st.rooted_until > t || st.cast.is_some() {
+                return;
+            }
+            // The visible enemy champion nearest the cursor, in range.
+            let pick = ctx
+                .roster
+                .iter()
+                .filter(|r| {
+                    r.team != team
+                        && r.kind == UnitKind::Champion
+                        && !ctx.hidden.contains(&r.id)
+                        && (r.pos - here).length() <= range + r.radius
+                        && (r.pos - aim).length() <= SUPPORT_PICK + r.radius
+                })
+                .min_by(|a, b| (a.pos - aim).length_sq().total_cmp(&(b.pos - aim).length_sq()).then(a.id.cmp(&b.id)));
+            let Some(victim) = pick else { return };
+            let gameplay_radius = unit.gameplay_radius;
+            let st = &mut unit.state;
+            st.cancel_attack(t);
+            let to_victim = victim.pos - st.pos;
+            let dir = to_victim.normalize_or_zero();
+            let dist = (to_victim.length() - victim.radius - gameplay_radius * 0.5).max(0.0);
+            let to = st.pos + dir * dist;
+            let end_at = SimTime(t.0 + ((dist / PLUNGE_SPEED * SUBTICKS_PER_SECOND as f32).ceil() as u64).max(1));
+            let strike = Some((victim.id, ITEM_STRIKE + slot));
+            st.dash = Some(DashMove { dir, to, speed: PLUNGE_SPEED, end_at, strike, recover: SimDuration(0) });
+            st.face(dir);
+            st.detour = None;
+            events.push(SimEvent::Dashed { unit: uid, from: st.pos, to, at: t, end_at });
+        }
+        Active::Encase { ms, .. } => {
+            // Stasis: untargetable and unable to act until it ends.
+            let until = t.plus(SimDuration::from_millis(ms));
+            let st = &mut unit.state;
+            st.fx.stasis_until = until;
+            st.stunned_until = st.stunned_until.max(until);
+            st.cancel_attack(t);
+            st.cast = None;
+            st.recovery = None;
+            st.buffered = None;
+            st.set_order(Order::Idle, map);
+            unit.encased = true;
+        }
+        Active::Surge { dash, bolts, base, ap_ratio, .. } => {
+            let st = &unit.state;
+            let dir = (aim - here).normalize_or_zero();
+            if st.rooted_until > t || st.cast.is_some() || dir == Vec2::ZERO {
+                return;
+            }
+            // The fan, 10° apart and centered on the aim, from where the dash starts.
+            let power = base + ap_ratio * unit.stats.ability_power;
+            let n = bolts.min(FAN.len() as u8) as usize;
+            for (i, (cs, sn)) in FAN[(FAN.len() - n) / 2..][..n].iter().copied().enumerate() {
+                let i = i as u8;
+                let d = Vec2::new(dir.x * cs - dir.y * sn, dir.x * sn + dir.y * cs);
+                ctx.fired.push(Fired::Missile(Missile {
+                    id: 0,
+                    owner: uid,
+                    team,
+                    origin: here,
+                    dir: d,
+                    spec: SURGE_BOLT,
+                    spawn_at: t,
+                    cast_seq: seq,
+                    power,
+                    shot: i,
+                    slot: 0,
+                    item: id,
+                }));
+            }
+            let radius = unit.collision_radius;
+            let st = &mut unit.state;
+            st.cancel_attack(t);
+            let to = blink_landing(map, here, dir, dash, radius);
+            let dist = (to - here).length();
+            let end_at = SimTime(t.0 + ((dist / SURGE_SPEED * SUBTICKS_PER_SECOND as f32).ceil() as u64).max(1));
+            st.dash = Some(DashMove { dir, to, speed: SURGE_SPEED, end_at, strike: None, recover: SimDuration(0) });
+            st.face(dir);
+            st.detour = None;
+            events.push(SimEvent::Dashed { unit: uid, from: here, to, at: t, end_at });
+        }
+        Active::Petrify { base, bonus_hp, ms, cut, .. } => {
+            let until = t.plus(SimDuration::from_millis(ms));
+            let amount = base + bonus_hp * gear::bonus_health(unit);
+            gear::shield(unit, amount, until, t, events);
+            unit.state.fx.petrify_cut = (cut * 100.0).round() as u8;
+            unit.state.fx.petrify_until = until;
+        }
+        Active::Embrace { base, per_level, ms, .. } => {
+            let amount = base + per_level * level as f32;
+            gear::shield(unit, amount, t.plus(SimDuration::from_millis(ms)), t, events);
+            ctx.fired.push(Fired::ItemNova { owner: uid, item: id, at: t });
+        }
+        Active::Absolve { range, heal, heal_missing, speed, ms, .. } => {
+            // The allied champion nearest the cursor, in range; else the user.
+            let ally = ctx
+                .roster
+                .iter()
+                .filter(|r| {
+                    r.team == team
+                        && r.id != uid
+                        && r.kind == UnitKind::Champion
+                        && (r.pos - here).length() <= range + r.radius
+                        && (r.pos - aim).length() <= SUPPORT_PICK + r.radius
+                })
+                .min_by(|a, b| (a.pos - aim).length_sq().total_cmp(&(b.pos - aim).length_sq()).then(a.id.cmp(&b.id)));
+            match ally {
+                Some(a) => ctx.fired.push(Fired::ItemSupport { owner: uid, target: a.id, item: id, at: t }),
+                None => absolve(unit, heal, heal_missing, speed, ms, t, events),
+            }
+        }
+        _ => return,
+    }
+    unit.state.progress.gear.ready[s] = t.plus(cooldown);
+    events.push(SimEvent::ItemUsed { unit: uid, item: id, at: t, point: aim, seq });
 }
 
 /// Validate and start a cast at `t` (03 §5: the sim validates everything). Skillshots and
@@ -3181,6 +3507,11 @@ fn try_cast(
 ) {
     let Some(ability) = unit.ability(slot) else { return };
     let mods = augments::mods(&unit.state.progress.augments);
+    let passives = gear::of(unit);
+    let grown = match passives.find(|p| matches!(p, Passive::Hatchling(_))) {
+        Some((Passive::Hatchling(kind), _)) if unit.state.progress.gear.grown() => Some(kind),
+        _ => None,
+    };
     if slot == 3 && mods.fundamentals {
         return; // Fundamentals: no ultimate
     }
@@ -3294,36 +3625,26 @@ fn try_cast(
             } else {
                 None
             };
+            // Heal and shield power (18 §3) makes them stronger.
+            let power = 1.0 + stats.heal_power;
             let heal = if sup.heal > 0.0 || sup.heal_missing > 0.0 {
-                sup.heal + sup.heal_ap * stats.ability_power + if sup.shield > 0.0 { 0.0 } else { bonus }
+                (sup.heal + sup.heal_ap * stats.ability_power + if sup.shield > 0.0 { 0.0 } else { bonus }) * power
             } else {
                 0.0
             };
-            let shield = if sup.shield > 0.0 { sup.shield + sup.shield_ap * stats.ability_power + bonus } else { 0.0 };
+            let shield =
+                if sup.shield > 0.0 { (sup.shield + sup.shield_ap * stats.ability_power + bonus) * power } else { 0.0 };
+            let heal_missing = sup.heal_missing * power;
             let until = t.plus(sup.duration);
             match ally {
-                Some(a) => ctx.fired.push(Fired::Support {
-                    owner: id,
-                    target: a.id,
-                    heal,
-                    heal_missing: sup.heal_missing,
-                    shield,
-                    until,
-                    at: t,
-                }),
+                Some(a) => {
+                    ctx.fired.push(Fired::Support { owner: id, target: a.id, heal, heal_missing, shield, until, at: t })
+                }
                 None => {
                     // On the caster itself: at once, so prediction shows it.
-                    let max = stats.max_health;
-                    let amount = (heal + sup.heal_missing * (max - st.health)).min(max - st.health);
-                    if amount > 0.0 {
-                        st.health += amount;
-                        events.push(SimEvent::Healed { unit: id, amount, at: t });
-                    }
-                    if shield > 0.0 {
-                        st.shield = if st.shield_until > t { st.shield + shield } else { shield };
-                        st.shield_until = st.shield_until.max(until);
-                        events.push(SimEvent::Shielded { unit: id, amount: shield, at: t, until: st.shield_until });
-                    }
+                    let missing = stats.max_health - st.health;
+                    gear::heal_state(st, &stats, id, heal + heal_missing * missing, t, events);
+                    gear::shield_state(st, &stats, id, shield, until, t, events);
                 }
             }
         }
@@ -3351,7 +3672,8 @@ fn try_cast(
                 .roster
                 .iter()
                 .filter(|r| {
-                    (r.kind == UnitKind::Monster || (r.kind == UnitKind::Minion && r.team != team))
+                    let flint = grown == Some(items::Hatchling::Flintling) && r.kind == UnitKind::Champion;
+                    (r.kind == UnitKind::Monster || (matches!(r.kind, UnitKind::Minion) || flint) && r.team != team)
                         && !ctx.hidden.contains(&r.id)
                         && (r.pos - st.pos).length() <= c.range + r.radius
                         && (r.pos - target).length() <= crate::ability::CLAIM_PICK + r.radius
@@ -3363,6 +3685,10 @@ fn try_cast(
             let power = if st.progress.camps >= crate::jungle::CLAIM_UPGRADE_CAMPS { c.upgraded } else { c.damage };
             st.face((victim.pos - st.pos).normalize_or_zero());
             ctx.fired.push(Fired::Claim { owner: id, target: victim.id, power, at: t });
+            if grown == Some(items::Hatchling::Windling) {
+                use crate::items::hatchling::*;
+                st.fx.hasten(WIND_SPEED, t.plus(SimDuration::from_millis(WIND_MS)), WIND_MS as u16, t);
+            }
         }
     }
     // Instant casts (supports, shields, blinks, dashes, lunges) still tell clients a cast
@@ -3391,6 +3717,13 @@ fn try_cast(
     if mods.spellblade && slot < 4 {
         st.spellblade_until = t.plus(SimDuration::from_millis(augments::SPELLBLADE_MS));
     }
+    // An item's Spellblade arms for longer, off its cooldown (18 §4).
+    if slot < 4
+        && passives.find(|p| matches!(p, Passive::Spellblade { .. })).is_some()
+        && st.progress.gear.passive_ready[gear::SPELLBLADE] <= t
+    {
+        st.spellblade_until = st.spellblade_until.max(t.plus(gear::SPELLBLADE_WINDOW));
+    }
 }
 
 /// Where a blink toward `dir` lands: the farthest walkable, in-bounds point on the line, so a
@@ -3410,6 +3743,7 @@ fn blink_landing(map: &Map, from: Vec2, dir: Vec2, dist: f32, radius: f32) -> Ve
 }
 
 /// Phase 3 on the server: missiles, areas and bolts against the units' motion this tick.
+/// Returns who immobilized a champion, and when (Bulwark, 18 §6).
 #[allow(clippy::too_many_arguments)]
 fn resolve_effects(
     units: &mut [Unit],
@@ -3423,7 +3757,8 @@ fn resolve_effects(
     s0: SimTime,
     s1: SimTime,
     events: &mut Vec<SimEvent>,
-) {
+) -> Vec<(UnitId, SimTime)> {
+    let mut held: Vec<(UnitId, SimTime)> = Vec::new();
     // Skillshots and areas hit units, not structures (those take attacks only).
     let motion: Vec<(UnitId, Team, f32, Vec2, Vec2)> = units
         .iter()
@@ -3454,18 +3789,16 @@ fn resolve_effects(
             events.push(SimEvent::MissileHit { id: m.id, target, at });
             let from = pos_of(m.owner).unwrap_or(m.origin);
             let amp = damage_amp(units, m.owner, target, true, rng);
+            let by = Hitter::find(units, m.owner, at);
+            let origin = if m.item != 0 { DamageOrigin::Item(m.item) } else { DamageOrigin::Ability(m.slot) };
             if let Some(u) = units.iter_mut().find(|u| u.id == target) {
-                apply_cc(u, m.spec.cc, at, from, s1, events);
-                let dealt = deal_damage(
-                    u,
-                    m.owner,
-                    DamageOrigin::Ability(m.slot),
-                    m.power * amp,
-                    m.spec.damage.kind,
-                    at,
-                    events,
-                );
-                after_ability_hit(units, m.owner, target, dealt, at, events);
+                if apply_cc(u, m.spec.cc, at, from, s1, events) {
+                    held.push((m.owner, at));
+                }
+                let dealt = deal_damage(u, &by, origin, m.power * amp, m.spec.damage.kind, at, events);
+                if m.item == 0 {
+                    after_ability_hit(units, m.owner, target, dealt, at, events);
+                }
             }
             return false;
         }
@@ -3489,17 +3822,13 @@ fn resolve_effects(
             let reach = a.radius + r;
             if team != a.team && (q0.lerp(q1, frac) - a.center).length_sq() <= reach * reach {
                 let amp = damage_amp(units, a.owner, id, true, rng);
+                let by = Hitter::find(units, a.owner, a.detonate_at);
                 let Some(u) = units.iter_mut().find(|u| u.id == id) else { continue };
-                apply_cc(u, a.cc, a.detonate_at, a.center, s1, events);
-                let dealt = deal_damage(
-                    u,
-                    a.owner,
-                    DamageOrigin::Ability(a.slot),
-                    a.power * amp,
-                    a.kind,
-                    a.detonate_at,
-                    events,
-                );
+                if apply_cc(u, a.cc, a.detonate_at, a.center, s1, events) {
+                    held.push((a.owner, a.detonate_at));
+                }
+                let dealt =
+                    deal_damage(u, &by, DamageOrigin::Ability(a.slot), a.power * amp, a.kind, a.detonate_at, events);
                 after_ability_hit(units, a.owner, id, dealt, a.detonate_at, events);
             }
         }
@@ -3523,9 +3852,9 @@ fn resolve_effects(
                 return at <= c.end_at;
             }
             // Interrupted: dead, or hard CC took the channel's lock (`apply_cc`).
-            let held =
+            let still =
                 units.iter().find(|u| u.id == c.owner).is_some_and(|u| u.state.alive() && u.state.recovery.is_some());
-            if !held {
+            if !still {
                 events.push(SimEvent::BeamInterrupted { id: c.id, at });
                 return false;
             }
@@ -3533,11 +3862,14 @@ fn resolve_effects(
             let candidates = motion.iter().map(|&(id, team, r, q0, q1)| (id, team, r, q0.lerp(q1, frac)));
             if let Some((target, _)) = c.first_on_beam(candidates) {
                 let amp = damage_amp(units, c.owner, target, true, rng);
+                let by = Hitter::find(units, c.owner, at);
                 if let Some(u) = units.iter_mut().find(|u| u.id == target) {
-                    apply_cc(u, c.spec.cc, at, c.origin, s1, events);
+                    if apply_cc(u, c.spec.cc, at, c.origin, s1, events) {
+                        held.push((c.owner, at));
+                    }
                     let dealt = deal_damage(
                         u,
-                        c.owner,
+                        &by,
                         DamageOrigin::Ability(c.slot),
                         c.power * amp,
                         c.spec.damage.kind,
@@ -3552,11 +3884,11 @@ fn resolve_effects(
     });
     let mut landed: Vec<(UnitId, UnitId, f32, SimTime)> = Vec::new();
     bolts.retain_mut(|b| {
-        let amp = damage_amp(units, b.owner, b.target, false, rng);
-        let Some(target) = units.iter_mut().find(|u| u.id == b.target && u.targetable()) else {
+        if !units.iter().any(|u| u.id == b.target && u.targetable()) {
             events.push(SimEvent::AttackLanded { id: b.id, target: b.target, at: s1, hit: false });
             return false;
-        };
+        }
+        let Some(target) = units.iter().find(|u| u.id == b.target) else { return false };
         let from = b.launched_at.max(s0);
         let dt = (s1.0 - from.0) as f32 / SUBTICKS_PER_SECOND as f32;
         let to = target.state.pos - b.pos;
@@ -3565,62 +3897,195 @@ fn resolve_effects(
         if gap <= step {
             let at = SimTime(from.0 + (gap / b.speed * SUBTICKS_PER_SECOND as f32) as u64).min(s1);
             events.push(SimEvent::AttackLanded { id: b.id, target: b.target, at, hit: true });
-            let dealt = deal_damage(target, b.owner, DamageOrigin::Attack, b.power * amp, b.kind, at, events);
-            landed.push((b.owner, b.target, dealt, at));
+            if let Some(dealt) = land_attack(units, b.owner, b.target, b.power, b.kind, at, rng, events) {
+                landed.push((b.owner, b.target, dealt, at));
+            }
             return false;
         }
         b.pos += to.normalize_or_zero() * step;
         true
     });
     on_hit(units, &landed, events);
+    held
 }
 
-/// Item effects of landed basic attacks: on-hit magic damage, then life steal on the attack's
-/// damage (02 §10 order).
+/// A basic attack landing (server): its owner's damage modifiers, a crit roll for champions
+/// (18 §3.1: the server rolls when the attack lands), mitigation. Returns the damage dealt.
+#[allow(clippy::too_many_arguments)]
+fn land_attack(
+    units: &mut [Unit],
+    owner: UnitId,
+    target: UnitId,
+    power: f32,
+    kind: DamageKind,
+    at: SimTime,
+    rng: &mut Pcg32,
+    events: &mut Vec<SimEvent>,
+) -> Option<f32> {
+    let amp = damage_amp(units, owner, target, false, rng);
+    let by = Hitter::find(units, owner, at);
+    let (chance, bonus) = units
+        .iter()
+        .find(|u| u.id == owner && u.kind == UnitKind::Champion)
+        .map_or((0.0, 0.0), |o| (o.stats.crit_chance, o.stats.crit_damage));
+    let crit = chance > 0.0 && kind != DamageKind::True && (rng.next_u32() >> 8) as f32 / 16_777_216.0 < chance;
+    let u = units.iter_mut().find(|u| u.id == target && u.targetable())?;
+    let mut raw = power * amp;
+    if crit {
+        raw *= gear::crit_multiplier(bonus, u);
+    }
+    let amount = if u.kind == UnitKind::Ward { raw } else { gear::mitigate(u, &by, raw, kind, true, at) };
+    Some(damage_with(u, owner, DamageOrigin::Attack, amount, kind, crit, at, events))
+}
+
+/// Item and buff effects of landed basic attacks (02 §10 order): Cinder, on-hit damage,
+/// Kindle, Cleave, Spoils, then life steal on the attack's damage (with Overflow), then what
+/// the target returns (Thorns).
 fn on_hit(units: &mut [Unit], landed: &[(UnitId, UnitId, f32, SimTime)], events: &mut Vec<SimEvent>) {
     for &(owner, target, dealt, at) in landed {
         let Some(o) = units.iter().find(|u| u.id == owner && u.kind == UnitKind::Champion) else { continue };
-        let (passives, stats) = (items::passives(&o.state.progress.items), o.stats);
-        let cinder = (o.state.progress.cinder_until > at).then(|| crate::jungle::cinder_burn(o.state.progress.level));
+        let (passives, stats, team, level) = (gear::of(o), o.stats, o.team, o.state.progress.level);
+        let ranged = o.attack.is_some_and(|a| a.bolt_speed > 0.0);
+        let kindle = (o.state.fx.kindle_until > at).then_some(o.state.fx.kindle as f32);
+        let by = Hitter::of(o, at);
+        let cinder = (o.state.progress.cinder_until > at).then(|| crate::jungle::cinder_burn(level));
         if let Some(burn) = cinder
             && let Some(t) = units.iter_mut().find(|u| u.id == target)
         {
             // Cinder: the hit burns (true damage) and slows.
-            deal_damage(t, owner, DamageOrigin::Attack, burn, DamageKind::True, at, events);
+            deal_damage(t, &by, DamageOrigin::Attack, burn, DamageKind::True, at, events);
             let st = &mut t.state;
             if st.alive() {
                 st.slow = st.slow.max(crate::jungle::CINDER_SLOW);
                 st.slowed_until = st.slowed_until.max(at.plus(crate::jungle::CINDER_SLOW_FOR));
             }
         }
-        if let Some((base, ap_ratio, item)) = passives.on_hit_magic
+        if let Some((Passive::OnHitMagic { base, ap_ratio }, item)) =
+            passives.find(|p| matches!(p, Passive::OnHitMagic { .. }))
             && let Some(t) = units.iter_mut().find(|u| u.id == target)
         {
             let raw = base + ap_ratio * stats.ability_power;
-            deal_damage(t, owner, DamageOrigin::Item(item), raw, DamageKind::Magic, at, events);
+            deal_damage(t, &by, DamageOrigin::Item(item), raw, DamageKind::Magic, at, events);
         }
+        if let Some(magic) = kindle
+            && let Some(t) = units.iter_mut().find(|u| u.id == target)
+        {
+            deal_damage(t, &by, DamageOrigin::Item(items::SUNWARD_LANTERN), magic, DamageKind::Magic, at, events);
+        }
+        // Cleave: enemies around the target take a share of the attack damage.
+        if let Some((Passive::Cleave { melee, ranged: far, radius }, item)) =
+            passives.find(|p| matches!(p, Passive::Cleave { .. }))
+            && let Some(center) = units.iter().find(|u| u.id == target).map(|u| u.state.pos)
+        {
+            let share = if ranged { far } else { melee };
+            let near: Vec<UnitId> = units
+                .iter()
+                .filter(|u| u.id != target && u.team != team && u.targetable())
+                .filter(|u| !u.kind.is_structure() && u.kind != UnitKind::Ward)
+                .filter(|u| (u.state.pos - center).length() <= radius + u.gameplay_radius)
+                .map(|u| u.id)
+                .collect();
+            for id in near {
+                if let Some(u) = units.iter_mut().find(|u| u.id == id) {
+                    let raw = share * stats.attack_damage;
+                    deal_damage(u, &by, DamageOrigin::Item(item), raw, DamageKind::Physical, at, events);
+                }
+            }
+        }
+        spoils(units, owner, target, at, events);
         if stats.life_steal > 0.0
             && dealt > 0.0
             && let Some(o) = units.iter_mut().find(|u| u.id == owner && u.state.alive())
         {
-            let amount = (stats.life_steal * dealt).min(o.stats.max_health - o.state.health);
-            if amount > 0.0 {
-                o.state.health += amount;
-                events.push(SimEvent::Healed { unit: owner, amount, at });
+            let want = stats.life_steal * dealt;
+            let healed = gear::heal(o, want, at, events);
+            // Overflow: life steal past full health becomes a shield, up to a cap.
+            if let Some((Passive::Overflow { base, per_level, ms }, _)) =
+                passives.find(|p| matches!(p, Passive::Overflow { .. }))
+                && healed < want * gear::heal_factor(o, at) - 0.01
+            {
+                let excess = want * gear::heal_factor(o, at) - healed;
+                let cap = base + per_level * level as f32;
+                let st = &mut o.state;
+                let now = if st.shield_until > at { st.shield } else { 0.0 };
+                st.shield = (now + excess).min(cap.max(now));
+                st.shield_until = st.shield_until.max(at.plus(SimDuration::from_millis(ms)));
             }
         }
-        // Thorns: the attacked champion returns a share as magic damage.
-        let thorns = units
-            .iter()
-            .find(|u| u.id == target && u.kind == UnitKind::Champion && u.state.alive())
-            .is_some_and(|t| augments::mods(&t.state.progress.augments).thorns);
-        if thorns
+        // Thorns (the augment, and the item): the attacked champion strikes back.
+        let Some(t) = units.iter().find(|u| u.id == target && u.kind == UnitKind::Champion && u.state.alive()) else {
+            continue;
+        };
+        let thorns_augment = augments::mods(&t.state.progress.augments).thorns;
+        let thorns_item = match gear::of(t).find(|p| matches!(p, Passive::Thorns { .. })) {
+            Some((Passive::Thorns { base, bonus_armor, wounds }, item)) => {
+                Some((base + bonus_armor * gear::bonus_armor(t), wounds, item))
+            }
+            _ => None,
+        };
+        let back = Hitter::of(t, at);
+        if thorns_augment
             && dealt > 0.0
             && let Some(o) = units.iter_mut().find(|u| u.id == owner)
         {
             let thorns = DamageOrigin::Augment(augments::THORNS_ID);
-            deal_damage(o, target, thorns, augments::THORNS * dealt, DamageKind::Magic, at, events);
+            deal_damage(o, &back, thorns, augments::THORNS * dealt, DamageKind::Magic, at, events);
         }
+        if let Some((raw, wounds, item)) = thorns_item
+            && let Some(o) = units.iter_mut().find(|u| u.id == owner)
+        {
+            deal_damage(o, &back, DamageOrigin::Item(item), raw, DamageKind::Magic, at, events);
+            o.state.fx.wound(wounds, at);
+        }
+    }
+}
+
+/// Spoils (the support quest, 18 §6): the holder's attack on an enemy minion low on health,
+/// with an allied champion near, kills it; the ally gets the minion's gold too.
+fn spoils(units: &mut [Unit], owner: UnitId, target: UnitId, at: SimTime, events: &mut Vec<SimEvent>) {
+    use crate::items::quest;
+    let Some(o) = units.iter().find(|u| u.id == owner) else { return };
+    let questing =
+        o.state.progress.items.iter().any(|i| matches!(*i, items::PILGRIMS_LEDGER | items::PILGRIMS_ASTROLABE));
+    if !questing || o.state.progress.gear.spoils_spent >= quest::SPOILS_CHARGES {
+        return;
+    }
+    let (team, pos) = (o.team, o.state.pos);
+    let below =
+        if o.attack.is_some_and(|a| a.bolt_speed > 0.0) { quest::SPOILS_BELOW } else { quest::SPOILS_BELOW_MELEE };
+    let Some(m) =
+        units.iter().find(|u| u.id == target && u.kind == UnitKind::Minion && u.team != team && u.state.alive())
+    else {
+        return;
+    };
+    if m.state.health > below * m.stats.max_health {
+        return;
+    }
+    let gold = lane::minion_reward(m.attack.map_or(0.0, |a| a.range)).0;
+    let ally = units
+        .iter()
+        .filter(|u| u.kind == UnitKind::Champion && u.team == team && u.id != owner && u.state.alive())
+        .filter(|u| (u.state.pos - pos).length() <= quest::SPOILS_RANGE)
+        .min_by(|a, b| {
+            (a.state.pos - pos).length_sq().total_cmp(&(b.state.pos - pos).length_sq()).then(a.id.cmp(&b.id))
+        })
+        .map(|u| u.id);
+    let Some(ally) = ally else { return };
+    if let Some(m) = units.iter_mut().find(|u| u.id == target) {
+        let rest = m.state.health;
+        damage_with(m, owner, DamageOrigin::Item(items::PILGRIMS_LEDGER), rest, DamageKind::True, false, at, events);
+    }
+    if let Some(a) = units.iter_mut().find(|u| u.id == ally) {
+        a.state.progress.gold += gold;
+        events.push(SimEvent::Reward { unit: ally, gold, xp: 0, at });
+    }
+    if let Some(o) = units.iter_mut().find(|u| u.id == owner) {
+        let g = &mut o.state.progress.gear;
+        g.spoils_spent += 1;
+        if g.spoils_at.0 == 0 {
+            g.spoils_at = at.plus(quest::SPOILS_EVERY);
+        }
+        g.quest = g.quest.saturating_add(gold as u16);
     }
 }
 
@@ -3647,20 +4112,24 @@ fn after_ability_hit(
         p.stacks = (p.stacks + 1).min(augments::SPELLHUNGER_CAP);
     }
     if m.spell_vamp {
-        let amount = (augments::SPELL_VAMP * dealt).min(o.stats.max_health - o.state.health);
-        if amount > 0.0 {
-            o.state.health += amount;
-            events.push(SimEvent::Healed { unit: owner, amount, at });
-        }
+        gear::heal(o, augments::SPELL_VAMP * dealt, at, events);
     }
 }
 
+/// `d` shortened by tenacity `t` (02 §9), in whole sub-ticks.
+fn tenacious(d: SimDuration, t: f32) -> SimDuration {
+    SimDuration((d.0 as f32 * (1.0 - t.clamp(0.0, 1.0))).round() as u64)
+}
+
 /// Crowd control on `u` at `at` (`from`: where a pull drags it toward). Forced movement starts
-/// with the next tick (`s1`): units only move during phase 2.
-fn apply_cc(u: &mut Unit, cc: Cc, at: SimTime, from: Vec2, s1: SimTime, events: &mut Vec<SimEvent>) {
+/// with the next tick (`s1`): units only move during phase 2. Tenacity shortens stuns, roots and
+/// slows, slow resistance weakens slows (02 §9). Returns whether it immobilized a champion.
+fn apply_cc(u: &mut Unit, cc: Cc, at: SimTime, from: Vec2, s1: SimTime, events: &mut Vec<SimEvent>) -> bool {
     if !u.targetable() {
-        return;
+        return false;
     }
+    let (tenacity, slow_resist) = (u.stats.tenacity, u.stats.slow_resist);
+    let champion = u.kind == UnitKind::Champion;
     let st = &mut u.state;
     st.recall_until = SimTime(0);
     let hard_stop = |st: &mut UnitState, until: SimTime| {
@@ -3672,15 +4141,22 @@ fn apply_cc(u: &mut Unit, cc: Cc, at: SimTime, from: Vec2, s1: SimTime, events: 
     };
     match cc {
         Cc::None => {}
-        Cc::Stun(d) | Cc::Knockup(d) => hard_stop(st, at.plus(d)),
-        Cc::Root(d) => st.rooted_until = st.rooted_until.max(at.plus(d)),
-        Cc::Slow { pct, duration } => st.apply_slow(pct, at.plus(duration), at),
+        Cc::Stun(d) => hard_stop(st, at.plus(tenacious(d, tenacity))),
+        Cc::Knockup(d) => {
+            hard_stop(st, at.plus(d));
+            st.fx.airborne_until = st.fx.airborne_until.max(at.plus(d));
+        }
+        Cc::Root(d) => st.rooted_until = st.rooted_until.max(at.plus(tenacious(d, tenacity))),
+        Cc::Slow { pct, duration } => {
+            let pct = (pct as f32 * (1.0 - slow_resist)).round() as u8;
+            st.apply_slow(pct, at.plus(tenacious(duration, tenacity)), at)
+        }
         Cc::Pull(stop) => {
             // Dragged (a forced dash, ignoring units) to `stop` units from the puller.
             let away = st.pos - from;
             let len = away.length();
             if len <= stop as f32 || u.kind.is_structure() {
-                return;
+                return false;
             }
             let dir = away * (1.0 / len);
             let to = from + dir * stop as f32;
@@ -3690,7 +4166,42 @@ fn apply_cc(u: &mut Unit, cc: Cc, at: SimTime, from: Vec2, s1: SimTime, events: 
                 Some(DashMove { dir: -dir, to, speed: PULL_SPEED, end_at, strike: None, recover: SimDuration(0) });
             st.detour = None;
             hard_stop(st, end_at);
+            st.fx.airborne_until = st.fx.airborne_until.max(end_at);
             events.push(SimEvent::Dashed { unit: u.id, from: st.pos, to, at, end_at });
+        }
+    }
+    champion && cc.is_hard()
+}
+
+/// Bulwark (Bulwark Lantern): each holder who immobilized an enemy champion shields allied
+/// champions near it.
+fn bulwark(units: &mut [Unit], held: &[(UnitId, SimTime)], events: &mut Vec<SimEvent>) {
+    for &(owner, at) in held {
+        let Some(o) = units.iter().find(|u| u.id == owner && u.kind == UnitKind::Champion && u.state.alive()) else {
+            continue;
+        };
+        let Some((Passive::Bulwark { shield, bonus_hp, radius, cooldown_ms }, _)) =
+            gear::of(o).find(|p| matches!(p, Passive::Bulwark { .. }))
+        else {
+            continue;
+        };
+        if o.state.progress.gear.passive_ready[gear::BULWARK] > at {
+            continue;
+        }
+        let (team, pos, amount) = (o.team, o.state.pos, shield + bonus_hp * gear::bonus_health(o));
+        let allies: Vec<UnitId> = units
+            .iter()
+            .filter(|u| u.kind == UnitKind::Champion && u.team == team && u.state.alive())
+            .filter(|u| (u.state.pos - pos).length() <= radius)
+            .map(|u| u.id)
+            .collect();
+        for id in allies {
+            if let Some(u) = units.iter_mut().find(|u| u.id == id) {
+                gear::shield(u, amount, at.plus(SimDuration::from_millis(2500)), at, events);
+            }
+        }
+        if let Some(o) = units.iter_mut().find(|u| u.id == owner) {
+            o.state.progress.gear.passive_ready[gear::BULWARK] = at.plus(SimDuration::from_millis(cooldown_ms));
         }
     }
 }
@@ -3730,70 +4241,209 @@ fn damage_amp(units: &[Unit], owner: UnitId, target: UnitId, ability: bool, rng:
 /// How fast a pull drags its target.
 pub const PULL_SPEED: f32 = 1800.0;
 
-/// Lunge strikes and ally heals/shields, in time order (server only).
-fn resolve_direct(units: &mut [Unit], direct: &mut [Fired], rng: &mut Pcg32, s1: SimTime, events: &mut Vec<SimEvent>) {
+/// Lunge strikes, ally heals and shields, Claims and item actives' effects on others, in time
+/// order (server only). Returns who immobilized a champion, and when.
+fn resolve_direct(
+    units: &mut [Unit],
+    direct: &mut [Fired],
+    rng: &mut Pcg32,
+    s1: SimTime,
+    events: &mut Vec<SimEvent>,
+) -> Vec<(UnitId, SimTime)> {
+    let mut held = Vec::new();
     let at_of = |f: &Fired| match f {
-        Fired::Strike { at, owner, .. } | Fired::Support { at, owner, .. } | Fired::Claim { at, owner, .. } => {
-            (*at, *owner)
-        }
+        Fired::Strike { at, owner, .. }
+        | Fired::Support { at, owner, .. }
+        | Fired::Claim { at, owner, .. }
+        | Fired::ItemNova { at, owner, .. }
+        | Fired::ItemSupport { at, owner, .. } => (*at, *owner),
         _ => (SimTime(0), UnitId(0)),
     };
     direct.sort_by_key(at_of);
     for f in direct.iter() {
         match *f {
-            Fired::Strike { owner, slot, target, power, kind, cc, at } => {
+            Fired::Strike { owner, slot, target, power, kind, cc, at, item } => {
                 let power = power * damage_amp(units, owner, target, true, rng);
+                let by = Hitter::find(units, owner, at);
                 let from = units.iter().find(|u| u.id == owner).map(|u| (u.state.pos, u.gameplay_radius));
+                let mark = match items::item(item).map(|i| i.active) {
+                    Some(Active::Plunge { amp, amp_ms, .. }) => Some((amp, amp_ms)),
+                    _ => None,
+                };
                 if let (Some((p, r)), Some(u)) = (from, units.iter_mut().find(|u| u.id == target)) {
                     // Still within reach on arrival (it may have dashed or blinked away).
                     if (u.state.pos - p).length() <= r + u.gameplay_radius + STRIKE_SLACK {
-                        apply_cc(u, cc, at, p, s1, events);
-                        let dealt = deal_damage(u, owner, DamageOrigin::Ability(slot), power, kind, at, events);
-                        after_ability_hit(units, owner, target, dealt, at, events);
+                        if apply_cc(u, cc, at, p, s1, events) {
+                            held.push((owner, at));
+                        }
+                        let origin = if item != 0 { DamageOrigin::Item(item) } else { DamageOrigin::Ability(slot) };
+                        let dealt = deal_damage(u, &by, origin, power, kind, at, events);
+                        if let Some((amp, ms)) = mark {
+                            // Plunge: more of the owner's damage on this target for a while.
+                            let fx = &mut u.state.fx;
+                            (fx.mark_by, fx.mark_amp) = (owner, (amp * 100.0).round() as u8);
+                            fx.mark_until = at.plus(SimDuration::from_millis(ms));
+                        } else {
+                            after_ability_hit(units, owner, target, dealt, at, events);
+                        }
                     }
                 }
             }
             Fired::Claim { owner, target, power, at } => {
+                let by = Hitter::find(units, owner, at);
+                let grown = units.iter().find(|u| u.id == owner).and_then(|o| {
+                    let h = gear::of(o).find(|p| matches!(p, Passive::Hatchling(_)));
+                    match h {
+                        Some((Passive::Hatchling(kind), _)) if o.state.progress.gear.grown() => Some(kind),
+                        _ => None,
+                    }
+                });
                 let Some(u) = units.iter_mut().find(|u| u.id == target) else { continue };
-                let monster = u.kind == UnitKind::Monster;
-                deal_damage(u, owner, DamageOrigin::Ability(5), power, DamageKind::True, at, events);
+                let (monster, champion) = (u.kind == UnitKind::Monster, u.kind == UnitKind::Champion);
+                if champion {
+                    // A grown Flintling's Claim on a champion: true damage and a slow (18 §7).
+                    use crate::items::hatchling::*;
+                    let raw = FLINT_BASE + FLINT_MAX_HP * u.stats.max_health;
+                    deal_damage(u, &by, DamageOrigin::Ability(5), raw, DamageKind::True, at, events);
+                    let slow = Cc::Slow { pct: FLINT_SLOW, duration: SimDuration::from_millis(FLINT_SLOW_MS) };
+                    apply_cc(u, slow, at, Vec2::ZERO, s1, events);
+                    continue;
+                }
+                deal_damage(u, &by, DamageOrigin::Ability(5), power, DamageKind::True, at, events);
                 // Claiming a monster heals the caster.
                 if monster && let Some(o) = units.iter_mut().find(|u| u.id == owner && u.state.alive()) {
-                    let amount = crate::jungle::CLAIM_HEAL.min(o.stats.max_health - o.state.health);
-                    if amount > 0.0 {
-                        o.state.health += amount;
-                        events.push(SimEvent::Healed { unit: owner, amount, at });
+                    gear::heal(o, crate::jungle::CLAIM_HEAL, at, events);
+                    if grown == Some(items::Hatchling::Barkling) {
+                        use crate::items::hatchling::*;
+                        let amount = BARK_SHIELD + BARK_BONUS_HP * gear::bonus_health(o);
+                        gear::shield(o, amount, at.plus(SimDuration::from_millis(BARK_MS)), at, events);
                     }
                 }
             }
-            Fired::Support { target, heal, heal_missing, shield, until, at, .. } => {
+            Fired::Support { owner, target, heal, heal_missing, shield, until, at } => {
+                let kindle = units.iter().find(|u| u.id == owner).and_then(|o| {
+                    match gear::of(o).find(|p| matches!(p, Passive::Kindle { .. })) {
+                        Some((Passive::Kindle { magic, ms }, _)) => Some((magic, ms)),
+                        _ => None,
+                    }
+                });
                 let Some(u) = units.iter_mut().find(|u| u.id == target && u.state.alive()) else { continue };
-                let max = u.stats.max_health;
-                let st = &mut u.state;
-                let amount = (heal + heal_missing * (max - st.health)).min(max - st.health);
-                if amount > 0.0 {
-                    st.health += amount;
-                    events.push(SimEvent::Healed { unit: target, amount, at });
+                let missing = u.stats.max_health - u.state.health;
+                let healed = gear::heal(u, heal + heal_missing * missing, at, events);
+                gear::shield(u, shield, until, at, events);
+                if let Some((magic, ms)) = kindle {
+                    u.state.fx.kindle = magic as u8;
+                    u.state.fx.kindle_until = at.plus(SimDuration::from_millis(ms));
                 }
-                if shield > 0.0 {
-                    st.shield = if st.shield_until > at { st.shield + shield } else { shield };
-                    st.shield_until = st.shield_until.max(until);
-                    events.push(SimEvent::Shielded { unit: target, amount: shield, at, until: st.shield_until });
+                // Supporting an ally pays the support quest's Tithe.
+                if (healed > 0.0 || shield > 0.0)
+                    && u.kind == UnitKind::Champion
+                    && let Some(o) = units.iter_mut().find(|u| u.id == owner)
+                {
+                    gear::tithe(o, at, events);
+                }
+            }
+            Fired::ItemNova { owner, item, at } => item_nova(units, owner, item, at, s1, events),
+            Fired::ItemSupport { owner, target, item, at } => {
+                let Some(Active::Absolve { heal, heal_missing, speed, ms, .. }) = items::item(item).map(|i| i.active)
+                else {
+                    continue;
+                };
+                if owner == target {
+                    continue; // on the user: applied when used
+                }
+                if let Some(u) = units.iter_mut().find(|u| u.id == target && u.state.alive()) {
+                    absolve(u, heal, heal_missing, speed, ms, at, events);
+                    if let Some(o) = units.iter_mut().find(|u| u.id == owner) {
+                        gear::tithe(o, at, events);
+                    }
                 }
             }
             _ => {}
         }
+    }
+    held
+}
+
+/// Absolve on `u`: stuns, roots and slows end (not knock-ups or pulls, 02 §9), a heal, and a
+/// burst of speed that fades.
+fn absolve(u: &mut Unit, heal: f32, heal_missing: f32, speed: u8, ms: u64, at: SimTime, events: &mut Vec<SimEvent>) {
+    let st = &mut u.state;
+    let keep = st.fx.airborne_until.max(st.fx.stasis_until);
+    st.stunned_until = st.stunned_until.min(keep.max(at));
+    st.rooted_until = st.rooted_until.min(at);
+    st.slowed_until = st.slowed_until.min(at);
+    st.slow = 0;
+    st.fx.hasten(speed, at.plus(SimDuration::from_millis(ms)), ms as u16, at);
+    let missing = u.stats.max_health - u.state.health;
+    gear::heal(u, heal + heal_missing * missing, at, events);
+}
+
+/// The part of a self-centered item active that touches others (server): Reaping Arc's and
+/// Bloodletting's damage (and Bloodletting's heal), Quake's slow, Embrace's shields on allies.
+fn item_nova(units: &mut [Unit], owner: UnitId, item: u8, at: SimTime, s1: SimTime, events: &mut Vec<SimEvent>) {
+    let Some(active) = items::item(item).map(|i| i.active) else { return };
+    let Some(o) = units.iter().find(|u| u.id == owner && u.state.alive()) else { return };
+    let (team, pos, ad, level, by) =
+        (o.team, o.state.pos, o.stats.attack_damage, o.state.progress.level, Hitter::of(o, at));
+    let around = |radius: f32, allies: bool| -> Vec<UnitId> {
+        units
+            .iter()
+            .filter(|u| (u.team == team) == allies && u.targetable() && u.kind != UnitKind::Ward)
+            .filter(|u| !u.kind.is_structure() && (!allies || u.kind == UnitKind::Champion))
+            .filter(|u| (u.state.pos - pos).length() <= radius + u.gameplay_radius)
+            .map(|u| u.id)
+            .collect()
+    };
+    match active {
+        Active::ReapingArc { ad: ratio, radius, .. } | Active::Bloodletting { ad: ratio, radius, .. } => {
+            let mut champions = 0;
+            for id in around(radius, false) {
+                let Some(u) = units.iter_mut().find(|u| u.id == id) else { continue };
+                champions += (u.kind == UnitKind::Champion) as u32;
+                deal_damage(u, &by, DamageOrigin::Item(item), ratio * ad, DamageKind::Physical, at, events);
+            }
+            if let Active::Bloodletting { heal_missing, .. } = active
+                && champions > 0
+                && let Some(o) = units.iter_mut().find(|u| u.id == owner)
+            {
+                let missing = o.stats.max_health - o.state.health;
+                gear::heal(o, heal_missing * missing * champions as f32, at, events);
+            }
+        }
+        Active::Quake { radius, slow, ms, .. } => {
+            for id in around(radius, false) {
+                if let Some(u) = units.iter_mut().find(|u| u.id == id) {
+                    apply_cc(u, Cc::Slow { pct: slow, duration: SimDuration::from_millis(ms) }, at, pos, s1, events);
+                }
+            }
+        }
+        Active::Embrace { base, per_level, radius, ms, .. } => {
+            let amount = base + per_level * level as f32;
+            let allies: Vec<UnitId> = around(radius, true).into_iter().filter(|id| *id != owner).collect();
+            for id in &allies {
+                if let Some(u) = units.iter_mut().find(|u| u.id == *id) {
+                    gear::shield(u, amount, at.plus(SimDuration::from_millis(ms)), at, events);
+                }
+            }
+            if !allies.is_empty()
+                && let Some(o) = units.iter_mut().find(|u| u.id == owner)
+            {
+                gear::tithe(o, at, events);
+            }
+        }
+        _ => {}
     }
 }
 
 /// A lunge still connects if its target moved up to this far away during the dash.
 pub const STRIKE_SLACK: f32 = 100.0;
 
-/// The damage pipeline (02 §5), M1 subset: resistance mitigation, shields, health, death.
-/// Returns the damage dealt (shields included).
+/// The damage pipeline (02 §5): mitigation for `by` (`gear::mitigate`), then shields, health,
+/// death. Returns the damage dealt (shields included).
 fn deal_damage(
     u: &mut Unit,
-    source: UnitId,
+    by: &Hitter,
     origin: DamageOrigin,
     raw: f32,
     kind: DamageKind,
@@ -3803,6 +4453,43 @@ fn deal_damage(
     if raw <= 0.0 || !u.targetable() {
         return 0.0;
     }
+    let amount = if u.kind == UnitKind::Ward {
+        raw
+    } else {
+        gear::mitigate(u, by, raw, kind, origin == DamageOrigin::Attack, at)
+    };
+    damage_with(u, by.id, origin, amount, kind, false, at, events)
+}
+
+/// Damage already mitigated (`gear::mitigate`) from `source`: shields, health, death.
+pub(crate) fn damage(
+    u: &mut Unit,
+    source: UnitId,
+    origin: DamageOrigin,
+    amount: f32,
+    kind: DamageKind,
+    at: SimTime,
+    events: &mut Vec<SimEvent>,
+) -> f32 {
+    damage_with(u, source, origin, amount, kind, false, at, events)
+}
+
+/// The rest of the pipeline (02 §5 steps 7–9), `crit` marking a critical strike. Returns the
+/// damage dealt (shields included).
+#[allow(clippy::too_many_arguments)]
+fn damage_with(
+    u: &mut Unit,
+    source: UnitId,
+    origin: DamageOrigin,
+    mut amount: f32,
+    kind: DamageKind,
+    crit: bool,
+    at: SimTime,
+    events: &mut Vec<SimEvent>,
+) -> f32 {
+    if amount <= 0.0 || !u.targetable() {
+        return 0.0;
+    }
     // Wards count basic attacks: one point each, nothing else hurts them.
     if u.kind == UnitKind::Ward {
         if origin != DamageOrigin::Attack {
@@ -3810,19 +4497,23 @@ fn deal_damage(
         }
         let st = &mut u.state;
         st.health -= 1.0;
-        events.push(SimEvent::Damage { source, target: u.id, origin, kind, amount: 1.0, absorbed: 0.0, at });
+        events.push(SimEvent::Damage { source, target: u.id, origin, kind, amount: 1.0, absorbed: 0.0, crit, at });
         if st.health <= 0.0 {
             *st = UnitState { respawn_at: Some(SimTime(u64::MAX)), ..UnitState::new(st.pos, 0.0) };
             events.push(SimEvent::Died { unit: u.id, killer: source, at, respawn_at: SimTime(u64::MAX) });
         }
         return 1.0;
     }
-    let resist = match kind {
-        DamageKind::Physical => u.stats.armor,
-        DamageKind::Magic => u.stats.magic_resist,
-        DamageKind::True => 0.0,
+    let rally = if u.kind == UnitKind::Champion {
+        match gear::of(u).find(|p| matches!(p, Passive::Rally { .. })) {
+            Some((Passive::Rally { shield, bonus_hp, threshold, duration_ms, cooldown_ms }, _)) => {
+                Some((shield + bonus_hp * gear::bonus_health(u), threshold, duration_ms, cooldown_ms))
+            }
+            _ => None,
+        }
+    } else {
+        None
     };
-    let mut amount = if kind == DamageKind::True { raw } else { raw * resist_multiplier(resist) };
     let st = &mut u.state;
     let mut absorbed = 0.0;
     if st.shield > 0.0 && st.shield_until > at {
@@ -3831,7 +4522,7 @@ fn deal_damage(
         amount -= absorbed;
     }
     st.health -= amount;
-    events.push(SimEvent::Damage { source, target: u.id, origin, kind, amount, absorbed, at });
+    events.push(SimEvent::Damage { source, target: u.id, origin, kind, amount, absorbed, crit, at });
     let dealt = amount + absorbed;
     if dealt > 0.0 {
         st.recall_until = SimTime(0);
@@ -3844,17 +4535,15 @@ fn deal_damage(
         }
     }
     if st.health > 0.0
-        && u.kind == UnitKind::Champion
-        && let Some((shield, threshold, duration_ms, cooldown_ms)) = items::passives(&st.progress.items).lifeline
+        && let Some((shield, threshold, duration_ms, cooldown_ms)) = rally
         && st.health < threshold * u.stats.max_health
-        && st.progress.lifeline_ready <= at
+        && st.progress.gear.passive_ready[gear::RALLY] <= at
     {
-        // Lifeline (item passive): a shield when dropping low, on a long cooldown.
-        st.shield = if st.shield_until > at { st.shield + shield } else { shield };
-        st.shield_until = st.shield_until.max(at.plus(SimDuration::from_millis(duration_ms)));
-        st.progress.lifeline_ready = at.plus(SimDuration::from_millis(cooldown_ms));
-        events.push(SimEvent::Shielded { unit: u.id, amount: shield, at, until: st.shield_until });
+        // Rally (item passive): a shield when dropping low, on a long cooldown.
+        st.progress.gear.passive_ready[gear::RALLY] = at.plus(SimDuration::from_millis(cooldown_ms));
+        gear::shield(u, shield, at.plus(SimDuration::from_millis(duration_ms)), at, events);
     }
+    let st = &mut u.state;
     if st.health <= 0.0 {
         let respawn_at = match u.kind {
             UnitKind::Champion => at.plus(respawn_time(st.progress.level)),
@@ -3943,6 +4632,15 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
             UnitKind::Minion => {
                 let (gold, xp) = lane::minion_reward(victim.attack.map_or(0.0, |a| a.range));
                 if let Some(k) = enemy_champ(killer) {
+                    // The support quest pays its holder less for farming (18 §6).
+                    let questing = units.iter().find(|u| u.id == k).is_some_and(|u| {
+                        u.state
+                            .progress
+                            .items
+                            .iter()
+                            .any(|i| matches!(*i, items::PILGRIMS_LEDGER | items::PILGRIMS_ASTROLABE))
+                    });
+                    let gold = if questing { gold * items::quest::OWN_MINION_SHARE } else { gold };
                     pay.push((k, gold, 0, at));
                     if let Some(u) = units.iter_mut().find(|u| u.id == k) {
                         u.state.progress.cs = u.state.progress.cs.saturating_add(1);
@@ -3987,6 +4685,22 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
                         u.state.progress.assists = u.state.progress.assists.saturating_add(1);
                     }
                 }
+                // Tally: stacks for takedowns, some lost on death.
+                for (id, kill) in credit.iter().map(|k| (*k, true)).chain(assists.iter().map(|a| (*a, false))) {
+                    let Some(u) = units.iter_mut().find(|u| u.id == id) else { continue };
+                    if let Some((Passive::Tally { most, kill: k, assist, .. }, _)) =
+                        gear::of(u).find(|p| matches!(p, Passive::Tally { .. }))
+                    {
+                        let g = &mut u.state.progress.gear;
+                        g.tally = (g.tally + if kill { k } else { assist }).min(most);
+                    }
+                }
+                if let Some(v) = units.iter_mut().find(|u| u.id == unit)
+                    && let Some((Passive::Tally { death, .. }, _)) =
+                        gear::of(v).find(|p| matches!(p, Passive::Tally { .. }))
+                {
+                    v.state.progress.gear.tally = v.state.progress.gear.tally.saturating_sub(death);
+                }
                 // Takedowns: Champion of Chaos counts them, Reset refreshes Q, W and E.
                 for id in credit.iter().chain(&assists) {
                     let Some(u) = units.iter_mut().find(|u| u.id == *id) else { continue };
@@ -4020,9 +4734,13 @@ fn rewards(units: &mut [Unit], game: &MatchState, tick_events: &[SimEvent], even
                 let def = kind.def();
                 pay.push((k, def.gold, def.xp, at));
                 if let Some(u) = units.iter_mut().find(|u| u.id == k) {
+                    let hatchling = gear::of(u).find(|p| matches!(p, Passive::Hatchling(_))).is_some();
                     let p = &mut u.state.progress;
                     if def.big {
                         p.camps = p.camps.saturating_add(1);
+                    }
+                    if hatchling {
+                        p.gear.food = p.gear.food.saturating_add(if def.big { 2 } else { 1 });
                     }
                     let until = at.plus(crate::jungle::BUFF_DURATION);
                     match kind {
@@ -4103,15 +4821,8 @@ fn fountains_and_relics(units: &mut [Unit], map: &Map, prediction: bool, s1: Sim
                 let max = u.stats.max_health;
                 u.state.health = (u.state.health + max * lane::FOUNTAIN_HEAL * TICK_DT).min(max);
             } else if !prediction {
-                deal_damage(
-                    u,
-                    UnitId(0),
-                    DamageOrigin::Fountain,
-                    lane::FOUNTAIN_DPS * TICK_DT,
-                    DamageKind::True,
-                    s1,
-                    events,
-                );
+                let by = Hitter::plain(UnitId(0), UnitKind::Turret);
+                deal_damage(u, &by, DamageOrigin::Fountain, lane::FOUNTAIN_DPS * TICK_DT, DamageKind::True, s1, events);
             }
         }
     }
@@ -4129,9 +4840,7 @@ fn fountains_and_relics(units: &mut [Unit], map: &Map, prediction: bool, s1: Sim
         });
         let Some(c) = taker else { continue };
         let max = c.stats.max_health;
-        let amount = (max * lane::RELIC_HEAL).min(max - c.state.health);
-        c.state.health += amount;
-        events.push(SimEvent::Healed { unit: c.id, amount, at: s1 });
+        gear::heal(c, max * lane::RELIC_HEAL, s1, events);
         if let Some(rel) = units.iter_mut().find(|u| u.id == relic) {
             rel.state.respawn_at = Some(s1.plus(lane::RELIC_RESPAWN));
         }
@@ -5864,7 +6573,7 @@ mod tests {
             })
             .expect("thorns");
         let mr = w.unit(me).unwrap().stats.magic_resist;
-        assert!((back - augments::THORNS * hit * resist_multiplier(mr)).abs() < 1e-2, "{back} of {hit}");
+        assert!((back - augments::THORNS * hit * crate::combat::resist_multiplier(mr)).abs() < 1e-2, "{back} of {hit}");
     }
 
     /// Takedowns count toward Champion of Chaos (its reward lands at eight) and Reset refreshes
@@ -6149,7 +6858,7 @@ mod tests {
     }
 
     /// Item stats and passives change combat numbers exactly (02 §5, §7, §8, §10): flat AD,
-    /// attack speed into the attack period, life steal, on-hit magic, ability haste, Lifeline.
+    /// attack speed into the attack period, life steal, on-hit magic, ability haste, Rally.
     #[test]
     fn items_change_combat_numbers_exactly() {
         use crate::items::*;
@@ -6164,7 +6873,7 @@ mod tests {
         w.step(&[]);
         let u = w.unit(me).unwrap();
         assert_eq!(u.stats.attack_damage, 66.0 + 15.0);
-        assert_eq!(u.stats.ability_power, 50.0);
+        assert_eq!(u.stats.ability_power, 70.0);
         let spec = u.attack.unwrap();
         assert!((spec.attack_speed - 0.8 * (1.0 + 0.12 + 0.40)).abs() < 1e-6);
         assert_eq!(spec.period(), SimDuration((1920.0f32 / spec.attack_speed).round() as u64));
@@ -6178,7 +6887,7 @@ mod tests {
             })
             .collect();
         let physical = 81.0 * 100.0 / 122.0;
-        let magic = (15.0 + 0.15 * 50.0) * 100.0 / 130.0;
+        let magic = (20.0 + 0.25 * 70.0) * 100.0 / 130.0;
         assert!(hits.len() >= 6, "{hits:?}");
         for pair in hits.chunks(2) {
             assert_eq!(pair[0].0, DamageKind::Physical);
@@ -6206,11 +6915,12 @@ mod tests {
         let expect = SimDuration((q.0 as f64 * 100.0 / 110.0).round() as u64);
         assert_eq!(w.unit(ember).unwrap().state.cooldowns[0], SimTime::at(Tick(2), SubTick::START).plus(expect));
 
-        // Lifeline: dropping under 30% grants 250 shield once, then it is on cooldown.
+        // Rally: dropping under 30% grants 150 + 60% of the 400 bonus health as a shield once,
+        // then it is on cooldown.
         let mut w = World::new(1);
         let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(1000.0, 1000.0));
         w.spawn_champion(PlayerId(1), Team::Red, ChampionId::Vesper, Vec2::new(1500.0, 1000.0));
-        w.unit_mut(me).unwrap().state.progress.items[0] = LIFELINE_TALISMAN;
+        w.unit_mut(me).unwrap().state.progress.items[0] = LIONHEART_TALISMAN;
         w.step(&[]);
         let max = w.unit(me).unwrap().stats.max_health;
         assert_eq!(max, 620.0 + 400.0);
@@ -6219,7 +6929,7 @@ mod tests {
         let ev = run_until_quiet(&mut w, 150);
         let shields: Vec<&SimEvent> = ev.iter().filter(|e| matches!(e, SimEvent::Shielded { .. })).collect();
         assert_eq!(shields.len(), 1, "{shields:?}");
-        assert!(matches!(shields[0], SimEvent::Shielded { unit, amount, .. } if *unit == me && *amount == 250.0));
+        assert!(matches!(shields[0], SimEvent::Shielded { unit, amount, .. } if *unit == me && *amount == 390.0));
     }
 
     #[test]

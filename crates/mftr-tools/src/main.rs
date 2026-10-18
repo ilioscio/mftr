@@ -87,6 +87,7 @@ fn main() {
                 }
             }
         }
+        Some("items") => mftr_tools::itembalance::print(),
         Some("botmatch") => {
             // 17 §11: server bots play whole matches; the replays must re-simulate exactly.
             let scenario = if args.iter().any(|a| a == "--horde") {
@@ -125,6 +126,8 @@ fn main() {
                 replay: get("--replay"),
                 trace: get("--trace").map(|p| p.parse().expect("--trace PLAYER")),
                 trace_falls: args.iter().any(|a| a == "--trace-falls"),
+                items: args.iter().any(|a| a == "--items"),
+                shuffle_builds: args.iter().any(|a| a == "--shuffle-builds"),
             };
             if !mftr_tools::botmatch::run(&cfg) {
                 std::process::exit(1);
@@ -293,7 +296,7 @@ fn main() {
             );
             eprintln!("       mftr-tools blind-report FILE.tsv...");
             eprintln!(
-                "       mftr-tools botmatch [--horde|--mayhem|--hyper|--classic] [--team NAME,...] [--seed N] [--seeds N] [--minutes N] [--tier|--blue|--red recruit|veteran|elite|nightmare|legacy]"
+                "       mftr-tools botmatch [--horde|--mayhem|--hyper|--classic] [--team NAME,...] [--seed N] [--seeds N] [--minutes N] [--items] [--shuffle-builds] [--tier|--blue|--red recruit|veteran|elite|nightmare|legacy]"
             );
             eprintln!("       mftr-tools pack validate FILE.glb|DIR...");
             eprintln!("       mftr-tools sfx build [sounds.ron|DIR...]");

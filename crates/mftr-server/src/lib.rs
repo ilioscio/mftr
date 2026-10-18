@@ -1130,6 +1130,9 @@ impl ServerCore {
                     dashing: st.dash.is_some(),
                     slowed: st.slow > 0 && st.slowed_until > s1,
                     recovering: st.recovering(s1),
+                    encased: st.fx.encased(s1),
+                    wounded: st.fx.wounds_until > s1,
+                    burning: st.fx.burn_until > s1,
                     attack_variant: st.attacks & 3,
                     facing: mftr_net::msg::facing_to_wire(st.facing),
                 };
@@ -1504,6 +1507,36 @@ pub struct ChampionReport {
     pub taken_minions: f32,
     pub taken_structures: f32,
     pub stats: Option<mftr_bots::agent::AgentStats>,
+    /// The inventory at the end (18: what the bots built).
+    pub items: [u8; mftr_sim::items::INVENTORY],
+    /// What its items did over the match (the balance pass's measurements).
+    pub item_log: ItemLog,
+}
+
+/// One champion's items over a bot match (18).
+#[derive(Clone, Debug, Default)]
+pub struct ItemLog {
+    /// Each item, the second it was first held, and how many seconds it was held.
+    pub held: Vec<(u8, u32, u32)>,
+    /// Actives used, per item.
+    pub uses: Vec<(u8, u32)>,
+    /// Damage to enemy champions by item effects (`DamageOrigin::Item`), per item.
+    pub damage: Vec<(u8, f32)>,
+    /// Basic attacks that hit an enemy champion, and how many crit.
+    pub attacks: u32,
+    pub crits: u32,
+    /// The support quest: the second the Astrolabe came, and the second it was done.
+    pub quest_stage: Option<u32>,
+    pub quest_done: Option<u32>,
+    /// The second a hatchling grew up.
+    pub grown: Option<u32>,
+}
+
+fn bump<K: PartialEq + Copy, V: std::ops::AddAssign + Copy>(list: &mut Vec<(K, V)>, key: K, v: V) {
+    match list.iter_mut().find(|(k, _)| *k == key) {
+        Some(e) => e.1 += v,
+        None => list.push((key, v)),
+    }
 }
 
 /// Time spent in bots and in the simulation over a bot match (microseconds).
@@ -1589,6 +1622,7 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
     let mut horde_waves = Vec::new();
     let mut cost = BotCost::default();
     let mut pings = [0u32; 8];
+    let mut logs: Vec<(UnitId, ItemLog)> = Vec::new();
     let mut winner = None;
     for _ in 0..max_ticks {
         let k = core.game.world.tick().next();
@@ -1607,7 +1641,38 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
         cost.bots_us += bots_us;
         cost.bots_worst_us = cost.bots_worst_us.max(bots_us);
         cost.sim_us += (t2 - t1).as_secs_f64() * 1e6;
+        let secs_now = k.0 / mftr_sim::TICK_HZ;
+        let log_of = |logs: &mut Vec<(UnitId, ItemLog)>, id: UnitId| -> usize {
+            match logs.iter().position(|(u, _)| *u == id) {
+                Some(i) => i,
+                None => {
+                    logs.push((id, ItemLog::default()));
+                    logs.len() - 1
+                }
+            }
+        };
         for e in &events {
+            if let SimEvent::ItemUsed { unit, item, .. } = e {
+                let i = log_of(&mut logs, *unit);
+                bump(&mut logs[i].1.uses, *item, 1u32);
+            }
+            if let SimEvent::Damage { source, target, amount, absorbed, origin, crit, .. } = e
+                && let (Some(s), Some(t)) = (core.game.world.unit(*source), core.game.world.unit(*target))
+                && s.kind == UnitKind::Champion
+                && t.kind == UnitKind::Champion
+                && s.team != t.team
+            {
+                let i = log_of(&mut logs, s.id);
+                let log = &mut logs[i].1;
+                match origin {
+                    mftr_sim::world::DamageOrigin::Item(item) => bump(&mut log.damage, *item, amount + absorbed),
+                    mftr_sim::world::DamageOrigin::Attack => {
+                        log.attacks += 1;
+                        log.crits += *crit as u32;
+                    }
+                    _ => {}
+                }
+            }
             if let SimEvent::Damage { source, target, amount, absorbed, .. } = e
                 && let (Some(s), Some(t)) = (core.game.world.unit(*source), core.game.world.unit(*target))
                 && s.kind == UnitKind::Champion
@@ -1748,6 +1813,32 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
             );
         }
         for u in core.game.world.units().iter().filter(|u| u.kind == UnitKind::Champion) {
+            // Items held this second, the quest's stages, a hatchling grown.
+            if k.0.is_multiple_of(mftr_sim::TICK_HZ) {
+                let i = log_of(&mut logs, u.id);
+                let log = &mut logs[i].1;
+                let p = &u.state.progress;
+                let mut seen: Vec<u8> = Vec::new();
+                for &item in p.items.iter().filter(|i| **i != 0) {
+                    if seen.contains(&item) {
+                        continue;
+                    }
+                    seen.push(item);
+                    match log.held.iter_mut().find(|h| h.0 == item) {
+                        Some(h) => h.2 += 1,
+                        None => log.held.push((item, secs_now, 1)),
+                    }
+                }
+                if log.quest_stage.is_none() && p.items.contains(&mftr_sim::items::PILGRIMS_ASTROLABE) {
+                    log.quest_stage = Some(secs_now);
+                }
+                if log.quest_done.is_none() && p.gear.quest >= mftr_sim::items::quest::DONE {
+                    log.quest_done = Some(secs_now);
+                }
+                if log.grown.is_none() && p.gear.grown() {
+                    log.grown = Some(secs_now);
+                }
+            }
             if !u.state.alive() {
                 match dead.iter_mut().find(|(id, _)| *id == u.id) {
                     Some(e) => e.1 += 1,
@@ -1823,6 +1914,8 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
                 taken_minions: taken_other.iter().find(|(id, ..)| *id == u.id).map_or(0.0, |d| d.1),
                 taken_structures: taken_other.iter().find(|(id, ..)| *id == u.id).map_or(0.0, |d| d.2),
                 stats: stats.iter().find(|(q, _)| *q == player).map(|(_, s)| *s),
+                items: p.items,
+                item_log: logs.iter().find(|(id, _)| *id == u.id).map(|(_, l)| l.clone()).unwrap_or_default(),
             })
         })
         .collect();

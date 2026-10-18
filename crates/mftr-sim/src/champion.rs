@@ -101,6 +101,23 @@ pub struct Stats {
     pub ability_haste: f32,
     /// Share of basic-attack damage dealt returned as health (items).
     pub life_steal: f32,
+    /// Item stats (18 §3): chance a basic attack crits, and crit damage on top of 175%.
+    pub crit_chance: f32,
+    pub crit_damage: f32,
+    /// Lethality (flat armor penetration by level, 02 §4) and percent armor penetration.
+    pub lethality: f32,
+    pub armor_pen: f32,
+    /// Flat and percent magic penetration.
+    pub magic_pen: f32,
+    pub magic_pen_pct: f32,
+    /// Share of all damage dealt returned as health.
+    pub omnivamp: f32,
+    /// Shortens stuns, roots and slows (02 §9); weakens slows.
+    pub tenacity: f32,
+    pub slow_resist: f32,
+    /// Heals and shields given to allies, and those received, are worth this much more.
+    pub heal_power: f32,
+    pub heal_received: f32,
 }
 
 impl Stats {
@@ -115,6 +132,17 @@ impl Stats {
         move_speed: 0.0,
         ability_haste: 0.0,
         life_steal: 0.0,
+        crit_chance: 0.0,
+        crit_damage: 0.0,
+        lethality: 0.0,
+        armor_pen: 0.0,
+        magic_pen: 0.0,
+        magic_pen_pct: 0.0,
+        omnivamp: 0.0,
+        tenacity: 0.0,
+        slow_resist: 0.0,
+        heal_power: 0.0,
+        heal_received: 0.0,
     };
 }
 
@@ -165,8 +193,7 @@ impl ChampionDef {
             attack_damage: at(b.attack_damage, g.attack_damage),
             ability_power: at(b.ability_power, g.ability_power),
             move_speed: b.move_speed,
-            ability_haste: 0.0,
-            life_steal: 0.0,
+            ..Stats::NONE
         }
     }
 }
@@ -186,8 +213,7 @@ const fn growth(health: f32, armor: f32, magic_resist: f32, attack_damage: f32) 
         attack_damage,
         ability_power: 0.0,
         move_speed: 0.0,
-        ability_haste: 0.0,
-        life_steal: 0.0,
+        ..Stats::NONE
     }
 }
 
@@ -209,8 +235,7 @@ pub const EMBER: ChampionDef = ChampionDef {
         attack_damage: 50.0,
         ability_power: 80.0,
         move_speed: 325.0,
-        ability_haste: 0.0,
-        life_steal: 0.0,
+        ..Stats::NONE
     },
     growth: growth(90.0, 4.2, 1.3, 3.0),
     attack: AttackSpec { range: 525.0, attack_speed: 0.65, windup_fraction: 0.2, bolt_speed: 1600.0 },
@@ -282,8 +307,7 @@ pub const VESPER: ChampionDef = ChampionDef {
         attack_damage: 66.0,
         ability_power: 0.0,
         move_speed: 325.0,
-        ability_haste: 0.0,
-        life_steal: 0.0,
+        ..Stats::NONE
     },
     growth: growth(96.0, 4.4, 1.3, 3.2),
     attack: AttackSpec { range: 575.0, attack_speed: 0.8, windup_fraction: 0.18, bolt_speed: 2200.0 },
@@ -366,8 +390,7 @@ const fn stats(health: f32, regen: f32, armor: f32, magic_resist: f32, ad: f32, 
         attack_damage: ad,
         ability_power: ap,
         move_speed: speed,
-        ability_haste: 0.0,
-        life_steal: 0.0,
+        ..Stats::NONE
     }
 }
 

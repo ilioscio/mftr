@@ -138,6 +138,13 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 > Stat Anvil steps and up to 16 effects (kind, tenths of a second left, a value: a slow's
 > percent, a shield's points, plates, stacks). Nothing in snapshots changes.
 
+> **Implemented (protocol 27):** items ([18](18-items.md) §10). The own champion's state adds
+> its item state (`Gear`: active and passive cooldowns, Tally, the quest's gold and charges,
+> hatchling food) and timed item effects (`Fx`: Wounds, burns, Sunder, Expose, speed buffs,
+> stasis, Petrify, marks), each one bit when empty. `Damage` events carry a crit bit, missiles
+> the item that fired them (8 bits), a dash strike's slot is 4 bits. Other units' flags add
+> stasis, Wounded and burning. New event `ItemUsed` (22): unit, item, time, point, sequence.
+
 > **Implemented (protocol 26):** pings and the bots' tier ([17](17-bots.md) §8–§9).
 > `Ping { kind, at, target }` (client kind 6: a 3-bit kind, the point, an optional unit) is
 > relayed to the pinger's team and spectators as the event `Ping` (21: kind, point, optional

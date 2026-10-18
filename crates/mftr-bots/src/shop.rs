@@ -1,8 +1,9 @@
-//! Shopping and drafting (17 §7.3): the build path with its defensive item chosen against the
-//! enemy's damage, starting items and potions, control wards, ability ranks, augments and Stat
-//! Anvils.
+//! Shopping and drafting (17 §7.3, 18 §9): the build path with its defensive items chosen
+//! against the enemy's damage, the role's starter (a hatchling for the jungle, the Pilgrim's
+//! quest for supports, and its lantern), potions, control wards, ability ranks, augments and
+//! Stat Anvils.
 
-use crate::kit::{self, Archetype, use_of};
+use crate::kit::{self, Archetype, Role, use_of};
 use mftr_sim::ability::Effect as Shape;
 use mftr_sim::augments::{self, Effect};
 use mftr_sim::items::{self, *};
@@ -224,25 +225,104 @@ pub fn level_up(c: ChampionId, p: &Progress) -> Option<u8> {
     basics.iter().copied().find(|s| p.ranks[*s as usize] == 0).or(basics.first().copied())
 }
 
-/// The champion's build path, its defensive item swapped for the one that answers the enemy's
-/// damage (`physical`: the share of it that's physical).
-pub fn path(c: ChampionId, physical: f32) -> Vec<u8> {
+/// The champion's build path for its role (18 §9): a jungler starts on a hatchling, a support
+/// on the Pilgrim's Ledger; boots and the defensive items answer the enemy's damage
+/// (`physical`: the share of it that's physical).
+pub fn path(c: ChampionId, physical: f32, role: Option<Role>) -> Vec<u8> {
+    use Archetype as A;
     let base = items::build_path(c);
     let mut p = base.to_vec();
-    let has = |id: u8| base.contains(&id);
-    let mr = [WARDING_CLOAK, VITAL_CRYSTAL, FOCUS_CHARM, WARDSTONE_MANTLE];
-    let armor = [PADDED_VEST, CHAIN_COAT, VITAL_CRYSTAL, BRAMBLE_PLATE];
-    let swap = |p: &mut Vec<u8>, from: &[u8; 4], to: &[u8; 4]| {
-        if let Some(i) = p.windows(4).position(|w| w == from) {
-            p.splice(i..i + 4, to.iter().copied());
+    let starter = p.iter().position(|id| items::item(*id).is_some_and(|i| i.tier == items::Tier::Starter));
+    let role_start = match role {
+        Some(Role::Jungle) => Some(match Archetype::of(c) {
+            A::Tank | A::Warden | A::Bruiser => BARKLING,
+            A::Assassin | A::Skirmisher => FLINTLING,
+            _ => WINDLING,
+        }),
+        Some(Role::Support) => Some(PILGRIMS_LEDGER),
+        _ => None,
+    };
+    if let (Some(i), Some(id)) = (starter, role_start) {
+        p[i] = id;
+    }
+    // Boots against the damage the enemy deals.
+    for b in p.iter_mut() {
+        match *b {
+            IRONSHOD_BOOTS if physical < 0.4 => *b = STALWART_SABATONS,
+            STALWART_SABATONS if physical > 0.6 => *b = IRONSHOD_BOOTS,
+            _ => {}
+        }
+    }
+    let mr: &[u8] = &[WARDING_CLOAK, SPELLWARD_MANTLE, VITAL_CRYSTAL, GLOWING_GARNET, WARDSTONE_MANTLE];
+    let armor: &[u8] = &[PADDED_VEST, CHAIN_COAT, VITAL_CRYSTAL, BRIARHIDE_PLATE];
+    let swap = |p: &mut Vec<u8>, from: &[u8], to: &[u8]| {
+        if let Some(i) = p.windows(from.len()).position(|w| w == from) {
+            p.splice(i..i + from.len(), to.iter().copied());
         }
     };
-    if has(WARDSTONE_MANTLE) && !has(BRAMBLE_PLATE) && physical > 0.62 {
-        swap(&mut p, &mr, &armor);
-    } else if has(BRAMBLE_PLATE) && !has(WARDSTONE_MANTLE) && physical < 0.38 {
-        swap(&mut p, &armor, &mr);
+    let has = |id: u8| p.contains(&id);
+    if has(WARDSTONE_MANTLE) && !has(BRIARHIDE_PLATE) && physical > 0.62 {
+        swap(&mut p, mr, armor);
+    } else if has(BRIARHIDE_PLATE) && !has(WARDSTONE_MANTLE) && physical < 0.38 {
+        swap(&mut p, armor, mr);
+    }
+    let seed = SHUFFLE.load(std::sync::atomic::Ordering::Relaxed);
+    if seed != 0 {
+        return shuffled(c, &p, seed);
     }
     p
+}
+
+/// The build-shuffle experiment (18's balance pass, `mftr-tools botmatch --shuffle-builds`):
+/// when not 0, each bot's legendaries are drawn from its class's at random (seeded by this
+/// and the champion), so an item's results across many games aren't its champion's.
+pub static SHUFFLE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The legendaries a champion's class picks from.
+fn class_pool(c: ChampionId) -> Vec<u8> {
+    use Archetype as A;
+    let classes: &[&str] = match Archetype::of(c) {
+        A::Marksman | A::Skirmisher => &["Marksman"],
+        A::Assassin => &["Assassin"],
+        A::Bruiser => &["Fighter"],
+        A::Tank | A::Warden => &["Tank"],
+        A::Mage | A::Artillery | A::Battlemage => &["Mage"],
+        A::Enchanter => &["Support", "Mage"],
+    };
+    items::CATALOG
+        .iter()
+        .filter(|i| items::class_of(i.id).is_some_and(|k| classes.contains(&k)))
+        .map(|i| i.id)
+        .collect()
+}
+
+/// A shuffled build: the path's starter and boots, its legendaries swapped for random ones of
+/// the class (each bought from its components up).
+fn shuffled(c: ChampionId, base: &[u8], seed: u64) -> Vec<u8> {
+    let mut rng = mftr_sim::rng::Pcg32::new(seed, c as u64 + 1);
+    let mut pool = class_pool(c);
+    let mut out = Vec::new();
+    for &id in base {
+        let Some(it) = items::item(id) else { continue };
+        match it.tier {
+            items::Tier::Starter | items::Tier::Boots | items::Tier::Support | items::Tier::Jungle => out.push(id),
+            items::Tier::Legendary if !pool.is_empty() => {
+                let pick = pool.remove(rng.next_u32() as usize % pool.len());
+                out.extend(items::buy_order(pick));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The lantern a support takes when its quest is done (18 §6).
+pub fn lantern(c: ChampionId) -> u8 {
+    match Archetype::of(c) {
+        Archetype::Enchanter | Archetype::Mage | Archetype::Artillery | Archetype::Battlemage => SUNWARD_LANTERN,
+        Archetype::Tank | Archetype::Warden => BULWARK_LANTERN,
+        _ => HUNTERS_LANTERN,
+    }
 }
 
 /// The inventory after buying `ids` in order from nothing (recipes consume their components).
@@ -261,12 +341,28 @@ fn simulate(ids: &[u8]) -> Vec<u8> {
     inv
 }
 
+/// What an item in an inventory stands for on a build path: the quest's later stages for the
+/// Ledger.
+fn on_path(id: u8) -> u8 {
+    match id {
+        PILGRIMS_ASTROLABE | SUNWARD_LANTERN | BULWARK_LANTERN | HUNTERS_LANTERN => PILGRIMS_LEDGER,
+        _ => id,
+    }
+}
+
 /// The next item of `path` given what the champion holds: the step after the longest prefix
 /// of the path whose result it has (so a bot that takes over a champion mid-match carries on
-/// from its items).
+/// from its items). A starter is skipped once the champion holds anything else.
 pub fn next_item(path: &[u8], held: &[u8; INVENTORY]) -> Option<u8> {
-    let mut have: Vec<u8> = held.iter().copied().filter(|id| *id != 0 && items::stackable(*id).is_none()).collect();
+    let mut have: Vec<u8> =
+        held.iter().copied().filter(|id| *id != 0 && !items::sold_by_charge(*id)).map(on_path).collect();
     have.sort_unstable();
+    let starter = |id: &u8| items::item(*id).is_some_and(|i| i.tier == items::Tier::Starter);
+    let path: Vec<u8> = if !have.is_empty() && !have.iter().any(starter) {
+        path.iter().copied().filter(|id| !starter(id)).collect()
+    } else {
+        path.to_vec()
+    };
     let mut done = 0;
     for k in 1..=path.len() {
         let mut want = simulate(&path[..k]);
@@ -291,14 +387,18 @@ pub fn next_item(path: &[u8], held: &[u8; INVENTORY]) -> Option<u8> {
 
 /// What to buy now, if anything (one purchase per call). `physical`: the enemy's physical share;
 /// `potions`, `wards`: how many the role wants on hand.
-pub fn buy(u: &Unit, physical: f32, potions: u8, wards: u8) -> Option<CommandKind> {
+pub fn buy(u: &Unit, physical: f32, potions: u8, wards: u8, role: Option<Role>) -> Option<CommandKind> {
     let c = u.champion?;
     let p = &u.state.progress;
     let gold = p.gold;
+    // The quest done: the Astrolabe becomes a lantern, for free.
+    if p.items.contains(&PILGRIMS_ASTROLABE) && p.gear.quest >= items::quest::DONE {
+        return Some(CommandKind::Buy(lantern(c)));
+    }
     let free = p.items.iter().filter(|i| **i == 0).count();
     let count =
         |id: u8| -> u8 { p.items.iter().zip(p.charges).filter(|(i, _)| **i == id).map(|(_, n)| n.max(1)).sum() };
-    let path = path(c, physical);
+    let path = path(c, physical, role);
     if let Some(next) = next_item(&path, &p.items)
         && let Some((cost, used)) = items::price(next, &p.items)
         && cost <= gold
@@ -306,8 +406,9 @@ pub fn buy(u: &Unit, physical: f32, potions: u8, wards: u8) -> Option<CommandKin
         if free > 0 || !used.is_empty() {
             return Some(CommandKind::Buy(next));
         }
-        // Full: make room by selling a consumable.
-        if let Some(slot) = p.items.iter().position(|i| items::stackable(*i).is_some()) {
+        // Full: make room by selling a consumable, else the starter.
+        let spare = |tier: items::Tier| p.items.iter().position(|i| items::item(*i).is_some_and(|i| i.tier == tier));
+        if let Some(slot) = spare(items::Tier::Consumable).or(spare(items::Tier::Starter)) {
             return Some(CommandKind::Sell(slot as u8));
         }
     }
@@ -348,21 +449,39 @@ mod tests {
     #[test]
     fn the_next_item_follows_the_path_from_any_inventory() {
         let path = items::build_path(ChampionId::Ember);
-        assert_eq!(next_item(path, &[0; 6]), Some(BOOTS));
-        assert_eq!(next_item(path, &[BOOTS, CHARGED_WAND, 0, 0, 0, 0]), Some(VITAL_CRYSTAL));
-        // Boots consumed into Sage Boots: not bought again.
-        assert_eq!(next_item(path, &[SAGE_BOOTS, INFERNO_DIADEM, 0, 0, 0, 0]), Some(CHARGED_WAND));
+        assert_eq!(next_item(path, &[0; 6]), Some(SQUIRES_RING));
+        assert_eq!(next_item(path, &[SQUIRES_RING, BOOTS, CHARGED_WAND, 0, 0, 0]), Some(GLOWING_GARNET));
+        // Boots consumed into Spellstriders: not bought again; a starter sold isn't bought back.
+        assert_eq!(next_item(path, &[SPELLSTRIDERS, INFERNO_DIADEM, 0, 0, 0, 0]), Some(ELDER_STAFF));
         // Potions don't count.
-        assert_eq!(next_item(path, &[HEALTH_POTION, BOOTS, 0, 0, 0, 0]), Some(CHARGED_WAND));
+        assert_eq!(next_item(path, &[HEALTH_POTION, SQUIRES_RING, BOOTS, 0, 0, 0]), Some(CHARGED_WAND));
+        // The quest's later stages stand for the Ledger.
+        let support = path_for_test(ChampionId::Lumen, Some(Role::Support));
+        assert_eq!(support[0], PILGRIMS_LEDGER);
+        assert_eq!(next_item(&support, &[PILGRIMS_ASTROLABE, 0, 0, 0, 0, 0]), Some(support[1]));
+    }
+
+    fn path_for_test(c: ChampionId, role: Option<Role>) -> Vec<u8> {
+        path(c, 0.5, role)
+    }
+
+    #[test]
+    fn roles_change_the_start() {
+        assert_eq!(path(ChampionId::Bastion, 0.5, Some(Role::Jungle))[0], BARKLING);
+        assert_eq!(path(ChampionId::Shade, 0.5, Some(Role::Jungle))[0], FLINTLING);
+        assert_eq!(path(ChampionId::Ember, 0.5, Some(Role::Mid))[0], SQUIRES_RING);
+        assert_eq!(lantern(ChampionId::Lumen), SUNWARD_LANTERN);
+        assert_eq!(lantern(ChampionId::Cairn), BULWARK_LANTERN);
     }
 
     #[test]
     fn defenses_answer_the_enemys_damage() {
-        let p = path(ChampionId::Ember, 0.9);
-        assert!(p.contains(&BRAMBLE_PLATE) && !p.contains(&WARDSTONE_MANTLE));
-        let p = path(ChampionId::Rook, 0.1);
-        assert!(p.contains(&WARDSTONE_MANTLE) && !p.contains(&BRAMBLE_PLATE));
-        assert_eq!(path(ChampionId::Ember, 0.5), items::build_path(ChampionId::Ember));
+        let p = path(ChampionId::Bastion, 0.9, None);
+        assert!(p.contains(&BRIARHIDE_PLATE) && !p.contains(&WARDSTONE_MANTLE));
+        assert!(p.contains(&IRONSHOD_BOOTS));
+        let p = path(ChampionId::Bastion, 0.1, None);
+        assert!(p.contains(&WARDSTONE_MANTLE) && p.contains(&STALWART_SABATONS));
+        assert_eq!(path(ChampionId::Ember, 0.5, None), items::build_path(ChampionId::Ember));
     }
 
     #[test]

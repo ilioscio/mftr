@@ -14,10 +14,15 @@ extends Node
 ## "monster:<key>" or "prop:<id>" plus a suffix of the caller's choosing (its team): `tints`
 ## and `accents` give such a key its backdrop and team colors. A prop has no head and no idle:
 ## its "bust" frames the whole model.
+##
+## Items (18 §8) are keyed "item:<key>": one "icon", the whole model in three-quarter view from
+## a little above, on a transparent background (the icon's backdrop is its tier's, drawn by
+## `item_icons.gd`). Model an item facing the front view (Blender's -Y) as it should read.
 
 signal rendered(champion: String)
 
 const BUST_PX := 256
+const ICON_PX := 128                     # item icons (18 §8)
 const FULL_PX := Vector2i(384, 576)
 const HUMAN_DEPTH := 0.5                # a human-sized champion's chest, front to back, meters
 const ACCENT := Color(0.78, 0.65, 0.38)  # a neutral gold where team colors would go
@@ -73,6 +78,9 @@ func _render(champion: String) -> void:
 		_cache[champion] = {}
 		_busy = false
 		rendered.emit(champion)
+		return
+	if champion.begins_with("item:"):
+		await _render_item(champion, source)
 		return
 	var vp := SubViewport.new()
 	vp.size = Vector2i(BUST_PX * 2, BUST_PX * 2)
@@ -195,6 +203,72 @@ func _render(champion: String) -> void:
 	}
 	_busy = false
 	rendered.emit(champion)
+
+
+## An item's icon render: lit like the portraits (a warm key from the upper left, a cool rim),
+## framed to fill the square, transparent around it.
+func _render_item(key: String, source: MftrModel) -> void:
+	var vp := SubViewport.new()
+	vp.size = Vector2i(ICON_PX * 2, ICON_PX * 2)
+	vp.own_world_3d = true
+	vp.transparent_bg = true
+	vp.msaa_3d = Viewport.MSAA_4X
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child(vp)
+	var env := WorldEnvironment.new()
+	var e := Environment.new()
+	e.background_mode = Environment.BG_CLEAR_COLOR
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	e.ambient_light_color = Color(0.62, 0.68, 0.85)
+	e.ambient_light_energy = 0.45
+	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	e.tonemap_exposure = 1.25
+	e.tonemap_white = 4.0
+	env.environment = e
+	vp.add_child(env)
+	var light := DirectionalLight3D.new()
+	light.rotation_degrees = Vector3(-35, -40, 0)
+	light.light_color = Color(1.0, 0.94, 0.84)
+	light.light_energy = 1.9
+	vp.add_child(light)
+	var rim := DirectionalLight3D.new()
+	rim.rotation_degrees = Vector3(-10, 160, 0)
+	rim.light_color = Color(0.6, 0.75, 1.0)
+	rim.light_energy = 1.3
+	vp.add_child(rim)
+	var model: Node3D = source.instantiate()
+	vp.add_child(model)
+	var mesh: MeshInstance3D = model.get_node("Skeleton/Mesh")
+	var slots := source.surface_slots()
+	for i in slots.size():
+		var m := ShaderMaterial.new()
+		m.shader = load("res://shaders/champion_model.gdshader")
+		m.set_shader_parameter("slot", SLOTS.find(slots[i]))
+		m.set_shader_parameter("team_accent", accents.get(key, ACCENT))
+		m.set_shader_parameter("identity_mix", 0.0)
+		m.set_shader_parameter("cloud_receive", 0.0)
+		mesh.set_surface_override_material(i, m)
+	await get_tree().process_frame
+	var cam := Camera3D.new()
+	vp.add_child(cam)
+	cam.make_current()
+	# A three-quarter view from a little above and to the right, fitted to the model's bounds.
+	var box := mesh.get_aabb()
+	var aim := box.get_center()
+	var dir := Vector3(sin(deg_to_rad(18.0)), sin(deg_to_rad(14.0)), cos(deg_to_rad(18.0))).normalized()
+	cam.fov = 24.0
+	var reach := box.size.length() * 0.5
+	cam.position = aim + dir * (reach * 1.06 / tan(deg_to_rad(12.0)))
+	cam.look_at(aim, Vector3.UP)
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var img := vp.get_texture().get_image()
+	vp.queue_free()
+	img.convert(Image.FORMAT_RGBA8)
+	img.resize(ICON_PX, ICON_PX, Image.INTERPOLATE_LANCZOS)
+	_cache[key] = {"icon": ImageTexture.create_from_image(img)}
+	_busy = false
+	rendered.emit(key)
 
 
 ## How deep the body is, front to back, around the chest (in the rest pose; the arms reach

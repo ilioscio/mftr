@@ -8,6 +8,7 @@ use crate::bits::{BitReader, BitWriter, DecodeError};
 use crate::delta::{self, UnitUpdate};
 use crate::packet::PacketHeader;
 use mftr_sim::ability::{Beam, Cc, Damage, DamageKind, LineSkillshot, Pulses, SLOTS};
+use mftr_sim::gear::{Fx, Gear};
 use mftr_sim::items::INVENTORY;
 use mftr_sim::map::MapId;
 use mftr_sim::ping::{Ping, PingKind};
@@ -200,6 +201,10 @@ pub struct RemoteUnit {
     pub slowed: bool,
     /// In an ability's follow-through (10 §4.1).
     pub recovering: bool,
+    /// Item effects shown over the unit (18): in stasis, under Wounds, burning.
+    pub encased: bool,
+    pub wounded: bool,
+    pub burning: bool,
     /// Basic attacks started, modulo 4: picks the attack animation (10 §5.2).
     pub attack_variant: u8,
     /// Facing angle, 10 bits (see [`facing_to_wire`]).
@@ -853,6 +858,7 @@ fn write_missile(w: &mut BitWriter, m: &Missile) {
     w.write_f32(m.power);
     w.write(m.shot as u64, 4);
     w.write(m.slot as u64, 3);
+    w.write_u8(m.item);
 }
 
 fn read_missile(r: &mut BitReader) -> Result<Missile, DecodeError> {
@@ -868,6 +874,7 @@ fn read_missile(r: &mut BitReader) -> Result<Missile, DecodeError> {
         power: read_finite(r)?,
         shot: r.read(4)? as u8,
         slot: r.read(3)? as u8,
+        item: r.read_u8()?,
     })
 }
 
@@ -994,7 +1001,7 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             write_time(w, *at);
             w.write_bool(*hit);
         }
-        SimEvent::Damage { source, target, origin, kind, amount, absorbed, at } => {
+        SimEvent::Damage { source, target, origin, kind, amount, absorbed, crit, at } => {
             w.write(8, 5);
             w.write_u32(source.0);
             w.write_u32(target.0);
@@ -1002,6 +1009,7 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
             write_damage_kind(w, *kind);
             w.write_f32(*amount);
             w.write_f32(*absorbed);
+            w.write_bool(*crit);
             write_time(w, *at);
         }
         SimEvent::Died { unit, killer, at, respawn_at } => {
@@ -1081,6 +1089,14 @@ fn write_event(w: &mut BitWriter, e: &SimEvent) {
                 }
             }
         }
+        SimEvent::ItemUsed { unit, item, at, point, seq } => {
+            w.write(22, 5);
+            w.write_u32(unit.0);
+            w.write_u8(*item);
+            write_time(w, *at);
+            write_vec2(w, *point);
+            w.write_u32(*seq);
+        }
         SimEvent::PlatesBroken { unit, count, at } => {
             w.write(17, 5);
             w.write_u32(unit.0);
@@ -1143,6 +1159,7 @@ fn read_event_of(kind: u64, r: &mut BitReader) -> Result<SimEvent, DecodeError> 
             kind: read_damage_kind(r)?,
             amount: read_finite(r)?,
             absorbed: read_finite(r)?,
+            crit: r.read_bool()?,
             at: read_time(r)?,
         },
         9 => SimEvent::Died { unit: unit(r)?, killer: unit(r)?, at: read_time(r)?, respawn_at: read_time(r)? },
@@ -1170,6 +1187,13 @@ fn read_event_of(kind: u64, r: &mut BitReader) -> Result<SimEvent, DecodeError> 
         18 => SimEvent::HordeWon { at: read_time(r)? },
         19 => SimEvent::BeamStarted(read_channel(r)?),
         20 => SimEvent::BeamInterrupted { id: r.read_u32()?, at: read_time(r)? },
+        22 => SimEvent::ItemUsed {
+            unit: unit(r)?,
+            item: r.read_u8()?,
+            at: read_time(r)?,
+            point: read_vec2(r)?,
+            seq: r.read_u32()?,
+        },
         _ => return Err(DecodeError::Invalid("event kind")),
     })
 }
@@ -1240,7 +1264,7 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
         w.write_bool(d.strike.is_some());
         if let Some((id, slot)) = d.strike {
             w.write_u32(id.0);
-            w.write(slot as u64, 3);
+            w.write(slot as u64, 4);
         }
         w.write_u32(d.recover.0 as u32);
     }
@@ -1281,7 +1305,6 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     for c in p.charges {
         w.write(c as u64, 4);
     }
-    write_time(w, p.lifeline_ready);
     w.write(p.undo_len as u64, 3);
     for t in &p.undo[..p.undo_len as usize] {
         for i in t.items {
@@ -1339,6 +1362,138 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     w.write_f32(s.potion_rate);
     write_time(w, s.potion_until);
     write_time(w, s.recall_until);
+    write_gear(w, &s.progress.gear);
+    write_fx(w, &s.fx);
+}
+
+/// A time that is usually unset (0): one bit then.
+fn write_time0(w: &mut BitWriter, t: SimTime) {
+    w.write_bool(t.0 != 0);
+    if t.0 != 0 {
+        write_time(w, t);
+    }
+}
+
+fn read_time0(r: &mut BitReader) -> Result<SimTime, DecodeError> {
+    Ok(if r.read_bool()? { read_time(r)? } else { SimTime(0) })
+}
+
+/// Item state (18 §10): one bit when there is none.
+fn write_gear(w: &mut BitWriter, g: &Gear) {
+    w.write_bool(!g.is_default());
+    if g.is_default() {
+        return;
+    }
+    for t in g.ready.iter().chain(&g.passive_ready) {
+        write_time0(w, *t);
+    }
+    w.write_u8(g.tally);
+    w.write_u16(g.quest);
+    w.write(g.tithe_spent as u64, 2);
+    write_time0(w, g.tithe_at);
+    w.write(g.spoils_spent as u64, 2);
+    write_time0(w, g.spoils_at);
+    w.write_u8(g.food);
+}
+
+fn read_gear(r: &mut BitReader) -> Result<Gear, DecodeError> {
+    let mut g = Gear::NONE;
+    if !r.read_bool()? {
+        return Ok(g);
+    }
+    for t in g.ready.iter_mut().chain(g.passive_ready.iter_mut()) {
+        *t = read_time0(r)?;
+    }
+    g.tally = r.read_u8()?;
+    g.quest = r.read_u16()?;
+    g.tithe_spent = r.read(2)? as u8;
+    g.tithe_at = read_time0(r)?;
+    g.spoils_spent = r.read(2)? as u8;
+    g.spoils_at = read_time0(r)?;
+    g.food = r.read_u8()?;
+    Ok(g)
+}
+
+/// Timed item effects: one bit when there are none.
+fn write_fx(w: &mut BitWriter, f: &Fx) {
+    w.write_bool(!f.is_default());
+    if f.is_default() {
+        return;
+    }
+    w.write(f.wounds as u64, 7);
+    write_time0(w, f.wounds_until);
+    w.write_f32(f.burn);
+    w.write_u32(f.burn_by.0);
+    w.write_u8(f.burn_item);
+    write_time0(w, f.burn_next);
+    write_time0(w, f.burn_until);
+    w.write(f.sunder as u64, 4);
+    w.write(f.sunder_pct as u64, 7);
+    write_time0(w, f.sunder_until);
+    w.write(f.expose as u64, 7);
+    write_time0(w, f.expose_until);
+    w.write_u8(f.haste);
+    write_time0(w, f.haste_until);
+    w.write_u16(f.haste_fade);
+    w.write_u8(f.quick);
+    write_time0(w, f.quick_until);
+    w.write_u8(f.light);
+    write_time0(w, f.stasis_until);
+    w.write(f.petrify_cut as u64, 7);
+    write_time0(w, f.petrify_until);
+    write_time0(w, f.airborne_until);
+    write_time0(w, f.combat_at);
+    write_time0(w, f.hurt_at);
+    write_time0(w, f.dealt_at);
+    w.write_u32(f.combo.0);
+    write_time0(w, f.combo_at);
+    w.write_u32(f.mark_by.0);
+    w.write(f.mark_amp as u64, 7);
+    write_time0(w, f.mark_until);
+    w.write_u8(f.kindle);
+    write_time0(w, f.kindle_until);
+    write_time0(w, f.smolder_at);
+}
+
+fn read_fx(r: &mut BitReader) -> Result<Fx, DecodeError> {
+    if !r.read_bool()? {
+        return Ok(Fx::NONE);
+    }
+    Ok(Fx {
+        wounds: r.read(7)? as u8,
+        wounds_until: read_time0(r)?,
+        burn: read_finite(r)?,
+        burn_by: UnitId(r.read_u32()?),
+        burn_item: r.read_u8()?,
+        burn_next: read_time0(r)?,
+        burn_until: read_time0(r)?,
+        sunder: r.read(4)? as u8,
+        sunder_pct: r.read(7)? as u8,
+        sunder_until: read_time0(r)?,
+        expose: r.read(7)? as u8,
+        expose_until: read_time0(r)?,
+        haste: r.read_u8()?,
+        haste_until: read_time0(r)?,
+        haste_fade: r.read_u16()?,
+        quick: r.read_u8()?,
+        quick_until: read_time0(r)?,
+        light: r.read_u8()?,
+        stasis_until: read_time0(r)?,
+        petrify_cut: r.read(7)? as u8,
+        petrify_until: read_time0(r)?,
+        airborne_until: read_time0(r)?,
+        combat_at: read_time0(r)?,
+        hurt_at: read_time0(r)?,
+        dealt_at: read_time0(r)?,
+        combo: UnitId(r.read_u32()?),
+        combo_at: read_time0(r)?,
+        mark_by: UnitId(r.read_u32()?),
+        mark_amp: r.read(7)? as u8,
+        mark_until: read_time0(r)?,
+        kindle: r.read_u8()?,
+        kindle_until: read_time0(r)?,
+        smolder_at: read_time0(r)?,
+    })
 }
 
 fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
@@ -1377,7 +1532,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let attack_ready_at = read_time(r)?;
     let dash = if r.read_bool()? {
         let (dir, to, speed, end_at) = (read_vec2(r)?, read_vec2(r)?, read_finite(r)?, read_time(r)?);
-        let strike = if r.read_bool()? { Some((UnitId(r.read_u32()?), r.read(3)? as u8)) } else { None };
+        let strike = if r.read_bool()? { Some((UnitId(r.read_u32()?), r.read(4)? as u8)) } else { None };
         let recover = SimDuration(r.read_u32()? as u64);
         Some(DashMove { dir, to, speed, end_at, strike, recover })
     } else {
@@ -1423,7 +1578,6 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     for c in charges.iter_mut() {
         *c = r.read(4)? as u8;
     }
-    let lifeline_ready = read_time(r)?;
     let undo_len = r.read(3)? as u8;
     if undo_len as usize > UNDO {
         return Err(DecodeError::Invalid("undo"));
@@ -1480,6 +1634,8 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let attacks = r.read_u8()?;
     let (potion_rate, potion_until) = (read_finite(r)?, read_time(r)?);
     let recall_until = read_time(r)?;
+    let gear = read_gear(r)?;
+    let fx = read_fx(r)?;
     let progress = Progress {
         level,
         xp,
@@ -1489,7 +1645,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         streak,
         items,
         charges,
-        lifeline_ready,
+        gear,
         undo,
         undo_len,
         augments,
@@ -1548,6 +1704,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         potion_rate,
         potion_until,
         recall_until,
+        fx,
     })
 }
 
@@ -1629,9 +1786,20 @@ fn write_update(w: &mut BitWriter, u: &UnitUpdate) {
         w.write(o.plates.min(7) as u64, 3);
     }
     if u.mask & delta::FLAGS != 0 {
-        for f in
-            [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected, o.slowed, o.recovering, o.recalling]
-        {
+        for f in [
+            o.casting,
+            o.attacking,
+            o.stunned,
+            o.rooted,
+            o.dashing,
+            o.protected,
+            o.slowed,
+            o.recovering,
+            o.recalling,
+            o.encased,
+            o.wounded,
+            o.burning,
+        ] {
             w.write_bool(f);
         }
         w.write((o.attack_variant & 3) as u64, 2);
@@ -1671,6 +1839,9 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         dashing: false,
         slowed: false,
         recovering: false,
+        encased: false,
+        wounded: false,
+        burning: false,
         attack_variant: 0,
         facing: 0,
     };
@@ -1711,11 +1882,24 @@ fn read_update(r: &mut BitReader) -> Result<UnitUpdate, DecodeError> {
         o.plates = r.read(3)? as u8;
     }
     if mask & delta::FLAGS != 0 {
-        let mut f = [false; 9];
+        let mut f = [false; 12];
         for b in f.iter_mut() {
             *b = r.read_bool()?;
         }
-        [o.casting, o.attacking, o.stunned, o.rooted, o.dashing, o.protected, o.slowed, o.recovering, o.recalling] = f;
+        [
+            o.casting,
+            o.attacking,
+            o.stunned,
+            o.rooted,
+            o.dashing,
+            o.protected,
+            o.slowed,
+            o.recovering,
+            o.recalling,
+            o.encased,
+            o.wounded,
+            o.burning,
+        ] = f;
         o.attack_variant = r.read(2)? as u8;
     }
     Ok(UnitUpdate { mask, unit: o })
@@ -2596,7 +2780,7 @@ mod tests {
                 to: Vec2::new(5.0, 330.0),
                 speed: 1000.0,
                 end_at: SimTime(124_100),
-                strike: Some((UnitId(23), 2)),
+                strike: Some((UnitId(23), 11)),
                 recover: SimDuration(154),
             }),
             stunned_until: SimTime(99_999),
@@ -2624,7 +2808,12 @@ mod tests {
                 streak: -3,
                 items: [19, 0, 7, 26, 0, 3],
                 charges: [0, 0, 2, 0, 0, 5],
-                lifeline_ready: SimTime(98_765),
+                gear: Gear {
+                    ready: [0, 0, 0, 77_000, 0, 0].map(SimTime),
+                    passive_ready: [0, 0, 98_765, 0].map(SimTime),
+                    tally: 7,
+                    ..Gear::NONE
+                },
                 undo: [
                     Trade { items: [10, 0, 7, 26, 0, 3], charges: [0, 0, 0, 0, 0, 0], gold: -2750.0 },
                     Trade { items: [10, 0, 7, 26, 0, 27], charges: [0, 0, 0, 0, 0, 4], gold: 280.0 },
@@ -2666,10 +2855,78 @@ mod tests {
             potion_rate: 8.0,
             potion_until: SimTime(77_000),
             recall_until: SimTime(90_000),
+            fx: Fx {
+                wounds: 40,
+                wounds_until: SimTime(91_000),
+                haste: 20,
+                haste_until: SimTime(92_000),
+                combat_at: SimTime(88_000),
+                ..Fx::NONE
+            },
         }
     }
 
-    /// Beams (start, interruption) and a lingering area's pulses survive the wire exactly.
+    /// Every item effect at once (stasis, burns, marks...): the own state survives the wire.
+    #[test]
+    fn full_item_state_round_trips() {
+        let mut st = sample_state();
+        st.progress.gear = Gear {
+            ready: [0, 5, 0, 77, 0, 9].map(SimTime),
+            passive_ready: [1, 98_765, 3, 0].map(SimTime),
+            tally: 7,
+            quest: 1234,
+            tithe_spent: 2,
+            tithe_at: SimTime(4444),
+            spoils_spent: 1,
+            spoils_at: SimTime(5555),
+            food: 19,
+        };
+        st.fx = Fx {
+            wounds: 40,
+            wounds_until: SimTime(1),
+            burn: 12.5,
+            burn_by: UnitId(9),
+            burn_item: 18,
+            burn_next: SimTime(2),
+            burn_until: SimTime(3),
+            sunder: 6,
+            sunder_pct: 5,
+            sunder_until: SimTime(4),
+            expose: 12,
+            expose_until: SimTime(5),
+            haste: 40,
+            haste_until: SimTime(6),
+            haste_fade: 2000,
+            quick: 20,
+            quick_until: SimTime(7),
+            light: 20,
+            stasis_until: SimTime(8),
+            petrify_cut: 60,
+            petrify_until: SimTime(9),
+            airborne_until: SimTime(10),
+            combat_at: SimTime(11),
+            hurt_at: SimTime(12),
+            dealt_at: SimTime(13),
+            combo: UnitId(14),
+            combo_at: SimTime(15),
+            mark_by: UnitId(16),
+            mark_amp: 15,
+            mark_until: SimTime(17),
+            kindle: 20,
+            kindle_until: SimTime(18),
+            smolder_at: SimTime(19),
+        };
+        let mut w = BitWriter::new();
+        write_unit_state(&mut w, &st);
+        let bytes = w.finish();
+        let back = read_unit_state(&mut BitReader::new(&bytes)).unwrap();
+        assert!(back.bits_eq(&st));
+        assert_eq!(back.fx, st.fx);
+        assert_eq!(back.progress.gear, st.progress.gear);
+    }
+
+    /// Beams (start, interruption), a lingering area's pulses, item actives, match ends and
+    /// pings survive the wire exactly.
     #[test]
     fn beam_events_and_area_pulses_round_trip() {
         use mftr_sim::ability::Effect;
@@ -2716,6 +2973,17 @@ mod tests {
                 pulses: hail.pulses,
                 lingering: true,
             }),
+            // And the rarer events (a full snapshot carries one of each of the rest).
+            SimEvent::ItemUsed { unit: UnitId(3), item: 65, at: SimTime(6_400), point: Vec2::new(1.5, -2.25), seq: 77 },
+            SimEvent::MatchEnded { winner: Team::Red, at: SimTime(99_000) },
+            SimEvent::HordeWon { at: SimTime(99_002) },
+            SimEvent::Ping(Ping {
+                kind: PingKind::OnMyWay,
+                at: Vec2::new(1234.5, 6789.25),
+                target: Some(UnitId(12)),
+                from: Some(UnitId(3)),
+            }),
+            SimEvent::Ping(Ping { kind: PingKind::Group, at: Vec2::new(10.0, 20.0), target: None, from: None }),
         ];
         let mut w = BitWriter::new();
         for e in &events {
@@ -2782,6 +3050,7 @@ mod tests {
             power: 140.0,
             shot: 2,
             slot: 5,
+            item: 67,
         };
         let area = Area {
             id: 11,
@@ -2845,6 +3114,9 @@ mod tests {
             dashing: true,
             slowed: true,
             recovering: true,
+            encased: true,
+            wounded: false,
+            burning: true,
             attack_variant: 3,
             facing: 1001,
         };
@@ -2871,6 +3143,7 @@ mod tests {
                 kind: DamageKind::Physical,
                 amount: 40.25,
                 absorbed: 11.0,
+                crit: true,
                 origin: mftr_sim::world::DamageOrigin::Ability(2),
                 at: SimTime(6_300),
             },
@@ -2886,16 +3159,7 @@ mod tests {
             },
             SimEvent::Shielded { unit: UnitId(4), amount: 150.0, at: SimTime(2), until: SimTime(4_802) },
             SimEvent::Healed { unit: UnitId(4), amount: 150.0, at: SimTime(3) },
-            SimEvent::MatchEnded { winner: Team::Red, at: SimTime(99_000) },
             SimEvent::Reward { unit: UnitId(3), gold: 21.5, xp: 60, at: SimTime(99_001) },
-            SimEvent::HordeWon { at: SimTime(99_002) },
-            SimEvent::Ping(Ping {
-                kind: PingKind::OnMyWay,
-                at: Vec2::new(1234.5, 6789.25),
-                target: Some(UnitId(12)),
-                from: Some(UnitId(3)),
-            }),
-            SimEvent::Ping(Ping { kind: PingKind::Group, at: Vec2::new(10.0, 20.0), target: None, from: None }),
         ];
         let snap = Snapshot {
             horde: Some(HordeStatus {
@@ -2983,6 +3247,7 @@ mod tests {
             power: 140.0,
             shot,
             slot: 0,
+            item: 0,
         };
         let volley = [
             m(20, Vec2::new(1.0, 0.0), 0),

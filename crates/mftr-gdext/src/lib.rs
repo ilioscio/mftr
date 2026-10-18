@@ -21,6 +21,7 @@ use mftr_sim::{ChampionId, Team, UnitId, UnitKind, Vec2};
 use std::net::UdpSocket;
 use std::time::Instant;
 
+mod itemtext;
 mod maps;
 mod model;
 
@@ -685,9 +686,13 @@ impl MatchClient {
         let mut out = VarArray::new();
         let p = self.session.own_state_now().map(|s| s.progress);
         let wards = self.session.map().layout.wards;
+        let jungle = !self.session.map().layout.camps.is_empty();
         for it in items::CATALOG.iter() {
-            // Control wards only where wards are allowed.
-            if items::placeable(it.id) && !wards {
+            // Control wards and the support quest only where wards are allowed; hatchlings
+            // where there's a jungle.
+            if (items::placeable(it.id) || it.tier == items::Tier::Support) && !wards
+                || it.tier == items::Tier::Jungle && !jungle
+            {
                 continue;
             }
             let inv = p.map_or([0; INVENTORY], |p| p.items);
@@ -697,27 +702,46 @@ impl MatchClient {
             d.set("name", it.name);
             d.set("cost", it.cost as i64);
             d.set("price", price as i64);
-            // 0 = component, 1 = upgraded component or boots, 2 = legendary.
-            let tier = if it.recipe.is_empty() {
-                0
-            } else if it.cost >= 2500.0 {
-                2
-            } else {
-                1
-            };
-            d.set("tier", tier as i64);
+            // The shop's column (18 §2): 0 starter, 1 component, 2 epic, 3 legendary, 4 boots,
+            // 5 consumable, 6 support, 7 jungle.
+            d.set("tier", it.tier.index() as i64);
+            d.set("group", it.tier.name());
             d.set("stats", item_text(it).as_str());
+            d.set("buyable", it.id != items::PILGRIMS_ASTROLABE);
+            // The active: its name, whether it's aimed at the cursor, its cooldown.
+            if let Some((name, _)) = itemtext::active(&it.active) {
+                d.set("active", name);
+                d.set("aimed", it.active.aimed());
+                d.set("active_cooldown", it.active.cooldown().map_or(0.0, |c| c.0 as f64 / 1920.0));
+            }
             let mut recipe = VarArray::new();
             for r in it.recipe {
                 recipe.push(&(*r as i64).to_variant());
             }
             d.set("recipe", &recipe);
             d.set("consumable", items::stackable(it.id).is_some());
-            // Used at the cursor (a control ward).
-            d.set("placeable", items::placeable(it.id));
+            // Used at the cursor (wards, aimed actives).
+            d.set("placeable", items::aimed(it.id));
             d.set("lines", &item_lines(it));
             d.set("affordable", p.is_some_and(|p| p.gold >= price));
             d.set("owned", inv.contains(&it.id));
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// Every item, whatever the map (icon sheets, the item list): `{ id, name, tier, group,
+    /// stats }`, in catalog order.
+    #[func]
+    fn item_list(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for it in items::CATALOG.iter() {
+            let mut d = VarDictionary::new();
+            d.set("id", it.id as i64);
+            d.set("name", it.name);
+            d.set("tier", it.tier.index() as i64);
+            d.set("group", it.tier.name());
+            d.set("stats", item_text(it).as_str());
             out.push(&d.to_variant());
         }
         out
@@ -838,6 +862,7 @@ impl MatchClient {
             d.set("amount", c.amount);
             d.set("absorbed", c.absorbed);
             d.set("heal", c.heal);
+            d.set("crit", c.crit);
             d.set(
                 "kind",
                 match c.kind {
@@ -1280,6 +1305,21 @@ impl MatchClient {
         out
     }
 
+    /// Item actives used since the last call (18 §4), confirmed: `[{ unit, item, name, point }]`.
+    #[func]
+    fn take_item_uses(&mut self) -> VarArray {
+        let mut out = VarArray::new();
+        for (unit, item, point) in self.session.take_item_uses() {
+            let mut d = VarDictionary::new();
+            d.set("unit", unit.0 as i64);
+            d.set("item", item as i64);
+            d.set("name", items::item(item).and_then(|i| itemtext::active(&i.active)).map_or("", |(n, _)| n));
+            d.set("point", Vector2::new(point.x, point.y));
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
     #[func]
     fn dash_action(&self, champion: GString) -> GString {
         let Some(c) = ChampionId::by_name(&champion.to_string()) else { return GString::new() };
@@ -1328,6 +1368,23 @@ impl MatchClient {
             d.set("items", &inv);
             let charges: PackedInt32Array = s.progress.charges.iter().map(|c| *c as i32).collect();
             d.set("charges", &charges);
+            // Item actives' cooldowns (seconds left per slot) and what items have built up:
+            // Tally stacks, quest gold, hatchling food (18 §5–§7).
+            let g = &s.progress.gear;
+            let ready: PackedFloat32Array =
+                g.ready.iter().map(|r| if *r > t { r.secs_since(t) } else { 0.0 }).collect();
+            d.set("item_cooldowns", &ready);
+            d.set("tally", g.tally as i64);
+            d.set("quest", g.quest as i64);
+            d.set("quest_stage", items::quest::STAGE as i64);
+            d.set("quest_done", items::quest::DONE as i64);
+            d.set("food", g.food as i64);
+            d.set("grown_at", items::hatchling::GROWN as i64);
+            // Item effects on us.
+            d.set("encased", s.fx.encased(t));
+            d.set("wounded", s.fx.wounds_until > t);
+            d.set("burning", s.fx.burn_until > t);
+            d.set("hasted", s.fx.haste_until > t);
             d.set("potion", if s.potion_until > t { s.potion_until.secs_since(t) } else { 0.0 });
             // The F spell, big monsters taken (Claim's upgrade) and the jungle buffs' seconds left.
             d.set("spell_f", s.progress.spell_f as i64);
@@ -1592,6 +1649,9 @@ impl MatchClient {
             d.set("dashing", u.dashing);
             d.set("slowed", u.slowed);
             d.set("stunned", u.stunned);
+            d.set("encased", u.encased);
+            d.set("wounded", u.wounded);
+            d.set("burning", u.burning);
             if let Some((p, dir)) = u.windup {
                 d.set("windup", p);
                 d.set("windup_dir", Vector2::new(dir.x, dir.y));
@@ -2078,7 +2138,8 @@ fn known_servers() -> KnownServers {
     KnownServers::from_text(&std::fs::read_to_string(user_path(KNOWN_FILE)).unwrap_or_default())
 }
 
-/// One line describing an item's bonuses and passive.
+/// One short line for an item: its stats, abbreviated, then its passives' and active's names
+/// (the shop's list; the tooltip has the full text, `item_lines`).
 fn item_text(it: &items::Item) -> String {
     let b = &it.bonus;
     let mut parts: Vec<String> = Vec::new();
@@ -2087,111 +2148,50 @@ fn item_text(it: &items::Item) -> String {
             parts.push(format!("+{v} {name}"));
         }
     };
-    flat(b.health, "HP");
-    flat(b.health_regen, "HP/s");
-    flat(b.armor, "armor");
-    flat(b.magic_resist, "MR");
     flat(b.attack_damage, "AD");
     flat(b.ability_power, "AP");
+    flat(b.health, "HP");
+    flat(b.armor, "armor");
+    flat(b.magic_resist, "MR");
     flat(b.ability_haste, "haste");
+    flat(b.lethality, "lethality");
+    flat(b.magic_pen, "magic pen");
     flat(b.move_speed, "MS");
+    flat(b.health_regen, "HP/s");
     let mut pct = |v: f32, name: &str| {
         if v != 0.0 {
             parts.push(format!("+{}% {name}", (v * 100.0).round()));
         }
     };
     pct(b.attack_speed, "AS");
+    pct(b.crit_chance, "crit");
+    pct(b.armor_pen, "armor pen");
+    pct(b.magic_pen_pct, "magic pen");
     pct(b.life_steal, "life steal");
+    pct(b.omnivamp, "omnivamp");
+    pct(b.tenacity, "tenacity");
     pct(b.move_speed_pct, "MS");
     pct(b.ability_power_pct, "AP");
-    match it.passive {
-        items::Passive::OnHitMagic { base, ap_ratio } => {
-            parts.push(format!("attacks deal {base} + {}% AP magic", (ap_ratio * 100.0).round()))
+    for p in &it.passives {
+        if let Some((name, _)) = itemtext::passive(p) {
+            parts.push(name.to_string());
         }
-        items::Passive::Lifeline { shield, threshold, cooldown_ms, .. } => parts.push(format!(
-            "{shield} shield below {}% HP ({} s cooldown)",
-            (threshold * 100.0).round(),
-            cooldown_ms / 1000
-        )),
-        items::Passive::None => {}
     }
-    if let Some(active) = consumable_text(it) {
-        parts.push(active);
+    if let Some((name, _)) = itemtext::active(&it.active) {
+        parts.push(format!("Active: {name}"));
     }
     parts.join(", ")
-}
-
-/// A consumable's active, in words.
-fn consumable_text(it: &items::Item) -> Option<String> {
-    if items::placeable(it.id) {
-        let (charges, _) = items::stackable(it.id)?;
-        return Some(format!(
-            "Active: place a control ward at the cursor. It watches until destroyed, and reveals and disables enemy stealth wards it sees; one out at a time, up to {charges} in a slot"
-        ));
-    }
-    let (heal, ms, charges, refills) = items::consumable(it.id)?;
-    let secs = ms / 1000;
-    Some(if refills {
-        format!("Active: heals {heal} over {secs} s; {charges} charges, refilled at the fountain")
-    } else {
-        format!("Active: heals {heal} over {secs} s; up to {charges} stack in a slot")
-    })
 }
 
 /// An item's tooltip lines, each with what it is (a stat's key, "passive" or "active") so the
 /// client colors them by stat.
 fn item_lines(it: &items::Item) -> VarArray {
-    let b = &it.bonus;
     let mut out = VarArray::new();
-    let mut add = |text: String, kind: &str| {
+    for l in itemtext::lines(it) {
         let mut d = VarDictionary::new();
-        d.set("text", text.as_str());
-        d.set("kind", kind);
+        d.set("text", l.text.as_str());
+        d.set("kind", l.kind);
         out.push(&d.to_variant());
-    };
-    let flat = [
-        (b.health, "health", "hp"),
-        (b.health_regen, "health per second", "hp"),
-        (b.armor, "armor", "armor"),
-        (b.magic_resist, "magic resist", "mr"),
-        (b.attack_damage, "attack damage", "ad"),
-        (b.ability_power, "ability power", "ap"),
-        (b.ability_haste, "ability haste", "haste"),
-        (b.move_speed, "move speed", "ms"),
-    ];
-    for (v, name, kind) in flat {
-        if v != 0.0 {
-            add(format!("+{v} {name}"), kind);
-        }
-    }
-    let pct = [
-        (b.attack_speed, "attack speed", "as"),
-        (b.life_steal, "life steal", "lifesteal"),
-        (b.move_speed_pct, "move speed", "ms"),
-        (b.ability_power_pct, "ability power", "ap"),
-    ];
-    for (v, name, kind) in pct {
-        if v != 0.0 {
-            add(format!("+{}% {name}", (v * 100.0).round()), kind);
-        }
-    }
-    match it.passive {
-        items::Passive::OnHitMagic { base, ap_ratio } => add(
-            format!("Passive: basic attacks deal {base} (+{}% AP) magic damage", (ap_ratio * 100.0).round()),
-            "passive",
-        ),
-        items::Passive::Lifeline { shield, threshold, cooldown_ms, .. } => add(
-            format!(
-                "Passive: a {shield} shield when you fall below {}% health ({} s cooldown)",
-                (threshold * 100.0).round(),
-                cooldown_ms / 1000
-            ),
-            "passive",
-        ),
-        items::Passive::None => {}
-    }
-    if let Some(active) = consumable_text(it) {
-        add(active, "active");
     }
     out
 }

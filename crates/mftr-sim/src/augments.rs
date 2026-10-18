@@ -183,11 +183,20 @@ pub struct Growth {
     pub anvil: [u16; 8],
     /// The Insight jungle buff (not an augment either).
     pub insight: bool,
+    /// Tally stacks (an item's, 18 §5).
+    pub tally: u8,
 }
 
 impl Growth {
-    pub const NONE: Growth =
-        Growth { unstable_tiny: false, stacks: 0, chaos_done: false, hyper: false, anvil: [0; 8], insight: false };
+    pub const NONE: Growth = Growth {
+        unstable_tiny: false,
+        stacks: 0,
+        chaos_done: false,
+        hyper: false,
+        anvil: [0; 8],
+        insight: false,
+        tally: 0,
+    };
 }
 
 /// Champion of Chaos's reward.
