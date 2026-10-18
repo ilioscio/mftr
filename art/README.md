@@ -10,7 +10,8 @@ art/
 │  ├─ sounds.ron                   # the shared sound recipes (footsteps, death, the hard-CC accent…)
 │  └─ export/biped_library.glb (+ .anims.ron, .vfx.ron, .sfx.ron, sfx/*.ogg)
 ├─ champions/<id>/                 # one folder per champion (see champions/README.md)
-└─ minions/<kind>/<kind>.blend      # lane minions: melee, caster, siege, super (build.py generates all four)
+├─ minions/<kind>/<kind>.blend      # lane minions: melee, caster, siege, super (build.py generates all four)
+└─ items/<key>/<key>.blend         # every item's model (build.py generates all 75; the client renders icons from them)
 ```
 
 `.blend` files are the source of truth. `export/` holds generated files that are committed so CI (and the game) can check and load them without Blender. `review/` folders hold generated renders and are git-ignored.
