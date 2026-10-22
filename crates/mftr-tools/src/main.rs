@@ -9,6 +9,8 @@
 //!   mftr-tools pack validate FILE.glb|DIR...
 //!   mftr-tools sfx build [sounds.ron|DIR...]   (default: art)
 //!   mftr-tools map svg open|arena|bridge|crossroads|FILE.mftrmap   (an SVG of the layout, on stdout)
+//!   mftr-tools release-key FILE        (a new release key: private half into FILE, public half printed)
+//!   mftr-tools release-manifest DIR    (latest.json + .sig beside the client archives; key in MFTR_RELEASE_KEY)
 //!
 //! Profiles: perfect, lan, good, typical, mid, rough, awful.
 
@@ -166,6 +168,42 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("release-key") => {
+            // A new release key: the private half into FILE (for the MFTR_RELEASE_KEY secret),
+            // the public half printed (for mftr_client::update::RELEASE_KEY).
+            let path = args.get(1).expect("release-key FILE");
+            match mftr_tools::release::new_key(std::path::Path::new(path)) {
+                Ok(public) => println!("{public}"),
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some("release-manifest") => {
+            // The release workflow: latest.json and its signature beside the client archives,
+            // signed with the key in MFTR_RELEASE_KEY.
+            let dir = std::path::Path::new(args.get(1).expect("release-manifest DIR"));
+            let secret = std::env::var("MFTR_RELEASE_KEY").unwrap_or_default();
+            if secret.trim().is_empty() {
+                eprintln!(
+                    "MFTR_RELEASE_KEY is not set (the release key's private half, from `mftr-tools release-key`)"
+                );
+                std::process::exit(1);
+            }
+            match mftr_tools::release::write(dir, &secret) {
+                Ok(m) => {
+                    println!("latest.json for {} (protocol {}):", m.version, m.protocol);
+                    for a in &m.assets {
+                        println!("  {}  {} bytes  sha256 {}", a.name, a.size, a.sha256);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Some("replay") => {
             // Re-simulate a replay file and check its hashes.
             let path = args.get(1).expect("replay FILE");
@@ -301,6 +339,8 @@ fn main() {
             eprintln!("       mftr-tools pack validate FILE.glb|DIR...");
             eprintln!("       mftr-tools sfx build [sounds.ron|DIR...]");
             eprintln!("       mftr-tools map svg open|arena|bridge|crossroads");
+            eprintln!("       mftr-tools release-key FILE");
+            eprintln!("       mftr-tools release-manifest DIR");
             std::process::exit(2);
         }
     }

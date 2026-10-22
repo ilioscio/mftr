@@ -30,9 +30,10 @@
       };
 
       # On a NixOS machine whose configuration is a flake (docs/hosting.md, "NixOS"):
-      #   inputs.mftr.url = "github:ilioscio/mftr";
+      #   inputs.mftr.url = "github:ilioscio/mftr/release";   # the newest release
       #   modules = [ mftr.nixosModules.default { services.mftr.enable = true; } ];
-      # Redeploy the latest version with `nix flake update mftr` and a rebuild.
+      # Redeploy the newest release with `nix flake update mftr` and a rebuild (CI moves the
+      # `release` branch to each release once it's published).
       nixosModules.default = { pkgs, lib, ... }: {
         imports = [ ./nix/module.nix ];
         services.mftr.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.mftr-server;

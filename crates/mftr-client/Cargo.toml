@@ -9,6 +9,10 @@ rust-version.workspace = true
 [dependencies]
 mftr-sim.workspace = true
 mftr-net.workspace = true
+# The release manifest (`update`): its JSON, and its Ed25519 signature (on the curve25519-dalek
+# the transport already has).
+nanoserde = { version = "0.2", default-features = false, features = ["json", "std"] }
+ed25519-dalek = { version = "2.1", default-features = false }
 
 [lints]
 workspace = true
