@@ -36,7 +36,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,horde,...] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR] [--bot-tier recruit|veteran|elite|nightmare]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|horde|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]";
+const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,horde,...] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR] [--bot-tier recruit|veteran|elite|nightmare]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|horde|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]\n       mftr-server --version";
 /// Instances running at once, by default.
 const MAX_MATCHES: usize = 32;
 
@@ -150,6 +150,10 @@ fn main() -> std::io::Result<()> {
                 println!("{USAGE}");
                 return Ok(());
             }
+            "-V" | "--version" => {
+                println!("mftr-server {} (protocol {})", mftr_net::RELEASE, mftr_net::PROTOCOL_VERSION);
+                return Ok(());
+            }
             other => panic!("unknown argument {other}\n{USAGE}"),
         }
     }
@@ -206,7 +210,7 @@ fn main() -> std::io::Result<()> {
     let socket = UdpSocket::bind(&bind)?;
     socket.set_nonblocking(true)?;
     let local = socket.local_addr()?;
-    println!("mftr-server listening on {local} (protocol {})", mftr_net::PROTOCOL_VERSION);
+    println!("mftr-server {} listening on {local} (protocol {})", mftr_net::RELEASE, mftr_net::PROTOCOL_VERSION);
     println!(
         "key fingerprint {}: players can pin it with HOST:{}#{}",
         identity.fingerprint(),
@@ -260,6 +264,11 @@ fn main() -> std::io::Result<()> {
                 Ok((n, from)) => match secure.receive(from, &buf[..n], now()) {
                     Received::Reply(reply) => {
                         let _ = socket.send_to(&reply, from);
+                    }
+                    Received::Replies(replies) => {
+                        for reply in replies {
+                            let _ = socket.send_to(&reply, from);
+                        }
                     }
                     Received::Connected { client } => {
                         println!("player {} connected from {from}", Fingerprint::of(&client));

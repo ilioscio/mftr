@@ -6,6 +6,7 @@ pub mod itembalance;
 pub mod loadtest;
 pub mod mapsvg;
 pub mod netlab;
+pub mod release;
 pub mod report;
 pub mod sfx;
 pub mod size;

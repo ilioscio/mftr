@@ -16,6 +16,10 @@
 //! DATA     seq u16, ciphertext, tag           ↔
 //! ```
 //!
+//! A HELLO on another protocol gets `VERSION protocol` and `RELEASE protocol, release` instead
+//! (both plaintext and frozen: clients of every version read them). Clients before 0.17 only
+//! know VERSION and drop RELEASE; newer ones show the server's release ("0.17.0") to the player.
+//!
 //! A HELLO is padded so that no unauthenticated reply is larger than the request (no
 //! amplification), and the server spends no work and keeps no state for an address until that
 //! address has echoed a cookie. DATA carries the low 16 bits of a 64-bit nonce, which the
@@ -39,6 +43,10 @@ const CONFIRM: u8 = 4;
 const DATA: u8 = 5;
 /// Server → client, plaintext: "I speak protocol N" (the client's HELLO had another).
 const VERSION: u8 = 6;
+/// Server → client, plaintext, sent with VERSION: its protocol and its release ("0.17.0").
+const RELEASE: u8 = 7;
+/// The longest release a RELEASE packet carries.
+const MAX_RELEASE_LEN: usize = 32;
 
 const TAG: usize = 16;
 const COOKIE_LEN: usize = 4 + 16;
@@ -82,6 +90,16 @@ fn unhex<const N: usize>(s: &str) -> Option<[u8; N]> {
         *o = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok()?;
     }
     Some(out)
+}
+
+/// A RELEASE packet's body: the protocol, then the release ("0.17.0": digits, letters, `.`, `-`
+/// and `+` only, as anything shown to the player and put in a link must be).
+fn parse_release(body: &[u8]) -> Option<String> {
+    let text = body.get(2..).filter(|t| !t.is_empty() && t.len() <= MAX_RELEASE_LEN)?;
+    if !text.iter().all(|&c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'-' | b'+')) {
+        return None;
+    }
+    Some(String::from_utf8_lossy(text).into_owned())
 }
 
 // ---- keys --------------------------------------------------------------------------------
@@ -328,8 +346,9 @@ impl Channel {
 /// Why a connection can't be made.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SecureError {
-    /// The server speaks another protocol version.
-    Version { server: u16 },
+    /// The server speaks another protocol version; `release` is its release, when it said
+    /// (servers from 0.17 on do).
+    Version { server: u16, release: Option<String> },
     /// The server's key isn't the pinned one.
     KeyChanged { expected: Fingerprint, got: Fingerprint },
 }
@@ -337,9 +356,15 @@ pub enum SecureError {
 impl fmt::Display for SecureError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SecureError::Version { server } => write!(
+            SecureError::Version { server, release: None } => write!(
                 f,
                 "version mismatch: the server speaks protocol {server}, this client {}",
+                crate::PROTOCOL_VERSION
+            ),
+            SecureError::Version { server, release: Some(release) } => write!(
+                f,
+                "version mismatch: the server runs {release} (protocol {server}), this client {} (protocol {})",
+                crate::RELEASE,
                 crate::PROTOCOL_VERSION
             ),
             SecureError::KeyChanged { expected, got } => write!(
@@ -431,7 +456,19 @@ impl SecureClient {
                 None
             }
             (ClientState::Hello { .. }, VERSION) if body.len() == 2 => {
-                self.fail(SecureError::Version { server: u16::from_le_bytes([body[0], body[1]]) });
+                self.fail(SecureError::Version { server: u16::from_le_bytes([body[0], body[1]]), release: None });
+                None
+            }
+            // With VERSION, before or after it: the same, and the server's release too.
+            (ClientState::Hello { .. } | ClientState::Failed, RELEASE) => {
+                let release = parse_release(body)?;
+                let server = u16::from_le_bytes([body[0], body[1]]);
+                match &self.error {
+                    None | Some(SecureError::Version { release: None, .. }) => {
+                        self.fail(SecureError::Version { server, release: Some(release) });
+                    }
+                    Some(_) => {}
+                }
                 None
             }
             (ClientState::Hello { hs, .. }, REPLY) => {
@@ -500,6 +537,8 @@ pub enum Received {
     Nothing,
     /// Send this back to the sender (a handshake step).
     Reply(Vec<u8>),
+    /// Send these back to the sender, in order (the answer to a HELLO on another protocol).
+    Replies(Vec<Vec<u8>>),
     /// A new session from this address (it replaces any earlier one), with the client's key.
     Connected {
         client: [u8; 32],
@@ -596,9 +635,14 @@ impl SecureServer {
                 }
                 let version = u16::from_le_bytes([body[4], body[5]]);
                 if version != crate::PROTOCOL_VERSION {
-                    let mut p = vec![VERSION];
-                    p.extend_from_slice(&crate::PROTOCOL_VERSION.to_le_bytes());
-                    return Received::Reply(p);
+                    let protocol = crate::PROTOCOL_VERSION.to_le_bytes();
+                    let mut v = vec![VERSION];
+                    v.extend_from_slice(&protocol);
+                    let mut r = vec![RELEASE];
+                    r.extend_from_slice(&protocol);
+                    r.extend_from_slice(crate::RELEASE.as_bytes());
+                    // Together still far smaller than the padded HELLO.
+                    return Received::Replies(vec![v, r]);
                 }
                 let cookie = &body[6..6 + COOKIE_LEN];
                 if !self.cookie_valid(from, cookie, now) {
@@ -789,10 +833,36 @@ mod tests {
         let mut client = SecureClient::new(&Identity::generate(), None);
         let mut hello = client.seal(b"").remove(0);
         hello[5..7].copy_from_slice(&(crate::PROTOCOL_VERSION - 1).to_le_bytes());
-        let Received::Reply(r) = server.receive(addr(1), &hello, 0.0) else { panic!() };
-        // The server's answer, as an older client would see it: reuse ours to read it.
-        client.receive(&r);
-        assert_eq!(client.error(), Some(&SecureError::Version { server: crate::PROTOCOL_VERSION }));
+        let Received::Replies(r) = server.receive(addr(1), &hello, 0.0) else { panic!() };
+        assert_eq!(r.len(), 2);
+        assert!(r.iter().map(Vec::len).sum::<usize>() < hello.len(), "no amplification");
+        // The server's answer, as another client would see it: reuse ours to read it.
+        let protocol = crate::PROTOCOL_VERSION;
+        let release = Some(crate::RELEASE.to_string());
+        // Clients before 0.17 read VERSION alone (and drop RELEASE, a kind they don't know).
+        assert_eq!(r[0], [vec![VERSION], protocol.to_le_bytes().to_vec()].concat(), "frozen");
+        client.receive(&r[0]);
+        assert_eq!(client.error(), Some(&SecureError::Version { server: protocol, release: None }));
+        client.receive(&r[1]);
+        assert_eq!(client.error(), Some(&SecureError::Version { server: protocol, release: release.clone() }));
+        // In either order.
+        let mut client = SecureClient::new(&Identity::generate(), None);
+        client.receive(&r[1]);
+        client.receive(&r[0]);
+        assert_eq!(client.error(), Some(&SecureError::Version { server: protocol, release }));
+        assert!(client.seal(b"x").is_empty());
+    }
+
+    #[test]
+    fn a_release_that_could_be_anything_is_ignored() {
+        for body in [&b""[..], b"\x1e\x00", b"\x1e\x00 0.17", b"\x1e\x000.17/../x", &[b'1'; 40]] {
+            let mut client = SecureClient::new(&Identity::generate(), None);
+            client.receive(&[&[RELEASE][..], body].concat());
+            assert_eq!(client.error(), None, "{body:?}");
+        }
+        let mut client = SecureClient::new(&Identity::generate(), None);
+        client.receive(b"\x07\x1e\x000.17.0-rc.1+abc");
+        assert_eq!(client.error(), Some(&SecureError::Version { server: 30, release: Some("0.17.0-rc.1+abc".into()) }));
     }
 
     #[test]

@@ -2,7 +2,9 @@ name: Release
 
 # M2 slice 6: on a version tag (or by hand), build the server, tools and Godot extension on every
 # desktop OS, export the client for Linux, Windows and macOS, check sizes against their budgets,
-# publish a GitHub release, and push the server image to the GitHub container registry.
+# publish a GitHub release with its signed manifest (latest.json, which clients check for
+# updates), move the `release` branch to it, and push the server image to the GitHub container
+# registry.
 
 on:
   push:
@@ -149,12 +151,55 @@ jobs:
         with:
           name: clients
           path: artifacts
+      # The release manifest clients check for updates (mftr_client::update): latest.json with
+      # each client archive's size and SHA-256, signed with the release key. The secret's public
+      # half must be the one clients carry (mftr-tools refuses another).
+      - name: Signed release manifest
+        env:
+          MFTR_RELEASE_KEY: ${{ secrets.MFTR_RELEASE_KEY }}
+        run: |
+          if [ -z "$MFTR_RELEASE_KEY" ]; then
+            echo "::error::The MFTR_RELEASE_KEY secret is missing: clients would never hear of this release. Add it (README, Releasing) and re-run."
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p tools
+          tar -xzf "artifacts/mftr-server-$version-linux-x86_64.tar.gz" -C tools --strip-components=1
+          tools/mftr-tools release-manifest artifacts | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/mftr-server-*
             artifacts/mftr-client-*
+            artifacts/latest.json
+            artifacts/latest.json.sig
           generate_release_notes: true
+
+  release-branch:
+    name: release branch
+    # Servers that follow `github:ilioscio/mftr/release` (NixOS: `nix flake update`) get a version
+    # only once its release is out, archives and latest.json included: never code from main
+    # that players can't download yet.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Move release to this tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Only forward: re-running an older tag's workflow leaves a newer release in place.
+          if git rev-parse -q --verify origin/release >/dev/null; then
+            current=$(git show origin/release:Cargo.toml | grep -m1 '^version' | cut -d'"' -f2)
+            if [ "$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -1)" != "$version" ]; then
+              echo "::notice::release is at $current, newer than $version: left there."
+              exit 0
+            fi
+          fi
+          git push --force origin "$GITHUB_SHA:refs/heads/release"
+          echo "release → $GITHUB_REF_NAME ($(git rev-parse --short "$GITHUB_SHA"))" | tee -a "$GITHUB_STEP_SUMMARY"
 
   image:
     name: server image

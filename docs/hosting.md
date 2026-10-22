@@ -13,9 +13,12 @@ a fresh Linux machine (a VPS or a spare PC).
 ## Quick start with Docker
 
 ```sh
-git clone https://github.com/ilioscio/mftr.git && cd mftr
+git clone -b release https://github.com/ilioscio/mftr.git && cd mftr
 docker compose -f deploy/compose.yaml up -d
 ```
+
+The `release` branch is the newest release (see [Updating](#updating)); `git pull` and the same
+`docker compose ... up -d --build` move to the next one.
 
 This builds the server image and starts it on UDP 7777, recording every match. Players type
 `your.server.address:7777` into the client's start menu (it remembers the servers they joined),
@@ -66,7 +69,7 @@ configuration:
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     mftr = {
-      url = "github:ilioscio/mftr";
+      url = "github:ilioscio/mftr/release";   # the newest release (see Updating)
       inputs.nixpkgs.follows = "nixpkgs";   # build with your nixpkgs (needs Rust 1.88+)
     };
   };
@@ -88,14 +91,16 @@ configuration:
 ```
 
 `nixos-rebuild switch` builds the server from source and starts `mftr.service`. To deploy
-the newest version, update the input and rebuild; the service restarts on the new build:
+the newest release, update the input and rebuild; the service restarts on the new build:
 
 ```sh
 nix flake update mftr && sudo nixos-rebuild switch --flake .#myserver
 ```
 
 To test a branch, point the input at it (`url = "github:ilioscio/mftr/my-branch";`), or at a
-local checkout with `--override-input mftr path:/home/me/mftr`.
+local checkout with `--override-input mftr path:/home/me/mftr`. Players can only join a server
+on their own protocol, so a server on `main` turns away everyone on the latest release whenever
+main has a wire change the release doesn't.
 
 A fuller setup: the main server with the modes you want, plus the Duel Sandbox and the dodge
 rig as servers of their own.
@@ -268,3 +273,18 @@ out first. They all share the one process and port; `--max-matches` caps them, a
   and ready up, or wait out the 60 s countdown once a human has joined.
 - **No replay files:** a match's file is written once a minute; in Docker, the directory must
   be inside the `/data` volume.
+
+## Updating
+
+Follow the `release` branch, not `main`. The release workflow moves `release` to a version's tag
+once that release is published, with its client downloads and the manifest clients check for
+updates. A server updated from it never runs a version players can't download yet: NixOS hosts
+with the input above get it from `nix flake update mftr`, Docker hosts from `git pull` in a
+checkout of `release`.
+
+Players see a version mismatch plainly. A client on another protocol is turned away, and from
+0.17 on the server tells it which release it runs: the player reads *"This server runs MFTR
+0.17.0, and you have 0.16.1"* with a button to get it (the download on Windows and macOS, the
+release page on Linux). Clients also check for a newer release when they start and say so in
+the start menu. `mftr-server --version` prints the server's release and protocol; the startup
+log has them too.
