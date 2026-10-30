@@ -8,9 +8,10 @@
 //! carries ([`RELEASE_KEY`]): a manifest that doesn't verify is ignored, so the only one a client
 //! acts on is one the release workflow signed.
 //!
-//! On Windows and macOS the notice comes with the new archive's download (the browser fetches
-//! it; the player unpacks it, or drags the app in, as on the first install). Linux players
-//! update through their package manager or the flake, so they get the release page instead.
+//! On Windows the client installs the new archive itself (`selfupdate`). On macOS the notice
+//! comes with its download (the browser fetches it; the player drags the app in, as on the first
+//! install). Linux players update through their package manager or the flake, so they get the
+//! release page instead.
 
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use nanoserde::{DeJson, SerJson};
@@ -46,6 +47,12 @@ pub fn platform() -> &'static str {
 /// their package manager or the flake).
 pub fn offers_download(platform: &str) -> bool {
     matches!(platform, "windows" | "macos")
+}
+
+/// Whether the client installs a newer release itself (Windows: `selfupdate`). macOS players
+/// install the download as they did the first one.
+pub fn updates_itself(platform: &str) -> bool {
+    platform == "windows"
 }
 
 /// The client archive of `version` for `platform`, as `scripts/package-client.sh` names it.

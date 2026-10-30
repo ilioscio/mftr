@@ -140,7 +140,11 @@ func _ready() -> void:
 	add_child(client)
 	updates = preload("res://scripts/updates.gd").new()
 	add_child(updates)
-	updates.checked.connect(func(_info): _fill_update_notice())
+	updates.checked.connect(func(_info):
+		_fill_update_notice()
+		if _update_at_once and _self_update():
+			_update_now(PackedStringArray()))
+	updates.progress.connect(_on_update_progress)
 	var address := ""
 	_load_menu_choices()  # command-line flags below override them
 	var args := OS.get_cmdline_user_args()
@@ -302,6 +306,11 @@ func _ready() -> void:
 			blind_auto = true
 		elif args[i] == "--update-manifest" and i + 1 < args.size():
 			updates.manifest_url = args[i + 1]
+			i += 1
+		elif args[i] == "--update-now":
+			_update_at_once = true
+		elif args[i] == "--update-install-dir" and i + 1 < args.size():
+			updates.set_install_dir(args[i + 1])
 			i += 1
 		elif args[i] == "--no-update-check":
 			_update_check = false
@@ -6036,6 +6045,10 @@ var connecting_get: Button              # "Get MFTR x": a server on a newer vers
 var updates: Node                       # updates.gd: is a newer release out?
 var _update_check := true               # `--no-update-check`: don't ask GitHub
 var menu_update: VBoxContainer          # the start menu's "newer release" notice
+var menu_update_label: Label
+var _update_status := ""                # what the update is doing (Windows), or why it stopped
+var _update_failed := false             # then the buttons offer the download instead
+var _update_at_once := false            # `--update-now`: press Update as soon as it's offered (testing)
 
 
 func _load_servers() -> Array:
@@ -6233,10 +6246,10 @@ func _show_menu(error: String) -> void:
 			_menu_join(servers[0].get("address", ""))
 
 
-## A newer release is out (updates.gd): say so at the top of the start menu. On Windows and macOS
-## with its download (the browser fetches the archive); Linux players update through their package
-## manager or the flake, so they get its release page. Filled when the menu opens, and again when
-## the check answers.
+## A newer release is out (updates.gd): say so at the top of the start menu. On Windows with an
+## Update button (the game installs it and restarts); on macOS with its download (the browser
+## fetches the archive); Linux players update through their package manager or the flake, so they
+## get its release page. Filled when the menu opens, and again when the check answers.
 func _fill_update_notice() -> void:
 	if menu_update == null or not is_instance_valid(menu_update):
 		return
@@ -6251,19 +6264,64 @@ func _fill_update_notice() -> void:
 	text.text = "MFTR %s is out (you have %s)." % [version, MftrRelease.current()]
 	if not MftrRelease.offers_download():
 		text.text += " Update it through your package manager or the flake."
+	if _update_status != "":
+		text.text += "\n" + _update_status
 	text.theme_type_variation = "HeaderLabel"
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(text)
-	var url: String = updates.info["download"] if MftrRelease.offers_download() else updates.info["page"]
+	menu_update_label = text
 	var get := Button.new()
-	get.text = "Download" if MftrRelease.offers_download() else "Release Page"
 	get.theme_type_variation = "PrimaryButton"
-	get.tooltip_text = url
-	get.pressed.connect(func(): OS.shell_open(url))
+	if _self_update():
+		get.text = "Update"
+		get.tooltip_text = "Download MFTR %s, install it over this one and restart (your settings stay)" % version
+		get.pressed.connect(func():
+			get.disabled = true
+			_update_now(PackedStringArray()))
+	else:
+		var url: String = updates.info["download"] if MftrRelease.offers_download() else updates.info["page"]
+		get.text = "Download" if MftrRelease.offers_download() else "Release Page"
+		get.tooltip_text = url
+		get.pressed.connect(func(): OS.shell_open(url))
 	row.add_child(get)
 	menu_update.add_child(row)
 	menu_update.add_child(HSeparator.new())
+
+
+## Whether the newer release installs itself here (Windows), and the last try didn't fail.
+func _self_update() -> bool:
+	return updates.can_update_itself() and not _update_failed
+
+
+## Install the newer release and restart into it with `args` (the server to join again).
+func _update_now(args: PackedStringArray) -> void:
+	_update_status = ""
+	var err: String = await updates.update_now(args)
+	if err != "":
+		_update_failed = true
+		_fill_update_notice()
+
+
+func _on_update_progress(text: String) -> void:
+	_update_status = text
+	if menu_update_label != null and is_instance_valid(menu_update_label):
+		var version: String = updates.newer_version()
+		menu_update_label.text = "MFTR %s is out (you have %s).\n%s" % [version, MftrRelease.current(), text]
+
+
+## Whether `version` (the one a server turned us away for) installs itself here: the newest
+## release, on Windows. A server on an older one than the newest gets the download instead.
+func _installs_itself(version: String) -> bool:
+	return version != "" and version == updates.newer_version() and _self_update()
+
+
+func _on_connecting_get() -> void:
+	var newer := _release_to_get()
+	if _installs_itself(newer):
+		_update_now(PackedStringArray([_server_address]))
+	else:
+		OS.shell_open(_link_to(newer))
 
 
 ## Where to get `version`: its download on Windows and macOS, its release page on Linux.
@@ -6338,7 +6396,7 @@ func _update_connecting(phase: String) -> void:
 		connecting_get = Button.new()
 		connecting_get.theme_type_variation = "PrimaryButton"
 		connecting_get.visible = false
-		connecting_get.pressed.connect(func(): OS.shell_open(_link_to(_release_to_get())))
+		connecting_get.pressed.connect(_on_connecting_get)
 		v.add_child(connecting_get)
 		var cancel := Button.new()
 		cancel.text = "Back to the server list"
@@ -6348,11 +6406,18 @@ func _update_connecting(phase: String) -> void:
 	var err: String = client.last_error()
 	var head := "Can't play on %s" if client.version_mismatch() else "Connecting to %s…"
 	connecting_label.text = (head % _server_address) + (("\n\n" + err) if err != "" else "")
+	if _update_status != "":
+		connecting_label.text += "\n\n" + _update_status
 	connecting_trust.visible = not client.key_conflict().is_empty()
 	var newer := _release_to_get()
 	connecting_get.visible = newer != ""
-	connecting_get.text = ("Get MFTR %s" % newer) if MftrRelease.offers_download() else "Release Page"
-	connecting_get.tooltip_text = _link_to(newer) if newer != "" else ""
+	connecting_get.disabled = updates.updating()
+	if _installs_itself(newer):
+		connecting_get.text = "Update to MFTR %s" % newer
+		connecting_get.tooltip_text = "Install MFTR %s over this one, restart and join %s again" % [newer, _server_address]
+	else:
+		connecting_get.text = ("Get MFTR %s" % newer) if MftrRelease.offers_download() else "Release Page"
+		connecting_get.tooltip_text = _link_to(newer) if newer != "" else ""
 	_center(connecting_panel)
 	if _shot_trust and connecting_trust.visible:
 		_shot_trust = false

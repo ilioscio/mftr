@@ -34,6 +34,7 @@ pub mod effects;
 pub mod ground;
 pub mod missiles;
 pub mod recap;
+pub mod selfupdate;
 pub mod update;
 use effects::EffectBook;
 pub use effects::{AreaRender, BoltRender};
