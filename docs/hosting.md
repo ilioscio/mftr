@@ -284,7 +284,8 @@ checkout of `release`.
 
 Players see a version mismatch plainly. A client on another protocol is turned away, and from
 0.17 on the server tells it which release it runs: the player reads *"This server runs MFTR
-0.17.0, and you have 0.16.1"* with a button to get it (the download on Windows and macOS, the
-release page on Linux). Clients also check for a newer release when they start and say so in
-the start menu. `mftr-server --version` prints the server's release and protocol; the startup
+0.17.0, and you have 0.16.1"*, on Windows and macOS with a button that downloads it (Linux
+players update through their package manager or the flake, so theirs opens the release page).
+Clients also check for a newer release when they start and say so in the start menu, the same
+way. `mftr-server --version` prints the server's release and protocol; the startup
 log has them too.

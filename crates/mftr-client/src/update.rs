@@ -8,9 +8,9 @@
 //! carries ([`RELEASE_KEY`]): a manifest that doesn't verify is ignored, so the only one a client
 //! acts on is one the release workflow signed.
 //!
-//! On Windows and macOS the client will update itself from the manifest's archive; Linux
-//! players update through their package manager (or a new download), so they get the notice
-//! only.
+//! On Windows and macOS the notice comes with the new archive's download (the browser fetches
+//! it; the player unpacks it, or drags the app in, as on the first install). Linux players
+//! update through their package manager or the flake, so they get the release page instead.
 
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use nanoserde::{DeJson, SerJson};
@@ -42,8 +42,9 @@ pub fn platform() -> &'static str {
     }
 }
 
-/// Whether the client updates itself here (Linux players use their package manager).
-pub fn updates_itself(platform: &str) -> bool {
+/// Whether the client offers a newer release's download here (Linux players update through
+/// their package manager or the flake).
+pub fn offers_download(platform: &str) -> bool {
     matches!(platform, "windows" | "macos")
 }
 
@@ -58,14 +59,12 @@ pub fn release_page(version: &str) -> String {
     format!("https://github.com/{REPOSITORY}/releases/tag/v{version}")
 }
 
-/// Where to get `version` on `platform`: the archive itself on Windows and macOS (one click
-/// starts the download), the release page on Linux.
-pub fn download_link(version: &str, platform: &str) -> String {
-    if updates_itself(platform) {
+/// The archive of `version` to download on `platform` (one click starts the download); none on
+/// Linux (its players get the release page).
+pub fn download_link(version: &str, platform: &str) -> Option<String> {
+    offers_download(platform).then(|| {
         format!("https://github.com/{REPOSITORY}/releases/download/v{version}/{}", archive_name(version, platform))
-    } else {
-        release_page(version)
-    }
+    })
 }
 
 /// A release version, `major.minor.patch`.
@@ -286,10 +285,14 @@ mod tests {
     fn links_and_platforms() {
         assert_eq!(release_page("0.17.0"), "https://github.com/ilioscio/mftr/releases/tag/v0.17.0");
         assert_eq!(
-            download_link("0.17.0", "windows"),
-            "https://github.com/ilioscio/mftr/releases/download/v0.17.0/mftr-client-0.17.0-windows.zip"
+            download_link("0.17.0", "windows").as_deref(),
+            Some("https://github.com/ilioscio/mftr/releases/download/v0.17.0/mftr-client-0.17.0-windows.zip")
         );
-        assert_eq!(download_link("0.17.0", "linux"), release_page("0.17.0"));
+        assert_eq!(
+            download_link("0.17.0", "macos").as_deref(),
+            Some("https://github.com/ilioscio/mftr/releases/download/v0.17.0/mftr-client-0.17.0-macos.zip")
+        );
+        assert_eq!(download_link("0.17.0", "linux"), None, "Linux players update through their package manager");
         assert!(PLATFORMS.contains(&platform()));
         assert!(MANIFEST_URL.contains(REPOSITORY) && MANIFEST_URL.ends_with(MANIFEST_FILE));
         assert_eq!(SIGNATURE_FILE, format!("{MANIFEST_FILE}.sig"));

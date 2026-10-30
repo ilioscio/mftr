@@ -25,11 +25,11 @@ impl MftrRelease {
         update::platform().into()
     }
 
-    /// Whether this client updates itself (Windows and macOS); Linux players use their package
-    /// manager.
+    /// Whether this client offers a newer release's download (Windows and macOS); Linux players
+    /// update through their package manager or the flake, and get the release page instead.
     #[func]
-    fn updates_itself() -> bool {
-        update::updates_itself(update::platform())
+    fn offers_download() -> bool {
+        update::offers_download(update::platform())
     }
 
     /// The newest release's `latest.json` (its signature is at this + ".sig").
@@ -40,7 +40,7 @@ impl MftrRelease {
 
     /// Check a fetched manifest: `{ version, protocol, newer, page, download }` when its
     /// signature is the release key's (`newer`: newer than this build; `download`: this
-    /// platform's link, see `download_link`), else `{ error }`.
+    /// platform's archive, empty on Linux), else `{ error }`.
     #[func]
     fn check(json: PackedByteArray, signature: PackedByteArray) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -51,7 +51,8 @@ impl MftrRelease {
                 d.set("protocol", m.protocol as i64);
                 d.set("newer", update::is_newer(&m.version, mftr_net::RELEASE));
                 d.set("page", m.notes.as_str());
-                d.set("download", update::download_link(&m.version, update::platform()).as_str());
+                let download = update::download_link(&m.version, update::platform()).unwrap_or_default();
+                d.set("download", download.as_str());
             }
             Err(e) => d.set("error", e.to_string().as_str()),
         }
@@ -64,14 +65,24 @@ impl MftrRelease {
         update::is_newer(&release.to_string(), mftr_net::RELEASE)
     }
 
-    /// Where to get `release` here: its archive on Windows and macOS, its release page on Linux
-    /// (empty unless it's a `major.minor.patch` version).
+    /// `release`'s archive for this platform (empty on Linux, and unless it's a
+    /// `major.minor.patch` version).
     #[func]
     fn download_link(release: GString) -> GString {
         let release = release.to_string();
         if update::Version::parse(&release).is_none() {
             return GString::new();
         }
-        GString::from(&update::download_link(&release, update::platform()))
+        GString::from(&update::download_link(&release, update::platform()).unwrap_or_default())
+    }
+
+    /// `release`'s page on GitHub (empty unless it's a `major.minor.patch` version).
+    #[func]
+    fn release_page(release: GString) -> GString {
+        let release = release.to_string();
+        if update::Version::parse(&release).is_none() {
+            return GString::new();
+        }
+        GString::from(&update::release_page(&release))
     }
 }
