@@ -432,14 +432,14 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mftr-bots"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "mftr-sim",
 ]
 
 [[package]]
 name = "mftr-client"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "ed25519-dalek",
  "flate2",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "mftr-gdext"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "godot",
  "mftr-client",
@@ -463,7 +463,7 @@ dependencies = [
 
 [[package]]
 name = "mftr-net"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "blake2",
  "curve25519-dalek",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "mftr-pack"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "lewton",
  "mftr-sim",
@@ -483,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "mftr-server"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "mftr-bots",
  "mftr-net",
@@ -492,11 +492,11 @@ dependencies = [
 
 [[package]]
 name = "mftr-sim"
-version = "0.17.1"
+version = "0.18.0"
 
 [[package]]
 name = "mftr-tools"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "getrandom 0.3.4",
  "mftr-bots",
