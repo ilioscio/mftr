@@ -14,6 +14,11 @@ pub mod secure;
 /// Bumped on any wire-format change. Client and server must match exactly.
 pub const PROTOCOL_VERSION: u16 = 30;
 
+/// The release this build belongs to ("0.16.1"): the workspace version, the same in the client,
+/// the server and the tools. A server tells it to clients on another protocol, so their players
+/// learn which version to get.
+pub const RELEASE: &str = env!("CARGO_PKG_VERSION");
+
 /// Packets above this size are a bug (IPv6-safe, see 03b §1).
 pub const MAX_PACKET_BYTES: usize = 1200;
 

@@ -24,6 +24,7 @@ use std::time::Instant;
 mod itemtext;
 mod maps;
 mod model;
+mod release;
 
 struct MftrExtension;
 
@@ -343,6 +344,22 @@ impl MatchClient {
             d.set("now", now.to_string().as_str());
         }
         d
+    }
+
+    /// The server runs another version of the game (another protocol), so it turned us away.
+    #[func]
+    fn version_mismatch(&self) -> bool {
+        matches!(self.secure.as_ref().and_then(|s| s.error()), Some(SecureError::Version { .. }))
+    }
+
+    /// The release of a server that runs another version ("0.17.0"), when it said (servers from
+    /// 0.17 on do); empty otherwise.
+    #[func]
+    fn server_release(&self) -> GString {
+        match self.secure.as_ref().and_then(|s| s.error()) {
+            Some(SecureError::Version { release: Some(r), .. }) => r.as_str().into(),
+            _ => GString::new(),
+        }
     }
 
     /// Replace the saved key for the server in conflict with the one it showed, so the next
@@ -2029,15 +2046,30 @@ impl MatchClient {
     fn check_transport(&mut self) {
         let Some(secure) = &self.secure else { return };
         if let Some(e) = secure.error() {
-            let mut text = e.to_string();
-            if let SecureError::KeyChanged { expected, got } = e {
-                self.key_conflict = Some((*expected, *got));
-                text = format!(
-                    "This server's identity key changed since you last played on it (saved {expected}, now {got}). \
-                     That happens when its host replaces the key or reinstalls the server; it can also mean \
-                     something is pretending to be this server. Trust the new key only if you expected the change."
-                );
-            }
+            let (ours, protocol) = (mftr_net::RELEASE, mftr_net::PROTOCOL_VERSION);
+            let text = match e {
+                // Servers from 0.17 on say which release they run.
+                SecureError::Version { release: Some(theirs), .. } if mftr_client::update::is_newer(theirs, ours) => {
+                    format!("This server runs MFTR {theirs}, and you have {ours}: get {theirs} to play here.")
+                }
+                SecureError::Version { release: Some(theirs), .. } if mftr_client::update::is_newer(ours, theirs) => {
+                    format!(
+                        "This server runs MFTR {theirs}, older than yours ({ours}): it has to update before you can play here."
+                    )
+                }
+                SecureError::Version { server, .. } => format!(
+                    "This server runs another version of MFTR (protocol {server}; you have {ours}, protocol {protocol}). \
+                     Update the game, or ask the server's host to update it."
+                ),
+                SecureError::KeyChanged { expected, got } => {
+                    self.key_conflict = Some((*expected, *got));
+                    format!(
+                        "This server's identity key changed since you last played on it (saved {expected}, now {got}). \
+                         That happens when its host replaces the key or reinstalls the server; it can also mean \
+                         something is pretending to be this server. Trust the new key only if you expected the change."
+                    )
+                }
+            };
             self.last_error = GString::from(&text);
         } else if !self.trusted
             && secure.is_open()

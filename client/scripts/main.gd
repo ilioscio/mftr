@@ -138,6 +138,9 @@ func _ready() -> void:
 	add_child(sfx)
 	client = MatchClient.new()
 	add_child(client)
+	updates = preload("res://scripts/updates.gd").new()
+	add_child(updates)
+	updates.checked.connect(func(_info): _fill_update_notice())
 	var address := ""
 	_load_menu_choices()  # command-line flags below override them
 	var args := OS.get_cmdline_user_args()
@@ -297,6 +300,11 @@ func _ready() -> void:
 			client.set_spectate(true)
 		elif args[i] == "--blind-auto":
 			blind_auto = true
+		elif args[i] == "--update-manifest" and i + 1 < args.size():
+			updates.manifest_url = args[i + 1]
+			i += 1
+		elif args[i] == "--no-update-check":
+			_update_check = false
 		elif args[i] == "--champion" and i + 1 < args.size():
 			if not client.set_champion(args[i + 1]):
 				push_error("MFTR: unknown champion %s" % args[i + 1])
@@ -307,6 +315,11 @@ func _ready() -> void:
 		i += 1
 	if blind_enabled:
 		_menu_mode = 2
+	# Is a newer release out? Not for scripted captures and headless runs, unless they name a
+	# manifest to check.
+	var scripted := _shot_path != "" or _lineup != "" or DisplayServer.get_name() == "headless"
+	if _update_check and (not scripted or updates.manifest_url != MftrRelease.manifest_url()):
+		updates.start()
 	if _lineup != "":
 		_start_lineup.call_deferred()
 	elif _start_editor:
@@ -6019,6 +6032,10 @@ var pause_panel: PanelContainer
 var connecting_panel: PanelContainer
 var connecting_label: Label
 var connecting_trust: Button
+var connecting_get: Button              # "Get MFTR x": a server on a newer version turned us away
+var updates: Node                       # updates.gd: is a newer release out?
+var _update_check := true               # `--no-update-check`: don't ask GitHub
+var menu_update: VBoxContainer          # the start menu's "newer release" notice
 
 
 func _load_servers() -> Array:
@@ -6104,6 +6121,9 @@ func _show_menu(error: String) -> void:
 	title.text = "Play"
 	title.theme_type_variation = "TitleLabel"
 	v.add_child(title)
+	menu_update = VBoxContainer.new()
+	v.add_child(menu_update)
+	_fill_update_notice()
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
@@ -6195,6 +6215,11 @@ func _show_menu(error: String) -> void:
 	quit.text = "Quit"
 	quit.pressed.connect(func(): get_tree().quit())
 	v.add_child(quit)
+	var version := Label.new()
+	version.text = "MFTR %s" % MftrRelease.current()
+	version.theme_type_variation = "HintLabel"
+	version.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	v.add_child(version)
 	await get_tree().process_frame
 	if menu_panel != null:
 		_center(menu_panel)
@@ -6206,6 +6231,49 @@ func _show_menu(error: String) -> void:
 			_auto_queue_key = servers[0].get("queue", "")
 			await get_tree().create_timer(1.0).timeout
 			_menu_join(servers[0].get("address", ""))
+
+
+## A newer release is out (updates.gd): say so at the top of the start menu, with the way to get
+## it: its download on Windows and macOS, its release page on Linux (whose players update through
+## their package manager). Filled when the menu opens, and again when the check answers.
+func _fill_update_notice() -> void:
+	if menu_update == null or not is_instance_valid(menu_update):
+		return
+	for c in menu_update.get_children():
+		c.queue_free()
+	var version: String = updates.newer_version()
+	if version == "":
+		return
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	var text := Label.new()
+	text.text = "MFTR %s is out (you have %s)." % [version, MftrRelease.current()]
+	if not MftrRelease.updates_itself():
+		text.text += " Update it through your package manager, or get it from its release page."
+	text.theme_type_variation = "HeaderLabel"
+	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(text)
+	var get := Button.new()
+	get.text = "Download" if MftrRelease.updates_itself() else "Release page"
+	get.theme_type_variation = "PrimaryButton"
+	get.tooltip_text = updates.info["download"]
+	get.pressed.connect(func(): OS.shell_open(updates.info["download"]))
+	row.add_child(get)
+	menu_update.add_child(row)
+	menu_update.add_child(HSeparator.new())
+
+
+## The release to get to play on the server that just turned us away for our version: the one it
+## runs when that's newer (servers from 0.17 on say), else the newest release when it's newer
+## than ours. Empty when there's none (the server is the one behind).
+func _release_to_get() -> String:
+	if not client.version_mismatch():
+		return ""
+	var theirs: String = client.server_release()
+	if theirs != "":
+		return theirs if MftrRelease.is_newer(theirs) else ""
+	return updates.newer_version()
 
 
 ## The map editor (12), over everything; closing it brings the menu back.
@@ -6259,14 +6327,25 @@ func _update_connecting(phase: String) -> void:
 		connecting_trust.visible = false
 		connecting_trust.pressed.connect(_trust_new_key)
 		v.add_child(connecting_trust)
+		# A server on a newer version: one click to get it.
+		connecting_get = Button.new()
+		connecting_get.theme_type_variation = "PrimaryButton"
+		connecting_get.visible = false
+		connecting_get.pressed.connect(func(): OS.shell_open(MftrRelease.download_link(_release_to_get())))
+		v.add_child(connecting_get)
 		var cancel := Button.new()
 		cancel.text = "Back to the server list"
 		connecting_label.theme_type_variation = "HeaderLabel"
 		cancel.pressed.connect(_leave)
 		v.add_child(cancel)
 	var err: String = client.last_error()
-	connecting_label.text = "Connecting to %s…%s" % [_server_address, ("\n\n" + err) if err != "" else ""]
+	var head := "Can't play on %s" if client.version_mismatch() else "Connecting to %s…"
+	connecting_label.text = (head % _server_address) + (("\n\n" + err) if err != "" else "")
 	connecting_trust.visible = not client.key_conflict().is_empty()
+	var newer := _release_to_get()
+	connecting_get.visible = newer != ""
+	connecting_get.text = "Get MFTR %s" % newer
+	connecting_get.tooltip_text = MftrRelease.download_link(newer) if newer != "" else ""
 	_center(connecting_panel)
 	if _shot_trust and connecting_trust.visible:
 		_shot_trust = false
