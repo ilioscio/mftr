@@ -26,7 +26,7 @@ impl MftrRelease {
     }
 
     /// Whether this client offers a newer release's download (Windows and macOS); Linux players
-    /// update through their package manager or the flake, and get the notice only.
+    /// update through their package manager or the flake, and get the release page instead.
     #[func]
     fn offers_download() -> bool {
         update::offers_download(update::platform())
@@ -74,5 +74,15 @@ impl MftrRelease {
             return GString::new();
         }
         GString::from(&update::download_link(&release, update::platform()).unwrap_or_default())
+    }
+
+    /// `release`'s page on GitHub (empty unless it's a `major.minor.patch` version).
+    #[func]
+    fn release_page(release: GString) -> GString {
+        let release = release.to_string();
+        if update::Version::parse(&release).is_none() {
+            return GString::new();
+        }
+        GString::from(&update::release_page(&release))
     }
 }

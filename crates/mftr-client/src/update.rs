@@ -10,7 +10,7 @@
 //!
 //! On Windows and macOS the notice comes with the new archive's download (the browser fetches
 //! it; the player unpacks it, or drags the app in, as on the first install). Linux players
-//! update through their package manager or the flake, so they get the notice only.
+//! update through their package manager or the flake, so they get the release page instead.
 
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use nanoserde::{DeJson, SerJson};
@@ -60,7 +60,7 @@ pub fn release_page(version: &str) -> String {
 }
 
 /// The archive of `version` to download on `platform` (one click starts the download); none on
-/// Linux.
+/// Linux (its players get the release page).
 pub fn download_link(version: &str, platform: &str) -> Option<String> {
     offers_download(platform).then(|| {
         format!("https://github.com/{REPOSITORY}/releases/download/v{version}/{}", archive_name(version, platform))

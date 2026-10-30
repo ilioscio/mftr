@@ -6235,7 +6235,7 @@ func _show_menu(error: String) -> void:
 
 ## A newer release is out (updates.gd): say so at the top of the start menu. On Windows and macOS
 ## with its download (the browser fetches the archive); Linux players update through their package
-## manager or the flake, so they get the notice only. Filled when the menu opens, and again when
+## manager or the flake, so they get its release page. Filled when the menu opens, and again when
 ## the check answers.
 func _fill_update_notice() -> void:
 	if menu_update == null or not is_instance_valid(menu_update):
@@ -6255,15 +6255,20 @@ func _fill_update_notice() -> void:
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(text)
-	if MftrRelease.offers_download():
-		var get := Button.new()
-		get.text = "Download"
-		get.theme_type_variation = "PrimaryButton"
-		get.tooltip_text = updates.info["download"]
-		get.pressed.connect(func(): OS.shell_open(updates.info["download"]))
-		row.add_child(get)
+	var url: String = updates.info["download"] if MftrRelease.offers_download() else updates.info["page"]
+	var get := Button.new()
+	get.text = "Download" if MftrRelease.offers_download() else "Release Page"
+	get.theme_type_variation = "PrimaryButton"
+	get.tooltip_text = url
+	get.pressed.connect(func(): OS.shell_open(url))
+	row.add_child(get)
 	menu_update.add_child(row)
 	menu_update.add_child(HSeparator.new())
+
+
+## Where to get `version`: its download on Windows and macOS, its release page on Linux.
+func _link_to(version: String) -> String:
+	return MftrRelease.download_link(version) if MftrRelease.offers_download() else MftrRelease.release_page(version)
 
 
 ## The release to get to play on the server that just turned us away for our version: the one it
@@ -6329,11 +6334,11 @@ func _update_connecting(phase: String) -> void:
 		connecting_trust.visible = false
 		connecting_trust.pressed.connect(_trust_new_key)
 		v.add_child(connecting_trust)
-		# A server on a newer version: one click to get it (not on Linux: the package manager).
+		# A server on a newer version: one click to get it (its release page on Linux).
 		connecting_get = Button.new()
 		connecting_get.theme_type_variation = "PrimaryButton"
 		connecting_get.visible = false
-		connecting_get.pressed.connect(func(): OS.shell_open(MftrRelease.download_link(_release_to_get())))
+		connecting_get.pressed.connect(func(): OS.shell_open(_link_to(_release_to_get())))
 		v.add_child(connecting_get)
 		var cancel := Button.new()
 		cancel.text = "Back to the server list"
@@ -6345,9 +6350,9 @@ func _update_connecting(phase: String) -> void:
 	connecting_label.text = (head % _server_address) + (("\n\n" + err) if err != "" else "")
 	connecting_trust.visible = not client.key_conflict().is_empty()
 	var newer := _release_to_get()
-	connecting_get.visible = newer != "" and MftrRelease.offers_download()
-	connecting_get.text = "Get MFTR %s" % newer
-	connecting_get.tooltip_text = MftrRelease.download_link(newer) if newer != "" else ""
+	connecting_get.visible = newer != ""
+	connecting_get.text = ("Get MFTR %s" % newer) if MftrRelease.offers_download() else "Release Page"
+	connecting_get.tooltip_text = _link_to(newer) if newer != "" else ""
 	_center(connecting_panel)
 	if _shot_trust and connecting_trust.visible:
 		_shot_trust = false
