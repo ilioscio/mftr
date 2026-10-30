@@ -6233,9 +6233,10 @@ func _show_menu(error: String) -> void:
 			_menu_join(servers[0].get("address", ""))
 
 
-## A newer release is out (updates.gd): say so at the top of the start menu, with the way to get
-## it: its download on Windows and macOS, its release page on Linux (whose players update through
-## their package manager). Filled when the menu opens, and again when the check answers.
+## A newer release is out (updates.gd): say so at the top of the start menu. On Windows and macOS
+## with its download (the browser fetches the archive); Linux players update through their package
+## manager or the flake, so they get the notice only. Filled when the menu opens, and again when
+## the check answers.
 func _fill_update_notice() -> void:
 	if menu_update == null or not is_instance_valid(menu_update):
 		return
@@ -6248,18 +6249,19 @@ func _fill_update_notice() -> void:
 	row.add_theme_constant_override("separation", 12)
 	var text := Label.new()
 	text.text = "MFTR %s is out (you have %s)." % [version, MftrRelease.current()]
-	if not MftrRelease.updates_itself():
-		text.text += " Update it through your package manager, or get it from its release page."
+	if not MftrRelease.offers_download():
+		text.text += " Update it through your package manager or the flake."
 	text.theme_type_variation = "HeaderLabel"
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(text)
-	var get := Button.new()
-	get.text = "Download" if MftrRelease.updates_itself() else "Release page"
-	get.theme_type_variation = "PrimaryButton"
-	get.tooltip_text = updates.info["download"]
-	get.pressed.connect(func(): OS.shell_open(updates.info["download"]))
-	row.add_child(get)
+	if MftrRelease.offers_download():
+		var get := Button.new()
+		get.text = "Download"
+		get.theme_type_variation = "PrimaryButton"
+		get.tooltip_text = updates.info["download"]
+		get.pressed.connect(func(): OS.shell_open(updates.info["download"]))
+		row.add_child(get)
 	menu_update.add_child(row)
 	menu_update.add_child(HSeparator.new())
 
@@ -6327,7 +6329,7 @@ func _update_connecting(phase: String) -> void:
 		connecting_trust.visible = false
 		connecting_trust.pressed.connect(_trust_new_key)
 		v.add_child(connecting_trust)
-		# A server on a newer version: one click to get it.
+		# A server on a newer version: one click to get it (not on Linux: the package manager).
 		connecting_get = Button.new()
 		connecting_get.theme_type_variation = "PrimaryButton"
 		connecting_get.visible = false
@@ -6343,7 +6345,7 @@ func _update_connecting(phase: String) -> void:
 	connecting_label.text = (head % _server_address) + (("\n\n" + err) if err != "" else "")
 	connecting_trust.visible = not client.key_conflict().is_empty()
 	var newer := _release_to_get()
-	connecting_get.visible = newer != ""
+	connecting_get.visible = newer != "" and MftrRelease.offers_download()
 	connecting_get.text = "Get MFTR %s" % newer
 	connecting_get.tooltip_text = MftrRelease.download_link(newer) if newer != "" else ""
 	_center(connecting_panel)

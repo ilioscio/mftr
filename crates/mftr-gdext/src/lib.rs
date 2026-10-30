@@ -2050,7 +2050,13 @@ impl MatchClient {
             let text = match e {
                 // Servers from 0.17 on say which release they run.
                 SecureError::Version { release: Some(theirs), .. } if mftr_client::update::is_newer(theirs, ours) => {
-                    format!("This server runs MFTR {theirs}, and you have {ours}: get {theirs} to play here.")
+                    if mftr_client::update::offers_download(mftr_client::update::platform()) {
+                        format!("This server runs MFTR {theirs}, and you have {ours}: get {theirs} to play here.")
+                    } else {
+                        format!(
+                            "This server runs MFTR {theirs}, and you have {ours}: update to {theirs} (through your                              package manager or the flake) to play here."
+                        )
+                    }
                 }
                 SecureError::Version { release: Some(theirs), .. } if mftr_client::update::is_newer(ours, theirs) => {
                     format!(
