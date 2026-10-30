@@ -13,6 +13,11 @@ mftr-net.workspace = true
 # the transport already has).
 nanoserde = { version = "0.2", default-features = false, features = ["json", "std"] }
 ed25519-dalek = { version = "2.1", default-features = false }
+# The Windows self-update (`selfupdate`): the archive's SHA-256, and unpacking it (deflate only,
+# in pure Rust).
+sha2 = "0.10"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 [lints]
 workspace = true

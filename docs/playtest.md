@@ -16,9 +16,10 @@ And which own-missile display (A or B) and minion setting feels better? (Decisio
    address the organizer gave you, set **Join as** to **Blind playtest**, and press **Join**.
    The part after `#` in the address is the server's key fingerprint: with it, the client only
    talks to that server. The client remembers the server for next time. When a newer version is
-   out, the start menu says so (on Windows and macOS with a Download button: unpack it, or on
-   macOS drag the app in, as the first time; on Linux with its release page); if the server runs a newer version than yours, the
-   client tells you which one instead of connecting.
+   out, the start menu says so. On Windows, press **Update**: the game downloads it, installs it
+   and restarts (your settings stay). On macOS, **Download** it and drag the app in as the first
+   time; on Linux, update through your package manager. If the server runs a newer version than
+   yours, the client tells you which one instead of connecting, with the same button.
 
    From a terminal instead: `./mftr.x86_64 -- --blind playtest.example.org:7777#8a0bb4a2aa55a37cf673e459749c6705`.
 
