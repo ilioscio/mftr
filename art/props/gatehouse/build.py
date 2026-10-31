@@ -10,6 +10,10 @@ team-colored crystal in an iron ring. In the paving's blue-grey stone on a plint
 R06 §2); team color only in the crystal and the banners. Collapse: the towers' upper halves, the
 roofs, the arch's top and the crystal are part bones the client brings down; the stumps and the
 plinth stay. Front: -Y (the lane side); it stands across the lane (X).
+
+Each part holds everything above its foot, cores included, so only the stumps stay: the towers to
+half height, the piers and the plinth. The gate's arch (its voussoirs, the wall over it and the
+walkway) comes down into the passage, and the portcullis sinks into the ground.
 """
 
 import math
@@ -53,17 +57,21 @@ def block_wall(p, x0, x1, y0, y1, z0, courses, ch, n_per, var=0.12, alt_every=10
 def tower(p, cx, size, height, side):
     s = size / 2
     p.box((cx, 0, 0), (size + 0.24, size + 0.24, 0.3), "cloth", STONE_DARK, var=0.1)   # footing
-    p.box((cx, 0, 0.3), (size - 0.08, size - 0.08, height - 0.3), "cloth", STONE_DARK)  # core
-    # Courses of blocks on the four faces.
+    # The core in two: its upper half falls with the blocks around it.
     courses, ch = 8, (height - 0.3) / 8
+    waist = 0.3 + (courses // 2) * ch
+    p.box((cx, 0, 0.3), (size - 0.08, size - 0.08, waist - 0.3), "cloth", STONE_DARK)
+    p.part(f"tower_{side}", (cx, 0, waist))
+    p.box((cx, 0, waist), (size - 0.08, size - 0.08, height - waist), "cloth", STONE_DARK)
+    p.part(None)
+    # Courses of blocks on the four faces.
     for k in range(courses):
         z = 0.3 + k * ch
-        if k == courses // 2:
-            p.part(f"tower_{side}", (cx, 0, z))
+        p.part(f"tower_{side}" if k >= courses // 2 else None)
         for face in range(4):
             a = face * math.pi / 2
             nrm = Vector((math.cos(a), math.sin(a), 0))
-            side = Vector((-nrm.y, nrm.x, 0))
+            along = Vector((-nrm.y, nrm.x, 0))
             n = 3
             off = (k % 2) * 0.5
             for i in range(n + (1 if off else 0)):
@@ -72,7 +80,7 @@ def tower(p, cx, size, height, side):
                 if t1 - t0 < 0.05:
                     continue
                 mid = (t0 + t1) / 2
-                c = Vector((cx, 0, 0)) + nrm * (s - 0.02) + side * mid
+                c = Vector((cx, 0, 0)) + nrm * (s - 0.02) + along * mid
                 col = p.rng.choice(STONE) if p.rng.randrange(9) else MOSS
                 dims = (0.1, t1 - t0 - 0.03, ch - 0.03) if face % 2 == 0 else (t1 - t0 - 0.03, 0.1, ch - 0.03)
                 p.box((c.x, c.y, z), dims, "cloth", col, var=0.12)
@@ -118,11 +126,13 @@ def build():
             p.box((x, y, 0.0), (4.0 / 12 - 0.04, 0.41, 0.12 + 0.02 * ((i + j) % 2)), "cloth", p.rng.choice(STONE), var=0.1)
     for cx, side in ((-1.05, "l"), (1.05, "r")):
         tower(p, cx, tw, h, side)
-    # The arch wall between the towers: piers, an arch of voussoirs, a portcullis.
+    # The arch wall between the towers: piers, an arch of voussoirs, a portcullis. The arch and
+    # all above it fall as one part, pivoting at its springing.
     span0, span1 = -0.6, 0.6
-    block_wall(p, span0, span1, -0.22, 0.22, 2.0, 4, 0.33, 3)
     for side in (-1, 1):
         p.box((side * 0.66, 0, 0), (0.18, 0.5, 2.0), "cloth", TRIM, var=0.08)
+    p.part("arch", (0, 0, 1.45))
+    block_wall(p, span0, span1, -0.22, 0.22, 2.0, 4, 0.33, 3)
     ring = 9
     for i in range(ring):
         a0 = math.pi * i / ring
@@ -135,7 +145,9 @@ def build():
         p.face(pts1, "cloth", TRIM, var=0.1, out=(0, 1, 0))
         p.face((pts0[2], pts0[3], pts1[3], pts1[2]), "cloth", col, var=0.1, out=(math.cos((a0 + a1) / 2), 0, math.sin((a0 + a1) / 2)))
         p.face((pts0[0], pts0[1], pts1[1], pts1[0]), "cloth", STONE_DARK, var=0.1, out=(-math.cos((a0 + a1) / 2), 0, -math.sin((a0 + a1) / 2)))
-    # The dark passage and the portcullis.
+    # The dark passage and the portcullis: they sink into the ground when the gate falls,
+    # leaving the way open.
+    p.part("portcullis", (0, -0.08, 0.0))
     p.box((0, 0.05, 0), (1.1, 0.04, 2.0), "cloth", DARK)
     for i in range(6):
         x = -0.5 + i * 0.2
@@ -146,7 +158,7 @@ def build():
         p.prism((-0.5 + i * 0.2, -0.08), [(0.25, 0.025), (0.0, 0.0)], 4, "metal", IRON, cap_top=False)
     # The walkway on top with merlons, and the gate's heart: a team crystal in an iron ring.
     top = 2.0 + 4 * 0.33
-    p.part("arch", (0, 0, top))
+    p.part("arch")
     p.box((0, 0, top), (1.4, 0.6, 0.12), "cloth", TRIM, var=0.08)
     for x in (-0.45, 0.0, 0.45):
         for y in (-0.24, 0.24):

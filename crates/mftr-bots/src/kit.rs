@@ -351,17 +351,21 @@ pub fn hit_chance(a: &Ability, caster: &Unit, target: &Unit, now: SimTime, block
     if !u.damage {
         return 0.0;
     }
-    if u.nova && !u.skillshot {
-        // An instant nova: it lands if the target is inside at the wind-up's end.
+    if u.nova {
+        // A nova lands around the caster, wherever it's aimed: it lands if the target is inside
+        // when it strikes. One with a delay (Monolith) can be seen coming and walked out of.
         let room = width(a) + target.gameplay_radius - d;
         let t = impact_time(a, d);
-        let escape = target.state.speed_at(now) * (t - locked_for(target, now)).max(0.0);
-        return if room > escape {
-            0.95
-        } else if room > 0.0 {
-            0.6
-        } else {
+        let react = if u.skillshot { DODGE_REACTION } else { 0.0 };
+        let escape = target.state.speed_at(now) * (t - locked_for(target, now) - react).max(0.0);
+        return if room <= 0.0 {
             0.0
+        } else if room > escape {
+            0.95
+        } else if u.skillshot {
+            (room / escape).clamp(0.08, 0.85)
+        } else {
+            0.6
         };
     }
     let t = impact_time(a, d);
@@ -407,6 +411,24 @@ mod tests {
         let roles = assign_roles(&[Vesper, Lumen, Rook, Shade, Ember], &[None, None, None, Some(Role::Mid), None]);
         assert_eq!(roles[3], Role::Mid);
         assert!(!roles.iter().enumerate().any(|(i, r)| i != 3 && *r == Role::Mid));
+    }
+
+    /// Cairn's Monolith (a delayed knock-up around himself) only lands on what stands near him,
+    /// however it's aimed.
+    #[test]
+    fn a_delayed_nova_lands_only_near_the_caster() {
+        let mut w = mftr_sim::World::new(1);
+        let cairn =
+            w.spawn_champion(mftr_sim::PlayerId(0), mftr_sim::Team::Blue, ChampionId::Cairn, Vec2::new(5000.0, 5000.0));
+        let near =
+            w.spawn_champion(mftr_sim::PlayerId(1), mftr_sim::Team::Red, ChampionId::Vesper, Vec2::new(5100.0, 5000.0));
+        let far =
+            w.spawn_champion(mftr_sim::PlayerId(2), mftr_sim::Team::Red, ChampionId::Vesper, Vec2::new(5800.0, 5000.0));
+        let (me, near, far) = (w.unit(cairn).unwrap(), w.unit(near).unwrap(), w.unit(far).unwrap());
+        let monolith = me.ability(3).unwrap();
+        assert!(use_of(&monolith).nova && use_of(&monolith).skillshot);
+        assert!(hit_chance(&monolith, me, near, mftr_sim::SimTime(0), false) > 0.5);
+        assert_eq!(hit_chance(&monolith, me, far, mftr_sim::SimTime(0), false), 0.0);
     }
 
     #[test]

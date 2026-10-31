@@ -146,6 +146,7 @@ func _graphics_tab() -> Control:
 	_row(g, "Shadows", _check(settings.shadows, func(v): settings.shadows = v), "The sun's shadows. Off is faster on older graphics cards.")
 	_row(g, "Bloom", _check(settings.bloom, func(v): settings.bloom = v), "A soft glow around bright things: crystals, fire, spells.")
 	_row(g, "Clouds and motes", _check(settings.atmosphere, func(v): settings.atmosphere = v), "Cloud shadows drifting over the map, and motes floating in the light.")
+	_row(g, "Damage at the edges", _check(settings.hurt_edges, func(v): settings.hurt_edges = v), "The screen's edges flash red when you're hurt, redder the lower your health, and throb when you're nearly dead.")
 	var seasons := OptionButton.new()
 	seasons.focus_mode = Control.FOCUS_NONE
 	var keys := ["", "summer", "autumn", "winter"]

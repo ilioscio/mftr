@@ -17,6 +17,7 @@ var minimap_size := 100.0                # 50–160 %
 var shadows := true                      # the sun's shadows
 var bloom := true                        # glow around bright things
 var atmosphere := true                   # cloud shadows and floating motes
+var hurt_edges := true                   # the screen's edges flash red when hurt, and pulse when low
 ## The season the map is dressed in (15 §9): "" for the map's own, else "summer", "autumn" or
 ## "winter". Looks only.
 var season := ""
@@ -85,6 +86,7 @@ func load_file() -> void:
 		shadows = cfg.get_value("graphics", "shadows", shadows)
 		bloom = cfg.get_value("graphics", "bloom", bloom)
 		atmosphere = cfg.get_value("graphics", "atmosphere", atmosphere)
+		hurt_edges = cfg.get_value("graphics", "hurt_edges", hurt_edges)
 		season = str(cfg.get_value("graphics", "season", season))
 		master_volume = clampf(cfg.get_value("audio", "master", master_volume), 0.0, 100.0)
 		effects_volume = clampf(cfg.get_value("audio", "effects", effects_volume), 0.0, 100.0)
@@ -106,6 +108,7 @@ func save() -> void:
 	cfg.set_value("graphics", "shadows", shadows)
 	cfg.set_value("graphics", "bloom", bloom)
 	cfg.set_value("graphics", "atmosphere", atmosphere)
+	cfg.set_value("graphics", "hurt_edges", hurt_edges)
 	cfg.set_value("graphics", "season", season)
 	cfg.set_value("audio", "master", master_volume)
 	cfg.set_value("audio", "effects", effects_volume)

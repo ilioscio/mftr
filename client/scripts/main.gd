@@ -185,6 +185,9 @@ func _ready() -> void:
 			_shot_goto_fight = true
 		elif args[i] == "--shot-collapse":
 			_shot_collapse = true
+			if i + 1 < args.size() and args[i + 1] in ["turret", "gatehouse", "base"]:
+				_shot_collapse_kind = args[i + 1]
+				i += 1
 		elif args[i] == "--shot-tour" and i + 1 < args.size():
 			for xy in args[i + 1].split(";"):
 				var v := xy.split(",")
@@ -555,7 +558,8 @@ var _shot_tour: Array = []                # `--shot-tour "X,Y;X,Y;..."`: one sho
 var _shot_seq_every := 0.0               # `--shot-seq-every S`: a sequence's frames S seconds apart
 var _shot_seq_last := -1.0
 var _shot_collapse := false
-var _shot_collapse_body = null               # `--shot-collapse`: bring down the structure nearest the look point
+var _shot_collapse_body = null               # `--shot-collapse [kind]`: bring down the structure nearest the look point
+var _shot_collapse_kind := "turret"
 var _shot_tour_i := 0
 var _shot_tour_at := 0.0
 var _shot_hover := -1                     # `--hover-slot N`: show that ability's tooltip
@@ -566,7 +570,7 @@ var _shot_tab_hover := ""                 # `--tab-hover augment|item`: show one
 var _shot_tab := false                    # `--shot-tab`: hold the match breakdown open
 var _shot_numbers := false                # `--shot-numbers`: sample damage numbers, for review
 var _shot_charge := false                 # `--shot-charge`: attack-move to mid, camera locked on us
-var _shot_veil := false                   # `--shot-veil`: cast E (Shade's Veil Step) instead of Q
+var _shot_veil := false                   # `--shot-veil`: cast E (Shade's Veil Step) instead of Q, and stay in it
 var _shot_recall := false                 # `--shot-recall`: walk out, then recall 3 s before the shot
 var _shot_claim := false                 # `--shot-claim`: take Claim in F at the start
 var _start_editor := false               # `--map-editor`: open the map editor at start
@@ -645,9 +649,10 @@ func _update_shot(delta: float) -> void:
 		_shot_moved = true
 	elif _shot_moved and _shot_timer > 1.4 and _shot_timer - delta <= 1.4:
 		client.cast(2 if _shot_veil else 0, own + inward * 800.0 - side * 250.0)
-		client.move_to(own + inward * 600.0 - side * 500.0)
-		_show_click_marker(_to_world(own + inward * 600.0 - side * 500.0), OWN_COLOR)
-	elif _shot_moved and _shot_timer > 1.7 and _shot_timer - delta <= 1.7:
+		if not _shot_veil:  # a veil's capture stays in the cloud (the stealth tint)
+			client.move_to(own + inward * 600.0 - side * 500.0)
+			_show_click_marker(_to_world(own + inward * 600.0 - side * 500.0), OWN_COLOR)
+	elif _shot_moved and not _shot_veil and _shot_timer > 1.7 and _shot_timer - delta <= 1.7:
 		client.cast(4, own + side * 400.0)
 	elif _shot_ward and _shot_moved and _shot_timer > 2.5 and _shot_timer - delta <= 2.5:
 		client.use_trinket(own + inward * 450.0)
@@ -681,12 +686,12 @@ func _update_shot(delta: float) -> void:
 		_open_settings()
 		settings_panel.tabs.current_tab = _shot_settings
 	elif _shot_collapse and _shot_moved and _shot_timer > _shot_at - 2.0 and _shot_timer - delta <= _shot_at - 2.0:
-		# Structure collapse review (15 §5): look at the turret nearest the look point...
+		# Structure collapse review (15 §5): look at the structure nearest the look point...
 		var look: Vector2 = _shot_look if _shot_look != null else client.own_position()
 		var best = null
 		for id in remote_bodies:
 			var b: Node3D = remote_bodies[id]
-			if b.get_meta("prop", "") == "turret" and (best == null or Vector2(b.position.x, b.position.z).distance_to(look * UNITS_TO_METERS) < Vector2(best.position.x, best.position.z).distance_to(look * UNITS_TO_METERS)):
+			if b.get_meta("prop", "") == _shot_collapse_kind and (best == null or Vector2(b.position.x, b.position.z).distance_to(look * UNITS_TO_METERS) < Vector2(best.position.x, best.position.z).distance_to(look * UNITS_TO_METERS)):
 				best = b
 		if best != null:
 			_shot_look = Vector2(best.position.x, best.position.z) / UNITS_TO_METERS
@@ -1849,6 +1854,15 @@ func _update_remotes(delta: float) -> void:
 		seen[id] = true
 		remote_info[id] = u
 		if not remote_bodies.has(id):
+			# A Gatehouse rises again where it fell: its ruin goes.
+			if _fallen.has(id):
+				var ruin: Node3D = _fallen[id]
+				_fallen.erase(id)
+				if is_instance_valid(ruin):
+					var pile = ruin.get_meta("rubble", null)
+					if pile != null and is_instance_valid(pile):
+						pile.queue_free()
+					ruin.queue_free()
 			var b: Node3D
 			var team_color := ALLY_COLOR if u.ally else ENEMY_COLOR
 			if u.kind == "gatehouse":
@@ -1939,6 +1953,7 @@ func _update_remotes(delta: float) -> void:
 			# Structures are always visible: one that's gone fell. It collapses (15 §5): the
 			# plinth and the stump stay, under rubble.
 			if gone.has_meta("prop"):
+				_fallen[id] = gone
 				_collapse(gone)
 				continue
 			# A minion or monster last seen at 0 health died (rather than leaving our vision): it
@@ -2251,11 +2266,13 @@ func _relic_pad(at: Vector2) -> void:
 ## ---- Structures falling (15 §5) --------------------------------------------------------------
 ## A destroyed structure comes down in stages, heavy: its crystal shatters first, then each part
 ## above the stump, top first, shudders, tips about its foot and drops with gravity onto the
-## plinth, throwing up dust and stone chips where it lands, and sinks into its own rubble. The
-## plinth and the stump stay. The motion is computed here from the model's part bones
+## plinth, throwing up dust and stone chips where it lands, and sinks into its own rubble. A part
+## standing on the ground (a gate's portcullis) sinks into it instead. The plinth and the stump
+## stay. The motion is computed here from the model's part bones
 ## (`part_*`, each pivoting at its foot), so every structure that has them falls the same way.
 
 var collapses := []
+var _fallen := {}                         # unit id -> what's left of a structure that fell
 const COLLAPSE_SECONDS := 3.4
 const STONE_CHIPS := [Color(0.58, 0.6, 0.63), Color(0.42, 0.44, 0.47), Color(0.28, 0.29, 0.32)]
 
@@ -2280,7 +2297,11 @@ func _collapse(body: Node3D) -> void:
 			continue
 		var foot: float = skel.get_bone_rest(b).origin.y
 		parts.append({"bone": b, "name": bone_name, "foot": foot})
-	parts.sort_custom(func(a, b): return a.foot > b.foot)
+	# The crystal first, wherever it sits, then from the top down.
+	parts.sort_custom(func(a, b):
+		var ca: bool = a.name.begins_with("part_crystal")
+		var cb: bool = b.name.begins_with("part_crystal")
+		return ca if ca != cb else a.foot > b.foot)
 	var lean := Vector3(rng.randf_range(-1.0, 1.0), 0.0, rng.randf_range(-1.0, 1.0)).normalized()
 	for i in parts.size():
 		var pt: Dictionary = parts[i]
@@ -2292,6 +2313,9 @@ func _collapse(body: Node3D) -> void:
 		pt.slide = lean * pt.foot * rng.randf_range(0.35, 0.6) * height_share
 		pt.drop = pt.foot * 0.92
 		pt.landed = false
+		if pt.foot < 0.1:
+			pt.tilt = 0.0
+			pt.slide = Vector3.ZERO
 	collapses.append({"body": body, "skel": skel, "parts": parts, "t": 0.0, "rubble": false})
 	_sfx_play("", ["structure.fall"], body.global_position)
 
@@ -2328,7 +2352,7 @@ func _update_collapses(delta: float) -> void:
 				var j := sin(t * 70.0 + float(b)) * 0.02 * (t / shake)
 				skel.set_bone_pose_rotation(b, rest.basis.get_rotation_quaternion() * Quaternion(pt.axis, j))
 				continue
-			var tf: float = sqrt(2.0 * pt.drop / G)
+			var tf: float = maxf(sqrt(2.0 * pt.drop / G), 0.05)
 			var s := clampf((t - shake) / tf, 0.0, 1.0)
 			var tip: float = pt.tilt * pow(s, 1.6)
 			var fall: Vector3 = Vector3(0, -pt.drop * s * s, 0) + pt.slide * s * s
@@ -2337,8 +2361,8 @@ func _update_collapses(delta: float) -> void:
 					pt.landed = true
 					var at: Vector3 = skel.global_transform * (rest.origin + fall)
 					_stone_impact(at, clampf(pt.drop / 2.0, 0.6, 1.6))
-				# Settling into the rubble: sinks slowly.
-				var sink: float = minf((t - shake - tf) * 0.35, 0.9)
+				# Settling into the rubble: sinks slowly. One on the ground sinks out of sight.
+				var sink: float = minf((t - shake - tf) * 0.35, 0.9) if pt.foot >= 0.1 else minf((t - shake) * 1.1, 2.2)
 				fall.y -= sink
 			skel.set_bone_pose_rotation(b, Quaternion(pt.axis, tip) * rest.basis.get_rotation_quaternion())
 			skel.set_bone_pose_position(b, rest.origin + fall)
@@ -2433,6 +2457,7 @@ func _leave_rubble(gone: Node3D) -> void:
 		pile.rotation.y = gone.rotation.y
 		pile.scale = Vector3.ONE * {"turret": 1.0, "gatehouse": 1.5, "base": 2.0}.get(kind, 1.0)
 		add_child(pile)
+		gone.set_meta("rubble", pile)
 	# A cloud of stone dust where it fell.
 	_dust_cloud(Vector3(gone.position.x, 0.05, gone.position.z), 1.8)
 
@@ -2990,6 +3015,7 @@ func _update_veils() -> void:
 		var mine = live.get(own_id)
 		var inside: bool = mine != null and mine.ours and Vector2(own_body.position.x, own_body.position.z).distance_to(Vector2(mine.center.x, mine.center.y) * UNITS_TO_METERS) <= float(mine.radius) * UNITS_TO_METERS
 		_set_faded(own_body, inside)
+		_own_veiled = inside
 	for id in remote_bodies:
 		_set_faded(remote_bodies[id], bool(remote_info.get(id, {}).get("veiled", false)))
 
@@ -3287,6 +3313,7 @@ func _screen(p: Vector3):
 func _draw_overlay() -> void:
 	if loading_panel != null and loading_panel.modulate.a > 0.5:
 		return  # the loading screen covers the match until it fades
+	_draw_screen_edges()
 	var font := ThemeDB.fallback_font
 	if client.phase() == "playing" and client.is_spectator():
 		var who: String = remote_info[spectate_target].champion if remote_info.has(spectate_target) else "the map"
@@ -3412,6 +3439,74 @@ func _draw_bar(world: Vector3, size: Vector2, hp: float, max_hp: float, shield: 
 		overlay.draw_rect(lb, Color(0.04, 0.05, 0.07, 0.95))
 		overlay.draw_rect(lb, Hud.GOLD_DIM, false, 1.0)
 		overlay.draw_string(ThemeDB.fallback_font, lb.position + Vector2(0, lb.size.y - 4.0 * k), "%d" % level, HORIZONTAL_ALIGNMENT_CENTER, lb.size.x, roundi(12.0 * k), Color.WHITE)
+
+
+## ---- The screen's edges -------------------------------------------------------------------
+## Hidden from the enemy (in our veil, or in brush no enemy we see stands in), the screen darkens
+## a little toward its edges, as the reference game does for stealth; it clears when an enemy
+## walks into the brush. Hurt, the edges flash red (more for a bigger hit), stay redder the
+## lower our health, and throb like a heartbeat when we're nearly dead (`settings.hurt_edges`).
+
+var _own_veiled := false
+var _stealth_shade := 0.0                 # 0..1, eased toward hidden or not
+var _hurt_flash := 0.0                    # 0..1, a hit's flash, fading
+var _hurt_last_health := -1.0
+var _edges_ms := 0
+var _edge_texture: GradientTexture2D
+
+
+func _draw_screen_edges() -> void:
+	var now := Time.get_ticks_msec()
+	var dt := clampf((now - _edges_ms) / 1000.0, 0.0, 0.1)
+	_edges_ms = now
+	var playing: bool = client.phase() == "playing" and not client.is_spectator() and not own_status.is_empty()
+	var alive: bool = playing and not own_status.get("dead", false)
+	# Stealth.
+	var hidden: bool = alive and (_own_veiled or own_status.get("in_brush", false))
+	_stealth_shade = move_toward(_stealth_shade, 1.0 if hidden else 0.0, dt * (4.0 if hidden else 6.0))
+	if _stealth_shade > 0.0:
+		overlay.draw_rect(Rect2(Vector2.ZERO, overlay.size), Color(0.05, 0.03, 0.1, 0.16 * _stealth_shade))
+		_draw_edge(Color(0.06, 0.03, 0.14, 0.6 * _stealth_shade))
+	# Hurt.
+	var hp: float = own_status.get("health", 0.0)
+	var mx: float = maxf(own_status.get("max_health", 1.0), 1.0)
+	if not alive:
+		_hurt_last_health = -1.0
+		_hurt_flash = 0.0
+		return
+	if _hurt_last_health >= 0.0 and hp < _hurt_last_health - 0.5:
+		# A hit: a flash by its share of our health, never too faint to notice.
+		_hurt_flash = minf(1.0, maxf(_hurt_flash, 0.35 + 3.0 * (_hurt_last_health - hp) / mx))
+	_hurt_last_health = hp
+	_hurt_flash = move_toward(_hurt_flash, 0.0, dt * 1.8)
+	if not settings.hurt_edges:
+		return
+	var frac := hp / mx
+	var low := clampf((0.45 - frac) / 0.45, 0.0, 1.0)  # from under 45 % health, deepening
+	var a := 0.4 * low * low + 0.45 * _hurt_flash
+	if frac < 0.2:
+		# Nearly dead: a heartbeat, two beats a second and a rest.
+		var beat := fmod(now / 1000.0, 0.9) / 0.9
+		var throb := maxf(exp(-pow((beat - 0.1) / 0.06, 2.0)), 0.7 * exp(-pow((beat - 0.32) / 0.06, 2.0)))
+		a += 0.35 * throb * (1.0 - frac / 0.2 * 0.5)
+	if a > 0.005:
+		_draw_edge(Color(0.75, 0.04, 0.03, minf(a, 0.9)))
+
+
+## A soft band around the screen's edges in `color` (its alpha at the very edge).
+func _draw_edge(color: Color) -> void:
+	if _edge_texture == null:
+		var g := Gradient.new()
+		g.offsets = PackedFloat32Array([0.0, 0.55, 0.85, 1.0])
+		g.colors = PackedColorArray([Color(1, 1, 1, 0), Color(1, 1, 1, 0.08), Color(1, 1, 1, 0.55), Color(1, 1, 1, 1)])
+		_edge_texture = GradientTexture2D.new()
+		_edge_texture.gradient = g
+		_edge_texture.fill = GradientTexture2D.FILL_RADIAL
+		_edge_texture.fill_from = Vector2(0.5, 0.5)
+		_edge_texture.fill_to = Vector2(1.08, 0.5)
+		_edge_texture.width = 256
+		_edge_texture.height = 256
+	overlay.draw_texture_rect(_edge_texture, Rect2(Vector2.ZERO, overlay.size), false, color)
 
 
 ## A plated turret's plates (01 §3): a gold pip under its bar for each one left, a dim one for
