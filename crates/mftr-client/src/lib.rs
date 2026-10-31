@@ -532,6 +532,16 @@ impl ClientSession {
         &self.map
     }
 
+    /// Whether our champion stands in brush no enemy we see stands in too: hidden there from
+    /// whoever's outside, until one walks in (for the screen's tint, 01 §9).
+    pub fn own_in_hidden_brush(&self, now: f64) -> bool {
+        let Some(pos) = self.own_render_position(now) else { return false };
+        let Some(brush) = self.map.brush_at(pos) else { return false };
+        !self.remote_render_units(now).iter().any(|u| {
+            u.team != self.team && u.team != Team::Neutral && u.health > 0.0 && self.map.brush_at(u.pos) == Some(brush)
+        })
+    }
+
     pub fn team(&self) -> Team {
         self.team
     }

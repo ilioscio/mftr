@@ -2304,9 +2304,11 @@ impl World {
                 None => Vec::new(),
             };
             if !unit.state.alive() {
-                // Commands while dead are dropped, except shopping.
-                for c in &mine {
-                    shop(unit, c.kind, map, &rules);
+                // Commands while dead are dropped, except the ones that don't act in the world:
+                // ranking up, shopping, drafts, and setting up spells and items (as in LoL).
+                for c in mine.iter().filter(|c| works_while_dead(c.kind)) {
+                    let ctx = CastContext { roster: &roster, hidden: &hidden[unit.team as usize], fired: &mut fired };
+                    apply_command(unit, c, SimTime::at(k, c.sub), map, &rules, ctx, events);
                 }
                 continue;
             }
@@ -3156,6 +3158,25 @@ fn apply_command(
         }
         CommandKind::PickAugment(_) | CommandKind::RerollAugment(_) => {}
     }
+}
+
+/// Whether a dead champion's command still applies: it changes the champion's build, not the
+/// world (LoL lets the dead rank up, shop and draft).
+fn works_while_dead(kind: CommandKind) -> bool {
+    matches!(
+        kind,
+        CommandKind::LevelUp(_)
+            | CommandKind::Buy(_)
+            | CommandKind::Sell(_)
+            | CommandKind::Undo
+            | CommandKind::PickAugment(_)
+            | CommandKind::RerollAugment(_)
+            | CommandKind::BuyAnvil
+            | CommandKind::PickAnvil(_)
+            | CommandKind::ChooseSpell(_)
+            | CommandKind::ChooseTrinket(_)
+            | CommandKind::SwapItems { .. }
+    )
 }
 
 /// Whether `unit` may shop now (01 §11, ARAM rule 06 §2): ranked matches only, while dead or
@@ -5890,8 +5911,10 @@ mod tests {
         assert!(seen(&w, Team::Red), "acting shows it");
         run_until_quiet(&mut w, 30);
         assert!(!seen(&w, Team::Red), "hidden again");
-        // The cloud fades.
-        run_until_quiet(&mut w, 75);
+        // The cloud fades (5 s after landing).
+        run_until_quiet(&mut w, 90);
+        assert!(!w.veils().is_empty(), "still up");
+        run_until_quiet(&mut w, 45);
         assert!(w.veils().is_empty());
         assert!(seen(&w, Team::Red), "seen once the cloud is gone");
     }
@@ -6204,6 +6227,25 @@ mod tests {
             sub: SubTick::START,
             kind: CommandKind::LevelUp(slot),
         }
+    }
+
+    /// The dead rank up (LoL), but don't move.
+    #[test]
+    fn the_dead_rank_up_but_stay_put() {
+        let mut w = ranked_world();
+        let me = w.spawn_champion(PlayerId(0), Team::Blue, ChampionId::Vesper, Vec2::new(400.0, 1500.0));
+        let points = w.unit(me).unwrap().state.progress.points;
+        assert!(points > 0);
+        w.unit_mut(me).unwrap().state.respawn_at = Some(SimTime::end_of(Tick(200)));
+        let at = w.unit(me).unwrap().state.pos;
+        let k = w.tick().0 + 1;
+        w.step(&[
+            level_up(0, 1, k, 0),
+            Command { kind: CommandKind::MoveTo(QPoint::from_vec2(Vec2::new(900.0, 1500.0))), ..level_up(0, 2, k, 0) },
+        ]);
+        let u = w.unit(me).unwrap();
+        assert_eq!((u.state.progress.ranks[0], u.state.progress.points), (1, points - 1));
+        assert_eq!(u.state.pos, at);
     }
 
     /// M3 slice 1: in ARAM: Mayhem a champion is offered three Silver augments at once (it
@@ -7515,8 +7557,9 @@ mod tests {
     /// the first waypoint as their lane. Re-laid after the reference ARAM (17 §13): turrets
     /// farther apart, relics in front of and behind the outer turrets, brush along the walls.
     /// The item overhaul (18) changed what the canary's random purchases do; the balance pass
-    /// after persona builds (17 §14) changed Vesper and two items.
-    const GOLDEN_HASH_BRIDGE: u64 = 0xc858_de23_595b_cbbb;
+    /// after persona builds (17 §14) changed Vesper and two items. The dead now rank up, and
+    /// Shade's veil lasts 5 s.
+    const GOLDEN_HASH_BRIDGE: u64 = 0x123b_ee06_38f8_5270;
 
     /// Cross-platform determinism canary: a scripted match must hash to the same value on
     /// every OS and CPU. If this fails on one platform, the sim used non-deterministic math.

@@ -621,7 +621,7 @@ pub const SHADE: ChampionDef = ChampionDef {
             effect: Effect::Dash(Dash {
                 range: 400.0,
                 speed: 1400.0,
-                veil: VeilSpec { radius: 300.0, duration: ms(3000) },
+                veil: VeilSpec { radius: 300.0, duration: ms(5000) },
             }),
             reaction: ReactionClass::None,
             per_rank: ranks(0.0, 1000),
