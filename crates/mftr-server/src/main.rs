@@ -8,6 +8,10 @@
 //!        mftr-server --scenario NAME [--bots N] [--lobby] [--max-players N] [--map FILE.mftrmap] [...]
 //!        mftr-server [--key FILE] --fingerprint
 //!
+//! `--seed N` seeds everything random, each match drawing its own seed from it, so a run can be
+//! played again; without it every start picks a fresh seed (and prints it), so no two runs play
+//! the same matches.
+//!
 //! `--key FILE` (default `server.key`) holds the server's key; it is created on first start.
 //! Clients pin it, so keep the file: a new key makes every client that met the server refuse
 //! it. `--fingerprint` prints the key's fingerprint (creating the key if needed) and exits.
@@ -90,6 +94,16 @@ fn read_map(path: &str) -> hub::HostedMap {
     hub::HostedMap { name: spec.name.clone(), kind: spec.kind, text: Arc::from(text.as_str()) }
 }
 
+/// A seed no other run has: from the standard library's per-process random keys, the clock and
+/// the process id.
+fn fresh_seed() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+    h.write_u32(std::process::id());
+    h.finish()
+}
+
 /// Where an instance's replay goes: `DIR/<started>-<queue>-<instance>.replay`.
 fn replay_file(dir: &str, inst: &hub::Instance, queue: &QueueSpec) -> PathBuf {
     PathBuf::from(dir).join(format!("{}-{}-{}.replay", inst.created_unix, queue.slug(), inst.id))
@@ -101,6 +115,7 @@ fn main() -> std::io::Result<()> {
     let mut key_path = PathBuf::from("server.key");
     let mut fingerprint_only = false;
     let mut base = ServerConfig::default();
+    let mut seed: Option<u64> = None;
     let mut scenario: Option<Scenario> = None;
     let mut modes: Option<Vec<ModeOffer>> = None;
     let mut maps: Vec<hub::HostedMap> = Vec::new();
@@ -111,7 +126,7 @@ fn main() -> std::io::Result<()> {
     while let Some(a) = args.next() {
         match a.as_str() {
             "--bind" => bind = args.next().expect("--bind needs an address"),
-            "--seed" => base.seed = args.next().and_then(|v| v.parse().ok()).expect("--seed needs a number"),
+            "--seed" => seed = Some(args.next().and_then(|v| v.parse().ok()).expect("--seed needs a number")),
             "--max-players" => {
                 max_players = Some(args.next().and_then(|v| v.parse().ok()).expect("--max-players needs a number"))
             }
@@ -207,6 +222,7 @@ fn main() -> std::io::Result<()> {
         println!("created a new server key in {}", key_path.display());
     }
 
+    base.seed = seed.unwrap_or_else(fresh_seed);
     let socket = UdpSocket::bind(&bind)?;
     socket.set_nonblocking(true)?;
     let local = socket.local_addr()?;
@@ -217,6 +233,7 @@ fn main() -> std::io::Result<()> {
         local.port(),
         identity.fingerprint()
     );
+    println!("seed {} (play these matches again with --seed {0})", base.seed);
     println!("{} queues, up to {max_matches} matches at once:", queues.len());
     for q in &queues {
         println!("  {}", q.slug());
