@@ -15,6 +15,7 @@ extends Node3D
 ## (scripted checks) opens the menu and joins the first remembered server through it.
 
 const Seasons = preload("res://scripts/seasons.gd")
+const Splashes = preload("res://scripts/splashes.gd")
 
 const UNITS_TO_METERS := 0.01           # 1 game unit = 1 cm
 const CAMERA_PITCH_DEG := 56.0          # D13 / R01 §1
@@ -946,8 +947,14 @@ func _build_backdrop() -> void:
 	word.add_theme_constant_override("shadow_offset_y", 5)
 	word.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	logo.add_child(word)
+	# What MFTR stands for today, rolled from splashes.txt.
 	var tag := Label.new()
-	tag.text = "M O B A   F O R   T H E   R E S T   O F   U S"
+	tag.text = Splashes.roll().to_upper()
+	var spaced := FontVariation.new()
+	spaced.base_font = ThemeDB.fallback_font
+	spaced.spacing_glyph = 4
+	spaced.spacing_space = 10
+	tag.add_theme_font_override("font", spaced)
 	tag.add_theme_font_size_override("font_size", 14)
 	tag.add_theme_color_override("font_color", Color(0.78, 0.65, 0.38))
 	tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
