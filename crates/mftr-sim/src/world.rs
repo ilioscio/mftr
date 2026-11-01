@@ -2837,6 +2837,13 @@ fn deliver(unit: &Unit, c: EchoCast, t: SimTime, echo: bool, fired: &mut Vec<Fir
     !echo && d.echo && tf.accepts(Transforms::ECHO)
 }
 
+/// When a cast started at `t` fires: after its windup, and never at `t` itself. Instants fire
+/// before that instant's commands, so a cast due at the instant it was ordered would never fire
+/// and hold its caster forever (Stormcall has no windup).
+fn windup_end(t: SimTime, windup: SimDuration) -> SimTime {
+    SimTime(t.0 + windup.0.max(1))
+}
+
 /// Windups, casts and dashes whose instant is `t`.
 fn fire_due(unit: &mut Unit, t: SimTime, roster: &[Target], fired: &mut Vec<Fired>, map: &Map) {
     let (id, team, stats) = (unit.id, unit.team, unit.stats);
@@ -3581,7 +3588,7 @@ fn try_cast(
             }
             st.cancel_attack(t);
             st.face(dir);
-            let fire_at = t.plus(spec.windup);
+            let fire_at = windup_end(t, spec.windup);
             st.cast = Some(Cast { slot, dir, point: target, fire_at, seq, mobile: timing.mobile });
             events.push(SimEvent::CastStarted { unit: id, slot, at: t, dir, point: target, fire_at, seq });
         }
@@ -3591,7 +3598,7 @@ fn try_cast(
             }
             st.cancel_attack(t);
             st.face(dir);
-            let fire_at = t.plus(b.windup);
+            let fire_at = windup_end(t, b.windup);
             st.cast = Some(Cast { slot, dir, point: target, fire_at, seq, mobile: timing.mobile });
             events.push(SimEvent::CastStarted { unit: id, slot, at: t, dir, point: target, fire_at, seq });
         }
@@ -3599,7 +3606,7 @@ fn try_cast(
             st.cancel_attack(t);
             let point = if len > a.range { st.pos + dir * a.range } else { target };
             st.face(dir);
-            let fire_at = t.plus(a.windup);
+            let fire_at = windup_end(t, a.windup);
             st.cast = Some(Cast { slot, dir, point, fire_at, seq, mobile: timing.mobile });
             events.push(SimEvent::CastStarted { unit: id, slot, at: t, dir, point, fire_at, seq });
         }
@@ -6582,6 +6589,27 @@ mod tests {
         w.step(&[cast_slot(0, 1, 1, 0, 5, (1500.0, 1000.0))]);
         let ev = run_until_quiet(&mut w, 30);
         assert!(ev.iter().any(|e| matches!(e, SimEvent::Dashed { unit, .. } if *unit == me)), "Vault dashes");
+    }
+
+    /// Stormcall (a nova on F) knocks up enemies around you, and you keep moving after it.
+    #[test]
+    fn stormcall_leaves_you_in_control() {
+        for champ in [ChampionId::Shade, ChampionId::Ember] {
+            let (mut w, me, them) = augmented([56, 0, 0, 0], champ, Vec2::new(1200.0, 1000.0));
+            w.step(&[cast_slot(0, 1, 1, 0, 5, (1500.0, 1000.0))]);
+            let ev = run_until_quiet(&mut w, 30);
+            assert!(ev.iter().any(|e| matches!(e, SimEvent::AreaSpawned(a) if a.owner == me)), "{champ:?}: a nova");
+            let st = &w.unit(me).unwrap().state;
+            assert!(st.cast.is_none(), "{champ:?}: the cast is over");
+            let hit = w.unit(them).unwrap();
+            assert!(hit.state.health < hit.stats.max_health, "{champ:?}: the nova lands");
+            let before = st.pos;
+            let tick = w.tick().0 + 1;
+            w.step(&[cmd(0, 2, tick, 0, (1000.0, 3000.0))]);
+            run_until_quiet(&mut w, 15);
+            let after = w.unit(me).unwrap().state.pos;
+            assert!(after.distance(before) > 100.0, "{champ:?} moves after Stormcall: {before:?} → {after:?}");
+        }
     }
 
     /// The power of the first bolt `champion` (holding `augments`) attacks with, after its Q.

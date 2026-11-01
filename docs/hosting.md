@@ -129,7 +129,7 @@ services.mftr = {
 | `maps` | `[ ]` | Map files from the map editor (`*.mftrmap`): each adds its modes on that map (Classic on a Classic map; ARAM, Mayhem, Hyper and Horde on an ARAM map). |
 | `maxMatches`, `workers` | `32`, one per core | As `--max-matches` and `--workers`. |
 | `botTier` | `"veteran"` | As `--bot-tier`. |
-| `seed` | `1` | As `--seed`. |
+| `seed` | `null` | As `--seed`; `null` picks a fresh seed every start. |
 | `replay` | `false` | Record every match into `/var/lib/mftr/server/replays`. |
 | `adoptKeyFrom` | `null` | The name of an older server whose key the main server takes on its first start (see below). |
 | `keyFile` | `/var/lib/mftr/server/server.key` | The main server's key (see [The server key](#the-server-key)). |
@@ -200,7 +200,7 @@ that key over the same way, without `adoptKeyFrom`.
 | `--map FILE` | none | Add a map from the map editor (`*.mftrmap`): Classic on it if it's a Classic map, the ARAM modes if it's an ARAM map; repeat for more maps. The server checks each at start (and refuses a map that breaks a rule, listing what's wrong); players download it as they join (a few hundred milliseconds), and replays carry it. |
 | `--max-matches N` | `32` | Matches running at once, at most. Past it, a player who'd need a new match is told the server is busy, and their client keeps asking. |
 | `--workers N` | one per core | Threads that step the matches. |
-| `--seed N` | `1` | Seeds everything random (each match draws its own seed from it). |
+| `--seed N` | fresh | Seeds everything random (each match draws its own seed from it), to play a run's matches again. Without it, every start picks a fresh seed and prints it. |
 | `--bot-tier T` | `veteran` | How well bots play: `recruit`, `veteran`, `elite` or `nightmare` (see below). |
 | `--replay DIR` | off | Record every match into DIR, as `<started>-<queue>-<match>.replay`. A file is rewritten every minute, when its match ends and when it stops. |
 | `--scenario NAME` | | For development: offer this one scenario instead, any of the above or `duel` (the Duel Sandbox), `minions`, `dodge`, `empty` (test grounds). With it, `--bots N` adds server bots (they count toward `--max-players N`, default 10: leave a seat for each player) and `--lobby` holds champion select first. A spectating client can watch a match of bots alone. |

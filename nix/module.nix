@@ -139,9 +139,9 @@ let
       };
 
       seed = mkOption {
-        type = types.ints.unsigned;
-        default = 1;
-        description = "Seeds everything random in the game.";
+        type = types.nullOr types.ints.unsigned;
+        default = null;
+        description = "Seeds everything random in the game, to play it again (default: a fresh seed every start).";
       };
 
       replay = mkOption {
@@ -258,9 +258,9 @@ in
     };
 
     seed = mkOption {
-      type = types.ints.unsigned;
-      default = 1;
-      description = "Seeds everything random in the matches (each match draws its own from it).";
+      type = types.nullOr types.ints.unsigned;
+      default = null;
+      description = "Seeds everything random in the matches (each match draws its own from it), to play them again (default: a fresh seed every start).";
     };
 
     keyFile = mkOption {
@@ -343,11 +343,11 @@ in
         args = [
           "--bind" (bind cfg.address cfg.port)
           "--key" cfg.keyFile
-          "--seed" (toString cfg.seed)
           "--modes" (lib.concatStringsSep "," cfg.modes)
           "--max-matches" (toString cfg.maxMatches)
           "--bot-tier" cfg.botTier
         ]
+        ++ lib.optionals (cfg.seed != null) [ "--seed" (toString cfg.seed) ]
         ++ lib.optionals (cfg.workers != null) [ "--workers" (toString cfg.workers) ]
         ++ lib.concatMap (m: [ "--map" "${m}" ]) cfg.maps
         ++ lib.optionals cfg.replay [ "--replay" "/var/lib/mftr/server/replays" ]
@@ -371,8 +371,8 @@ in
         "--scenario" s.scenario
         "--bots" (toString s.bots)
         "--max-players" (toString s.maxPlayers)
-        "--seed" (toString s.seed)
       ]
+      ++ lib.optionals (s.seed != null) [ "--seed" (toString s.seed) ]
       ++ lib.optional s.lobby "--lobby"
       ++ lib.optionals s.replay [ "--replay" "/var/lib/mftr/${name}/replays" ]
       ++ s.extraArgs;
