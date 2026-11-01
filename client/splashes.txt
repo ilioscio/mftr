@@ -1,0 +1,370 @@
+# What MFTR stands for today: one is rolled each time the client starts and shown under the logo.
+#
+#   - One per line. Blank lines and lines starting with # are skipped.
+#   - The capitalized words spell M F T R; lowercase filler is free ("Moba For The Rest of us").
+#     tests/splashes_test.gd checks this, along with duplicates and length (60 characters at most).
+#   - A line starting with a date is a holiday line: on those days it's rolled instead of the
+#     everyday ones. [12-25] is a day every year, [12-20..12-26] a range (it may wrap the new year),
+#     and [2027-02-06..2027-02-08] pins the year, for holidays that move.
+#   - The client won't show the same line again until it has shown about half of the others.
+
+# --- The original --------------------------------------------------------------------------------
+Moba For The Rest
+Moba For The Rested
+Moba For The Rookies
+Moba For The Retired
+Moba For The Reasonable
+Moba For The Relaxed
+Moba For The Rusty
+Moba For Those Remaining
+Mustaches For The Rascals
+
+# --- Laning and farming --------------------------------------------------------------------------
+Minions Follow The Rules
+Minions First, Then Running
+Missed Farm, Tilted Rapidly
+Mid Farms, Top Rages
+Missing Farm? Try Recalling
+Minion Fodder, Tower Resistant
+Mostly Farming, Truly Relaxing
+My Farm, Their Reward
+Must Freeze, Then Roam
+Mana Flows, Trades Resume
+Minions Fight, Tanks Rest
+Melee Farming Takes Reflexes
+Missed Five, Then Raged
+Many Freezes, Tiny Rewards
+Mostly Fine Trading Range
+Minions Fall, Tears Roll
+Mid Fears The Roam
+Master Farmer, Terrible Roamer
+Minions Fuel The Rich
+Money From Tiny Recruits
+More Farm, Then Rotate
+Minions Funnel Toward Ruins
+Minions Fail, Turret Retargets
+
+# --- Feeding, tilt and the report button --------------------------------------------------------
+Mostly Feeding, Totally Relaxed
+Minions, Feed Them Responsibly
+My Fault, Tower Range
+My First Tower-dive Regrets
+Mid Feeds, Top Reports
+Mid or Feed, Tilt, Repeat
+Mute, Flame, Type, Report
+Mute First, Then Relax
+Mute Feels Therapeutic, Really
+Muted For Typing Rudely
+Missing! Five Times, Repeated
+Mild Frustration, Tremendous Rage
+Mentally Fine, Tilted Recently
+My Fault? They Rotated?!
+Mid's Fed, Team Rejoices
+Mid's Feeding? That's Relatable
+Mid's Fine, Thanks Regardless
+Mastery Flex, Then Respawn
+Mood: Feeding, Tilted, Reporting
+My Feelings: Tilted, Ruined
+My Finger Twitched, Respawning
+Moral Fiber Tested Repeatedly
+Maybe Forgive Teammates, Really
+Mindset: Fun, Then Results
+Mistakes Forgiven, Time to Regroup
+Mostly Fleeing, Then Respawning
+Minute Fifteen: Team Resigns
+Minute Forty, Team Rallies
+Majority Forfeit, Then Rally
+Maybe Forfeit? Think Rationally
+Mid Fed: The Reckoning
+Monitor Froze, Teammates Raged
+Mom Fixed Tacos, Recall!
+Mom Flipped The Router
+Must Finish This Round
+Mute, Focus, Try, Reflect
+
+# --- Flash ---------------------------------------------------------------------------------------
+Missed Flash, Took the Respawn
+Must Flash To Reposition
+My Flash's Timer Remains
+Mispositioned, Flashed, Then Regretted
+Misclicked Flash, Total Regret
+Mid Flashed Toward the Rocks
+Mighty Flash, Tiny Range
+Maybe Flash Them, Right?
+
+# --- Teamfights and macro ------------------------------------------------------------------------
+Macro? Forget That, Run
+Macro Fixes Teamfight Ruin
+Macro Fundamentals, Tactical Rotations
+Mechanics Fail, Team Recovers
+Mechanics? Flawless. Teamwork? Rough.
+Mechanics First, Teamwork Rarely
+Mid Fails, Team Rescues
+Mid Fights, Then Roams
+Middle Fight, Top Rotates
+Move Fast, Take Risks
+Move Forward, Take River
+Moved Forward, Then Rooted
+Make Friends, Take Risks
+Make Friends, Then Rotate
+Massive Fight, Tiny Reward
+Massive Flank, Total Ruin
+Multikill For The Record
+Mages Fear Tank Rushes
+Mages Fall, Tanks Remain
+Marksmen Find Tanks Rude
+Missiles Fly, Targets Run
+Mispredicted, Feinted, Then Rooted
+Mobility Fixes Terrible Rotations
+Mana For Teamfights, Rationed
+Must Focus Their Ranged
+Many Fights, Thin Resources
+Mapless Fights, Terrible Results
+Make Fewer Terrible Rotations
+Mostly Fighting, Totally Reckless
+Mobilize, Focus, Teamfight, Regroup
+Map Flipped, Team Reversed
+Mid's Favorite: The Reset
+
+# --- Jungle, river and vision --------------------------------------------------------------------
+My Forest, Their Raid
+Mid Forgot The River
+Missing From The River
+Monsters Feel Time Repeating
+Monster Farm, Then Raid
+Mostly Fog, Tiny Radius
+My Fog, Their Ruin
+Map Fog Terrifies Rangers
+Minimap: Frequently Thought Redundant
+Minimap For Tactical Rotations
+Minimap? Fantastic Thing, Really
+Mystery Footsteps Through River
+Mossy Frogs, Tranquil River
+
+# --- Towers and base -----------------------------------------------------------------------------
+Must Fear Turret Range
+Many Fall, Towers Remain
+Mobs Fall, Towers Rumble
+My First Tower: Razed
+Meet Fountain, Then Return
+Mana Fountain Takes Requests
+My Favorite Thing: Recall
+Mana's Flat, Time to Recall
+Mad Fountain-dive, Total Regret
+Mighty Fortresses, Tiny Remains
+Monuments Fall, Thrones Rise
+
+# --- Queue, matchmaking and ranked ---------------------------------------------------------------
+MMR Falls, Then Rises
+MMR? Feelings? Totally Ruined
+Mostly Frustrated, Totally Ranked
+Mostly Fun, Then Ranked
+More Fun Than Ranked
+More Friends Than Rivals
+More Feelings Than Rank
+Match Found Too Rapidly
+Match Found, Then Requeue
+Match Found: Trolls Ready
+Match Found: Tank Required
+Match Found? Tea's Ready
+Matchmaking Found The Rest of us
+Mains Forget Their Runes
+Mained For Three Reworks
+Meta Flipped: Tierlists Rewritten
+Meta Forced, Tierlist Rejected
+Mid, Fill, Top, Random
+Mid? Flex Tonight, Right?
+Meditate, Focus, Then Rank
+Mom Finally Tried Ranked
+
+# --- Game modes ----------------------------------------------------------------------------------
+Mayhem, Feast, Then Repeat
+Mayhem: Fight The Relentless
+More Foes, Tougher Rounds
+More! Faster! Tougher! Relentless!
+Monsters Flood, Team Retreats
+Many Foes, Thin Ranks
+Mash Face, Then Reroll
+Mid Forever, Teams Random
+Mostly Fair, Totally Random
+Mythic Fortune, Terrible Rolls
+My Favorite Terrible Reroll
+Must Find That Reroll
+Mutual Fight, Then Respect
+Mirror Fight, Total Respect
+Mess Freely, Test Recklessly
+
+# --- Champions -----------------------------------------------------------------------------------
+Marrow Feeds The Rook
+Marrow Fears The Rook
+Marrow Fights The Rest
+My Favorite Tower: Rook
+
+# --- Servers, netcode and the code ---------------------------------------------------------------
+Measuring Frames, Testing Routers
+Milliseconds Feel Tremendously Real
+Mostly Fine Tick Rate
+Minimal Frames, Terrible Router
+My Fiber, Their Router
+Max Framerate, Toaster Rig
+Many Fingerprints, Trust Required
+My Friend's Toaster Runs servers
+Mostly Free, Totally Reproducible
+Made For Tinkering, Really
+Merged, Forked, Tested, Released
+Merge Fixed The Regression
+Mostly Functional, Thoroughly Rusty
+Memory-safe, Fearless, Thread-safe, Rusty
+
+# --- The map editor ------------------------------------------------------------------------------
+Mapmakers Forge Tiny Realms
+Make Fresh Terrain, Repeat
+Map Forge: Terrain Ready
+Make Forests, Tweak Rivers
+Mountains Formed, Trees Rooted
+Mapmaker's First Terrain: Rough
+Mountains, Forests, Towers, Rivers
+
+# --- Seasons and scenery -------------------------------------------------------------------------
+Maple Foliage Turns Red
+Melting Frost, Thawing River
+Morning Fog, Twinkling Rivers
+Meadow Flowers, Tall Reeds
+Mud, Frogs, Thick Reeds
+Moths Flutter Toward Radiance
+Many Flowers, Tiny Ribbits
+Midsummer Fireflies, Twilight River
+Midwinter Frost, Turrets Rimed
+
+# --- Fantasy flavor ------------------------------------------------------------------------------
+Myths, Fables, Taverns, Rumors
+Magic Forests, Tall Ramparts
+Magic, Fire, Thunder, Rocks
+Moon Fell, Torches Rekindled
+Mists Fall, Torches Rise
+Marching Footmen, Trumpets Roaring
+Mighty Foes, Tested Resolve
+Mercenaries For The Realm
+Monarchs Fall, Taverns Remain
+Mages, Fighters, Thieves, Rangers
+Mostly Fiction, Thoroughly Researched
+
+# --- Games in general ----------------------------------------------------------------------------
+Mash F To Respect
+More Frames Than Reflexes
+Mouse, Fingers, Twitch, Repeat
+Microtransactions? Frankly, Too Rude
+Mana Flask, Two Remaining
+Must Finish Tutorial, Regrettably
+Mana, Fury, Tempo, Rage
+Mobility, Firepower, Toughness, Range
+Mage, Fighter, Tank, Ranged
+Mythic Fragments, Totally Random
+Mashing Furiously, Thinking Rarely
+Max Fun, Tiny Rage
+Minimum Fun Threshold Reached
+Most Fun Thing, Really
+Mild Fun, Tremendous Respawn timers
+More Fun Than Raids
+
+# --- Wholesome -----------------------------------------------------------------------------------
+Make Friends, Then Rematch
+Mostly Friends, Totally Rad
+
+# --- About this very splash ----------------------------------------------------------------------
+Meaning? Forgotten. Try Rerolling
+More Fresh Taglines Rolling
+Meaningless Fun, Tagline Roulette
+Marketing Forgot The Release
+Minecraft Forged This Ritual
+Maybe Flip Tagline, Reload
+
+# --- Nonsense ------------------------------------------------------------------------------------
+Mushrooms Feel Things, Right?
+Mayonnaise For The Respawn
+Muffins For The Raid
+Moose Frequently Traverse Rivers
+My Fish Tank Reeks
+Microwave Finished, Terrific Reheat
+My Ferret Tried Ranked
+Marshmallows For The Rally
+Mysterious Frog, Totally Real
+Medieval Fishing Tournament, Ranked
+Moderately Fast Tortoise Racing
+Mint Flavored Turret Rocks
+Mysterious Fruit, Tastes Radioactive
+
+# --- Holidays ------------------------------------------------------------------------------------
+# New Year
+[12-31..01-01] Midnight Fireworks, Timers Reset
+[12-31..01-01] Midnight Fireworks, Turrets Rattle
+[12-31..01-01] My Fourteen Terrible Resolutions
+
+# Lunar New Year 2027, the Year of the Goat (it moves: add next year's)
+[2027-02-06..2027-02-08] Mountain goats Fear The Ram
+[2027-02-06..2027-02-08] Many Fireworks, Tangerines, Red envelopes
+
+# Valentine's Day
+[02-14] Match Found: True Romance
+[02-14] My Favorite Teammate, Really
+[02-14] Mid Flirts, Top Recalls
+[02-14] Mana For Two, Romantically
+
+# Leap day
+[02-29] Mysterious February Twenty-ninth Respawns
+[02-29] Miracle: February's Twenty-ninth Returns
+
+# Pi Day
+[03-14] Mathematically Fair Turret Radius
+[03-14] Mmm, Fresh Turret Radius
+
+# St. Patrick's Day
+[03-17] Minions Follow The Rainbow
+[03-17] My Four-leaf: Totally Real
+
+# April Fools' Day
+[04-01] Minecraft For The Rest (of us)
+[04-01] Mostly Farming Tractor Roleplay
+[04-01] Most Fun Tetris Remake
+[04-01] Mandatory Fun Tax Return
+
+# May the Fourth
+[05-04] May the Force: Teamfight Ready
+[05-04] Midichlorians Fuel Turret Range
+
+# Programmers' Day (the 256th day)
+[09-13] Memory Freed, Thread Returned
+[09-13] Merge Freeze? Tests Red
+
+# Talk Like a Pirate Day
+[09-19] Matey, Fetch The Rum
+[09-19] Mutiny! Flash To Rigging
+[09-19] Me Fleet Takes River
+
+# Halloween week
+[10-24..10-31] Monsters Fill The River
+[10-24..10-31] Midnight Fog, Turrets Rattle
+[10-24..10-31] Mid's Fully Terrified, Run
+[10-24..10-31] Mana, Fudge, Treats... Raisins?
+[10-24..10-31] Mummies Feed Top Relentlessly
+[10-24..10-31] Moonlit Fog, Tombstones Rising
+[10-24..10-31] Minions From The Reaper
+[10-24..10-31] My Favorite Trick: Respawning
+
+# Día de los Muertos
+[11-01..11-02] Marigolds For The Respawned
+[11-01..11-02] Marigolds, Friends, Toasts, Remembrance
+
+# Thanksgiving week (US Thanksgiving is always between the 22nd and the 28th)
+[11-22..11-28] Minions Feast, Turkey Respawns
+[11-22..11-28] More Food, Then Recall
+[11-22..11-28] Mashed, Fried, Toasted, Roasted
+[11-22..11-28] Mom: Family Table, Recall!
+
+# Winter holidays
+[12-20..12-26] Merry Feasts, Toasty Recalls
+[12-20..12-26] Mistletoe Found, Teammates Reluctant
+[12-20..12-26] Many Frosty Turrets Rejoice
+[12-20..12-26] Mince pies For The Respawn
+[12-20..12-26] Mittens, Fireplace, Then Recall
+[12-20..12-26] Minions' First Tinsel Run
