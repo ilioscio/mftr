@@ -95,7 +95,7 @@ Gold is the only currency. It is spent at the shop while in the fountain (or any
 ## 6. Experience & levels
 
 - Champions within **1400 u** of a dying enemy unit share its XP, with a bonus when there are fewer sharers. This makes solo lanes level faster than duo lanes.
-- Levels **1–18**. Each level-up grants one ability point. The ultimate can be ranked at 6 / 11 / 16; basic abilities go to rank 5.
+- Levels **1–18**. Each level-up grants one ability point. The ultimate can be ranked at 6 / 11 / 16; basic abilities go to rank 5. Points can be spent while dead, as can everything that changes the build rather than the world (shopping, augment and anvil picks, the F spell, the trinket, moving items).
 - Kills on higher-level champions grant bonus XP (comeback mechanic).
 
 ## 7. Jungle & epic monsters
@@ -147,7 +147,7 @@ Epic monsters are secured with the jungler's **Claim** utility spell (Smite-equi
   - **Sweeping Lens:** reveals and disables enemy stealth wards within 450 u of its champion for 6 s, on a 90 s cooldown.
 - The Bridge (ARAM) has no wards and no trinkets.
 - **Veils** (Shade's Veil Step, D65): the dash leaves a cloud of smoke 300 u across where it
-  lands, for 3 s.
+  lands, for 5 s.
   - **Inside it:** Shade is hidden from the enemy. Attack orders on it end, and nothing can
     newly target it; skillshots and areas still hit what they touch.
   - **Showing itself:** attacking, casting, using an item or dealing damage from inside

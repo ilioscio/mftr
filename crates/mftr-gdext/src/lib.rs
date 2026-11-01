@@ -1506,6 +1506,7 @@ impl MatchClient {
             d.set("golden", s.progress.golden as i64 - 1);
             d.set("shield", if s.shield_until > t { s.shield } else { 0.0 });
             d.set("dead", !s.alive());
+            d.set("in_brush", s.alive() && self.session.own_in_hidden_brush(now));
             d.set("respawn_in", s.respawn_at.map_or(0.0, |r| r.secs_since(t)));
             let p = s.progress;
             d.set("level", p.level as i64);
