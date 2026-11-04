@@ -2,6 +2,25 @@
 
 No dates yet: milestones finish when their **exit criteria** pass. The order is chosen to prove the hardest, most differentiating thing first (netcode feel), then grow scope from the smallest complete game (ARAM) to the full one.
 
+## Where it stands (2026-11-04, release 0.18.2)
+
+Everything through M3 is built, along with the tracks beside it, but no milestone after M0 has passed its exit: every exit left needs playtesters or the owner's review. M4 is half built. M5 and M6 haven't started.
+
+| Milestone | Built | Left for the exit |
+|---|---|---|
+| M0 Foundations | ✅ | — |
+| M1 Duel Sandbox | ✅ slices 1–5 | The blind playtest: dodging rated fair in ≥ 80% of rounds at 80 ms |
+| M2 ARAM | ✅ slices 1–6 | Ten humans finish a match on a community-hosted server (the release workflow has now run on every tag through v0.18.2) |
+| M3 Mayhem | ✅ slices 1–6, stress exit met | Playtesters rate Mayhem fun |
+| A Characters & animation | ✅ all ten, rebuilt by C | The owner's approval of the concepts; the blind side-by-side |
+| M4 Crossroads | Slices 1–4 ✅; 7 and most of 8 built by other tracks (D64, D62) | Slice 5 (epic objectives, waits on E5), slice 6 (Draft with bans and roles), roster 10 → 16–20 |
+| E Map editor | Slices 1–4 and 6 ✅ | Slice 5: the owner's Classic map |
+| S, I, Horde, updates (U) | ✅ | — |
+| C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
+| M5 Community, M6 Federation | Not started | Everything |
+
+**Next to build:** E5 (once the owner's map is exported), then M4 slice 5, slice 6 and the roster. **Next to run:** the M1 blind playtest and an M2/M3 community match, now that testers update themselves (U).
+
 ## M0 — Foundations
 **Goal:** the skeleton every later milestone builds on.
 - Cargo workspace and Godot project. CI on Linux, Windows and macOS. License files.
@@ -282,7 +301,7 @@ Four more placeholder champions (original kits, D36), so all six M2 archetypes e
 
 - **Capacity:** one 10-player ARAM costs 0.18 ms per 33 ms tick (about 0.5% of one core) and about 105 KB/s upload. Ten concurrent matches fit on one core of a 4-core VPS many times over.
 
-**Left for the M2 exit:** the release workflow runs on GitHub for the first time with the first tag, and ten humans still need to finish a match on a community-hosted server.
+**Left for the M2 exit:** ~~the release workflow runs on GitHub for the first time with the first tag~~ (it has run on every tag since, through v0.18.2), and ten humans still need to finish a match on a community-hosted server.
 
 ### ARAM polish (2026-10-08): bots, turrets, the map and the controls
 - **Bots** no longer sit out at low health: they take a safe relic, or keep fighting from behind
@@ -727,8 +746,27 @@ With A14 every champion in the roster has a model, clips, effects and sounds.
   - Ward bodies: a stake with an eye in the team's color, a pink crystal on control wards. Ward icons on the minimap.
   - A trinket slot on the HUD with charges and cooldown, the trinket switch in the shop, and a control-ward item icon.
   - The `--shot-ward` capture flag.
-- **Not yet:** sweep and reveal visuals, ward timers on the minimap, and the support item's wards (slice 7).
- Red wins 4 of 5 seeds, on The Bridge as well as Crossroads: the bots' fixed champion split (blue gets the even-numbered champions) is the likely cause, not the map.
+- **Not yet:** sweep and reveal visuals and ward timers on the minimap. The support item's wards came with the item overhaul (slice 7).
+- Red won 4 of 5 seeds, on The Bridge as well as Crossroads: the bots' fixed champion split (blue gets the even-numbered champions) was the likely cause, not the map. Over 1,600 ARAM games on 2026-10-18, blue won 46–52%; the lean came from those seeds.
+
+### M4 slice 5 status (2026-11-04): not started
+Waits on E slice 5: the epic objectives stand in the official map's objective pits. No wyrms, Wyrm Soul, Elder, Mites, Siege Beast or Colossus in the sim yet.
+
+### M4 slice 6 status (2026-11-04): not started
+Classic's champion select is a free pick since S slice 3 (any champion no human teammate has, no rerolls), which is close to Blind pick. No Draft pick, bans or roles yet.
+
+### M4 slice 7 status (2026-10-18): ✅ done by the item overhaul (D64)
+- **75 items** ([18](18-items.md)): 5 starters, 12 components, 13 epics, 28 legendaries by class, 7 boots, 3 consumables; new stats (crit, penetration, omnivamp, tenacity and more), unique passives and ten actives on 1–6, none with hard CC (D36).
+- **The support quest:** the Pilgrim's Ledger becomes the Astrolabe (stealth wards) at 400 quest gold and a lantern at 1,000. **Jungle hatchlings** (with Claim) grow up after 32 monsters and change Claim.
+- **Art:** a model per item built from code (`art/items/build.py`), and icons rendered from them.
+- **Balance** (18 §12): `mftr-tools items` and `botmatch --items`; against the old set, champion win rates narrowed from 22–92% to 27–80% and stalemates at 30 minutes dropped from 40% to 12%.
+- The target was ~80; 75 is where the catalog landed.
+
+### M4 slice 8 status (2026-10-18): mostly done by Bots v2 (D62)
+Bots v2 (below) plays roles: a coach assigns lanes and the jungler, bots gank, rotate to sieges and defenses, ward by persona, and buy by role. **Not yet:** vision denial, and a check that the rhythm (laning → skirmish → teamfight) shows in telemetry, which is the M4 exit.
+
+### Roster (2026-11-04): 10 of 16–20
+Vesper, Rook, Ember, Bastion, Lumen, Shade, Quill, Cairn, Marrow, Wren. No champion added since A slice 14. Front-line kits are the next champion work (17 §15).
 
 ## E — Map editor (before M4 slice 5)
 The map editor of [12](12-map-editor.md) (D56): the official 5v5 map is drawn with it, and
@@ -796,6 +834,9 @@ objective pits.
   map for captures. The headless test covers it (21 checks).
 - **Hosting:** an ARAM map file adds ARAM, Mayhem and Hyper (as offered) on it; a real client
   joined a hosted bent ARAM map and played.
+
+### E slice 5 status (2026-11-04): waiting on the owner's map
+`maps/crossroads.mftrmap` is still the starter layout of E slice 1 (last changed 2026-10-10). The slice is to export the owner's map from the editor and build it in; M4 slice 5 waits on it.
 
 ## C — Champion art v2 (between S and M4 slice 5)
 
@@ -1082,6 +1123,45 @@ to keep many matches on a server ([17](17-bots.md), D62).
     it has brush (traced patches no longer vanish).
   - **Measured:** kills a minute 3.8–4.1 → 5.7–6.1 (the reference match: 6.6); time behind the
     own outer turret 37–40% → 29–33% (25%).
+- **Builds by persona** (17 §14, 2026-10-18): each persona takes its class's legendaries in its
+  own order, steady keeps the balanced path; item actives follow the persona too. A 1,600-game
+  check: persona win rates within 4 points of the balanced builds, sides even (blue 46–52%).
+  Vesper (87% → 71–77%), Stonewall Aegis and Kinship Locket retuned.
+- **The front line** (17 §15, 2026-10-18): front-liners lose ARAM whatever bots do. Six ideas,
+  each over 400 Elite mirrors, didn't move them; only champion numbers have. Kept: divers go for
+  back-line carries, and Shade veils when focused or low. **Next:** front-line kits, a champion
+  pass rather than a bot one.
+
+## H — Horde (co-op survival, 2026-10-14)
+
+[Mayhem: Horde](../horde.md): five champions against 20 waves on The Bridge, defending the blue
+Base, with the Azure Warden at wave 10 and the Ember Brute at 20, then endless survival. Bots fill
+empty seats. ✅ Built; every Bots v2 tier clears the campaign.
+
+## U — Updates for testers (D66, 0.17.0–0.18.0)
+
+Testers shouldn't have to watch GitHub, so the playtests the exits need can run on current builds.
+
+### Status (2026-10-30): ✅ done
+- **Release notices** (0.17.0): each release carries a `latest.json` signed with the release
+  key; the client checks it at start and says *"MFTR x is out"*. A server on another protocol
+  answers with a `RELEASE` packet, so the client can say which version it needs. CI moves a
+  `release` branch to each published tag, and servers follow it.
+- **Linux** (0.18.0): the notice links the release page and says to update through the package
+  manager or the flake.
+- **Windows updates itself** (0.18.0): **Update** downloads the archive, checks its SHA-256
+  against the signed manifest, swaps the files in place (undoing every step if one fails) and
+  restarts, rejoining the server that turned it away. macOS keeps a **Download** button.
+- **Hosting:** the guide's Updating section; servers pick a fresh seed every start unless
+  `--seed` is given (0.18.2).
+
+## Playtest fixes and polish (0.16.0 on)
+- **Shade's veil** (D65, 0.16.0): Veil Step leaves a cloud that hides Shade, 5 s since 0.18.2.
+- **0.18.2:** ranking up while dead, the Gatehouse's collapse, bot Cairn's ult range, a stealth
+  tint at the screen's edges while hidden, red edges when hurt (Graphics → "Damage at the
+  edges"), Stormcall no longer holding its caster, and a fresh match seed every server start.
+- **On main, after 0.18.2:** the start menu rolls a new meaning for MFTR at every start
+  (`client/splashes.txt`).
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
