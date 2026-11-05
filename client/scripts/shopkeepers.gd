@@ -34,9 +34,12 @@ const PLINTH_R_M := 1.5
 ## flag on the left (90°).
 const SPOT_PREF := [22, 18, 26, 14, 30, 65, 60, 70, 55, 75, 10, 5, 0, 80, 85, 90, 50]
 const SPOT_REACH := Vector2(550.0, 850.0)
-## The stall's center stands this far out of the wall (u); the cliff is bent back around it into
-## an alcove (map_view.gd `notch`), the scenery kept out.
-const INSET_U := 40.0
+## The stall's center stands this far back into the wall (u), so the wall wraps its back half. The
+## cliff is bent back into an alcove (map_view.gd `notch`) around a point `ALCOVE_OUT_U` out from
+## the wall on the open side (bending from there pushes the cliff back, not forward); the scenery
+## is kept out.
+const INSET_U := 100.0
+const ALCOVE_OUT_U := 60.0
 const FADE := 0.3                          # seconds a clip crossfades into the next
 const FIDGET_EVERY := Vector2(8.0, 15.0)   # seconds between fidgets
 const NEAR_M := 8.0                        # a champion this close is at the shop
@@ -70,7 +73,7 @@ static func pair_for(rows: Array) -> Array:
 
 ## Each fountain's stall spot (`geo` as `map_geometry()`: its `fountains`, `walls` and `size`),
 ## in the fountains' order: `{ center (u), face (unit, where the keeper looks), notch (bool:
-## set into a wall) }`.
+## set into a wall), alcove (u: the point the cliff is bent back from, when it is) }`.
 static func spots(geo: Dictionary) -> Array:
 	var out: Array = []
 	for f in geo.get("fountains", []):
@@ -81,7 +84,7 @@ static func spots(geo: Dictionary) -> Array:
 			var dir := Vector2(-sin(a), -cos(a))
 			var hit := _wall_hit(geo, c, dir, SPOT_REACH.y)
 			if hit >= SPOT_REACH.x and hit <= SPOT_REACH.y:
-				spot = {"center": c + dir * (hit - INSET_U), "notch": true}
+				spot = {"center": c + dir * (hit + INSET_U), "notch": true, "alcove": c + dir * (hit - ALCOVE_OUT_U)}
 				break
 		if spot.is_empty():
 			# No wall near: on the open ground just past the platform, up and to the left.
