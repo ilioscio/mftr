@@ -72,9 +72,15 @@ The simulation never knows shopkeepers exist. The client:
   set into the wall behind it, its keeper facing the platform. From the map's data (the
   fountain and the walls), so editor maps get shops too: directions are tried from about 22°
   left of straight up (between the platform's flag and brazier), then about 65°, until one meets
-  a wall 5.5–8.5 m away; the cliff's mesh is bent back around the stall into an alcove (the
-  simulation's walls don't change: a Classic base's wall is the map's edge) and the scenery kept
-  out of it. With no wall in reach (an ARAM court), the stall stands just past the platform.
+  a wall 5.5–8.5 m away. The stall stands far enough out to clear the platform's braziers and
+  banners, in a nook: a U (rounded behind it, straight sides out to the platform) cut out of the
+  cliff's pieces before the cliffs are meshed (`MatchClient.map_cliff_pieces` /
+  `map_cliffs_from`), so the face and grass top follow it. The simulation's walls don't change
+  (a Classic base's wall is the map's edge), and the scenery is kept out of the nook. With no
+  wall in reach (an ARAM court), the stall stands just past the platform.
+- **draws the whole shop 2.2× its built size** (`SCALE`): the reference game's shopkeeper stands
+  two to three times a champion's height and its shop fills a corner of the screen, a call to
+  action. The packs stay at their built size and budgets.
   Horde maps have one fountain and one shop;
 - **picks the pair** from the match itself: a hash of its champions and their unit ids (the Tab
   scoreboard, the same for every player), blue's keeper and red's, never the same one. No wire

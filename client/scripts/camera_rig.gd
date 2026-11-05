@@ -12,12 +12,28 @@ var _ready := false
 var _drag_from := Vector2.ZERO
 var _dragging := false
 var _peeking := false                    # the minimap is held: the camera stays where it points
+## Edge panning waits until the mouse has moved since the match began: a cursor confined to the
+## window at the start (it was over the taskbar, a launcher) sits on an edge and would scroll
+## the camera away from the champion before the player has touched the mouse.
+const ARM_PX := 6.0
+var _edge_armed := false
+var _mouse_at = null
 
 
 ## Snap to `at` (match start, respawn).
 func center(at: Vector2) -> void:
 	focus = at
 	_ready = true
+
+
+## A new match: center on the champion as soon as its position is known, and hold edge panning
+## until the mouse moves.
+func reset() -> void:
+	_ready = false
+	_edge_armed = false
+	_mouse_at = null
+	_peeking = false
+	_dragging = false
 
 
 ## The minimap is clicked or dragged: look there while `held` (even when locked, like the
@@ -32,8 +48,17 @@ func peek(at: Vector2, held: bool) -> void:
 ## map's, `viewport` the game view, `units_per_px` how far a pixel of drag moves the camera.
 func update(delta: float, settings, own, size: Vector2, viewport: Viewport, units_per_px: float, input_free: bool) -> void:
 	var centering: bool = input_free and Input.is_action_pressed("camera_center")
-	if own != null and (not _ready or centering or (settings.camera_locked and not _peeking)):
+	# The champion's position is (0, 0) until its first state arrives: not a place to look.
+	var known: bool = own != null and own != Vector2.ZERO
+	if known and (not _ready or centering or (settings.camera_locked and not _peeking)):
 		center(own)
+	if not _ready:
+		return
+	var m0 := viewport.get_mouse_position()
+	if _mouse_at == null:
+		_mouse_at = m0
+	elif not _edge_armed and m0.distance_to(_mouse_at) > ARM_PX:
+		_edge_armed = true
 	if not settings.camera_locked and input_free and not _peeking:
 		var dir := Vector2.ZERO
 		if Input.is_action_pressed("pan_left"):
@@ -44,7 +69,7 @@ func update(delta: float, settings, own, size: Vector2, viewport: Viewport, unit
 			dir.y -= 1.0
 		if Input.is_action_pressed("pan_down"):
 			dir.y += 1.0
-		if settings.edge_pan and settings.edge_pan_speed > 0.0 and DisplayServer.window_is_focused():
+		if _edge_armed and settings.edge_pan and settings.edge_pan_speed > 0.0 and DisplayServer.window_is_focused():
 			var m := viewport.get_mouse_position()
 			var r := viewport.get_visible_rect().size
 			if m.x >= 0.0 and m.y >= 0.0 and m.x <= r.x and m.y <= r.y:

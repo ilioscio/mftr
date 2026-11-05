@@ -24,8 +24,12 @@ const BANTER := {
 ## Where each keeper stands on their stall's plinth (art/shopkeepers/concepts.py KEEP_AT), in the
 ## stall's space: x to its left, z toward its front.
 const KEEP_AT := {"goldwick": Vector2(0.0, 0.55), "rosette": Vector2(0.0, 0.50), "slink": Vector2(-0.15, 0.55), "folio": Vector2(0.0, 0.50)}
-const PLINTH_M := 0.18
-const PLINTH_R_M := 1.5
+## The whole shop (stall, keeper, plinth) is drawn this much larger than built: the reference
+## game's shopkeeper stands two to three times a champion's height and its shop fills a corner of
+## the screen, a call to action. The packs stay at their built size (and budgets).
+const SCALE := 2.2
+const PLINTH_M := 0.18                     # the plinth's top, in the stall's own (unscaled) space
+const PLINTH_R_M := 1.72 * SCALE           # the plinth's foot (its step): what a click hits, what clears the props
 ## Where a stall stands (`spots`), as in the reference game: on the rim of the fountain's
 ## platform, above it and a little to the left on screen (the camera is the same for both teams),
 ## set into the wall behind it. Directions are tried in this order, in degrees left of straight
@@ -34,16 +38,22 @@ const PLINTH_R_M := 1.5
 ## flag on the left (90°).
 const SPOT_PREF := [22, 18, 26, 14, 30, 65, 60, 70, 55, 75, 10, 5, 0, 80, 85, 90, 50]
 const SPOT_REACH := Vector2(550.0, 850.0)
-## The stall's center stands this far back into the wall (u), so the wall wraps its back half. The
-## cliff is bent back into an alcove (map_view.gd `notch`) around a point `ALCOVE_OUT_U` out from
-## the wall on the open side (bending from there pushes the cliff back, not forward); the scenery
-## is kept out.
-const INSET_U := 100.0
-const ALCOVE_OUT_U := 60.0
+## The stall's center stands at least this far back into the wall (u), and farther when the
+## platform's props need it; the cliff is carved into a U around it (map_view.gd `notch`) and the
+## scenery kept out.
+const INSET_U := 70.0 * SCALE
+## The fountain platform's own props (art/props/landmarks/build.py), at its built size (600 u):
+## braziers on the diagonals, banners on the axes. The plinth keeps CLEAR_U from both.
+const BRAZIER_R_U := 490.0
+const BANNER_R_U := 530.0
+const CLEAR_U := 30.0
+## The alcove: a U around the stall (rounded behind it, straight sides out to the platform), its
+## radius the plinth's and a margin.
+const ALCOVE_R_U := PLINTH_R_M * 100.0 + 40.0
 const FADE := 0.3                          # seconds a clip crossfades into the next
 const FIDGET_EVERY := Vector2(8.0, 15.0)   # seconds between fidgets
-const NEAR_M := 8.0                        # a champion this close is at the shop
-const LOOK_M := 6.0                        # and this close, the keeper turns its head to them
+const NEAR_M := 4.0 + 2.5 * SCALE          # a champion this close is at the shop
+const LOOK_M := 3.0 + 2.0 * SCALE          # and this close, the keeper turns its head to them
 const U := 0.01
 
 var art_root := ""
@@ -84,15 +94,84 @@ static func spots(geo: Dictionary) -> Array:
 			var dir := Vector2(-sin(a), -cos(a))
 			var hit := _wall_hit(geo, c, dir, SPOT_REACH.y)
 			if hit >= SPOT_REACH.x and hit <= SPOT_REACH.y:
-				spot = {"center": c + dir * (hit + INSET_U), "notch": true, "alcove": c + dir * (hit - ALCOVE_OUT_U)}
+				# Far enough out that the plinth clears the platform's braziers and banners.
+				var d := maxf(hit + INSET_U, _clear_of_props(dir, float(f.radius) / 600.0))
+				spot = {"center": c + dir * d, "notch": true, "dir": dir, "depth": d - hit}
 				break
 		if spot.is_empty():
-			# No wall near: on the open ground just past the platform, up and to the left.
+			# No wall near: on the open ground past the platform's props, up and to the left.
 			var a0 := deg_to_rad(float(SPOT_PREF[0]))
-			spot = {"center": c + Vector2(-sin(a0), -cos(a0)) * (float(f.radius) + 250.0), "notch": false}
+			var dir0 := Vector2(-sin(a0), -cos(a0))
+			spot = {"center": c + dir0 * _clear_of_props(dir0, float(f.radius) / 600.0), "notch": false}
 		spot["face"] = (c - spot.center).normalized()
 		out.append(spot)
 	return out
+
+
+## The alcove cut into the wall for `spot` (units): a U around the stall, a half circle of
+## ALCOVE_R_U behind its center and straight sides out past where the wall began.
+static func alcove(spot: Dictionary) -> PackedVector2Array:
+	var c: Vector2 = spot.center
+	var dir: Vector2 = spot.dir
+	var side := Vector2(-dir.y, dir.x)
+	var mouth := -(float(spot.depth) + 150.0)
+	var out := PackedVector2Array()
+	out.append(c + dir * mouth + side * ALCOVE_R_U)
+	for k in 17:
+		var a := PI / 2.0 - PI * k / 16.0
+		out.append(c + dir * cos(a) * ALCOVE_R_U + side * sin(a) * ALCOVE_R_U)
+	out.append(c + dir * mouth - side * ALCOVE_R_U)
+	return out
+
+
+## The cliffs' `pieces` (`map_cliff_pieces`) with the alcoves of `spots` cut out. A piece the cut
+## would leave with a hole (it can't: an alcove opens onto the platform) is kept whole.
+static func cut_pieces(pieces: Array, spots: Array) -> Array:
+	var cuts: Array = []
+	for s in spots:
+		if s.notch:
+			cuts.append(alcove(s))
+	if cuts.is_empty():
+		return pieces
+	var out: Array = []
+	for piece in pieces:
+		var parts: Array = [piece]
+		for cut in cuts:
+			var next: Array = []
+			for part in parts:
+				var res: Array = Geometry2D.clip_polygons(part, cut)
+				var holed := false
+				for r in res:
+					if Geometry2D.is_polygon_clockwise(r) != Geometry2D.is_polygon_clockwise(part):
+						holed = true
+				if holed:
+					next.append(part)
+				else:
+					next.append_array(res)
+			parts = next
+		out.append_array(parts)
+	return out
+
+
+## How far from a fountain's center along `dir` the plinth must stand to keep CLEAR_U from every
+## brazier and banner on its platform (the platform drawn `k` times its built size).
+static func _clear_of_props(dir: Vector2, k: float) -> float:
+	var need := PLINTH_R_M * 100.0 + CLEAR_U
+	var props: Array = []
+	for i in 8:
+		var a := PI / 4.0 * i
+		props.append(Vector2(cos(a), sin(a)) * (BRAZIER_R_U if i % 2 == 1 else BANNER_R_U) * k)
+	var d := 0.0
+	while d < 3000.0:
+		var ok := true
+		for p in props:
+			if (dir * d).distance_to(p) < need:
+				ok = false
+				break
+		if ok and d > BANNER_R_U * k:
+			return d
+		d += 10.0
+	return d
 
 
 ## How far from `from` along `dir` the ground stops being walkable (a wall or the map's edge),
@@ -145,6 +224,7 @@ func _build_shop(key: String, f: Dictionary, spot: Dictionary, season: String, t
 	var node := Node3D.new()
 	node.name = "Shop_" + key
 	node.position = Vector3(at.x * U, 0.0, at.y * U)
+	node.scale = Vector3.ONE * SCALE
 	# The keeper faces the fountain's platform, as the reference game's does.
 	var face: Vector2 = spot.face
 	node.rotation.y = atan2(face.x, face.y)

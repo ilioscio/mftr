@@ -86,92 +86,6 @@ static func prop_node(id: String, team: Color) -> MeshInstance3D:
 	return n
 
 
-## The shops' alcoves (19 §4): the cliff's vertices within NOTCH_OUT_U of each of `centers` (units,
-## each just out from the wall on the open side) pushed out from it to between NOTCH_U and
-## NOTCH_OUT_U, so the cliff curves back around the stall set into it, its face keeping its slope;
-## the cliff's top, grass and all, moves back with it.
-const NOTCH_U := 330.0
-const NOTCH_OUT_U := 430.0
-
-
-static func notch(tris: PackedVector3Array, centers: Array) -> PackedVector3Array:
-	var r := NOTCH_U * U
-	var r2 := NOTCH_OUT_U * U
-	var cs: Array = centers.map(func(c): return (c as Vector2) * U)
-	# The cliff's top is a few long triangles: refine the ones that reach an alcove first, or
-	# their straight edges would roof it over. Edges are split on their own merits (long, and
-	# passing within reach of a center), so the triangles either side of one split it alike.
-	var out := _refine(tris, cs, r2 + 0.3, 0.35)
-	for i in out.size():
-		var v := out[i]
-		for cm in cs:
-			var d := Vector2(v.x - cm.x, v.z - cm.y)
-			var dist := d.length()
-			if dist < r2:
-				var dir := d / dist if dist > 1e-4 else Vector2(0, -1)
-				d = dir * (r + (r2 - r) * dist / r2)
-				v = Vector3(cm.x + d.x, v.y, cm.y + d.y)
-		out[i] = v
-	return out
-
-
-## Split, round after round, every edge longer than `longest` (m) that passes within `reach` of
-## one of `centers` (xz, m), each triangle by the pattern of its split edges.
-static func _refine(tris: PackedVector3Array, centers: Array, reach: float, longest: float) -> PackedVector3Array:
-	var cur := tris
-	for _round in 12:
-		var split := func(a: Vector3, b: Vector3) -> bool:
-			if a.distance_to(b) <= longest:
-				return false
-			for c in centers:
-				var q := Geometry2D.get_closest_point_to_segment(c, Vector2(a.x, a.z), Vector2(b.x, b.z))
-				if q.distance_to(c) < reach:
-					return true
-			return false
-		var mid := func(a: Vector3, b: Vector3) -> Vector3:
-			return (a + b) * 0.5
-		var out := PackedVector3Array()
-		var changed := false
-		var i := 0
-		while i < cur.size():
-			var a := cur[i]
-			var b := cur[i + 1]
-			var c := cur[i + 2]
-			i += 3
-			var sab: bool = split.call(a, b)
-			var sbc: bool = split.call(b, c)
-			var sca: bool = split.call(c, a)
-			var n := int(sab) + int(sbc) + int(sca)
-			if n == 0:
-				out.append_array([a, b, c])
-				continue
-			changed = true
-			# Rotate so the split edges come first: ab, then bc, then ca.
-			while not sab or (n == 2 and not sbc) or (n == 1 and (sbc or sca)):
-				var t := a
-				a = b
-				b = c
-				c = t
-				var ts := sab
-				sab = sbc
-				sbc = sca
-				sca = ts
-			var mab: Vector3 = mid.call(a, b)
-			if n == 1:
-				out.append_array([a, mab, c, mab, b, c])
-			elif n == 2:
-				var mbc: Vector3 = mid.call(b, c)
-				out.append_array([a, mab, c, mab, b, mbc, mab, mbc, c])
-			else:
-				var mbc: Vector3 = mid.call(b, c)
-				var mca: Vector3 = mid.call(c, a)
-				out.append_array([a, mab, mca, mab, b, mbc, mca, mbc, c, mab, mbc, mca])
-		cur = out
-		if not changed:
-			break
-	return cur
-
-
 ## Polylines (game units) as the ground shader's segments (meters), at most 48.
 static func segments(polylines: Array) -> PackedVector4Array:
 	var out := PackedVector4Array()
@@ -282,13 +196,7 @@ func build(geo: Dictionary, ground: MeshInstance3D, ally: Color, enemy: Color) -
 	brush_mat.shader = load("res://shaders/brush.gdshader")
 	# The cliffs (15 §4), built whole from the wall pieces (`maps::cliffs`): one mesh per group.
 	var cliffs: Dictionary = geo.get("cliffs", {})
-	var notches := []
-	for s in geo.get("shop_spots", []):
-		if s.notch:
-			notches.append(s.alcove)
 	for tris in cliffs.get("groups", []):
-		if not notches.is_empty():
-			tris = notch(tris, notches)
 		var arrays := []
 		arrays.resize(Mesh.ARRAY_MAX)
 		arrays[Mesh.ARRAY_VERTEX] = tris
