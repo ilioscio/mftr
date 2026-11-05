@@ -38,7 +38,7 @@ fi
 copy_packs() {
   local dest="$1"
   rm -rf "$dest"
-  for d in art/library/*/export art/champions/*/export art/minions/*/export art/monsters/*/export art/props/*/export art/items/*/export art/items/icons; do
+  for d in art/library/*/export art/champions/*/export art/minions/*/export art/monsters/*/export art/shopkeepers/*/export art/props/*/export art/items/*/export art/items/icons; do
     [ -d "$d" ] || continue
     mkdir -p "$dest/${d#art/}"
     cp -R "$d/." "$dest/${d#art/}/"
