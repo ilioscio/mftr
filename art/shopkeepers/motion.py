@@ -178,6 +178,9 @@ def limbs(arms, legs):
     return out
 
 
+# Each keeper's winter accessory (19 §2) is on `winter` (and `winter2`) bones, which the client
+# shrinks away outside winter.
+
 # --- Goldwick: pompous, shrewd, delighted --------------------------------------------------
 
 class Goldwick:
@@ -199,6 +202,7 @@ class Goldwick:
         ("watch", WATCH, "body"),
         ("coin", COIN, "body"),
         ("coins", COINS, "world"),
+        ("winter", (0, 0.05, 0.88), "body"),
         ("ik_R", (-0.43, -0.12, 0.48), "body"),
         ("ik_L", (0.19, -0.32, 0.68), "body"),
     ] + limbs(arms, legs)
@@ -215,6 +219,12 @@ class Goldwick:
         C.disc(b, (0.17, -0.37, 0.585), 0.033, 0.004, C.CREAM, sides=12, rot=(90, 0, 0))
         b.part("coin")
         C.disc(b, Goldwick.COIN, 0.035, 0.012, C.GOLD, sides=10, rot=(90, 0, 0))
+        # Winter: his fur collar turned up, a thick ruff and a flap standing behind his head.
+        b.part("winter")
+        fur = (0.42, 0.32, 0.22)
+        C.donut(b, (0, 0, 0.875), 0.20, 0.075, fur, sides=14, tsides=5, rmod=lambda a, z: 1 + 0.06 * math.sin(9 * a))
+        C.lathe(b, [(0.0, 0.17), (0.07, 0.19), (0.17, 0.17), (0.20, 0.0)], 10, fur, at=(0, 0.13, 0.86), rot=(-18, 0, 0),
+                sy=0.35, rmod=lambda a, z: 1 + 0.08 * abs(math.sin(5 * a)))
         b.part("coins")
         x, y, z = Goldwick.COINS
         for k in range(10):
@@ -398,6 +408,9 @@ def _heart(rig, P, W, u, start, at):
         P.rot("heart", z=15 * math.sin(2 * math.pi * 1.5 * s))
 
 
+BOWC = (0.90, 0.20, 0.50)
+
+
 class Rosette:
     key = "rosette"
     MIRROR = (0.20, -0.22, 0.60)
@@ -421,6 +434,8 @@ class Rosette:
         ("perfume", PERFUME, "body"),
         ("heart", (0, 0, 0.75), "world"),
         ("mist", (0, 0, 0.80), "world"),
+        ("winter", (0, 0.02, 1.12), "head"),
+        ("winter2", (0.20, -0.12, 0.70), "body"),
     ] + limbs(arms, legs) + [("fingers_L", (0.18, -0.08, 0.70), "hand_L")]
     springs = {"skirt": (1.6, 0.35, -1, 1.2, 35), "bow": (2.2, 0.18, 1, 3.0, 30)}
     look = 0.78
@@ -438,6 +453,19 @@ class Rosette:
         for s in (-1, 1):
             C.sphere(b, (s * 0.035, 0, 0.775), 0.045, (1.0, 0.22, 0.50), sides=8, rings=5, s=(1, 0.45, 1))
         C.lathe(b, [(0.70, 0.0), (0.775, 0.075)], 8, (1.0, 0.22, 0.50), cap=False, sy=0.45)
+        # Winter: white fur earmuffs on a gold band behind the bow, and a muff for her left hand.
+        b.part("winter")
+        white = (0.86, 0.83, 0.80)
+        for sgn in (-1, 1):
+            C.sphere(b, (sgn * 0.165, 0.0, 1.11), 0.062, white, sides=10, rings=6, s=(0.75, 1, 1))
+        C.tube(b, [(-0.16, 0.04, 1.15), (-0.11, 0.07, 1.25), (0, 0.08, 1.29), (0.11, 0.07, 1.25), (0.16, 0.04, 1.15)], 0.012, 5, C.GOLD)
+        b.part("winter2")
+        b.push((0.20, -0.12, 0.70), (0, 90, 15))
+        C.lathe(b, [(-0.10, 0.05), (-0.09, 0.075), (0.09, 0.075), (0.10, 0.05)], 12, white,
+                rmod=lambda a, z: 1 + 0.05 * math.sin(7 * a + z * 30))
+        C.donut(b, (0, 0, -0.095), 0.07, 0.012, BOWC, sides=10, tsides=4)
+        C.donut(b, (0, 0, 0.095), 0.07, 0.012, BOWC, sides=10, tsides=4)
+        b.pop()
         b.part("mist")
         for i, (x, y, z, r) in enumerate(((0, 0, 0.80, 0.09), (0.09, 0.02, 0.83, 0.07), (-0.08, -0.03, 0.78, 0.075),
                                           (0.03, -0.06, 0.88, 0.06), (-0.04, 0.05, 0.86, 0.065), (0.07, -0.04, 0.74, 0.055),
@@ -600,6 +628,7 @@ class Slink:
         ("head", (0, -0.36, 1.30), "body"),
         ("brim", (0, -0.40, 1.50), "head"),
         ("scarf", (0.09, -0.46, 1.30), "head"),
+        ("winter", (0, -0.38, 1.30), "head"),
         ("dagger", DAGGER, "body"),
         ("ik_R", (-0.20, -0.52, 0.93), "body"),
         ("ik_L", (0.33, -0.60, 1.26), "body"),
@@ -627,6 +656,12 @@ class Slink:
         C.lathe(b, [(-0.035, 0.078), (0.035, 0.078)], 10, C.team(), at=tuple(sh.lerp(el, 0.55)), rot=rot)
         C.tube(b, [tuple(sh.lerp(el, 0.55) + Vector((0.0, -0.07, 0.0))), tuple(sh.lerp(el, 0.55) + Vector((0.03, -0.14, -0.08)))],
                [0.02, 0.008], 4, C.team(0.85))
+        # Winter: a chunky knitted scarf wound up over the void, its end over his shoulder.
+        b.part("winter")
+        rows = [(0.10, 0.20, 0.05), (0.16, 0.15, 0.13), (0.10, 0.20, 0.05), (0.30, 0.48, 0.02)]
+        C.donut(b, (0, -0.40, 1.31), 0.135, 0.07, lambda a, z: rows[int(a * 3) % 4], sides=8, tsides=4)
+        C.tube(b, [(-0.10, -0.42, 1.30), (-0.16, -0.30, 1.38), (-0.20, -0.08, 1.30), (-0.22, 0.05, 1.10)], [0.05, 0.05, 0.045, 0.035], 4,
+               (0.10, 0.20, 0.05))
         b.part("loot")
         C.sphere(b, (0.14, 0.10, 1.32), 0.10, C.emi((0.55, 1.0, 0.10)), sides=10, rings=6)
         for dx, dz in ((-0.07, 0.07), (0.08, 0.05), (0.0, 0.12)):
@@ -778,6 +813,8 @@ class Folio:
         ("beard1", (0, -0.17, 0.55), "head"),
         ("beard2", (0, -0.21, 0.40), "beard1"),
         ("bubble", (0.05, -0.27, 0.57), "head"),
+        ("winter", (0, -0.05, 0.70), "head"),
+        ("winter2", (0, -0.13, 0.95), "hoodtip"),
         ("pack1", (0, 0.18, 0.27), "body"),
         ("pack2", (0.01, 0.20, 0.72), "pack1"),
         ("pack3", (0.04, 0.20, 1.17), "pack2"),
@@ -799,6 +836,14 @@ class Folio:
     def props(b):
         b.part("bubble")
         C.sphere(b, (0.05, -0.27, 0.57), 0.065, (0.78, 0.90, 1.0), sides=10, rings=6)
+        # Winter: a knitted cap over the hood, red and cream, and a bobble on the hood's tip.
+        b.part("winter")
+        rows = [(0.55, 0.06, 0.05), (0.55, 0.06, 0.05), (0.72, 0.66, 0.55)]
+        C.lathe(b, [(0.0, 0.142), (0.05, 0.142), (0.10, 0.12), (0.14, 0.07), (0.16, 0.0)], 12,
+                lambda a, z: rows[int(z * 30) % 3], at=(0, -0.05, 0.665))
+        C.donut(b, (0, -0.05, 0.672), 0.142, 0.022, (0.72, 0.66, 0.55), sides=12, tsides=4)
+        b.part("winter2")
+        C.sphere(b, (0, -0.14, 0.95), 0.045, (0.55, 0.06, 0.05), sides=8, rings=5)
         b.part("scroll")
         x, y, z = Folio.SCROLL
         b.push((x, y, z), (0, 90, 0))

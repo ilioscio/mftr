@@ -176,6 +176,9 @@ func _ready() -> void:
 		elif args[i] == "--dump-terrain" and i + 1 < args.size():
 			_dump_terrain = args[i + 1]
 			i += 1
+		elif args[i] == "--shot-season" and i + 1 < args.size():
+			_shot_season = args[i + 1]
+			i += 1
 		elif args[i] == "--shopkeeper-tour":
 			_shopkeeper_tour = true
 		elif args[i] == "--shopkeepers" and i + 1 < args.size():
@@ -596,6 +599,7 @@ var _shot_queues := false                 # `--shot-queues`: capture the server'
 var _shot_keep_points := false            # `--keep-points`: don't spend the starting points
 var _forced_shopkeepers: Array = []       # `--shopkeepers A[,B]`: our base's keeper (and theirs), 19 §4
 var _shopkeeper_tour := false             # `--shopkeeper-tour`: the keepers play every clip in turn
+var _shot_season := ""                    # `--shot-season NAME`: switch to it 1.5 s before the shot (not saved)
 var shopkeepers: Node3D                   # the shops beside the fountains (shopkeepers.gd)
 
 
@@ -640,6 +644,9 @@ func _update_shot(delta: float) -> void:
 	_shot_timer += delta
 	if _shot_inspect != "" and _inspect_id < 0 and _shot_timer > _shot_at - 1.5:
 		_shot_open_inspect()
+	if _shot_season != "" and _shot_timer > _shot_at - 1.5:
+		settings.season = _shot_season  # as if picked in Settings mid-match
+		_shot_season = ""
 	if _shot_ping and _shot_timer > _shot_at - 2.0 and _shot_timer - delta <= _shot_at - 2.0:
 		var c := client.own_position()
 		client.ping("group", c + (client.map_geometry().size / 2.0 - c).normalized() * 600.0, -1)
@@ -1713,6 +1720,13 @@ func _process(delta: float) -> void:
 	_update_backdrop(phase)
 	if playing and not _map_built:
 		_build_map()
+	elif _map_built:
+		_season_check -= delta
+		if _season_check <= 0.0:
+			_season_check = 0.5
+			var want := _wanted_season()
+			if want != _season:
+				_redress_season(want)
 	if playing:
 		_update_blind()
 	_update_draft(playing)
@@ -2201,28 +2215,33 @@ func _size_ground(size_u: Vector2, margin_u := 0.0) -> void:
 	ground.position = Vector3(size_u.x, 0, size_u.y) * (UNITS_TO_METERS / 2.0)
 
 
+## The season the map is dressed in now, and the map's own (15 §9, K slice 5).
+var _season := ""
+var _map_season := ""
+var _map_geo: Dictionary = {}
+var _season_check := 0.0
+
+
+## The season the settings ask for: the calendar's (the default), the map's own, or one picked.
+func _wanted_season() -> String:
+	return Seasons.resolve(settings.season, _map_season, Time.get_date_dict_from_system(), settings.hemisphere)
+
+
 func _build_map() -> void:
 	_map_built = true
 	var geo: Dictionary = client.map_geometry()
 	geo["ground"] = client.map_ground()
 	geo["cliffs"] = client.map_cliffs()
-	# The map's own season unless the player picked one (15 §9).
-	if settings.season in Seasons.NAMES:
-		geo["season"] = settings.season
-	Seasons.apply_light(Seasons.get_season(geo.season), world_env, sun)
+	_map_geo = geo
+	# The shops' spots first: the cliffs are bent back around them into alcoves (19 §4).
+	geo["shop_spots"] = preload("res://scripts/shopkeepers.gd").spots(geo)
+	_map_season = str(geo.get("season", "summer"))
+	_season = _wanted_season()
+	geo["season"] = _season
 	vignette.visible = true
 	var size: Vector2 = geo.size
 	_build_minimap(geo)
-	atmosphere = preload("res://scripts/atmosphere.gd").new()
-	add_child(atmosphere)
-	atmosphere.setup(size / 2.0 * UNITS_TO_METERS, Seasons.get_season(geo.season).get("motes", "pollen"))
-	# The world: ground, roads, river, cliffs, brush, scenery, fountains (shared with the map
-	# editor's Actual view).
-	var view: Node3D = MapView.new()
-	view.name = "MapView"
-	add_child(view)
-	view.build(geo, ground, ALLY_COLOR, ENEMY_COLOR)
-	_road_segments = view.road_segments
+	_dress_map(geo)
 	# The shops beside the fountains (19 §4).
 	shopkeepers = preload("res://scripts/shopkeepers.gd").new()
 	shopkeepers.name = "Shopkeepers"
@@ -2230,11 +2249,48 @@ func _build_map() -> void:
 	shopkeepers.forced = _forced_shopkeepers
 	shopkeepers.tour = _shopkeeper_tour
 	add_child(shopkeepers)
-	shopkeepers.place(geo.get("fountains", []), geo.size, str(geo.get("season", "summer")), ALLY_COLOR, ENEMY_COLOR)
+	shopkeepers.place(geo, _season, ALLY_COLOR, ENEMY_COLOR)
 	if geo.fountains.size() == 2:
 		var a: Vector2 = geo.fountains[0].center
 		var b: Vector2 = geo.fountains[1].center
 		_lane_axis = [a, (b - a).normalized()]
+	_render_minimap_terrain()
+
+
+## The season's look: the light, the motes in the air, and the world (ground, cliffs, scenery,
+## life, fountains), shared with the map editor's Actual view.
+func _dress_map(geo: Dictionary) -> void:
+	var season := Seasons.get_season(geo.season)
+	Seasons.apply_light(season, world_env, sun)
+	if atmosphere != null:
+		atmosphere.queue_free()
+	atmosphere = preload("res://scripts/atmosphere.gd").new()
+	add_child(atmosphere)
+	atmosphere.setup(geo.size / 2.0 * UNITS_TO_METERS, season.get("motes", "pollen"))
+	var view: Node3D = MapView.new()
+	view.name = "MapView"
+	add_child(view)
+	view.build(geo, ground, ALLY_COLOR, ENEMY_COLOR)
+	_road_segments = view.road_segments
+
+
+## The season changed (the settings, or the calendar turned): redress the map at once, mid-match
+## too. Structures and shops keep their nodes and take the new snow; the scenery and life are
+## rebuilt, since a season swaps their props.
+func _redress_season(name: String) -> void:
+	_season = name
+	MapView.set_snow(Seasons.get_season(name).get("snow", 0.0))
+	var old := get_node_or_null("MapView")
+	if old != null:
+		remove_child(old)
+		old.queue_free()
+	_life = null
+	var geo := _map_geo.duplicate()
+	geo["season"] = name
+	_dress_map(geo)
+	_graphics_applied = []  # the new atmosphere takes the Graphics settings
+	if shopkeepers != null:
+		shopkeepers.set_season(name)
 	_render_minimap_terrain()
 
 

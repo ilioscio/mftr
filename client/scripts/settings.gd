@@ -18,9 +18,13 @@ var shadows := true                      # the sun's shadows
 var bloom := true                        # glow around bright things
 var atmosphere := true                   # cloud shadows and floating motes
 var hurt_edges := true                   # the screen's edges flash red when hurt, and pulse when low
-## The season the map is dressed in (15 §9): "" for the map's own, else "summer", "autumn" or
-## "winter". Looks only.
-var season := ""
+## The season the map is dressed in (15 §9): "calendar" (the default: the season it is where you
+## are, from the date and `hemisphere`), "map" for the map's own, else "summer", "autumn" or
+## "winter". Looks only; it changes at once, mid-match too.
+var season := "calendar"
+## "north" or "south": which half of the world's seasons "calendar" follows. The default comes
+## from the system's locale (`Seasons.default_hemisphere`).
+var hemisphere := ""
 var master_volume := 80.0                # 0–100 %
 var effects_volume := 100.0              # abilities, attacks, impacts: under Master
 var interface_volume := 100.0            # the fanfare and other interface sounds: under Master
@@ -88,6 +92,10 @@ func load_file() -> void:
 		atmosphere = cfg.get_value("graphics", "atmosphere", atmosphere)
 		hurt_edges = cfg.get_value("graphics", "hurt_edges", hurt_edges)
 		season = str(cfg.get_value("graphics", "season", season))
+		# Before the calendar (0.18), "" was the map's own and the default: now the calendar is.
+		if season == "":
+			season = "calendar"
+		hemisphere = str(cfg.get_value("graphics", "hemisphere", hemisphere))
 		master_volume = clampf(cfg.get_value("audio", "master", master_volume), 0.0, 100.0)
 		effects_volume = clampf(cfg.get_value("audio", "effects", effects_volume), 0.0, 100.0)
 		interface_volume = clampf(cfg.get_value("audio", "interface", interface_volume), 0.0, 100.0)
@@ -110,6 +118,7 @@ func save() -> void:
 	cfg.set_value("graphics", "atmosphere", atmosphere)
 	cfg.set_value("graphics", "hurt_edges", hurt_edges)
 	cfg.set_value("graphics", "season", season)
+	cfg.set_value("graphics", "hemisphere", hemisphere)
 	cfg.set_value("audio", "master", master_volume)
 	cfg.set_value("audio", "effects", effects_volume)
 	cfg.set_value("audio", "interface", interface_volume)

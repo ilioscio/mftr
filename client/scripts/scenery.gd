@@ -37,7 +37,15 @@ var _substitute := {}
 
 
 ## `geo` is `map_geometry()`; `materials_for(id)` returns [mesh, materials] for a prop, or null.
+## The shops' alcoves (units) and how far from each the scenery keeps.
+var _alcoves: Array = []
+const ALCOVE_CLEAR_U := 520.0
+
+
 func build(geo: Dictionary, materials_for: Callable) -> void:
+	for s in geo.get("shop_spots", []):
+		if s.notch:
+			_alcoves.append(s.center)
 	_rng.seed = 1971
 	var season: Dictionary = preload("res://scripts/seasons.gd").get_season(geo.get("season", "summer"))
 	_tint = season.get("tint", Color.WHITE)
@@ -314,8 +322,11 @@ func _add(id: String, p: Vector2, scale: float) -> void:
 	_add_at(id, p, scale, _height_at(p))
 
 
-## A prop at `p` standing at `height` (m).
+## A prop at `p` standing at `height` (m); none in a shop's alcove (19 §4).
 func _add_at(id: String, p: Vector2, scale: float, height: float) -> void:
+	for c in _alcoves:
+		if p.distance_to(c) < ALCOVE_CLEAR_U:
+			return
 	if not _batches.has(id):
 		_batches[id] = []
 	var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU)).scaled(Vector3.ONE * scale)

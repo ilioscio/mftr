@@ -16,7 +16,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | M4 Crossroads | Slices 1–4 ✅; 7 and most of 8 built by other tracks (D64, D62) | Slice 5 (epic objectives, waits on E5), slice 6 (Draft with bans and roles), roster 10 → 16–20 |
 | E Map editor | Slices 1–4 and 6 ✅ | Slice 5: the owner's Classic map |
 | S, I, Horde, updates (U) | ✅ | — |
-| K Shopkeepers | Slices 1–4 built | The owner's review in game, seasonal accessories, slice 5 (seasons by the calendar) |
+| K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
@@ -1184,7 +1184,7 @@ the shop, and the owner approves them at the gameplay camera.
 5. **Seasons by the calendar:** a "By the calendar" Season setting (the default), from the local
    date with a north/south choice; switching the season mid-match rebuilds the map's look.
 
-### Status (2026-11-04): slices 1–4 built, awaiting the owner's review in game
+### Status (2026-11-04): all five slices built, awaiting the owner's review in game
 - **Slice 1, concepts (approved):** the briefs (`art/shopkeepers/<key>/concept.md`) for Goldwick
   (the rich merchant), Madame Rosette (the perfumer), Slink (the black marketeer) and Old Folio
   (the archivist); block-outs and review sheets (`concepts.py`); animated previews of the idle and
@@ -1197,19 +1197,29 @@ the shop, and the owner approves them at the gameplay camera.
 - **Slice 3, stalls:** `art/shopkeepers/stalls.py` builds `stall_<key>` (the stall on its plinth,
   1,900–5,400 triangles) and `stall_<key>_<summer|autumn|winter>` (its dressing) into
   `art/props`. A test checks every keeper and stall pack.
-- **Slice 4, in game:** `client/scripts/shopkeepers.gd`. The stall stands below the fountain's
-  platform facing the camera; the pair comes from the scoreboard's champions (no wire change);
+- **Slice 4, in game:** `client/scripts/shopkeepers.gd`. The stall stands where the reference
+  game's shop does: on the platform's rim above the fountain and a little left, set into an
+  alcove bent into the cliff, its keeper facing the platform; the pair comes from the
+  scoreboard's champions (no wire change);
   left-clicking your own opens the shop (a coin-bag cursor over it), the enemy's has banter;
   greet, purchase, farewell, victory and defeat; fidgets every 8–15 s; your keeper turns its
   head to your champion; clips crossfade (`MftrAnimator.pose_mix`). Checked on Classic and ARAM.
   `--shopkeepers A[,B]` picks your base's keeper (and the enemy's); `--shopkeeper-tour` plays
   every clip in turn.
-- **Not done:** each keeper's seasonal accessory (19 §2: a fur collar, earmuffs, a knitted cap);
-  slice 5 (seasons by the calendar).
+- **Winter accessories:** Goldwick's fur collar turned up, Rosette's earmuffs and muff, Slink's
+  chunky knitted scarf, Folio's knitted cap and bobble, on `extra_winter` bones the client hides
+  outside winter (keepers now 3,900–4,450 triangles).
+- **Slice 5, seasons by the calendar:** Settings → Graphics → Season is "By the calendar" by
+  default (old saves' "the map's own" default becomes it), with Hemisphere (north or south, its
+  default from the locale); `Seasons.resolve` and `client/tests/seasons_test.gd`. Changing the
+  season, or the calendar turning, redresses the map at once, mid-match: light, motes, ground,
+  scenery, life, the structures' snow, the shops' dressing, the minimap. `--shot-season NAME`
+  switches mid-capture.
 - **Found on the way:** an awning over the keeper hides them from the gameplay camera, so keepers
-  stand at the plinth's front and awnings cover only the goods (19 §2); a stall turned toward its
-  fountain shows the camera its back, so stalls face the camera; the cage on Slink's cart is
-  behind him, so his third fidget peeks into his sack instead.
+  stand at the plinth's front and awnings cover only the goods (19 §2); the camera is the same
+  for both teams, so "above and to the left" is one direction on screen for both bases, which
+  keeps every keeper facing the camera; the cage on Slink's cart is behind him, so his third
+  fidget peeks into his sack instead.
 
 ## V — Colorblind mode (after K)
 

@@ -178,6 +178,10 @@ def poses(kp, rig, segs, n_frames):
         if active:
             _acts(kp)[active[0]][2](active[1], P, rig)
         springs.apply(P, 1.0 / FPS)
+        if SEASON != "winter":
+            for n in P:
+                if n.startswith("winter"):
+                    P.size(n, 0.0)
         out.append(P)
     return out
 

@@ -22,6 +22,7 @@ static var art_root := ""
 ## after it (the scenery, the structures).
 static var snow := 0.0
 static var _models := {}                  # id -> MftrModel (or null without a pack)
+static var _prop_mats: Array = []         # weak refs to every prop material made, for `set_snow`
 
 ## The roads as the ground shader draws them (segments in meters), for facing props along them.
 var road_segments := PackedVector4Array()
@@ -54,7 +55,21 @@ static func prop_materials(model: MftrModel, team: Color, tinted := false) -> Ar
 		m.set_shader_parameter("instance_tint", tinted)
 		m.set_shader_parameter("snow", snow)
 		mats.append(m)
+		_prop_mats.append(weakref(m))
 	return mats
+
+
+## The season changed mid-match: every prop material still in use (the structures, the shops)
+## takes `amount` of snow. The scenery is rebuilt instead (its season swaps props).
+static func set_snow(amount: float) -> void:
+	snow = amount
+	var alive: Array = []
+	for w in _prop_mats:
+		var m = w.get_ref()
+		if m != null:
+			m.set_shader_parameter("snow", amount)
+			alive.append(w)
+	_prop_mats = alive
 
 
 ## One prop as a node (null without its pack).
@@ -69,6 +84,30 @@ static func prop_node(id: String, team: Color) -> MeshInstance3D:
 		n.set_surface_override_material(i, mats[i])
 	n.set_meta("prop_mats", mats)
 	return n
+
+
+## The shops' alcoves (19 §4): the cliff's vertices near each of `centers` (units) pushed back from
+## it, so the cliff's foot curves around the stall at NOTCH_U and the face keeps its slope; past
+## 1.6 NOTCH_U nothing moves.
+const NOTCH_U := 240.0
+
+
+static func notch(tris: PackedVector3Array, centers: Array) -> PackedVector3Array:
+	var out := tris.duplicate()
+	var r := NOTCH_U * U
+	var r2 := r * 1.6
+	for i in out.size():
+		var v := out[i]
+		for c in centers:
+			var cm: Vector2 = c * U
+			var d := Vector2(v.x - cm.x, v.z - cm.y)
+			var dist := d.length()
+			if dist < r2:
+				var dir := d / dist if dist > 1e-4 else Vector2(0, -1)
+				d = dir * (r + (r2 - r) * dist / r2)
+				v = Vector3(cm.x + d.x, v.y, cm.y + d.y)
+		out[i] = v
+	return out
 
 
 ## Polylines (game units) as the ground shader's segments (meters), at most 48.
@@ -181,7 +220,13 @@ func build(geo: Dictionary, ground: MeshInstance3D, ally: Color, enemy: Color) -
 	brush_mat.shader = load("res://shaders/brush.gdshader")
 	# The cliffs (15 §4), built whole from the wall pieces (`maps::cliffs`): one mesh per group.
 	var cliffs: Dictionary = geo.get("cliffs", {})
+	var notches := []
+	for s in geo.get("shop_spots", []):
+		if s.notch:
+			notches.append(s.center)
 	for tris in cliffs.get("groups", []):
+		if not notches.is_empty():
+			tris = notch(tris, notches)
 		var arrays := []
 		arrays.resize(Mesh.ARRAY_MAX)
 		arrays[Mesh.ARRAY_VERTEX] = tris

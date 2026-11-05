@@ -3,6 +3,8 @@ extends PanelContainer
 ## once. Rebinding: click a binding, then press the key (with Alt / Ctrl / Shift) or the mouse
 ## button for it; Esc cancels, Backspace clears it.
 
+const Seasons := preload("res://scripts/seasons.gd")
+
 var settings
 var _waiting := ""                       # the action being rebound, or ""
 var _bind_buttons := {}                  # action -> Button
@@ -149,14 +151,26 @@ func _graphics_tab() -> Control:
 	_row(g, "Damage at the edges", _check(settings.hurt_edges, func(v): settings.hurt_edges = v), "The screen's edges flash red when you're hurt, redder the lower your health, and throb when you're nearly dead.")
 	var seasons := OptionButton.new()
 	seasons.focus_mode = Control.FOCUS_NONE
-	var keys := ["", "summer", "autumn", "winter"]
+	var keys := ["calendar", "map", "summer", "autumn", "winter"]
+	var names := {"calendar": "By the calendar", "map": "The map's own"}
 	for k in keys:
-		seasons.add_item("The map's own" if k == "" else str(k).capitalize())
+		seasons.add_item(names.get(k, str(k).capitalize()))
 	seasons.select(maxi(keys.find(settings.season), 0))
 	seasons.item_selected.connect(func(i: int):
 		settings.season = keys[i]
 		settings.save())
-	_row(g, "Season", seasons, "How the map is dressed: its ground, cliffs, light, flora and fauna. Its maker picks one; you can choose another. Looks only, and from the next match on.")
+	_row(g, "Season", seasons, "How the map is dressed: its ground, cliffs, light, flora and fauna, and the shops. By the calendar it's the season it is where you are; or the map maker's pick, or one you choose. Looks only, and it changes at once.")
+	var halves := OptionButton.new()
+	halves.focus_mode = Control.FOCUS_NONE
+	var sides := ["north", "south"]
+	halves.add_item("Northern")
+	halves.add_item("Southern")
+	var half: String = settings.hemisphere if settings.hemisphere in sides else Seasons.default_hemisphere()
+	halves.select(sides.find(half))
+	halves.item_selected.connect(func(i: int):
+		settings.hemisphere = sides[i]
+		settings.save())
+	_row(g, "Hemisphere", halves, "Which half of the world you're in, for the season by the calendar: winter is December to February in the north, June to August in the south.")
 	return g
 
 
