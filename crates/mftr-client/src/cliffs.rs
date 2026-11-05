@@ -55,19 +55,28 @@ fn key(p: Vec2) -> Key {
 }
 
 pub fn build(map: &Map, height_m: f32) -> Cliffs {
-    // Every piece wound the same way (positive area, y down: inside to the right of travel). The
-    // walls, then the frame past the map's edges.
+    build_pieces(&pieces(map), map.walls.len(), height_m)
+}
+
+/// The pieces the cliffs are built from: the map's walls, then the frame past its edges (rock at
+/// the cliffs' height, so a wall along the edge has no drop behind it).
+pub fn pieces(map: &Map) -> Vec<Vec<Vec2>> {
     let (sx, sy, m) = (map.size.x, map.size.y, MARGIN_U);
     let rect = |x0: f32, y0: f32, x1: f32, y1: f32| {
         vec![Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]
     };
     let frame =
         [rect(-m, -m, 0.0, sy + m), rect(sx, -m, sx + m, sy + m), rect(0.0, -m, sx, 0.0), rect(0.0, sy, sx, sy + m)];
-    let walls_n = map.walls.len();
-    let polys: Vec<Vec<Vec2>> = map
-        .walls
+    map.walls.iter().cloned().chain(frame).collect()
+}
+
+/// The cliffs of `pieces` (`pieces`, or those cut by the client: the shops' alcoves, 19 §4); the
+/// first `walls_n` are the map's walls (for outcrops).
+pub fn build_pieces(pieces: &[Vec<Vec2>], walls_n: usize, height_m: f32) -> Cliffs {
+    // Every piece wound the same way (positive area, y down: inside to the right of travel).
+    let polys: Vec<Vec<Vec2>> = pieces
         .iter()
-        .chain(frame.iter())
+        .filter(|w| w.len() >= 3)
         .map(|w| {
             let mut w = w.clone();
             if signed_area(&w) < 0.0 {
@@ -76,6 +85,7 @@ pub fn build(map: &Map, height_m: f32) -> Cliffs {
             w
         })
         .collect();
+    let walls_n = walls_n.min(polys.len());
     let n = polys.len();
 
     // Split each edge where another piece has a vertex on it (seams run along tile lines, where

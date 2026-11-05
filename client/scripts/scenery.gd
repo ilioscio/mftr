@@ -39,7 +39,7 @@ var _substitute := {}
 ## `geo` is `map_geometry()`; `materials_for(id)` returns [mesh, materials] for a prop, or null.
 ## The shops' alcoves (units) and how far from each the scenery keeps.
 var _alcoves: Array = []
-const ALCOVE_CLEAR_U := 520.0
+const ALCOVE_CLEAR_U := preload("res://scripts/shopkeepers.gd").ALCOVE_R_U + 250.0
 
 
 func build(geo: Dictionary, materials_for: Callable) -> void:

@@ -44,7 +44,26 @@ pub fn ground_image(map: &Map) -> Gd<godot::classes::Image> {
 /// three vertices a triangle), and `outcrops`, the indices of the walls that are boulders in the
 /// field instead (drawn with rock props).
 pub fn cliffs(map: &Map, height_m: f32) -> VarDictionary {
-    let c = mftr_client::cliffs::build(map, height_m);
+    cliffs_dict(mftr_client::cliffs::build(map, height_m))
+}
+
+/// The pieces the cliffs are built from (the walls, then the frame past the map's edges), for
+/// the client to cut (the shops' alcoves, 19 §4) and build with `cliffs_from`.
+pub fn cliff_pieces(map: &Map) -> VarArray {
+    polygons(&mftr_client::cliffs::pieces(map))
+}
+
+/// The cliffs of `pieces` (PackedVector2Arrays, units), the first `walls_n` the map's walls.
+pub fn cliffs_from(pieces: &VarArray, walls_n: usize, height_m: f32) -> VarDictionary {
+    let polys: Vec<Vec<Vec2>> = pieces
+        .iter_shared()
+        .filter_map(|p| p.try_to::<PackedVector2Array>().ok())
+        .map(|p| p.as_slice().iter().map(|q| Vec2::new(q.x, q.y)).collect())
+        .collect();
+    cliffs_dict(mftr_client::cliffs::build_pieces(&polys, walls_n, height_m))
+}
+
+fn cliffs_dict(c: mftr_client::cliffs::Cliffs) -> VarDictionary {
     let mut groups = VarArray::new();
     for g in &c.groups {
         let tris: PackedVector3Array = g.iter().map(|v| Vector3::new(v[0], v[1], v[2])).collect();

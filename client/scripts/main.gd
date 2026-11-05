@@ -1821,7 +1821,7 @@ func _update_camera(delta: float, dead: bool) -> void:
 	if _was_dead and not dead:
 		cam.center(client.own_position())  # back from the dead: look at the champion
 	_was_dead = dead
-	var free := menu_panel == null and (pause_panel == null or not pause_panel.visible) and (settings_panel == null or not settings_panel.visible)
+	var free := menu_panel == null and (pause_panel == null or not pause_panel.visible) and (settings_panel == null or not settings_panel.visible) and loading_panel == null
 	if _shot_path != "":
 		# Scripted captures follow the champion, or look where `--look` says.
 		cam.center(client.own_position() if _shot_look == null else _shot_look)
@@ -2233,8 +2233,13 @@ func _build_map() -> void:
 	geo["ground"] = client.map_ground()
 	geo["cliffs"] = client.map_cliffs()
 	_map_geo = geo
-	# The shops' spots first: the cliffs are bent back around them into alcoves (19 §4).
-	geo["shop_spots"] = preload("res://scripts/shopkeepers.gd").spots(geo)
+	# The shops' spots first: their alcoves are cut out of the cliffs (19 §4). Outcrops stay as
+	# the uncut map has them (an alcove never reaches a boulder in the field).
+	var shops_script := preload("res://scripts/shopkeepers.gd")
+	geo["shop_spots"] = shops_script.spots(geo)
+	if geo.shop_spots.any(func(s): return s.notch):
+		var cut: Array = shops_script.cut_pieces(client.map_cliff_pieces(), geo.shop_spots)
+		geo.cliffs["groups"] = client.map_cliffs_from(cut).groups
 	_map_season = str(geo.get("season", "summer"))
 	_season = _wanted_season()
 	geo["season"] = _season
@@ -6966,6 +6971,7 @@ func _reset_match_view() -> void:
 		shop_panel.visible = false
 	if shopkeepers != null:
 		shopkeepers.reset()
+	cam.reset()  # the next match starts on its champion, wherever this one left the camera
 	match_banner = ""
 	match_banner_subtitle = "A new match starts shortly"
 	_close_inspect()

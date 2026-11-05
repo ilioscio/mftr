@@ -1024,6 +1024,20 @@ impl MatchClient {
         maps::cliffs(self.session.map(), maps::CLIFF_M)
     }
 
+    /// The pieces the cliffs are built from: the map's walls, then the frame past its edges
+    /// (units). The client cuts the shops' alcoves out of them (19 §4).
+    #[func]
+    fn map_cliff_pieces(&self) -> VarArray {
+        maps::cliff_pieces(self.session.map())
+    }
+
+    /// The cliffs built from `pieces` (as `map_cliff_pieces` gives them, cut): the same
+    /// `{ groups, outcrops }` as `map_cliffs`.
+    #[func]
+    fn map_cliffs_from(&self, pieces: VarArray) -> VarDictionary {
+        maps::cliffs_from(&pieces, self.session.map().walls.len(), maps::CLIFF_M)
+    }
+
     /// What the ground is made of where (15 §3): the map's ground control map, an RGBA8 Image.
     /// Baked on each call: call once per map (`map_geometry` is cheap and called often).
     #[func]
