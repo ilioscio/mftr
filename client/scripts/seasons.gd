@@ -92,6 +92,37 @@ const WINTER := {
 }
 
 
+## The season it is on `date` (`Time.get_date_dict_from_system()`) in `hemisphere` ("north" or
+## "south"), meteorologically: winter is December to February in the north, June to August in
+## the south; autumn the three months before it; spring, which the maps don't have, is summer.
+static func for_date(date: Dictionary, hemisphere: String) -> String:
+	var month := int(date.get("month", 1))
+	if hemisphere == "south":
+		month = (month + 5) % 12 + 1
+	if month == 12 or month <= 2:
+		return "winter"
+	if month >= 9:
+		return "autumn"
+	return "summer"
+
+
+## The half of the world the system's locale says we're in: south for the countries mostly below
+## the equator, else north.
+static func default_hemisphere() -> String:
+	var country := OS.get_locale().get_slice("_", 1).left(2).to_upper()
+	return "south" if country in ["AU", "NZ", "ZA", "AR", "CL", "UY", "PY", "BR", "BO", "PE", "LS", "SZ", "NA", "BW", "ZW", "MZ", "MG", "MW", "ZM", "AO", "FJ", "PG"] else "north"
+
+
+## The season to dress a map in: the player's `choice` (a settings value: "calendar", "map" or a
+## season's name), the map's own `map_season`, the `date` and `hemisphere`.
+static func resolve(choice: String, map_season: String, date: Dictionary, hemisphere: String) -> String:
+	if choice in NAMES:
+		return choice
+	if choice == "map":
+		return map_season if map_season in NAMES else "summer"
+	return for_date(date, hemisphere if hemisphere in ["north", "south"] else default_hemisphere())
+
+
 static func get_season(name: String) -> Dictionary:
 	match name:
 		"autumn":

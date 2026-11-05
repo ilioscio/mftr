@@ -32,8 +32,10 @@ knowing the G key. Four shopkeepers to start, a random pair each match.
    the plinth's front, in the open**: the gameplay camera looks down at 56°, so an awning over
    the keeper hides them. Awnings and canopies cover only the goods behind.
 6. **Seasons** (15 §9): snow on every upward facet in winter comes from the prop material. On
-   top of that each stall swaps dressing by season (§5), and each keeper wears one seasonal
-   accessory.
+   top of that each stall swaps dressing by season (§5), and each keeper wears a winter
+   accessory (Goldwick's fur collar turned up, Rosette's earmuffs and muff, Slink's chunky
+   knitted scarf, Folio's knitted cap with a bobble on his hood's tip) on `extra_winter` bones
+   the client shrinks away in other seasons. The season can change mid-match (15 §9).
 7. **More animated than minions.** Minions march; shopkeepers perform. Every keeper has a
    breathing idle with secondary motion (a hat, a bow, a coat tail, a pack) and three fidgets
    that say who they are, plus reactions (§4).
@@ -65,11 +67,15 @@ knowing the G key. Four shopkeepers to start, a random pair each match.
 
 The simulation never knows shopkeepers exist. The client:
 
-- **places** each stall beside its team's fountain from the map's data (the fountain's center and
-  radius and the direction toward the map's middle), on the open ground below the fountain's
-  platform, facing the camera (every base shares its view) and a little toward where its team
-  walks, so editor maps get
-  shops too. Horde maps have one fountain and one shop;
+- **places** each stall where the reference game has its shop: on the rim of the fountain's
+  platform, above it and a little to the left on screen (the camera is the same for both teams),
+  set into the wall behind it, its keeper facing the platform. From the map's data (the
+  fountain and the walls), so editor maps get shops too: directions are tried from about 22°
+  left of straight up (between the platform's flag and brazier), then about 65°, until one meets
+  a wall 5.5–8.5 m away; the cliff's mesh is bent back around the stall into an alcove (the
+  simulation's walls don't change: a Classic base's wall is the map's edge) and the scenery kept
+  out of it. With no wall in reach (an ARAM court), the stall stands just past the platform.
+  Horde maps have one fountain and one shop;
 - **picks the pair** from the match itself: a hash of its champions and their unit ids (the Tab
   scoreboard, the same for every player), blue's keeper and red's, never the same one. No wire
   change. `--shopkeepers A[,B]` picks your base's keeper (and the enemy's) instead, for reviews;

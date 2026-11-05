@@ -26,10 +26,20 @@ const BANTER := {
 const KEEP_AT := {"goldwick": Vector2(0.0, 0.55), "rosette": Vector2(0.0, 0.50), "slink": Vector2(-0.15, 0.55), "folio": Vector2(0.0, 0.50)}
 const PLINTH_M := 0.18
 const PLINTH_R_M := 1.5
-## The stall's spot beside its fountain, in units: `ALONG` from the fountain's center toward the
-## map's middle, `ACROSS` to the side.
-const ALONG := 0.90
-const ACROSS := 1.46
+## Where a stall stands (`spots`), as in the reference game: on the rim of the fountain's
+## platform, above it and a little to the left on screen (the camera is the same for both teams),
+## set into the wall behind it. Directions are tried in this order, in degrees left of straight
+## up, until one meets a wall `SPOT_REACH` from the fountain's center (units): first midway between
+## the platform's flag (straight up) and brazier (45°), then midway between that brazier and the
+## flag on the left (90°).
+const SPOT_PREF := [22, 18, 26, 14, 30, 65, 60, 70, 55, 75, 10, 5, 0, 80, 85, 90, 50]
+const SPOT_REACH := Vector2(550.0, 850.0)
+## The stall's center stands this far back into the wall (u), so the wall wraps its back half. The
+## cliff is bent back into an alcove (map_view.gd `notch`) around a point `ALCOVE_OUT_U` out from
+## the wall on the open side (bending from there pushes the cliff back, not forward); the scenery
+## is kept out.
+const INSET_U := 100.0
+const ALCOVE_OUT_U := 60.0
 const FADE := 0.3                          # seconds a clip crossfades into the next
 const FIDGET_EVERY := Vector2(8.0, 15.0)   # seconds between fidgets
 const NEAR_M := 8.0                        # a champion this close is at the shop
@@ -39,6 +49,7 @@ const U := 0.01
 var art_root := ""
 var shops: Array = []      # [{ key, ally, center (u), node, skel, anim, clip, t, from, from_t, fade, wait, last, held, yaw }]
 var _rng := RandomNumberGenerator.new()
+var _season := "summer"    # the stalls' dressing and the keepers' accessories (winter's)
 var _pending := {}         # what `place` waits on until the match's pair is known
 var _placed := {}
 var forced: Array = []     # `--shopkeepers`: [ours, theirs]
@@ -60,11 +71,53 @@ static func pair_for(rows: Array) -> Array:
 	return [KEYS[a], KEYS[b]]
 
 
-## Set up the shops for `fountains` (`[{ center, radius, ally }]`, blue's first), the map `size`
-## (units) and `season`. They appear once the pair is known (`update` asks the scoreboard).
-func place(fountains: Array, size: Vector2, season: String, ally: Color, enemy: Color) -> void:
+## Each fountain's stall spot (`geo` as `map_geometry()`: its `fountains`, `walls` and `size`),
+## in the fountains' order: `{ center (u), face (unit, where the keeper looks), notch (bool:
+## set into a wall), alcove (u: the point the cliff is bent back from, when it is) }`.
+static func spots(geo: Dictionary) -> Array:
+	var out: Array = []
+	for f in geo.get("fountains", []):
+		var c: Vector2 = f.center
+		var spot := {}
+		for deg in SPOT_PREF:
+			var a := deg_to_rad(float(deg))
+			var dir := Vector2(-sin(a), -cos(a))
+			var hit := _wall_hit(geo, c, dir, SPOT_REACH.y)
+			if hit >= SPOT_REACH.x and hit <= SPOT_REACH.y:
+				spot = {"center": c + dir * (hit + INSET_U), "notch": true, "alcove": c + dir * (hit - ALCOVE_OUT_U)}
+				break
+		if spot.is_empty():
+			# No wall near: on the open ground just past the platform, up and to the left.
+			var a0 := deg_to_rad(float(SPOT_PREF[0]))
+			spot = {"center": c + Vector2(-sin(a0), -cos(a0)) * (float(f.radius) + 250.0), "notch": false}
+		spot["face"] = (c - spot.center).normalized()
+		out.append(spot)
+	return out
+
+
+## How far from `from` along `dir` the ground stops being walkable (a wall or the map's edge),
+## up to `reach` (INF past it).
+static func _wall_hit(geo: Dictionary, from: Vector2, dir: Vector2, reach: float) -> float:
+	var size: Vector2 = geo.get("size", Vector2.ZERO)
+	var walls: Array = geo.get("walls", [])
+	var t := 0.0
+	while t <= reach:
+		var p := from + dir * t
+		if p.x < 0.0 or p.y < 0.0 or p.x > size.x or p.y > size.y:
+			return t
+		for w in walls:
+			if Geometry2D.is_point_in_polygon(p, w):
+				return t
+		t += 20.0
+	return INF
+
+
+## Set up the shops for the map `geo` (its `fountains`, blue's first, and `shop_spots`) and
+## `season`. They appear once the pair is known (`update` asks the scoreboard).
+func place(geo: Dictionary, season: String, ally: Color, enemy: Color) -> void:
 	_rng.randomize()
-	_placed = {"fountains": fountains, "size": size, "season": season, "ally": ally, "enemy": enemy}
+	var at: Array = geo.get("shop_spots", spots(geo))
+	_placed = {"fountains": geo.get("fountains", []), "spots": at, "season": season, "ally": ally, "enemy": enemy}
 	_pending = _placed.duplicate()
 
 
@@ -80,46 +133,36 @@ func reset() -> void:
 func _build(keys_by_side: Array) -> void:
 	var p := _pending
 	_pending = {}
+	_season = p.season
 	for i in p.fountains.size():
 		var f: Dictionary = p.fountains[i]
 		var key: String = keys_by_side[i] if i < keys_by_side.size() else KEYS[0]
-		_build_shop(key, f, p.size, p.season, p.ally if f.ally else p.enemy)
+		_build_shop(key, f, p.spots[i], p.season, p.ally if f.ally else p.enemy)
 
 
-func _build_shop(key: String, f: Dictionary, size: Vector2, season: String, team: Color) -> void:
-	var c: Vector2 = f.center
-	var r: float = f.radius
-	var d := (size / 2.0 - c).normalized()
-	if d == Vector2.ZERO:
-		d = Vector2(1, 0)
-	var across := Vector2(d.y, -d.x)
-	var at := c + d * r * ALONG + across * r * ACROSS
+func _build_shop(key: String, f: Dictionary, spot: Dictionary, season: String, team: Color) -> void:
+	var at: Vector2 = spot.center
 	var node := Node3D.new()
 	node.name = "Shop_" + key
 	node.position = Vector3(at.x * U, 0.0, at.y * U)
-	# The stall faces the camera (every base shares its view, so a keeper turned toward the
-	# fountain shows its back), turned a little toward the map's middle, where its team walks.
-	var face := Vector2(signf(size.x / 2.0 - at.x) * 0.45, 1.0).normalized()
+	# The keeper faces the fountain's platform, as the reference game's does.
+	var face: Vector2 = spot.face
 	node.rotation.y = atan2(face.x, face.y)
 	add_child(node)
 	var core := MapView.prop_node("stall_" + key, team)
 	if core != null:
 		core.layers = MapView.LAYERS
 		node.add_child(core)
-	var dress := MapView.prop_node("stall_%s_%s" % [key, season if season in ["summer", "autumn", "winter"] else "summer"], team)
-	if dress != null:
-		dress.position.y = PLINTH_M
-		dress.layers = MapView.LAYERS
-		node.add_child(dress)
 	var shop := {"key": key, "ally": f.ally, "center": at, "node": node, "skel": null, "anim": null, "model": null,
+		"team": team, "dress": null, "winter_bones": [],
 		"clip": "idle", "t": _rng.randf_range(0.0, 4.0), "from": "idle", "from_t": 0.0, "fade": 1.0,
 		"wait": 1.0 if tour else _rng.randf_range(FIDGET_EVERY.x, FIDGET_EVERY.y), "last": "", "held": false, "yaw": 0.0}
 	var path := art_root.path_join("shopkeepers/%s/export/%s.glb" % [key, key]).simplify_path()
 	var pack: MftrModel = MftrModel.load(path) if FileAccess.file_exists(path) else null
 	if pack != null:
 		var model: Node3D = pack.instantiate()
-		var spot: Vector2 = KEEP_AT[key]
-		model.position = Vector3(spot.x, PLINTH_M, spot.y)
+		var keep: Vector2 = KEEP_AT[key]
+		model.position = Vector3(keep.x, PLINTH_M, keep.y)
 		node.add_child(model)
 		var mesh: MeshInstance3D = model.get_node("Skeleton/Mesh")
 		var outline := ShaderMaterial.new()
@@ -139,7 +182,36 @@ func _build_shop(key: String, f: Dictionary, size: Vector2, season: String, team
 		shop.anim = pack.new_animator()
 		shop.pack = pack
 		shop.len = shop.anim.clip_length("idle")
+		var skel: Skeleton3D = shop.skel
+		for i in skel.get_bone_count():
+			if skel.get_bone_name(i).begins_with("extra_winter"):
+				shop.winter_bones.append(i)
+	_dress(shop, season)
 	shops.append(shop)
+
+
+## The stall's dressing for `season` (its own pack, on the plinth's top).
+func _dress(shop: Dictionary, season: String) -> void:
+	if shop.dress != null:
+		shop.dress.queue_free()
+		shop.dress = null
+	var dress := MapView.prop_node("stall_%s_%s" % [shop.key, season if season in ["summer", "autumn", "winter"] else "summer"], shop.team)
+	if dress != null:
+		dress.position.y = PLINTH_M
+		dress.layers = MapView.LAYERS
+		shop.node.add_child(dress)
+		shop.dress = dress
+
+
+## The season changed mid-match: each stall changes its dressing, each keeper its winter things.
+func set_season(season: String) -> void:
+	_season = season
+	if not _pending.is_empty():
+		_pending.season = season
+	if not _placed.is_empty():
+		_placed.season = season
+	for s in shops:
+		_dress(s, season)
 
 
 ## Every frame: pick the pair once the match is known, then advance each keeper's clips. `own` is
@@ -240,6 +312,9 @@ func _animate(s: Dictionary, delta: float, own) -> void:
 			s.wait = _rng.randf_range(FIDGET_EVERY.x, FIDGET_EVERY.y)
 			play(s, pick)
 	s.anim.pose_mix(s.skel, s.from, s.from_t, s.clip, minf(s.t, length), s.fade)
+	if _season != "winter":
+		for i in s.winter_bones:
+			(s.skel as Skeleton3D).set_bone_pose_scale(i, Vector3.ZERO)
 	_look(s, delta, own)
 
 

@@ -136,8 +136,18 @@ grass), the life
 (autumn keeps lily pads and spores; winter has none), the ambient motes (pollen, falling leaves,
 snow), and the light's color and strength. A map names its default season (`season autumn` in
 its file, [12](12-map-editor.md); summer without it), picked in the editor, whose Actual view
-follows; a player can override it in Settings → Graphics → Season. Looks only: the simulation
-never reads it. Adding a season is a new entry in `seasons.gd`, plus any seasonal props.
+follows. What a player sees is their Settings → Graphics → Season:
+
+- **By the calendar** (the default): the season it is where they are, from the date and
+  Settings → Graphics → Hemisphere (its default from the system's locale). Meteorologically:
+  winter is December to February in the north and June to August in the south, autumn the three
+  months before it, and spring, which the maps don't have, is summer.
+- **The map's own**, or **summer**, **autumn** or **winter** picked.
+
+It changes at once, mid-match too: the light, motes, ground, cliffs, scenery and life are
+rebuilt, and the structures and shops take the new snow (the shops their dressing and their
+keepers' winter things, [19](19-shopkeepers.md)). Looks only: the simulation never reads it.
+Adding a season is a new entry in `seasons.gd`, plus any seasonal props.
 
 ## 10. Review
 
