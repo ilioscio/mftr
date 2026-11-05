@@ -187,6 +187,39 @@ impl MftrAnimator {
         true
     }
 
+    /// Pose `skeleton` as clip `a` at `time_a` crossfading into clip `b` at `time_b` by `w`
+    /// (0 = all `a`, 1 = all `b`): characters the client drives itself, like the shopkeepers
+    /// (19 §4), moving from one clip into the next. False if either clip is missing.
+    #[func]
+    fn pose_mix(
+        &mut self,
+        mut skeleton: Gd<Skeleton3D>,
+        a: GString,
+        time_a: f32,
+        b: GString,
+        time_b: f32,
+        w: f32,
+    ) -> bool {
+        let lib = &self.pack.library;
+        let (Some(ca), Some(cb)) = (lib.clip(&a.to_string()), lib.clip(&b.to_string())) else { return false };
+        let mut pose = lib.sample(ca, time_a);
+        mftr_pack::pose::blend(&mut pose, &lib.sample(cb, time_b), w.clamp(0.0, 1.0), None);
+        for (i, p) in pose.iter().enumerate() {
+            let i = i as i32;
+            skeleton.set_bone_pose_position(i, Vector3::new(p.t[0], p.t[1], p.t[2]));
+            skeleton.set_bone_pose_rotation(i, Quaternion::new(p.r[0], p.r[1], p.r[2], p.r[3]));
+            skeleton.set_bone_pose_scale(i, Vector3::new(p.s[0], p.s[1], p.s[2]));
+        }
+        true
+    }
+
+    /// Clip `name`'s length in seconds (-1 if the pack lacks it).
+    #[func]
+    fn clip_length(&self, name: GString) -> f32 {
+        let lib = &self.pack.library;
+        lib.clip(&name.to_string()).map_or(-1.0, |c| lib.clips[c].length)
+    }
+
     /// Advance `dt` seconds and pose `skeleton`. `unit` is an `own_status()` or
     /// `remote_units()` entry (`dead`, `stunned`, `rooted`, `dashing` and the `anim_*` keys);
     /// `speed` is the displayed ground speed in u/s. Returns what happened, for sounds (A4c):

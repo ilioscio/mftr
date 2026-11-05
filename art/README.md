@@ -11,7 +11,8 @@ art/
 │  └─ export/biped_library.glb (+ .anims.ron, .vfx.ron, .sfx.ron, sfx/*.ogg)
 ├─ champions/<id>/                 # one folder per champion (see champions/README.md)
 ├─ minions/<kind>/<kind>.blend      # lane minions: melee, caster, siege, super (build.py generates all four)
-└─ items/<key>/<key>.blend         # every item's model (build.py generates all 75; the client renders icons from them)
+├─ items/<key>/<key>.blend         # every item's model (build.py generates all 75; the client renders icons from them)
+└─ shopkeepers/<key>/<key>.blend   # the four shopkeepers (build.py; their stalls are props/stall_<key>*, stalls.py)
 ```
 
 `.blend` files are the source of truth. `export/` holds generated files that are committed so CI (and the game) can check and load them without Blender. `review/` folders hold generated renders and are git-ignored.

@@ -25,6 +25,7 @@ This is a living document. Each file covers one area. Record decisions in [DECIS
 | 16 | [Jungle Monster Art](16-jungle-monster-art.md) | The six camps' silhouettes, glows, rigs (the `creature` archetype) and clips |
 | 17 | [Bots](17-bots.md) | Honest, human-limited bots in four tiers: the team coach, agents, micro, the fight model, pings, cost and measurement |
 | 18 | [Items](18-items.md) | The shop: tiers, new stats (crit, penetration, anti-heal, omnivamp, tenacity), passives and actives, the catalog, the support quest, hatchlings, item models and icons |
+| 19 | [Shopkeepers](19-shopkeepers.md) | A clickable shop in each base: four shopkeeper characters, their stalls, seasons, reactions and placement |
 | — | [Decisions & Open Questions](DECISIONS.md) | Decision log and unresolved questions |
 
 ### Reference analyses

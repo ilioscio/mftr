@@ -156,6 +156,15 @@ pub fn minion_fire_frame(kind: MinionKind) -> f32 {
     mftr_sim::lane::minion_attack(kind).windup().0 as f32 * FPS as f32 / 1920.0
 }
 
+/// Shopkeepers (19, D67): client-only characters at each base's stall. They never move, fight or
+/// die; they perform: a looping idle, three fidgets and five reactions.
+pub const REQUIRED_SHOPKEEPER: &[&str] =
+    &["idle", "idle_fidget_1", "idle_fidget_2", "idle_fidget_3", "greet", "purchase", "farewell", "victory", "defeat"];
+pub const SHOPKEEPER_IDS: &[&str] = &["goldwick", "rosette", "slink", "folio"];
+/// A keeper is one per base, on screen beside the fountain: the minions' cap plus 15% (19 §2).
+pub const SHOPKEEPER_TRIANGLES_TARGET: (usize, usize) = (3000, 4500);
+pub const SHOPKEEPER_TRIANGLES_MAX: usize = 4500;
+
 /// Jungle monsters (16): every pack (`art/monsters/<key>`) ships these. Camps spend most of a
 /// match waiting, so an idle fidget is required.
 pub const REQUIRED_MONSTER: &[&str] = &["idle", "idle_fidget_1", "run", "attack_1", "death", "flinch"];

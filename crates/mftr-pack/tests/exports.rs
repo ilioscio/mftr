@@ -96,6 +96,41 @@ const MAP_PROPS: [&str; 19] = [
     "bush_winter",
 ];
 
+/// The shopkeepers (19, D67): each keeper's pack (`art/shopkeepers/<key>`, the nine clips, in the
+/// keepers' budget) and its stall's props (`stall_<key>` and a dressing per season) are clean;
+/// a keeper missing a reaction, or one the rules don't know, is refused.
+#[test]
+fn every_shopkeeper_has_its_pack_and_stall() {
+    for key in mftr_pack::rules::SHOPKEEPER_IDS {
+        let f = format!("shopkeepers/{key}/export/{key}.glb");
+        let r = validate_file(&art(&f));
+        assert!(r.findings.is_empty(), "{f}: {:#?}", r.findings);
+        let loaded = mftr_pack::load_file(&art(&f)).unwrap();
+        assert_eq!(loaded.kind, "shopkeeper", "{f}");
+        let tris = loaded.model.triangles();
+        let (lo, hi) = mftr_pack::rules::SHOPKEEPER_TRIANGLES_TARGET;
+        assert!((lo..=hi).contains(&tris), "{f}: {tris} triangles");
+        for stall in [
+            format!("stall_{key}"),
+            format!("stall_{key}_summer"),
+            format!("stall_{key}_autumn"),
+            format!("stall_{key}_winter"),
+        ] {
+            let f = format!("props/{stall}/export/{stall}.glb");
+            let r = validate_file(&art(&f));
+            assert!(r.findings.is_empty(), "{f}: {:#?}", r.findings);
+        }
+    }
+    let glb = std::fs::read(art("shopkeepers/goldwick/export/goldwick.glb")).unwrap();
+    let side = std::fs::read_to_string(art("shopkeepers/goldwick/export/goldwick.anims.ron")).unwrap();
+    let renamed = edit_json(&glb, |j| j.replace("\"name\":\"defeat\"", "\"name\":\"defeated\""));
+    assert_ne!(renamed, glb, "the clip `defeat` is in the model");
+    let r = validate(&renamed, &side.replace("(name: \"defeat\"", "(name: \"defeated\""));
+    assert_error(&r, "missing clips: defeat");
+    let r = validate(&glb, &side.replace("id: \"goldwick\"", "id: \"tinkerbell\""));
+    assert_error(&r, "shopkeeper `tinkerbell` must be one of");
+}
+
 /// Every item in the catalog has its model (18 §8): a prop pack at `art/items/<key>`, the key
 /// its name in snake case, valid and in the item budget.
 #[test]

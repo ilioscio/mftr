@@ -16,6 +16,8 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | M4 Crossroads | Slices 1–4 ✅; 7 and most of 8 built by other tracks (D64, D62) | Slice 5 (epic objectives, waits on E5), slice 6 (Draft with bans and roles), roster 10 → 16–20 |
 | E Map editor | Slices 1–4 and 6 ✅ | Slice 5: the owner's Classic map |
 | S, I, Horde, updates (U) | ✅ | — |
+| K Shopkeepers | Slices 1–4 built | The owner's review in game, seasonal accessories, slice 5 (seasons by the calendar) |
+| V Colorblind mode | Not started | Everything |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1162,6 +1164,59 @@ Testers shouldn't have to watch GitHub, so the playtests the exits need can run 
   edges"), Stormcall no longer holding its caster, and a fresh match seed every server start.
 - **On main, after 0.18.2:** the start menu rolls a new meaning for MFTR at every start
   (`client/splashes.txt`).
+
+## K — Shopkeepers (after U)
+
+A shop you can see and click in each base ([19](19-shopkeepers.md), D67): a shopkeeper at a
+stall beside the fountain, four of them to start, a random pair each match. New players find the
+shop by looking, not by knowing the G key.
+
+**Exit:** the four keepers and their stalls are in game in every season, clicking your own opens
+the shop, and the owner approves them at the gameplay camera.
+
+### K slices (in order of dependency)
+1. **Concepts:** the four briefs, the lineup and the base view, for the owner's approval.
+2. **Keepers:** models on the `biped` bones in their own shapes, the idle, three fidgets and the
+   reactions, as `shopkeeper` packs.
+3. **Stalls:** prop packs on paving plinths, each with its summer, autumn and winter dressing.
+4. **In game:** placement from the map's data, the match's pair, click to open the shop, the
+   reactions, the head turn; editor maps and Horde.
+5. **Seasons by the calendar:** a "By the calendar" Season setting (the default), from the local
+   date with a north/south choice; switching the season mid-match rebuilds the map's look.
+
+### Status (2026-11-04): slices 1–4 built, awaiting the owner's review in game
+- **Slice 1, concepts (approved):** the briefs (`art/shopkeepers/<key>/concept.md`) for Goldwick
+  (the rich merchant), Madame Rosette (the perfumer), Slink (the black marketeer) and Old Folio
+  (the archivist); block-outs and review sheets (`concepts.py`); animated previews of the idle and
+  fidgets on a quick rig (`previews.py`, `--reactions` for the five reactions, `--season`).
+- **Slice 2, keepers:** `art/shopkeepers/build.py` puts each approved block-out, rounded off, on
+  the `biped` bones placed at its joints, plus extras for what moves on its own, and keys the nine
+  clips every frame from `motion.py` (the same motion the previews showed: IK arms, planted feet,
+  springs). 3,640–4,184 triangles, 39–46 bones, 265–490 KB; kind `shopkeeper`, which the validator
+  now knows (the ids, the clips, the 3,000–4,500 budget).
+- **Slice 3, stalls:** `art/shopkeepers/stalls.py` builds `stall_<key>` (the stall on its plinth,
+  1,900–5,400 triangles) and `stall_<key>_<summer|autumn|winter>` (its dressing) into
+  `art/props`. A test checks every keeper and stall pack.
+- **Slice 4, in game:** `client/scripts/shopkeepers.gd`. The stall stands below the fountain's
+  platform facing the camera; the pair comes from the scoreboard's champions (no wire change);
+  left-clicking your own opens the shop (a coin-bag cursor over it), the enemy's has banter;
+  greet, purchase, farewell, victory and defeat; fidgets every 8–15 s; your keeper turns its
+  head to your champion; clips crossfade (`MftrAnimator.pose_mix`). Checked on Classic and ARAM.
+  `--shopkeepers A[,B]` picks your base's keeper (and the enemy's); `--shopkeeper-tour` plays
+  every clip in turn.
+- **Not done:** each keeper's seasonal accessory (19 §2: a fur collar, earmuffs, a knitted cap);
+  slice 5 (seasons by the calendar).
+- **Found on the way:** an awning over the keeper hides them from the gameplay camera, so keepers
+  stand at the plinth's front and awnings cover only the goods (19 §2); a stall turned toward its
+  fountain shows the camera its back, so stalls face the camera; the cage on Slink's cart is
+  behind him, so his third fidget peeks into his sack instead.
+
+## V — Colorblind mode (after K)
+
+Team colors are the ally/enemy rule (teal and red) on champions, minions, structures, shops,
+health bars, the minimap and effects. A colorblind mode recolors all of them from one palette,
+with presets for protanopia, deuteranopia and tritanopia, and checks that every place a team is
+told by color also has a shape or a mark that says it.
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.

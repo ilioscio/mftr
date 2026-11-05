@@ -176,6 +176,15 @@ func _ready() -> void:
 		elif args[i] == "--dump-terrain" and i + 1 < args.size():
 			_dump_terrain = args[i + 1]
 			i += 1
+		elif args[i] == "--shopkeeper-tour":
+			_shopkeeper_tour = true
+		elif args[i] == "--shopkeepers" and i + 1 < args.size():
+			for k in args[i + 1].split(","):
+				if k in ["goldwick", "rosette", "slink", "folio"]:
+					_forced_shopkeepers.append(k)
+				else:
+					push_warning("--shopkeepers: no keeper `%s` (goldwick, rosette, slink, folio)" % k)
+			i += 1
 		elif args[i] == "--zoom" and i + 1 < args.size():
 			camera_zoom = maxf(0.05, float(args[i + 1]))
 			i += 1
@@ -585,6 +594,9 @@ var _shot_goto_fight := false             # `--shot-goto-fight`: and from 1:32 (
 var _shot_menu := false                   # `--shot-menu`: capture the start menu
 var _shot_queues := false                 # `--shot-queues`: capture the server's queue list
 var _shot_keep_points := false            # `--keep-points`: don't spend the starting points
+var _forced_shopkeepers: Array = []       # `--shopkeepers A[,B]`: our base's keeper (and theirs), 19 §4
+var _shopkeeper_tour := false             # `--shopkeeper-tour`: the keepers play every clip in turn
+var shopkeepers: Node3D                   # the shops beside the fountains (shopkeepers.gd)
 
 
 func _update_shot(delta: float) -> void:
@@ -645,6 +657,8 @@ func _update_shot(delta: float) -> void:
 		if _shot_shop:
 			for item in [7, 1, 3]:  # Boots, Long Knife, Vital Crystal from the fountain
 				client.buy(item)
+				if shopkeepers != null:
+					shopkeepers.purchase()
 			_toggle_shop()
 		client.cast(1, own + inward * 700.0 + side * 200.0)
 		_shot_moved = true
@@ -1585,6 +1599,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			client.attack_move(p)
 			_show_click_marker(_to_world(p), ENEMY_COLOR)
 		return
+	if event.is_action_pressed("select") and shopkeepers != null:
+		# A shop under the cursor (19 §4): ours opens the shop, theirs has a word for us.
+		var hit = _ground_point(get_viewport().get_mouse_position())
+		var s = shopkeepers.shop_at(hit) if hit != null else null
+		if s != null and _pick_unit(_cursor_ground()) < 0:
+			if s.ally and not client.is_spectator():
+				if shop_panel == null or not shop_panel.visible:
+					_toggle_shop()
+			else:
+				notices.append({ "text": shopkeepers.banter(s), "age": 0.0 })
+			return
 	if event.is_action_pressed("select"):
 		# A unit under the cursor: inspect it (01 §13).
 		var p = _cursor_ground()
@@ -1692,6 +1717,9 @@ func _process(delta: float) -> void:
 		_update_blind()
 	_update_draft(playing)
 	own_status = client.own_status() if playing else {}
+	if playing and shopkeepers != null:
+		shopkeepers.update(delta, Callable(client, "scoreboard"), own_body.position if own_body != null else null,
+			shop_panel != null and shop_panel.visible)
 	_update_shop(delta)
 	_update_lobby(delta, phase)
 	_update_loading(delta)
@@ -2195,6 +2223,14 @@ func _build_map() -> void:
 	add_child(view)
 	view.build(geo, ground, ALLY_COLOR, ENEMY_COLOR)
 	_road_segments = view.road_segments
+	# The shops beside the fountains (19 §4).
+	shopkeepers = preload("res://scripts/shopkeepers.gd").new()
+	shopkeepers.name = "Shopkeepers"
+	shopkeepers.art_root = _art_root()
+	shopkeepers.forced = _forced_shopkeepers
+	shopkeepers.tour = _shopkeeper_tour
+	add_child(shopkeepers)
+	shopkeepers.place(geo.get("fountains", []), geo.size, str(geo.get("season", "summer")), ALLY_COLOR, ENEMY_COLOR)
 	if geo.fountains.size() == 2:
 		var a: Vector2 = geo.fountains[0].center
 		var b: Vector2 = geo.fountains[1].center
@@ -3261,6 +3297,8 @@ func _update_combat_text(delta: float) -> void:
 				sfx.play_flat(_sfx_table("").get("match.victory", []))
 			continue
 		elif n.kind == "match_ended":
+			if shopkeepers != null:
+				shopkeepers.match_ended(n.won)
 			match_banner = "VICTORY" if n.won else "DEFEAT"
 			match_banner_subtitle = "A new match starts shortly"
 			if not horde_status.is_empty():
@@ -4806,6 +4844,8 @@ func _update_cursor(playing: bool) -> void:
 			state = "attack"
 		elif hovered_body != null:
 			state = "enemy"
+		elif _over_own_shop():
+			state = "shop"
 		else:
 			# Teal over anything of ours: click to inspect it (01 §13).
 			var p = _cursor_ground()
@@ -4814,6 +4854,14 @@ func _update_cursor(playing: bool) -> void:
 				if id >= 0 and _inspect_unit(id).get("ally", false):
 					state = "ally"
 	GameCursor.set_state(state)
+
+
+func _over_own_shop() -> bool:
+	if shopkeepers == null or client.is_spectator():
+		return false
+	var hit = _ground_point(get_viewport().get_mouse_position())
+	var s = shopkeepers.shop_at(hit) if hit != null else null
+	return s != null and s.ally
 
 
 func _update_net_graph() -> void:
@@ -5245,6 +5293,8 @@ func _shop_item_input(e: InputEvent, id: int) -> void:
 		if mb.button_index == MOUSE_BUTTON_RIGHT or (mb.button_index == MOUSE_BUTTON_LEFT and mb.double_click):
 			_shop_pick = id
 			client.buy(id)
+			if shopkeepers != null:
+				shopkeepers.purchase()
 			_shop_detail_sig = ""
 			_shop_refresh = 0.0
 
@@ -5428,7 +5478,12 @@ func _update_shop_detail(open: bool, inv: Array) -> void:
 	_shop_buy.focus_mode = Control.FOCUS_NONE
 	_shop_buy.disabled = not open or not it.affordable
 	var id: int = _shop_pick
-	_shop_buy.pressed.connect(func(): client.buy(id); _shop_detail_sig = ""; _shop_refresh = 0.0)
+	_shop_buy.pressed.connect(func():
+		client.buy(id)
+		if shopkeepers != null:
+			shopkeepers.purchase()
+		_shop_detail_sig = ""
+		_shop_refresh = 0.0)
 	_shop_detail.add_child(_shop_buy)
 
 
@@ -6853,6 +6908,8 @@ func _reset_match_view() -> void:
 	own_champion = ""
 	if shop_panel != null:
 		shop_panel.visible = false
+	if shopkeepers != null:
+		shopkeepers.reset()
 	match_banner = ""
 	match_banner_subtitle = "A new match starts shortly"
 	_close_inspect()
