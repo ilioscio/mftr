@@ -129,8 +129,11 @@ fn check_prop(r: &mut Report, m: &Model) {
 }
 
 fn check_header(r: &mut Report, side: &Sidecar) {
-    if !matches!(side.kind.as_str(), "champion" | "library" | "minion" | "monster" | "rig" | "prop") {
-        r.err(format!("sidecar kind `{}` must be champion, library, minion, monster, rig or prop", side.kind));
+    if !matches!(side.kind.as_str(), "champion" | "library" | "minion" | "monster" | "shopkeeper" | "rig" | "prop") {
+        r.err(format!(
+            "sidecar kind `{}` must be champion, library, minion, monster, shopkeeper, rig or prop",
+            side.kind
+        ));
     }
     if side.kind == "prop" {
         if side.archetype != "prop" {
@@ -143,6 +146,9 @@ fn check_header(r: &mut Report, side: &Sidecar) {
     }
     if side.kind == "minion" && rules::minion_kind(&side.id).is_none() {
         r.err(format!("minion `{}` must be one of {}", side.id, rules::MINION_IDS.join(", ")));
+    }
+    if side.kind == "shopkeeper" && !rules::SHOPKEEPER_IDS.contains(&side.id.as_str()) {
+        r.err(format!("shopkeeper `{}` must be one of {}", side.id, rules::SHOPKEEPER_IDS.join(", ")));
     }
     if side.kind == "monster" && rules::monster_kind(&side.id).is_none() {
         let keys: Vec<&str> = mftr_sim::jungle::MonsterKind::ALL.iter().map(|m| m.key()).collect();
@@ -167,12 +173,17 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
     let target = match kind {
         "minion" => rules::MINION_TRIANGLES_TARGET,
         "monster" => rules::MONSTER_TRIANGLES_TARGET,
+        "shopkeeper" => rules::SHOPKEEPER_TRIANGLES_TARGET,
         "prop" => rules::PROP_TRIANGLES_TARGET,
         // The shared library's and the rig's mannequins only preview clips: no lower bound.
         "library" | "rig" => (0, rules::TRIANGLES_TARGET.1),
         _ => rules::TRIANGLES_TARGET,
     };
-    let max = if prop { rules::PROP_TRIANGLES_MAX } else { rules::TRIANGLES_MAX };
+    let max = match kind {
+        "prop" => rules::PROP_TRIANGLES_MAX,
+        "shopkeeper" => rules::SHOPKEEPER_TRIANGLES_MAX,
+        _ => rules::TRIANGLES_MAX,
+    };
     if tris > max {
         r.err(format!("{tris} triangles, over the {max} cap"));
     } else if tris < target.0 || tris > target.1 {
@@ -355,6 +366,7 @@ fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
         }
         "minion" => required.extend(rules::REQUIRED_MINION.iter().map(|s| s.to_string())),
         "monster" => required.extend(rules::REQUIRED_MONSTER.iter().map(|s| s.to_string())),
+        "shopkeeper" => required.extend(rules::REQUIRED_SHOPKEEPER.iter().map(|s| s.to_string())),
         "champion" => {
             required.extend(rules::REQUIRED_CHAMPION.iter().map(|s| s.to_string()));
             match ChampionId::by_name(&side.id) {

@@ -2,7 +2,8 @@ extends RefCounted
 ## The game cursor (05 §6): a steel gauntlet pointing the way, as in the genre, drawn here as
 ## SVG (no image files). It changes with what's under it, like the reference game's: red
 ## plates over an enemy you can attack, teal plates over an ally, a reticle while
-## an attack-move waits for its click. Menus and panels get the plain gauntlet.
+## an attack-move waits for its click, a bag of coins beside it over your own shop (19 §4). Menus
+## and panels get the plain gauntlet.
 
 const SIZE_PX := 40
 const OUTLINE := "#1b140e"
@@ -11,7 +12,8 @@ static var _cache := {}
 static var _state := ""
 
 
-## Show the cursor for `state`: "default", "enemy", "ally" or "attack" (a no-op if unchanged).
+## Show the cursor for `state`: "default", "enemy", "ally", "attack" or "shop" (a no-op if
+## unchanged).
 static func set_state(state: String) -> void:
 	if state == _state:
 		return
@@ -33,6 +35,8 @@ static func _make(state: String) -> Array:
 		var plate: String = {"enemy": "#d65a4a", "ally": "#4fc2b4"}.get(state, "#c9d0da")
 		var shade: String = {"enemy": "#8f2f25", "ally": "#2b7f75"}.get(state, "#7d8794")
 		svg = _gauntlet(plate, shade)
+		if state == "shop":
+			svg += _coin_bag()
 		hotspot = Vector2(18, 3)  # the fingertip, after the gauntlet's turn
 	var img := Image.new()
 	img.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">%s</svg>' % svg, SIZE_PX / 64.0)
@@ -64,6 +68,18 @@ static func _gauntlet(plate: String, shade: String) -> String:
 	for x in [30.25, 38.75, 47.25]:
 		g += '<path d="M%s 33v6" stroke="%s" stroke-width="1.6" stroke-linecap="round"/>' % [x, shade]
 	return '<g transform="translate(-4 -1) rotate(-6 32 32)">%s</g>' % g
+
+
+## Over your own shop: a bulging bag of coins tied with string, beside the hand.
+static func _coin_bag() -> String:
+	var s := 'stroke="%s" stroke-width="2.2" stroke-linejoin="round"' % OUTLINE
+	var g := ''
+	g += '<path d="M44 40q-11 6-11 14t13 8h6q13 0 13-8t-11-14z" fill="#a8743a" %s/>' % s
+	g += '<path d="M43 40l-3-6h17l-3 6z" fill="#8a5a2a" %s/>' % s
+	g += '<path d="M42 40h13" stroke="#e8c45a" stroke-width="2.4" stroke-linecap="round"/>'
+	g += '<circle cx="49" cy="53" r="5" fill="#f2c94c" %s/>' % s
+	g += '<path d="M49 50.5v5" stroke="#9a7420" stroke-width="1.6" stroke-linecap="round"/>'
+	return g
 
 
 ## Attack-move: a red reticle, aimed at its center.
