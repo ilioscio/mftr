@@ -44,7 +44,7 @@ const ALCOVE_CLEAR_U := preload("res://scripts/shopkeepers.gd").ALCOVE_R_U + 250
 
 func build(geo: Dictionary, materials_for: Callable) -> void:
 	for s in geo.get("shop_spots", []):
-		if s.notch:
+		if s.get("notch", false):
 			_alcoves.append(s.center)
 	_rng.seed = 1971
 	var season: Dictionary = preload("res://scripts/seasons.gd").get_season(geo.get("season", "summer"))

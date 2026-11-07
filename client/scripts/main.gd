@@ -2237,7 +2237,7 @@ func _build_map() -> void:
 	# the uncut map has them (an alcove never reaches a boulder in the field).
 	var shops_script := preload("res://scripts/shopkeepers.gd")
 	geo["shop_spots"] = shops_script.spots(geo)
-	if geo.shop_spots.any(func(s): return s.notch):
+	if geo.shop_spots.any(func(s): return s.get("notch", false)):
 		var cut: Array = shops_script.cut_pieces(client.map_cliff_pieces(), geo.shop_spots)
 		geo.cliffs["groups"] = client.map_cliffs_from(cut).groups
 	_map_season = str(geo.get("season", "summer"))

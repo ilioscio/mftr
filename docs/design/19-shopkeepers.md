@@ -69,19 +69,29 @@ The simulation never knows shopkeepers exist. The client:
 
 - **places** each stall where the reference game has its shop: on the rim of the fountain's
   platform, above it and a little to the left on screen (the camera is the same for both teams),
-  set into the wall behind it, its keeper facing the platform. From the map's data (the
-  fountain and the walls), so editor maps get shops too: directions are tried from about 22°
-  left of straight up (between the platform's flag and brazier), then about 65°, until one meets
-  a wall 5.5–8.5 m away. The stall stands far enough out to clear the platform's braziers and
-  banners, in a nook: a U (rounded behind it, straight sides out to the platform) cut out of the
-  cliff's pieces before the cliffs are meshed (`MatchClient.map_cliff_pieces` /
-  `map_cliffs_from`), so the face and grass top follow it. The simulation's walls don't change
-  (a Classic base's wall is the map's edge), and the scenery is kept out of the nook. With no
-  wall in reach (an ARAM court), the stall stands just past the platform.
+  set into the wall behind it, its keeper facing the platform. Horde maps have one fountain and
+  one shop. Placement uses only the map's data (`shopkeepers.gd` `spots`), so maps made in the
+  editor get shops too, and the editor's Actual view shows them:
+  - **Search:** directions are tried from about 22° left of straight up (between the platform's
+    top banner and brazier), then about 65°, then all around. Along each, the stall starts where
+    its plinth clears the platform's braziers and banners, then moves out up to 6 m.
+  - **A spot is taken only if:** the plinth keeps 4 m from every structure and touches no
+    boulder; and either it stands on open ground, or it's set into a wall (at most 3.5 m behind
+    its face) in a nook that leaves rock 2.5 m thick around it and opens only onto ground in
+    plain sight of the fountain. A cut never shows a way through that the simulation doesn't
+    have.
+  - **No spot:** that fountain gets no stall, and the shop is still on G.
+  - **The nook:** a U (rounded behind the stall, straight sides running past the whole plinth
+    toward the fountain) is cut out of the cliff's pieces before the cliffs are meshed
+    (`MatchClient.map_cliff_pieces` / `map_cliffs_from`, `MftrMaps.cliff_pieces` /
+    `cliffs_from_pieces` in the editor), so the face and grass top follow it. The pieces it
+    touches are merged first, so no seam between them is cut twice. The simulation's walls don't
+    change, and the scenery is kept out of the nook.
+  - **Tested:** `client/tests/shop_spots_test.gd` checks the stock maps at every size and custom
+    ones made to trip it (rocks where a stall would go, a path just behind an ARAM court's wall).
 - **draws the whole shop 2.2× its built size** (`SCALE`): the reference game's shopkeeper stands
   two to three times a champion's height and its shop fills a corner of the screen, a call to
-  action. The packs stay at their built size and budgets.
-  Horde maps have one fountain and one shop;
+  action. The packs stay at their built size and budgets;
 - **picks the pair** from the match itself: a hash of its champions and their unit ids (the Tab
   scoreboard, the same for every player), blue's keeper and red's, never the same one. No wire
   change. `--shopkeepers A[,B]` picks your base's keeper (and the enemy's) instead, for reviews;

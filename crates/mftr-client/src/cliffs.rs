@@ -74,6 +74,8 @@ pub fn pieces(map: &Map) -> Vec<Vec<Vec2>> {
 /// first `walls_n` are the map's walls (for outcrops).
 pub fn build_pieces(pieces: &[Vec<Vec2>], walls_n: usize, height_m: f32) -> Cliffs {
     // Every piece wound the same way (positive area, y down: inside to the right of travel).
+    // Empty pieces (merged into another by a cut) are skipped; the walls stay first.
+    let walls_n = pieces.iter().take(walls_n).filter(|w| w.len() >= 3).count();
     let polys: Vec<Vec<Vec2>> = pieces
         .iter()
         .filter(|w| w.len() >= 3)
@@ -85,7 +87,6 @@ pub fn build_pieces(pieces: &[Vec<Vec2>], walls_n: usize, height_m: f32) -> Clif
             w
         })
         .collect();
-    let walls_n = walls_n.min(polys.len());
     let n = polys.len();
 
     // Split each edge where another piece has a vertex on it (seams run along tile lines, where

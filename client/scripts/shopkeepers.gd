@@ -32,16 +32,25 @@ const PLINTH_M := 0.18                     # the plinth's top, in the stall's ow
 const PLINTH_R_M := 1.72 * SCALE           # the plinth's foot (its step): what a click hits, what clears the props
 ## Where a stall stands (`spots`), as in the reference game: on the rim of the fountain's
 ## platform, above it and a little to the left on screen (the camera is the same for both teams),
-## set into the wall behind it. Directions are tried in this order, in degrees left of straight
-## up, until one meets a wall `SPOT_REACH` from the fountain's center (units): first midway between
-## the platform's flag (straight up) and brazier (45°), then midway between that brazier and the
-## flag on the left (90°).
+## set into the wall where there is one. Directions are tried in this order, in degrees left of
+## straight up (midway between the platform's top banner and its brazier, then between that
+## brazier and the left banner), then every other one by how far it turns from the first. Along
+## each, the stall starts where its plinth clears the platform's props and goes out at most
+## SEARCH_U, until a spot passes `_check`. A fountain with no such spot gets no stall (the shop
+## is still on G).
 const SPOT_PREF := [22, 18, 26, 14, 30, 65, 60, 70, 55, 75, 10, 5, 0, 80, 85, 90, 50]
-const SPOT_REACH := Vector2(550.0, 850.0)
-## The stall's center stands at least this far back into the wall (u), and farther when the
-## platform's props need it; the cliff is carved into a U around it (map_view.gd `notch`) and the
-## scenery kept out.
+const SEARCH_U := 600.0
+const STEP_U := 20.0
+## A stall that meets a wall is set this far behind the wall's face (u) when it can be, in a nook
+## cut out of the cliff (`alcove`, `cut_pieces`); rock at least BACK_U thick must stay around the
+## nook, or the cut would show a way through that the simulation doesn't have.
 const INSET_U := 70.0 * SCALE
+const BACK_U := 250.0
+## The deepest a stall may stand behind a wall's face (u): clearing the platform's props can push
+## it past INSET_U, but never into a tunnel.
+const DEEPEST_U := 350.0
+## A stall keeps this far (u) from any structure, past its own plinth.
+const STRUCTURE_CLEAR_U := 400.0
 ## The fountain platform's own props (art/props/landmarks/build.py), at its built size (600 u):
 ## braziers on the diagonals, banners on the axes. The plinth keeps CLEAR_U from both.
 const BRAZIER_R_U := 490.0
@@ -81,40 +90,181 @@ static func pair_for(rows: Array) -> Array:
 	return [KEYS[a], KEYS[b]]
 
 
-## Each fountain's stall spot (`geo` as `map_geometry()`: its `fountains`, `walls` and `size`),
-## in the fountains' order: `{ center (u), face (unit, where the keeper looks), notch (bool:
-## set into a wall), alcove (u: the point the cliff is bent back from, when it is) }`.
+## Each fountain's stall spot, in the fountains' order. `geo` is as `map_geometry()` gives it
+## (`fountains`, `walls`, `size`, `structures`) with its `cliffs` (`outcrops`: walls that are
+## boulders). A spot is `{ center (u), face (unit: where the keeper looks), notch (bool: set into
+## a wall), dir (unit, from the fountain to the stall), reach (u: how far the nook runs from the
+## stall back toward the fountain) }`, or `{ none: true }`.
 static func spots(geo: Dictionary) -> Array:
+	var ctx := _context(geo)
 	var out: Array = []
 	for f in geo.get("fountains", []):
 		var c: Vector2 = f.center
+		var k := float(f.radius) / 600.0
 		var spot := {}
-		for deg in SPOT_PREF:
+		if _solid(ctx, c):
+			out.append({"none": true, "notch": false})  # a fountain off its own map: no stall
+			continue
+		for deg in _directions():
 			var a := deg_to_rad(float(deg))
 			var dir := Vector2(-sin(a), -cos(a))
-			var hit := _wall_hit(geo, c, dir, SPOT_REACH.y)
-			if hit >= SPOT_REACH.x and hit <= SPOT_REACH.y:
-				# Far enough out that the plinth clears the platform's braziers and banners.
-				var d := maxf(hit + INSET_U, _clear_of_props(dir, float(f.radius) / 600.0))
-				spot = {"center": c + dir * d, "notch": true, "dir": dir, "depth": d - hit}
+			var d0 := _clear_of_props(dir, k)
+			var tries: Array = []
+			var hit := _wall_hit(ctx, c, dir, d0 + SEARCH_U + PLINTH_R_M * 100.0)
+			if hit < INF and hit + INSET_U >= d0 and hit + INSET_U <= d0 + SEARCH_U:
+				tries.append(hit + INSET_U)  # set into the wall, the look we want
+			var d := d0
+			while d <= d0 + SEARCH_U:
+				tries.append(d)
+				d += STEP_U
+			for t in tries:
+				spot = _check(ctx, c, dir, t)
+				if not spot.is_empty():
+					break
+			if not spot.is_empty():
 				break
 		if spot.is_empty():
-			# No wall near: on the open ground past the platform's props, up and to the left.
-			var a0 := deg_to_rad(float(SPOT_PREF[0]))
-			var dir0 := Vector2(-sin(a0), -cos(a0))
-			spot = {"center": c + dir0 * _clear_of_props(dir0, float(f.radius) / 600.0), "notch": false}
+			out.append({"none": true, "notch": false})
+			continue
 		spot["face"] = (c - spot.center).normalized()
 		out.append(spot)
 	return out
 
 
+## The directions to try: SPOT_PREF, then every 10° around by how far it turns from the first.
+static func _directions() -> Array:
+	var out: Array = SPOT_PREF.duplicate()
+	var rest: Array = []
+	for deg in range(-170, 190, 10):
+		if not deg in out:
+			rest.append(deg)
+	rest.sort_custom(func(x, y): return absi(x - SPOT_PREF[0]) < absi(y - SPOT_PREF[0]))
+	return out + rest
+
+
+## What `spots` checks against: the walls (and their bounds), the map's size, the boulders and
+## the structures.
+static func _context(geo: Dictionary) -> Dictionary:
+	var walls: Array = geo.get("walls", [])
+	var rects: Array = walls.map(func(w): return _rect(w))
+	var outcrops: Array = []
+	for i in (geo.get("cliffs", {}).get("outcrops", PackedInt32Array()) as PackedInt32Array):
+		if i < walls.size():
+			outcrops.append(walls[i])
+	var structures: Array = []
+	for st in geo.get("structures", []):
+		structures.append(st.pos if st is Dictionary else st)
+	var size = geo.get("size", Vector2.ZERO)
+	if not size is Vector2:
+		size = Vector2(float(size), float(size))
+	return {"walls": walls, "rects": rects, "size": size, "outcrops": outcrops, "structures": structures}
+
+
+static func _rect(poly: PackedVector2Array) -> Rect2:
+	var r := Rect2(poly[0], Vector2.ZERO)
+	for q in poly:
+		r = r.expand(q)
+	return r
+
+
+## Whether `p` (u) is somewhere a champion can't stand: in a wall or off the map.
+static func _solid(ctx: Dictionary, p: Vector2) -> bool:
+	var size: Vector2 = ctx.size
+	if p.x < 0.0 or p.y < 0.0 or p.x > size.x or p.y > size.y:
+		return true
+	for i in ctx.walls.size():
+		if (ctx.rects[i] as Rect2).grow(1.0).has_point(p) and Geometry2D.is_point_in_polygon(p, ctx.walls[i]):
+			return true
+	return false
+
+
+## A circle of `r` around `c`, as a polygon.
+static func _circle(c: Vector2, r: float, n := 24) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for i in n:
+		var a := TAU * i / n
+		out.append(c + Vector2(cos(a), sin(a)) * r)
+	return out
+
+
+static func _touches(poly: PackedVector2Array, others: Array) -> bool:
+	var r := _rect(poly)
+	for o in others:
+		if _rect(o).intersects(r) and not Geometry2D.intersect_polygons(poly, o).is_empty():
+			return true
+	return false
+
+
+## The stall `d` u from the fountain at `c` along `dir`, if it can stand there: clear of the
+## structures and boulders; on open ground, or set into a wall in a nook that leaves rock BACK_U
+## thick around it and opens only onto the ground in front of it. Empty if it can't.
+static func _check(ctx: Dictionary, c: Vector2, dir: Vector2, d: float) -> Dictionary:
+	var center := c + dir * d
+	var r := PLINTH_R_M * 100.0
+	for st in ctx.structures:
+		if center.distance_to(st) < r + STRUCTURE_CLEAR_U:
+			return {}
+	var foot := _circle(center, r)
+	if _touches(foot, ctx.outcrops):
+		return {}
+	var touching := _solid(ctx, center)
+	for q in foot:
+		touching = touching or _solid(ctx, q)
+	if not touching:
+		return {"center": center, "notch": false}
+	# Set into a wall, no deeper than DEEPEST_U past its face along the way from the fountain. The
+	# nook runs back toward the fountain past that face and past the whole plinth, so it opens
+	# onto the ground in front however the plinth meets the wall (ahead, or at its side).
+	var hit := _wall_hit(ctx, c, dir, d + r + STEP_U)
+	if hit < INF and d - hit > DEEPEST_U:
+		return {}
+	var front := d - hit if hit < INF else -r
+	var reach := clampf(maxf(r + 40.0, front + 150.0), 0.0, d - 100.0)
+	if reach < r:
+		return {}  # too near the fountain to open in front of the plinth
+	var spot := {"center": center, "notch": true, "dir": dir, "reach": reach}
+	var mouth := center - dir * reach
+	if _solid(ctx, mouth):
+		return {}
+	var u := alcove(spot)
+	if _touches(u, ctx.outcrops):
+		return {}
+	# Everything around the nook within BACK_U is rock, or ground the nook's mouth opens onto in
+	# plain sight (a wall that slants away): never another way through.
+	var around: Array = Geometry2D.offset_polygon(u, BACK_U)
+	if around.is_empty():
+		return {}
+	var ring: PackedVector2Array = around[0]
+	for i in ring.size():
+		var a: Vector2 = ring[i]
+		var b: Vector2 = ring[(i + 1) % ring.size()]
+		var n := maxi(1, ceili(a.distance_to(b) / 40.0))
+		for j in n:
+			var q := a.lerp(b, float(j) / n)
+			if _solid(ctx, q):
+				continue
+			if not _clear_view(ctx, u, q, mouth):
+				return {}
+	return spot
+
+
+## Whether the straight line from `p` to `mouth` crosses no wall outside the nook `u`.
+static func _clear_view(ctx: Dictionary, u: PackedVector2Array, p: Vector2, mouth: Vector2) -> bool:
+	var n := maxi(1, ceili(p.distance_to(mouth) / STEP_U))
+	for j in range(1, n):
+		var q := p.lerp(mouth, float(j) / n)
+		if _solid(ctx, q) and not Geometry2D.is_point_in_polygon(q, u):
+			return false
+	return true
+
+
 ## The alcove cut into the wall for `spot` (units): a U around the stall, a half circle of
-## ALCOVE_R_U behind its center and straight sides out past where the wall began.
+## ALCOVE_R_U behind its center and straight sides running `reach` back toward the fountain.
 static func alcove(spot: Dictionary) -> PackedVector2Array:
 	var c: Vector2 = spot.center
 	var dir: Vector2 = spot.dir
 	var side := Vector2(-dir.y, dir.x)
-	var mouth := -(float(spot.depth) + 150.0)
+	var mouth := -float(spot.reach)
 	var out := PackedVector2Array()
 	out.append(c + dir * mouth + side * ALCOVE_R_U)
 	for k in 17:
@@ -124,32 +274,49 @@ static func alcove(spot: Dictionary) -> PackedVector2Array:
 	return out
 
 
-## The cliffs' `pieces` (`map_cliff_pieces`) with the alcoves of `spots` cut out. A piece the cut
-## would leave with a hole (it can't: an alcove opens onto the platform) is kept whole.
+## The cliffs' `pieces` (`map_cliff_pieces`: the walls, then the frame) with the alcoves of `spots`
+## cut out. The pieces a nook touches are merged first, so no seam between them is cut on each
+## side apart; the result takes the first one's place and the others are left empty, so the
+## walls keep their indices (for the boulders). A piece the cut would leave with a hole (it
+## can't: a nook opens onto the ground) is kept whole.
 static func cut_pieces(pieces: Array, spots: Array) -> Array:
-	var cuts: Array = []
+	var out: Array = pieces.duplicate()
 	for s in spots:
-		if s.notch:
-			cuts.append(alcove(s))
-	if cuts.is_empty():
-		return pieces
-	var out: Array = []
-	for piece in pieces:
-		var parts: Array = [piece]
-		for cut in cuts:
-			var next: Array = []
-			for part in parts:
-				var res: Array = Geometry2D.clip_polygons(part, cut)
-				var holed := false
-				for r in res:
-					if Geometry2D.is_polygon_clockwise(r) != Geometry2D.is_polygon_clockwise(part):
-						holed = true
-				if holed:
-					next.append(part)
-				else:
-					next.append_array(res)
-			parts = next
-		out.append_array(parts)
+		if not s.get("notch", false):
+			continue
+		var u := alcove(s)
+		var ur := _rect(u)
+		var touched: Array = []
+		for i in out.size():
+			var piece: PackedVector2Array = out[i]
+			if piece.size() >= 3 and _rect(piece).intersects(ur) and not Geometry2D.intersect_polygons(piece, u).is_empty():
+				touched.append(i)
+		if touched.is_empty():
+			continue
+		var merged: PackedVector2Array = out[touched[0]]
+		var parts: Array = []
+		for j in range(1, touched.size()):
+			var m: Array = Geometry2D.merge_polygons(merged, out[touched[j]])
+			if m.size() == 1:
+				merged = m[0]
+			else:
+				parts.append(out[touched[j]])  # not joined to the rest: cut on its own
+		parts.push_front(merged)
+		var cut: Array = []
+		for part in parts:
+			var res: Array = Geometry2D.clip_polygons(part, u)
+			var sides := {}
+			for r in res:
+				sides[Geometry2D.is_polygon_clockwise(r)] = true
+			if sides.size() > 1:
+				cut.append(part)
+			else:
+				cut.append_array(res)
+		for j in touched.size():
+			out[touched[j]] = PackedVector2Array()
+		if not cut.is_empty():
+			out[touched[0]] = cut[0]
+			out.append_array(cut.slice(1))
 	return out
 
 
@@ -176,19 +343,36 @@ static func _clear_of_props(dir: Vector2, k: float) -> float:
 
 ## How far from `from` along `dir` the ground stops being walkable (a wall or the map's edge),
 ## up to `reach` (INF past it).
-static func _wall_hit(geo: Dictionary, from: Vector2, dir: Vector2, reach: float) -> float:
-	var size: Vector2 = geo.get("size", Vector2.ZERO)
-	var walls: Array = geo.get("walls", [])
+static func _wall_hit(ctx: Dictionary, from: Vector2, dir: Vector2, reach: float) -> float:
 	var t := 0.0
 	while t <= reach:
-		var p := from + dir * t
-		if p.x < 0.0 or p.y < 0.0 or p.x > size.x or p.y > size.y:
+		if _solid(ctx, from + dir * t):
 			return t
-		for w in walls:
-			if Geometry2D.is_point_in_polygon(p, w):
-				return t
-		t += 20.0
+		t += STEP_U
 	return INF
+
+
+## The stall for `key` at `spot` (a node; its props from art/props, drawn SCALE times their size):
+## the stall on its plinth, and `season`'s dressing on the plinth's top (`dress` names it).
+static func stall_node(key: String, spot: Dictionary, season: String, team: Color) -> Node3D:
+	var node := Node3D.new()
+	node.name = "Shop_" + key
+	var at: Vector2 = spot.center
+	node.position = Vector3(at.x * U, 0.0, at.y * U)
+	node.scale = Vector3.ONE * SCALE
+	var face: Vector2 = spot.face
+	node.rotation.y = atan2(face.x, face.y)  # the keeper faces the platform
+	var core := MapView.prop_node("stall_" + key, team)
+	if core != null:
+		core.layers = MapView.LAYERS
+		node.add_child(core)
+	var dress := MapView.prop_node("stall_%s_%s" % [key, season if season in ["summer", "autumn", "winter"] else "summer"], team)
+	if dress != null:
+		dress.name = "Dress"
+		dress.position.y = PLINTH_M
+		dress.layers = MapView.LAYERS
+		node.add_child(dress)
+	return node
 
 
 ## Set up the shops for the map `geo` (its `fountains`, blue's first, and `shop_spots`) and
@@ -216,25 +400,16 @@ func _build(keys_by_side: Array) -> void:
 	for i in p.fountains.size():
 		var f: Dictionary = p.fountains[i]
 		var key: String = keys_by_side[i] if i < keys_by_side.size() else KEYS[0]
-		_build_shop(key, f, p.spots[i], p.season, p.ally if f.ally else p.enemy)
+		if i < p.spots.size() and not p.spots[i].get("none", false):
+			_build_shop(key, f, p.spots[i], p.season, p.ally if f.ally else p.enemy)
 
 
 func _build_shop(key: String, f: Dictionary, spot: Dictionary, season: String, team: Color) -> void:
 	var at: Vector2 = spot.center
-	var node := Node3D.new()
-	node.name = "Shop_" + key
-	node.position = Vector3(at.x * U, 0.0, at.y * U)
-	node.scale = Vector3.ONE * SCALE
-	# The keeper faces the fountain's platform, as the reference game's does.
-	var face: Vector2 = spot.face
-	node.rotation.y = atan2(face.x, face.y)
+	var node := stall_node(key, spot, season, team)
 	add_child(node)
-	var core := MapView.prop_node("stall_" + key, team)
-	if core != null:
-		core.layers = MapView.LAYERS
-		node.add_child(core)
 	var shop := {"key": key, "ally": f.ally, "center": at, "node": node, "skel": null, "anim": null, "model": null,
-		"team": team, "dress": null, "winter_bones": [],
+		"team": team, "dress": node.get_node_or_null("Dress"), "winter_bones": [],
 		"clip": "idle", "t": _rng.randf_range(0.0, 4.0), "from": "idle", "from_t": 0.0, "fade": 1.0,
 		"wait": 1.0 if tour else _rng.randf_range(FIDGET_EVERY.x, FIDGET_EVERY.y), "last": "", "held": false, "yaw": 0.0}
 	var path := art_root.path_join("shopkeepers/%s/export/%s.glb" % [key, key]).simplify_path()
@@ -266,7 +441,6 @@ func _build_shop(key: String, f: Dictionary, spot: Dictionary, season: String, t
 		for i in skel.get_bone_count():
 			if skel.get_bone_name(i).begins_with("extra_winter"):
 				shop.winter_bones.append(i)
-	_dress(shop, season)
 	shops.append(shop)
 
 
