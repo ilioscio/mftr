@@ -4,6 +4,8 @@ extends RefCounted
 ## defaults below and writes them back into the map.
 
 const PATH := "user://settings.cfg"
+const HUD_SCALE_MIN := 75.0
+const HUD_SCALE_MAX := 150.0
 
 ## Camera: unlocked by default, scrolled by bumping the mouse against the screen edges (the
 ## reference game's default); Y locks it on the champion, Space centers it while held.
@@ -14,6 +16,10 @@ var confine_cursor := true               # keep the cursor in the window while p
 ## Minimap (bottom right): shown, and its size as a share of the default.
 var minimap_shown := true
 var minimap_size := 100.0                # 50–160 %
+## The HUD's size (75–150 %): everything drawn over the view (the HUD, panels, menus, tooltips),
+## on top of the window's own size, so 100 % looks the same at 1080p and 4K (`main.gd`
+## `_apply_hud_scale`). The world isn't scaled: it always renders at the window's full resolution.
+var hud_scale := 100.0
 var shadows := true                      # the sun's shadows
 var bloom := true                        # glow around bright things
 var atmosphere := true                   # cloud shadows and floating motes
@@ -87,6 +93,7 @@ func load_file() -> void:
 		confine_cursor = cfg.get_value("camera", "confine_cursor", confine_cursor)
 		minimap_shown = cfg.get_value("minimap", "shown", minimap_shown)
 		minimap_size = clampf(cfg.get_value("minimap", "size", minimap_size), 50.0, 160.0)
+		hud_scale = clampf(cfg.get_value("interface", "hud_scale", hud_scale), HUD_SCALE_MIN, HUD_SCALE_MAX)
 		shadows = cfg.get_value("graphics", "shadows", shadows)
 		bloom = cfg.get_value("graphics", "bloom", bloom)
 		atmosphere = cfg.get_value("graphics", "atmosphere", atmosphere)
@@ -113,6 +120,7 @@ func save() -> void:
 	cfg.set_value("camera", "confine_cursor", confine_cursor)
 	cfg.set_value("minimap", "shown", minimap_shown)
 	cfg.set_value("minimap", "size", minimap_size)
+	cfg.set_value("interface", "hud_scale", hud_scale)
 	cfg.set_value("graphics", "shadows", shadows)
 	cfg.set_value("graphics", "bloom", bloom)
 	cfg.set_value("graphics", "atmosphere", atmosphere)

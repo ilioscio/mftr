@@ -88,7 +88,9 @@ func _check(on: bool, apply: Callable) -> CheckBox:
 	return c
 
 
-func _slider(value: float, lo: float, hi: float, apply: Callable, unit := "") -> HBoxContainer:
+## A slider row; `live` false applies only when the player lets go (or clicks or uses keys),
+## for a setting that would move the slider out from under the cursor.
+func _slider(value: float, lo: float, hi: float, apply: Callable, unit := "", live := true) -> HBoxContainer:
 	var h := HBoxContainer.new()
 	var s := HSlider.new()
 	s.min_value = lo
@@ -100,8 +102,18 @@ func _slider(value: float, lo: float, hi: float, apply: Callable, unit := "") ->
 	var l := Label.new()
 	l.custom_minimum_size = Vector2(56, 0)
 	l.text = "%d%s" % [roundi(value), unit]
-	s.value_changed.connect(func(v): apply.call(v); l.text = "%d%s" % [roundi(v), unit])
-	s.drag_ended.connect(func(_c): settings.save())
+	var dragging := [false]
+	s.drag_started.connect(func(): dragging[0] = true)
+	s.value_changed.connect(func(v):
+		l.text = "%d%s" % [roundi(v), unit]
+		if live or not dragging[0]:
+			apply.call(v)
+			if not live:
+				settings.save())
+	s.drag_ended.connect(func(_c):
+		dragging[0] = false
+		apply.call(s.value)
+		settings.save())
 	h.add_child(s)
 	h.add_child(l)
 	return h
@@ -126,6 +138,8 @@ func _interface_tab() -> Control:
 	reset.text = "Put every window back"
 	reset.pressed.connect(func(): settings.window_positions = {}; settings.save())
 	_row(g, "Moved windows", reset, "The shop, the augment draft, the match breakdown and the others go back to where they start.")
+	_row(g, "HUD scale", _slider(settings.hud_scale, settings.HUD_SCALE_MIN, settings.HUD_SCALE_MAX, func(v): settings.hud_scale = v, "%", false),
+		"The size of the HUD, the windows and the menus. 100% is the same share of the screen at any resolution. Applies when you let go of the slider.")
 	_row(g, "Show the minimap", _check(settings.minimap_shown, func(v): settings.minimap_shown = v))
 	_row(g, "Minimap size", _slider(settings.minimap_size, 50, 160, func(v): settings.minimap_size = v, "%"))
 	return g

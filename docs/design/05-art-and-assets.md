@@ -138,7 +138,7 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
   hover, one gold primary button per screen, recessed fields; one theme for every menu and
   panel (`ui_theme.gd`), the same colors in the HUD (`hud.gd`). Menus sit on a procedural dusk
   backdrop with the logo; champion select shows each team's champions as cards.
-- **The HUD:** one bottom panel scaled with the window: stats, a portrait with the level and an
+- **The HUD:** one bottom panel scaled with the window (and the HUD scale, below): stats, a portrait with the level and an
   XP ring, ability icons (a glyph per kind of effect on the champion's color) with cooldown
   sweeps, key tabs, rank pips and level-up tabs, a segmented health bar, items and gold. Hovering
   an ability shows its tooltip, generated from the sim's data: what it does, the numbers at the
@@ -147,8 +147,16 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
   the full net graph is on F1.
 - **Windows** (the augment draft, the shop, the anvil, the match breakdown, the death recap,
   settings) are dragged by any spot that isn't a button and stay where they were left (saved as
-  fractions of the screen). Tooltips draw above them all: items (icon, cost, stats colored by
-  stat, passive, active) and augments (on hover above the HUD) as well as abilities.
+  fractions of the screen). A window bigger than the screen (a big HUD scale on a small one) is
+  shrunk to fit. Tooltips draw above them all: items (icon, cost, stats colored by stat,
+  passive, active) and augments (on hover above the HUD) as well as abilities.
+- **HUD scale** (Settings → Interface, 75–150 %): the HUD is laid out for 1080p, and everything
+  drawn over the view (the bottom panel, minimap, bars over units, windows, menus, tooltips) is
+  scaled by the window's height over 1080 (never below 1) times the player's share
+  (`main.gd` `_apply_hud_scale`, the window's content scale). So 100 % takes the same share of
+  the screen at 1080p, 1440p and 4K, and text stays sharp. The world isn't scaled: it always
+  renders at the window's full resolution, and so do the pixel particles' blocks and the map
+  editor's Actual view. Windows under 1080 lines still shrink the bottom panel, down to 0.7.
 - **The cursor** is a steel gauntlet drawn as SVG, pointing like the classic hand cursor: the
   index finger up, the other three curled beside it, the thumb wrapped around the front (palm
   side), only its edge showing at the left: red plates over an enemy that can be attacked, teal over an ally, a red

@@ -78,8 +78,8 @@ func _ready() -> void:
 	var m := ShaderMaterial.new()
 	m.shader = load("res://shaders/pixel_vfx.gdshader")
 	mmi.material_override = m
-	# One pixel block per 540 lines (2 px at 1080p).
-	m.set_shader_parameter("block", maxf(1.0, roundf(get_viewport().get_visible_rect().size.y / 540.0)))
+	# One pixel block per 540 lines (2 px at 1080p): the window's own pixels, whatever the HUD scale.
+	m.set_shader_parameter("block", maxf(1.0, roundf(get_window().size.y / 540.0)))
 	# Particles are scattered; never cull the whole set by its stale bounds.
 	mmi.custom_aabb = AABB(Vector3(-1e4, -1e4, -1e4), Vector3(2e4, 2e4, 2e4))
 	add_child(mmi)

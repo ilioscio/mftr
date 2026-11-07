@@ -20,6 +20,9 @@ const Splashes = preload("res://scripts/splashes.gd")
 const UNITS_TO_METERS := 0.01           # 1 game unit = 1 cm
 const CAMERA_PITCH_DEG := 56.0          # D13 / R01 §1
 const CAMERA_VFOV_DEG := 45.0
+## The HUD never shrinks with a window under 1080 lines (its text would get too small to read);
+## the HUD scale setting can still take it down to 75 %.
+const HUD_SCREEN_MIN := 1.0
 const CAMERA_DISTANCE_U := 1900.0
 const ARENA_U := 4000.0
 const CHAMPION_RADIUS_U := 65.0         # gameplay radius
@@ -187,6 +190,10 @@ func _ready() -> void:
 					_forced_shopkeepers.append(k)
 				else:
 					push_warning("--shopkeepers: no keeper `%s` (goldwick, rosette, slink, folio)" % k)
+			i += 1
+		elif args[i] == "--hud-scale" and i + 1 < args.size():
+			# For captures: this run's HUD scale (%), not saved.
+			settings.hud_scale = clampf(float(args[i + 1]), settings.HUD_SCALE_MIN, settings.HUD_SCALE_MAX)
 			i += 1
 		elif args[i] == "--zoom" and i + 1 < args.size():
 			camera_zoom = maxf(0.05, float(args[i + 1]))
@@ -922,6 +929,18 @@ func _notification(what: int) -> void:
 		_focused = false
 	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
 		_focused = true
+
+
+## The HUD scale (Settings → Interface): every 2D layer (the HUD, windows, menus, tooltips) is
+## scaled by the window's height over 1080 (the HUD is laid out for 1080p) times the player's
+## share. The 3D view is untouched: it renders at the window's full resolution. Mouse positions,
+## `project_ray_*` and `unproject_position` are all in the scaled 2D space, so they still agree.
+func _apply_hud_scale() -> void:
+	var win := get_window()
+	var screen := clampf(win.size.y / 1080.0, HUD_SCREEN_MIN, 4.0)
+	var k: float = screen * settings.hud_scale / 100.0
+	if absf(win.content_scale_factor - k) > 1e-3:
+		win.content_scale_factor = k
 
 
 ## The Graphics settings, applied when they change.
@@ -1792,6 +1811,7 @@ func _process(delta: float) -> void:
 		atmosphere.update(delta, _look_point)
 	_apply_graphics()
 	_apply_audio()
+	_apply_hud_scale()
 	_update_ability_tip()
 	_hud_dt = delta
 	overlay.queue_redraw()
@@ -3644,7 +3664,7 @@ func _draw_ability_bar(font: Font) -> void:
 
 ## The bottom panel (05 §6): stats, the portrait with level and XP, the abilities with their
 ## cooldowns, ranks and level-up buttons, health, then items and gold. Centered, shifted left of
-## the minimap when they'd meet; scaled with the window (k = 1 at 1080 p).
+## the minimap when they'd meet; scaled with the window (`_hud_k`, `_apply_hud_scale`).
 func _draw_bottom_hud(font: Font) -> void:
 	var k := _hud_k()
 	var bold := _bold_font()
@@ -3819,9 +3839,10 @@ func _chip_of(id, hp: float, max_hp: float) -> float:
 	return c
 
 
-## The HUD's scale: 1.0 at 1080 p.
+## The bottom panel's own scale, under the window's (`_apply_hud_scale`, which grows it with
+## bigger screens and the HUD scale setting): 1.0, shrinking to 0.7 in a window under 1080 lines.
 func _hud_k() -> float:
-	return clampf(overlay.size.y / 1080.0, 0.7, 1.35)
+	return clampf(get_window().size.y / 1080.0, 0.7, 1.0)
 
 
 func _bold_font() -> Font:

@@ -108,7 +108,7 @@ const MapView := preload("res://scripts/map_view.gd")
 const Shops := preload("res://scripts/shopkeepers.gd")
 const ALLY := Color(0.3, 0.6, 1.0)
 const ENEMY := Color(0.95, 0.35, 0.25)
-var view_box: SubViewportContainer
+var view_box: TextureRect
 var view_port: SubViewport
 var view_cam: Camera3D
 var view_root: Node3D
@@ -1236,17 +1236,29 @@ func _export() -> void:
 
 # ---- the Actual view -------------------------------------------------------------------------
 
+## The Actual view's render size: its rect in the window's own pixels.
+func _size_view_port() -> void:
+	var px := view_box.size * get_window().content_scale_factor
+	view_port.size = Vector2i(maxi(1, roundi(px.x)), maxi(1, roundi(px.y)))
+
 func _show_actual(on: bool) -> void:
 	if on and view_box == null:
-		view_box = SubViewportContainer.new()
-		view_box.stretch = true
+		# The view renders at the window's own pixels, whatever the HUD scale (`main.gd`
+		# `_apply_hud_scale`), and is drawn over the canvas's (scaled) rect.
+		view_box = TextureRect.new()
+		view_box.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		view_box.stretch_mode = TextureRect.STRETCH_SCALE
 		view_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		view_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		canvas.add_child(view_box)
 		view_port = SubViewport.new()
 		view_port.own_world_3d = true
 		view_port.msaa_3d = Viewport.MSAA_4X
+		view_port.render_target_update_mode = SubViewport.UPDATE_WHEN_PARENT_VISIBLE
 		view_box.add_child(view_port)
+		view_box.texture = view_port.get_texture()
+		view_box.resized.connect(_size_view_port)
+		_size_view_port()
 		var env := WorldEnvironment.new()
 		var e := Environment.new()
 		e.background_mode = Environment.BG_COLOR
