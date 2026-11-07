@@ -62,6 +62,19 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
   near the camera, braziers burn, and a vignette darkens the corners ([15 §7](15-map-art-direction.md#7-light-and-shaders)).
   Shadows, bloom, and clouds with motes can each be turned off in Settings → Graphics, where the
   season can be chosen too.
+- **Display** (Settings → Graphics, `main.gd` `_apply_display`):
+  - **Window:** borderless fullscreen (the default), exclusive fullscreen or windowed. Scripted
+    captures keep the window they started with.
+  - **Anti-aliasing:** MSAA 4× (the default), MSAA 2×, FXAA or off. Without it, the edges of
+    the faceted models stair-step; with it, they're smooth. It doesn't touch the art's intended
+    chunkiness: the pixel particles, the ground's texels and the flat-shaded facets. MSAA 4× cost
+    about 10 % of the frame rate in a 1080p capture. The portraits and the map editor's view
+    always use MSAA 4×.
+  - **Render scale (50–150 %):** the world's resolution as a share of the window's, scaled
+    bilinearly. Under 100 % is faster and softer; over 100 % supersamples, and is costly (the
+    pixels go as the square). FSR needs the Forward+ renderer, and we use Mobile. The HUD always
+    draws at the window's own resolution, and the pixel particles keep one block per 540 lines of
+    the render.
 
 ## 4. Champions
 
@@ -103,7 +116,7 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 | any particle kit | `travel` | Streamed off a dashing champion every step until the dash lands, so a quarter-second dash leaves a visible path |
 | `plain`, `cracks`, `rocks`, `frost`, `flames`, `bones`, `stars`, `arrows`, `sigil`, `shadow` | `telegraph` | The *inside* of a delayed area's ground indicator, in the champion's colors (its outline keeps the team's): cracks that spread, rock shadows that grow, frost, flames, strewn bones, stars, arrowheads, a turning sigil, a pool of shadow |
 
-- **Pixel style:** all particles share one MultiMesh of camera-facing squares whose corners snap to a grid of screen pixels (2 px at 1080p). They step at **20 Hz** ("on twos") and walk their 2–6 color ramp in whole steps, with no blending.
+- **Pixel style:** all particles share one MultiMesh of camera-facing squares whose corners snap to a grid of the render's pixels (2 px at 1080p; one block per 540 lines at any size or render scale). They step at **20 Hz** ("on twos") and walk their 2–6 color ramp in whole steps, with no blending.
 - **Honest sizes:** projectile kits can't set a size. Shafts and frames are fitted inside the body's gameplay width, and trails only fall *behind* it (§1.1). Rings take the area's radius from the render state.
 - **`fire`** (A6): when an action's animation passes its `fire` marker. It is centered and sized for novas, at reach in front for melee blows and slams, and at the chest otherwise; any particle kit plays there (10 §6).
 - **Events:** the client fires `<action>.<phase>`. It finds the action from the kit: an area's or missile's radius is matched against the owner's abilities (augment-widened too), bolts are `attack`, and dashes are the kit's dash slot. A champion's own `action.phase` wins, then its `*.phase`, then the shared library's (`biped_library.vfx.ron`).
