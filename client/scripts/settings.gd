@@ -4,6 +4,12 @@ extends RefCounted
 ## defaults below and writes them back into the map.
 
 const PATH := "user://settings.cfg"
+const HUD_SCALE_MIN := 75.0
+const HUD_SCALE_MAX := 150.0
+const WINDOW_MODES := ["borderless", "fullscreen", "windowed"]
+const ANTIALIAS := ["msaa4", "msaa2", "fxaa", "off"]
+const RENDER_SCALE_MIN := 50.0
+const RENDER_SCALE_MAX := 150.0
 
 ## Camera: unlocked by default, scrolled by bumping the mouse against the screen edges (the
 ## reference game's default); Y locks it on the champion, Space centers it while held.
@@ -14,6 +20,19 @@ var confine_cursor := true               # keep the cursor in the window while p
 ## Minimap (bottom right): shown, and its size as a share of the default.
 var minimap_shown := true
 var minimap_size := 100.0                # 50–160 %
+## The HUD's size (75–150 %): everything drawn over the view (the HUD, panels, menus, tooltips),
+## on top of the window's own size, so 100 % looks the same at 1080p and 4K (`main.gd`
+## `_apply_hud_scale`). The world isn't scaled: it always renders at the window's full resolution.
+var hud_scale := 100.0
+## Display (Settings → Graphics). The window: "borderless" (fullscreen without a mode switch),
+## "fullscreen" (exclusive) or "windowed".
+var window_mode := "borderless"
+## Smoothing the edges of models: "msaa4", "msaa2", "fxaa" (cheap, softer) or "off".
+var antialias := "msaa4"
+## The world's render resolution as a share of the window's (50–150 %): under 100 is faster and
+## upscaled, over 100 renders more pixels and scales them down (sharper, slower). The HUD
+## is always drawn at the window's own resolution.
+var render_scale := 100.0
 var shadows := true                      # the sun's shadows
 var bloom := true                        # glow around bright things
 var atmosphere := true                   # cloud shadows and floating motes
@@ -87,6 +106,10 @@ func load_file() -> void:
 		confine_cursor = cfg.get_value("camera", "confine_cursor", confine_cursor)
 		minimap_shown = cfg.get_value("minimap", "shown", minimap_shown)
 		minimap_size = clampf(cfg.get_value("minimap", "size", minimap_size), 50.0, 160.0)
+		hud_scale = clampf(cfg.get_value("interface", "hud_scale", hud_scale), HUD_SCALE_MIN, HUD_SCALE_MAX)
+		window_mode = one_of(cfg.get_value("graphics", "window_mode", window_mode), WINDOW_MODES, window_mode)
+		antialias = one_of(cfg.get_value("graphics", "antialias", antialias), ANTIALIAS, antialias)
+		render_scale = clampf(cfg.get_value("graphics", "render_scale", render_scale), RENDER_SCALE_MIN, RENDER_SCALE_MAX)
 		shadows = cfg.get_value("graphics", "shadows", shadows)
 		bloom = cfg.get_value("graphics", "bloom", bloom)
 		atmosphere = cfg.get_value("graphics", "atmosphere", atmosphere)
@@ -105,6 +128,11 @@ func load_file() -> void:
 	apply_bindings()
 
 
+## `v` if it's one of `allowed`, else `fallback` (a saved choice from another version).
+static func one_of(v, allowed: Array, fallback: String) -> String:
+	return str(v) if str(v) in allowed else fallback
+
+
 func save() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("camera", "locked", camera_locked)
@@ -113,6 +141,10 @@ func save() -> void:
 	cfg.set_value("camera", "confine_cursor", confine_cursor)
 	cfg.set_value("minimap", "shown", minimap_shown)
 	cfg.set_value("minimap", "size", minimap_size)
+	cfg.set_value("interface", "hud_scale", hud_scale)
+	cfg.set_value("graphics", "window_mode", window_mode)
+	cfg.set_value("graphics", "antialias", antialias)
+	cfg.set_value("graphics", "render_scale", render_scale)
 	cfg.set_value("graphics", "shadows", shadows)
 	cfg.set_value("graphics", "bloom", bloom)
 	cfg.set_value("graphics", "atmosphere", atmosphere)

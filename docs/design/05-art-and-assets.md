@@ -62,6 +62,19 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
   near the camera, braziers burn, and a vignette darkens the corners ([15 §7](15-map-art-direction.md#7-light-and-shaders)).
   Shadows, bloom, and clouds with motes can each be turned off in Settings → Graphics, where the
   season can be chosen too.
+- **Display** (Settings → Graphics, `main.gd` `_apply_display`):
+  - **Window:** borderless fullscreen (the default), exclusive fullscreen or windowed. Scripted
+    captures keep the window they started with.
+  - **Anti-aliasing:** MSAA 4× (the default), MSAA 2×, FXAA or off. Without it, the edges of
+    the faceted models stair-step; with it, they're smooth. It doesn't touch the art's intended
+    chunkiness: the pixel particles, the ground's texels and the flat-shaded facets. MSAA 4× cost
+    about 10 % of the frame rate in a 1080p capture. The portraits and the map editor's view
+    always use MSAA 4×.
+  - **Render scale (50–150 %):** the world's resolution as a share of the window's, scaled
+    bilinearly. Under 100 % is faster and softer; over 100 % supersamples, and is costly (the
+    pixels go as the square). FSR needs the Forward+ renderer, and we use Mobile. The HUD always
+    draws at the window's own resolution, and the pixel particles keep one block per 540 lines of
+    the render.
 
 ## 4. Champions
 
@@ -103,7 +116,7 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 | any particle kit | `travel` | Streamed off a dashing champion every step until the dash lands, so a quarter-second dash leaves a visible path |
 | `plain`, `cracks`, `rocks`, `frost`, `flames`, `bones`, `stars`, `arrows`, `sigil`, `shadow` | `telegraph` | The *inside* of a delayed area's ground indicator, in the champion's colors (its outline keeps the team's): cracks that spread, rock shadows that grow, frost, flames, strewn bones, stars, arrowheads, a turning sigil, a pool of shadow |
 
-- **Pixel style:** all particles share one MultiMesh of camera-facing squares whose corners snap to a grid of screen pixels (2 px at 1080p). They step at **20 Hz** ("on twos") and walk their 2–6 color ramp in whole steps, with no blending.
+- **Pixel style:** all particles share one MultiMesh of camera-facing squares whose corners snap to a grid of the render's pixels (2 px at 1080p; one block per 540 lines at any size or render scale). They step at **20 Hz** ("on twos") and walk their 2–6 color ramp in whole steps, with no blending.
 - **Honest sizes:** projectile kits can't set a size. Shafts and frames are fitted inside the body's gameplay width, and trails only fall *behind* it (§1.1). Rings take the area's radius from the render state.
 - **`fire`** (A6): when an action's animation passes its `fire` marker. It is centered and sized for novas, at reach in front for melee blows and slams, and at the chest otherwise; any particle kit plays there (10 §6).
 - **Events:** the client fires `<action>.<phase>`. It finds the action from the kit: an area's or missile's radius is matched against the owner's abilities (augment-widened too), bolts are `attack`, and dashes are the kit's dash slot. A champion's own `action.phase` wins, then its `*.phase`, then the shared library's (`biped_library.vfx.ron`).
@@ -138,7 +151,7 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
   hover, one gold primary button per screen, recessed fields; one theme for every menu and
   panel (`ui_theme.gd`), the same colors in the HUD (`hud.gd`). Menus sit on a procedural dusk
   backdrop with the logo; champion select shows each team's champions as cards.
-- **The HUD:** one bottom panel scaled with the window: stats, a portrait with the level and an
+- **The HUD:** one bottom panel scaled with the window (and the HUD scale, below): stats, a portrait with the level and an
   XP ring, ability icons (a glyph per kind of effect on the champion's color) with cooldown
   sweeps, key tabs, rank pips and level-up tabs, a segmented health bar, items and gold. Hovering
   an ability shows its tooltip, generated from the sim's data: what it does, the numbers at the
@@ -147,8 +160,16 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
   the full net graph is on F1.
 - **Windows** (the augment draft, the shop, the anvil, the match breakdown, the death recap,
   settings) are dragged by any spot that isn't a button and stay where they were left (saved as
-  fractions of the screen). Tooltips draw above them all: items (icon, cost, stats colored by
-  stat, passive, active) and augments (on hover above the HUD) as well as abilities.
+  fractions of the screen). A window bigger than the screen (a big HUD scale on a small one) is
+  shrunk to fit. Tooltips draw above them all: items (icon, cost, stats colored by stat,
+  passive, active) and augments (on hover above the HUD) as well as abilities.
+- **HUD scale** (Settings → Interface, 75–150 %): the HUD is laid out for 1080p, and everything
+  drawn over the view (the bottom panel, minimap, bars over units, windows, menus, tooltips) is
+  scaled by the window's height over 1080 (never below 1) times the player's share
+  (`main.gd` `_apply_hud_scale`, the window's content scale). So 100 % takes the same share of
+  the screen at 1080p, 1440p and 4K, and text stays sharp. The world isn't scaled: it always
+  renders at the window's full resolution, and so do the pixel particles' blocks and the map
+  editor's Actual view. Windows under 1080 lines still shrink the bottom panel, down to 0.7.
 - **The cursor** is a steel gauntlet drawn as SVG, pointing like the classic hand cursor: the
   index finger up, the other three curled beside it, the thumb wrapped around the front (palm
   side), only its edge showing at the left: red plates over an enemy that can be attacked, teal over an ally, a red

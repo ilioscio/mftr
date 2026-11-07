@@ -20,6 +20,9 @@ const Splashes = preload("res://scripts/splashes.gd")
 const UNITS_TO_METERS := 0.01           # 1 game unit = 1 cm
 const CAMERA_PITCH_DEG := 56.0          # D13 / R01 §1
 const CAMERA_VFOV_DEG := 45.0
+## The HUD never shrinks with a window under 1080 lines (its text would get too small to read);
+## the HUD scale setting can still take it down to 75 %.
+const HUD_SCREEN_MIN := 1.0
 const CAMERA_DISTANCE_U := 1900.0
 const ARENA_U := 4000.0
 const CHAMPION_RADIUS_U := 65.0         # gameplay radius
@@ -50,6 +53,7 @@ var vignette: ColorRect                  # shown while a match is on (15 §7)
 var atmosphere                            # cloud shadows and motes (atmosphere.gd), per map
 var _look_point := Vector3.ZERO           # where the camera looks, on the ground
 var _graphics_applied := []
+var _fixed_window := false              # scripted captures keep their window (`_apply_display`)
 var _audio_applied := []
 var _focused := true
 var backdrop: CanvasLayer
@@ -187,6 +191,18 @@ func _ready() -> void:
 					_forced_shopkeepers.append(k)
 				else:
 					push_warning("--shopkeepers: no keeper `%s` (goldwick, rosette, slink, folio)" % k)
+			i += 1
+		elif args[i] == "--antialias" and i + 1 < args.size():
+			# For captures: this run's anti-aliasing (msaa4, msaa2, fxaa, off), not saved.
+			settings.antialias = settings.one_of(args[i + 1], settings.ANTIALIAS, settings.antialias)
+			i += 1
+		elif args[i] == "--render-scale" and i + 1 < args.size():
+			# For captures: this run's render scale (%), not saved.
+			settings.render_scale = clampf(float(args[i + 1]), settings.RENDER_SCALE_MIN, settings.RENDER_SCALE_MAX)
+			i += 1
+		elif args[i] == "--hud-scale" and i + 1 < args.size():
+			# For captures: this run's HUD scale (%), not saved.
+			settings.hud_scale = clampf(float(args[i + 1]), settings.HUD_SCALE_MIN, settings.HUD_SCALE_MAX)
 			i += 1
 		elif args[i] == "--zoom" and i + 1 < args.size():
 			camera_zoom = maxf(0.05, float(args[i + 1]))
@@ -343,6 +359,7 @@ func _ready() -> void:
 	# Is a newer release out? Not for scripted captures and headless runs, unless they name a
 	# manifest to check.
 	var scripted := _shot_path != "" or _lineup != "" or DisplayServer.get_name() == "headless"
+	_fixed_window = scripted
 	if _update_check and (not scripted or updates.manifest_url != MftrRelease.manifest_url()):
 		updates.start()
 	if _lineup != "":
@@ -924,16 +941,50 @@ func _notification(what: int) -> void:
 		_focused = true
 
 
-## The Graphics settings, applied when they change.
+## The HUD scale (Settings → Interface): every 2D layer (the HUD, windows, menus, tooltips) is
+## scaled by the window's height over 1080 (the HUD is laid out for 1080p) times the player's
+## share. The 3D view is untouched: it renders at the window's full resolution. Mouse positions,
+## `project_ray_*` and `unproject_position` are all in the scaled 2D space, so they still agree.
+func _apply_hud_scale() -> void:
+	var win := get_window()
+	var screen := clampf(win.size.y / 1080.0, HUD_SCREEN_MIN, 4.0)
+	var k: float = screen * settings.hud_scale / 100.0
+	if absf(win.content_scale_factor - k) > 1e-3:
+		win.content_scale_factor = k
+
+
+## The Graphics settings, applied when they change: the window, anti-aliasing and render scale
+## (05 §6) and the effects.
 func _apply_graphics() -> void:
-	var want := [settings.shadows, settings.bloom, settings.atmosphere, atmosphere != null]
+	var want := [settings.shadows, settings.bloom, settings.atmosphere, atmosphere != null, settings.window_mode, settings.antialias, settings.render_scale]
 	if want == _graphics_applied:
 		return
 	_graphics_applied = want
+	_apply_display()
 	sun.shadow_enabled = settings.shadows
 	world_env.glow_enabled = settings.bloom
 	if atmosphere != null:
 		atmosphere.set_enabled(settings.atmosphere, settings.atmosphere)
+
+
+## The window mode, anti-aliasing and the world's render scale. Scripted captures keep the window
+## they were started with, so every capture is the same size.
+func _apply_display() -> void:
+	var vp := get_viewport()
+	var aa: String = settings.antialias
+	vp.msaa_3d = {"msaa4": Viewport.MSAA_4X, "msaa2": Viewport.MSAA_2X}.get(aa, Viewport.MSAA_DISABLED)
+	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if aa == "fxaa" else Viewport.SCREEN_SPACE_AA_DISABLED
+	var scale: float = settings.render_scale / 100.0
+	# Bilinear: under 1 it upscales, over 1 it's a supersample. (FSR needs the Forward+ renderer;
+	# we use Mobile.)
+	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	vp.scaling_3d_scale = scale
+	if _fixed_window or DisplayServer.get_name() == "headless":
+		return
+	var mode: Window.Mode = {"borderless": Window.MODE_FULLSCREEN, "fullscreen": Window.MODE_EXCLUSIVE_FULLSCREEN}.get(settings.window_mode, Window.MODE_WINDOWED)
+	var win := get_window()
+	if win.mode != mode and not (mode == Window.MODE_WINDOWED and win.mode == Window.MODE_MAXIMIZED):
+		win.mode = mode
 
 
 ## The menus' backdrop and logo, behind every screen that isn't the match itself.
@@ -1792,6 +1843,7 @@ func _process(delta: float) -> void:
 		atmosphere.update(delta, _look_point)
 	_apply_graphics()
 	_apply_audio()
+	_apply_hud_scale()
 	_update_ability_tip()
 	_hud_dt = delta
 	overlay.queue_redraw()
@@ -3644,7 +3696,7 @@ func _draw_ability_bar(font: Font) -> void:
 
 ## The bottom panel (05 §6): stats, the portrait with level and XP, the abilities with their
 ## cooldowns, ranks and level-up buttons, health, then items and gold. Centered, shifted left of
-## the minimap when they'd meet; scaled with the window (k = 1 at 1080 p).
+## the minimap when they'd meet; scaled with the window (`_hud_k`, `_apply_hud_scale`).
 func _draw_bottom_hud(font: Font) -> void:
 	var k := _hud_k()
 	var bold := _bold_font()
@@ -3819,9 +3871,10 @@ func _chip_of(id, hp: float, max_hp: float) -> float:
 	return c
 
 
-## The HUD's scale: 1.0 at 1080 p.
+## The bottom panel's own scale, under the window's (`_apply_hud_scale`, which grows it with
+## bigger screens and the HUD scale setting): 1.0, shrinking to 0.7 in a window under 1080 lines.
 func _hud_k() -> float:
-	return clampf(overlay.size.y / 1080.0, 0.7, 1.35)
+	return clampf(get_window().size.y / 1080.0, 0.7, 1.0)
 
 
 func _bold_font() -> Font:

@@ -80,6 +80,19 @@ func _grid(name_: String) -> GridContainer:
 	return g
 
 
+## A drop-down of `labels` for the values `keys`, showing `current`; `apply` gets the key.
+func _choice(keys: Array, labels: Array, current: String, apply: Callable) -> OptionButton:
+	var o := OptionButton.new()
+	o.focus_mode = Control.FOCUS_NONE
+	for l in labels:
+		o.add_item(l)
+	o.select(maxi(keys.find(current), 0))
+	o.item_selected.connect(func(i: int):
+		apply.call(keys[i])
+		settings.save())
+	return o
+
+
 func _check(on: bool, apply: Callable) -> CheckBox:
 	var c := CheckBox.new()
 	c.button_pressed = on
@@ -88,7 +101,9 @@ func _check(on: bool, apply: Callable) -> CheckBox:
 	return c
 
 
-func _slider(value: float, lo: float, hi: float, apply: Callable, unit := "") -> HBoxContainer:
+## A slider row; `live` false applies only when the player lets go (or clicks or uses keys),
+## for a setting that would move the slider out from under the cursor.
+func _slider(value: float, lo: float, hi: float, apply: Callable, unit := "", live := true) -> HBoxContainer:
 	var h := HBoxContainer.new()
 	var s := HSlider.new()
 	s.min_value = lo
@@ -100,8 +115,18 @@ func _slider(value: float, lo: float, hi: float, apply: Callable, unit := "") ->
 	var l := Label.new()
 	l.custom_minimum_size = Vector2(56, 0)
 	l.text = "%d%s" % [roundi(value), unit]
-	s.value_changed.connect(func(v): apply.call(v); l.text = "%d%s" % [roundi(v), unit])
-	s.drag_ended.connect(func(_c): settings.save())
+	var dragging := [false]
+	s.drag_started.connect(func(): dragging[0] = true)
+	s.value_changed.connect(func(v):
+		l.text = "%d%s" % [roundi(v), unit]
+		if live or not dragging[0]:
+			apply.call(v)
+			if not live:
+				settings.save())
+	s.drag_ended.connect(func(_c):
+		dragging[0] = false
+		apply.call(s.value)
+		settings.save())
 	h.add_child(s)
 	h.add_child(l)
 	return h
@@ -126,6 +151,8 @@ func _interface_tab() -> Control:
 	reset.text = "Put every window back"
 	reset.pressed.connect(func(): settings.window_positions = {}; settings.save())
 	_row(g, "Moved windows", reset, "The shop, the augment draft, the match breakdown and the others go back to where they start.")
+	_row(g, "HUD scale", _slider(settings.hud_scale, settings.HUD_SCALE_MIN, settings.HUD_SCALE_MAX, func(v): settings.hud_scale = v, "%", false),
+		"The size of the HUD, the windows and the menus. 100% is the same share of the screen at any resolution. Applies when you let go of the slider.")
 	_row(g, "Show the minimap", _check(settings.minimap_shown, func(v): settings.minimap_shown = v))
 	_row(g, "Minimap size", _slider(settings.minimap_size, 50, 160, func(v): settings.minimap_size = v, "%"))
 	return g
@@ -145,6 +172,12 @@ func _audio_tab() -> Control:
 
 func _graphics_tab() -> Control:
 	var g := _grid("Graphics")
+	_row(g, "Window", _choice(settings.WINDOW_MODES, ["Borderless fullscreen", "Fullscreen", "Windowed"], settings.window_mode, func(k): settings.window_mode = k),
+		"Borderless fills the screen without switching its mode, so alt-tab is instant. Fullscreen takes the screen over (can be a little faster). Windowed is a window you can size and move.")
+	_row(g, "Anti-aliasing", _choice(settings.ANTIALIAS, ["MSAA 4×", "MSAA 2×", "FXAA", "Off"], settings.antialias, func(k): settings.antialias = k),
+		"Smooths the stair-stepped edges of champions, monsters, props and cliffs. MSAA 4× is the smoothest; 2× is cheaper; FXAA is cheapest but softens the whole picture a little.")
+	_row(g, "Render scale", _slider(settings.render_scale, settings.RENDER_SCALE_MIN, settings.RENDER_SCALE_MAX, func(v): settings.render_scale = v, "%"),
+		"The world's resolution, as a share of the window's. Under 100% is faster on slow graphics cards but softer; over 100% is sharper and slower. The HUD always stays at full resolution.")
 	_row(g, "Shadows", _check(settings.shadows, func(v): settings.shadows = v), "The sun's shadows. Off is faster on older graphics cards.")
 	_row(g, "Bloom", _check(settings.bloom, func(v): settings.bloom = v), "A soft glow around bright things: crystals, fire, spells.")
 	_row(g, "Clouds and motes", _check(settings.atmosphere, func(v): settings.atmosphere = v), "Cloud shadows drifting over the map, and motes floating in the light.")

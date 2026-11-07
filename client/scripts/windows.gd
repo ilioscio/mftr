@@ -13,6 +13,7 @@ static func make_movable(panel: Control, name: String, settings) -> void:
 
 
 ## Puts `panel` where it was left, else at `default` (top-left corner), inside `screen`.
+## A window bigger than the screen (a big HUD scale on a small one) is shrunk to fit.
 ## Does nothing while it's being dragged.
 static func place(panel: Control, name: String, settings, default: Vector2, screen: Vector2) -> void:
 	if panel.has_meta("drag_from"):
@@ -21,7 +22,24 @@ static func place(panel: Control, name: String, settings, default: Vector2, scre
 	var saved = settings.window_positions.get(name)
 	if saved is Array and saved.size() == 2:
 		at = Vector2(float(saved[0]) * screen.x, float(saved[1]) * screen.y)
-	panel.position = _inside(at, panel.size, screen)
+	panel.position = at
+	_fit(panel, screen)
+	# Its contents may grow it after it opens (the shop's lists): fit it again then.
+	if not panel.has_meta("refits"):
+		panel.set_meta("refits", true)
+		panel.resized.connect(_refit.bind(panel))
+
+
+static func _refit(panel: Control) -> void:
+	if panel.is_inside_tree() and not panel.has_meta("drag_from"):
+		_fit(panel, panel.get_viewport_rect().size)
+
+
+## Shrinks `panel` to fit `screen` if it's bigger, and keeps it inside.
+static func _fit(panel: Control, screen: Vector2) -> void:
+	var fit := minf(1.0, minf(screen.x / maxf(panel.size.x, 1.0), screen.y / maxf(panel.size.y, 1.0)))
+	panel.scale = Vector2(fit, fit)
+	panel.position = _inside(panel.position, panel.size * fit, screen)
 
 
 static func _inside(at: Vector2, size: Vector2, screen: Vector2) -> Vector2:
@@ -42,5 +60,5 @@ static func _drag(panel: Control, e: InputEvent, name: String, settings) -> void
 		panel.accept_event()
 	elif e is InputEventMouseMotion and panel.has_meta("drag_from"):
 		var offset: Vector2 = panel.get_meta("drag_from")
-		panel.position = _inside(panel.get_global_mouse_position() - offset, panel.size, screen)
+		panel.position = _inside(panel.get_global_mouse_position() - offset, panel.size * panel.scale, screen)
 		panel.accept_event()
