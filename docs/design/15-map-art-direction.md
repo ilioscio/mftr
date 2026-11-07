@@ -50,13 +50,20 @@ editor alike), in Rust from the map itself:
 |---|---|---|
 | R | dirt | lanes (wide), jungle paths and camps (the walkable ground that isn't lane), fading at the edges |
 | G | paving | plinths under every structure, the bases' plazas around the fountains and the base, emblem slabs where lanes meet |
-| B | water | the river, by its distance to the river's course |
+| B | water | the river, by its distance to the river's course; dry wherever a lane crosses it (below) |
 | A | signed wall distance | 0.5 on a wall's edge; above, how far open ground is from the nearest wall (cliff-foot occlusion, the jungle's gloom); below, how far a cliff's top is from its edge (the grassy lip, the forest's gloom); 10 m full scale either way |
 
 The shader breaks every boundary with noise (grass tongues over dirt, loose slabs off the paving,
 ragged banks), adds the grain and detail of each material (cracks in the dirt, joints with grass
 in the paving, ripples and foam in the water), and darkens the foot of every wall. Nothing is
 limited to a fixed number of segments, so any map works.
+
+**Lanes ford the river.** As in the reference game, a lane runs straight over the river: its dirt
+is unbroken from bank to bank and the water stops at the lane's sides, with a strip of wet mud
+between. The river never cuts a lane in two. The bake clears the water out to a quarter past the
+lane dirt's edge (`ground.rs` `FORD_DRY` / `FORD_WET`), so it holds wherever a map maker draws the
+river. It's paint only: the river was never a wall, and it's the same ground to walk on. Lily pads
+keep a pad's width from any dirt, so none lies over a lane's edge.
 
 ## 4. Walls, cliffs and rocks
 

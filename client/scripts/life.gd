@@ -13,6 +13,7 @@ const U := 0.01
 const TEXEL_U := 25.0                     # the control map's texel (ground.rs)
 const WALL_REACH_U := 1000.0              # its alpha's full scale either side of 0.5
 
+const PAD_CLEAR_U := 200.0                # a lily pad keeps this far from dirt (u; about its width)
 const FROG := 3.0                         # the frog's scale (its model is life size)
 const BUTTERFLY_COLORS := [Color(0.98, 0.62, 0.16), Color(0.96, 0.9, 0.55), Color(0.6, 0.78, 1.0)]
 const SCARE_M := 2.6                      # a unit this near (m, across the ground) scatters a butterfly
@@ -60,6 +61,15 @@ func _at(p: Vector2) -> Color:
 	var x := clampi(int(p.x / TEXEL_U), 0, _ctl.get_width() - 1)
 	var y := clampi(int(p.y / TEXEL_U), 0, _ctl.get_height() - 1)
 	return _ctl.get_pixel(x, y)
+
+
+## Whether there's lane or path dirt within `r` of `p` (u): the water runs right up to a lane
+## that fords the river, and a pad there would lie over its edge.
+func _dirt_near(p: Vector2, r: float) -> bool:
+	for k in 8:
+		if _at(p + Vector2.from_angle(TAU * k / 8.0) * r).r > 0.05:
+			return true
+	return false
 
 
 ## How far open ground is from the nearest wall (u); 0 in a wall.
@@ -112,7 +122,7 @@ func _lily_pads(area: float, tint: Color, materials_for: Callable) -> void:
 		for k in _rng.randi_range(1, 3):
 			var q := p + Vector2.from_angle(_rng.randf_range(0, TAU)) * _rng.randf_range(0.0, 120.0)
 			var cq := _at(q)
-			if cq.b > 0.25 and cq.r < 0.05:
+			if cq.b > 0.25 and cq.r < 0.05 and not _dirt_near(q, PAD_CLEAR_U):
 				list.append(_placed(q, 0.015, _rng.randf_range(2.4, 3.4), tint))
 				_pad_list.append([Vector3(q.x * U, 0.015, q.y * U), _rng.randf_range(0, TAU), _rng.randf_range(0, TAU)])
 	_pads = _batch("lily_1", list, materials_for)

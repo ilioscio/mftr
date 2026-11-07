@@ -5,7 +5,8 @@
 //! - **R, dirt:** a band down every lane, the middle of the jungle paths, the camps' and
 //!   objectives' clearings.
 //! - **G, paving:** plinths under the structures and relic pads, the fountains' plazas.
-//! - **B, water:** the river.
+//! - **B, water:** the river, except where a lane crosses it: the lane runs straight over, as
+//!   in the reference game, its dirt unbroken and the water lapping at its sides (a ford).
 //! - **A, signed wall distance:** 0.5 on a wall's edge; above it, how far open ground is from
 //!   the nearest wall (the cliffs' foot occlusion and the jungle's gloom); below it, how far a
 //!   cliff's top is from its edge (the grassy lip, the forest's gloom), each saturating at
@@ -21,6 +22,10 @@ use mftr_sim::{UnitKind, Vec2};
 pub const TEXEL_U: f32 = 25.0;
 /// Wall distance saturates here (A = 255 out in the open, 0 deep inside a wall).
 pub const WALL_REACH_U: f32 = 1000.0;
+/// A lane over the river: dry out to this share of where its dirt starts fading, and water again
+/// from this share of where the dirt ends, so the bank's mud rims the dirt.
+const FORD_DRY: f32 = 1.0;
+const FORD_WET: f32 = 1.25;
 
 pub struct GroundControl {
     pub width: usize,
@@ -51,6 +56,8 @@ pub fn control_map(map: &Map) -> GroundControl {
     let mut dirt = vec![0.0f32; w * h];
     let mut paving = vec![0.0f32; w * h];
     let mut water = vec![0.0f32; w * h];
+    // How much of each texel a lane keeps dry (1 across its dirt, fading out past its edge).
+    let mut ford = vec![0.0f32; w * h];
     let smooth = |e0: f32, e1: f32, x: f32| {
         let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
         t * t * (3.0 - 2.0 * t)
@@ -66,6 +73,13 @@ pub fn control_map(map: &Map) -> GroundControl {
             StrokeKind::Grass => continue,
         };
         paint(layer, w, h, &s.points, outer, |d| 1.0 - smooth(inner, outer, d));
+        if s.kind == StrokeKind::Lane {
+            let (dry, wet) = (inner * FORD_DRY, outer * FORD_WET);
+            paint(&mut ford, w, h, &s.points, wet, |d| 1.0 - smooth(dry, wet, d));
+        }
+    }
+    for (v, f) in water.iter_mut().zip(&ford) {
+        *v *= 1.0 - f;
     }
     let mut plinths: Vec<(Vec2, f32)> =
         map.layout.placements.iter().filter_map(|p| plinth_radius(p.kind).map(|r| (p.pos, r))).collect();
@@ -223,14 +237,36 @@ mod tests {
         assert!(px(lane_mid)[0] > 200, "{:?}", px(lane_mid));
         let turret = l.placements.iter().find(|p| p.kind == UnitKind::Turret).unwrap().pos;
         assert!(px(turret)[1] > 200);
-        let river_mid = l.river[l.river.len() / 4];
-        assert!(px(river_mid)[2] > 200, "{:?}", px(river_mid));
+        // Most of the river's course is water (the rest is where lanes ford it).
+        let wet = l.river.iter().filter(|p| px(**p)[2] > 200).count();
+        assert!(wet * 2 > l.river.len(), "{wet} of {}", l.river.len());
         // Inside a wall the alpha is under the half; open ground is over it.
         let wall_p = map.walls[0][0] + (map.walls[0][1] - map.walls[0][0]) * 0.5;
         let probe = [Vec2::new(10.0, 10.0), wall_p];
         assert!(probe.iter().any(|p| px(*p)[3] < 128));
         assert!(px(lane_mid)[3] > 128);
         assert_eq!(g.rgba.len(), g.width * g.height * 4);
+    }
+
+    #[test]
+    fn a_lane_runs_over_the_river() {
+        let map = MapId::Crossroads.shared();
+        let g = control_map(&map);
+        let px = |p: Vec2| {
+            let (x, y) = ((p.x / TEXEL_U) as usize, (p.y / TEXEL_U) as usize);
+            let i = (y * g.width + x) * 4;
+            [g.rgba[i], g.rgba[i + 1], g.rgba[i + 2]]
+        };
+        // Mid lane crosses the river at the map's center: dirt, no water.
+        let mid = map.size * 0.5;
+        let at = px(mid);
+        assert!(at[0] > 200 && at[2] < 10, "{at:?}");
+        // Along the river from the crossing, past the lane's edge, the water is back.
+        let l = &map.layout;
+        let (i, _) = l.river.iter().enumerate().min_by(|a, b| a.1.distance(mid).total_cmp(&b.1.distance(mid))).unwrap();
+        let along = (l.river[i + 1] - l.river[i - 1]).normalize_or_zero();
+        let beside = px(mid + along * 1000.0);
+        assert!(beside[2] > 200 && beside[0] < 60, "{beside:?}");
     }
 
     #[test]
