@@ -95,6 +95,22 @@ impl MftrMaps {
         mftr_sim::map::CROSSROADS_SPEC.into()
     }
 
+    /// The pieces the cliffs of map `text` are built from (its walls, then the frame past its
+    /// edges), for cutting the shops' alcoves (19 §4); empty when the text doesn't read.
+    #[func]
+    fn cliff_pieces(text: GString) -> VarArray {
+        let Ok(spec) = MapSpec::parse(&text.to_string()) else { return VarArray::new() };
+        cliff_pieces(&mapspec::build(&spec, MapId::Custom))
+    }
+
+    /// The cliffs of map `text` built from `pieces` (`cliff_pieces`, cut): `{ groups, outcrops }`.
+    #[func]
+    fn cliffs_from_pieces(text: GString, pieces: VarArray) -> VarDictionary {
+        let Ok(spec) = MapSpec::parse(&text.to_string()) else { return VarDictionary::new() };
+        let walls_n = mapspec::build(&spec, MapId::Custom).walls.len();
+        cliffs_from(&pieces, walls_n, CLIFF_M)
+    }
+
     /// The built-in Bridge's text (ARAM).
     #[func]
     fn bridge() -> GString {

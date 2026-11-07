@@ -105,6 +105,7 @@ var angle_check: CheckBox
 
 # The Actual view: the map as the game builds it, in 3D, over the canvas.
 const MapView := preload("res://scripts/map_view.gd")
+const Shops := preload("res://scripts/shopkeepers.gd")
 const ALLY := Color(0.3, 0.6, 1.0)
 const ENEMY := Color(0.95, 0.35, 0.25)
 var view_box: SubViewportContainer
@@ -1302,15 +1303,26 @@ func _build_view() -> void:
 	Seasons.apply_light(Seasons.get_season(season), view_env, view_sun)
 	var geo := {
 		"walls": built.walls, "brush": built.brush, "size": Vector2(s, s), "roads": built.lanes, "river": built.river, "ground": built.get("ground"),
-		"season": season, "cliffs": built.get("cliffs", {}),
+		"season": season, "cliffs": built.get("cliffs", {}).duplicate(), "structures": built.structures,
 		"fountains": [{"center": fountains[0], "radius": float(built.get("fountain_radius", 750.0)), "ally": true}, {"center": fountains[1], "radius": float(built.get("fountain_radius", 750.0)), "ally": false}],
 	}
+	# The shops where a match puts them (19 §4), their nooks cut out of the cliffs: a map maker
+	# sees whether the base has room for them. A fountain without a spot gets no stall.
+	geo["shop_spots"] = Shops.spots(geo)
+	if geo.shop_spots.any(func(sp): return sp.get("notch", false)):
+		var text := to_text()
+		var cut: Array = Shops.cut_pieces(MftrMaps.cliff_pieces(text), geo.shop_spots)
+		geo.cliffs["groups"] = MftrMaps.cliffs_from_pieces(text, cut).get("groups", [])
 	var ground := MapView.make_ground()
 	view_root.add_child(ground)
 	var world: Node3D = MapView.new()
 	view_root.add_child(world)
 	world.build(geo, ground, ALLY, ENEMY)
 	var segs: PackedVector4Array = world.road_segments
+	for i in geo.shop_spots.size():
+		var sp: Dictionary = geo.shop_spots[i]
+		if not sp.get("none", false):
+			view_root.add_child(Shops.stall_node(["goldwick", "rosette"][i % 2], sp, season, ALLY if i == 0 else ENEMY))
 	for st in built.structures:
 		var blue: bool = st.team == "blue"
 		var color := ALLY if blue else ENEMY

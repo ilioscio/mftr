@@ -998,6 +998,15 @@ impl MatchClient {
             }
         }
         d.set("fountains", &fountains);
+        // Where the structures stand (both teams'; not the relics): what the shops keep clear of.
+        let structures: PackedVector2Array = map
+            .layout
+            .placements
+            .iter()
+            .filter(|p| p.kind != mftr_sim::UnitKind::Relic)
+            .map(|p| Vector2::new(p.pos.x, p.pos.y))
+            .collect();
+        d.set("structures", &structures);
         let layout = &map.layout;
         let mut roads: Vec<Vec<Vec2>> = Vec::new();
         if let ([_], [Some((a, _)), Some((b, _))]) = (layout.lanes.as_slice(), layout.fountains) {
