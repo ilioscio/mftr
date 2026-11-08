@@ -39,20 +39,20 @@ BUILDS = {
     "humanoid_slim": {
         "masculine": {"shape": {"heights": [(0.0, 0.0), (2.15, 2.15)], "x": 1.04, "y": 1.0, "scale": 0.98, "shoulder": 0.03,
                                 "hand": 1.3},
-                      "girth": None, "head": 1.12, "hands": 1.0},
+                      "girth": None, "head": 1.36, "hands": 1.0},
         "feminine": {"shape": {"heights": [(0.0, 0.0), (2.15, 2.15)], "x": 0.96, "y": 0.98, "scale": 0.95, "shoulder": 0.0,
                                "hand": 1.2},
-                     "girth": None, "head": 1.08, "hands": 1.0},
+                     "girth": None, "head": 1.3, "hands": 1.0},
     },
     "humanoid_heavy": {
         "masculine": {"shape": {"heights": [(0.0, 0.0), (0.03, 0.03), (0.09, 0.09), (0.54, 0.46), (1.00, 0.89), (1.12, 1.01),
                                             (1.26, 1.16), (1.40, 1.31), (1.56, 1.48), (1.64, 1.53), (1.88, 1.78), (2.15, 2.05)],
                                 "x": 1.24, "y": 1.2, "scale": 1.1, "shoulder": 0.08, "arm": 1.06, "hand": 1.55},
-                      "girth": {"torso": (1.3, 1.28), "limb": (1.22, 1.22), "neck": (1.4, 1.35)}, "head": 1.06, "hands": 1.2},
+                      "girth": {"torso": (1.3, 1.28), "limb": (1.22, 1.22), "neck": (1.12, 1.1)}, "head": 1.38, "hands": 1.2},
         "feminine": {"shape": {"heights": [(0.0, 0.0), (0.03, 0.03), (0.09, 0.09), (0.54, 0.48), (1.00, 0.91), (1.12, 1.03),
                                            (1.26, 1.18), (1.40, 1.33), (1.56, 1.50), (1.64, 1.55), (1.88, 1.80), (2.15, 2.07)],
                                "x": 1.16, "y": 1.12, "scale": 1.06, "shoulder": 0.06, "arm": 1.04, "hand": 1.4},
-                     "girth": {"torso": (1.2, 1.18), "limb": (1.16, 1.16), "neck": (1.25, 1.2)}, "head": 1.04, "hands": 1.1},
+                     "girth": {"torso": (1.2, 1.18), "limb": (1.16, 1.16), "neck": (1.08, 1.06)}, "head": 1.32, "hands": 1.1},
     },
 }
 
@@ -102,10 +102,15 @@ def _body_parts(gender):
 
 def base_head(gender, build="humanoid_slim"):
     """The base's head (call with the base's shape in use)."""
-    return head.Head(base=rig.shaped((0, -0.01, 1.63)), height=0.255, scale=BUILDS[build][gender]["head"],
-                     jaw=0.3 if gender == "masculine" else 0.45, chin=1.1 if gender == "masculine" else 0.9,
-                     eye=1.0 if gender == "masculine" else 1.15, skin=SKIN, hair=(0.20, 0.14, 0.10), hair_style="bald",
-                     detail=2)
+    # Heroic proportions (14 §2.2): about six heads tall, the jaw overhanging the neck. The
+    # head's base sits a little low, so the neck runs up into the skull rather than ending in
+    # a stump under it.
+    masc = gender == "masculine"
+    feats = ({} if masc else {"brow": 0.5, "jaw": 0.45, "chin": 0.7, "cheekbones": 1.25, "lips": 1.3, "nose": 0.75})
+    return head.Head(base=rig.shaped((0, -0.012, 1.615)), height=0.255, scale=BUILDS[build][gender]["head"],
+                     jaw=0.22 if masc else 0.4, chin=1.1 if masc else 0.9,
+                     eye=1.0 if masc else 1.15, skin=SKIN, hair=(0.20, 0.14, 0.10), hair_style="bald",
+                     detail=3, features=feats)
 
 
 def _head_part(gender, build):
@@ -128,7 +133,7 @@ def build_base(gender, name, build="humanoid_slim"):
     bpy.context.scene.render.fps = 30
     use_build(gender, build)
     armature = rig.build_armature(name=name)
-    head.DEFAULT_DETAIL = 2
+    head.DEFAULT_DETAIL = 3
     hands = BUILDS[build][gender]["hands"]
     try:
         parts = (champion.detailed(_body_parts(gender)) + champion.hand_parts("l", SKIN, scale=hands)
@@ -205,7 +210,7 @@ def _join(*parts):
 
 # --- The sliders ------------------------------------------------------------------------------
 # How far the block-out strokes go at ±1: past natural faces and bodies on purpose (20 §5.2).
-GAIN = {"face": 2.0, "body": 1.6}
+GAIN = {"face": 2.8, "body": 1.6}
 # Each is (id, description, plus(regions) -> deltas, minus(regions) -> deltas or None for the
 # mirror of plus). Ids are `region_feature` identifiers; recipes name them (`looks.shape`); the game reads them from the
 # shape keys, so adding one here adds it to the creator.
@@ -243,11 +248,11 @@ def _sliders():
     face("head_width", "A broad or a narrow head",
          lambda r, f: scale(r, f["center"], (1.18, 1.0, 1.0)))
     face("face_length", "A long or a short lower face",
-         lambda r, f: {i: Vector((0, 0, -(0.55 - r.t(r.cos[i])) * r.size.z * 0.22)) for i in r.idx if r.t(r.cos[i]) < 0.55})
+         lambda r, f: {i: Vector((0, 0, -(0.55 - r.t(r.cos[i])) * r.size.z * 0.15)) for i in r.idx if r.t(r.cos[i]) < 0.55})
     face("jaw_width", "A wide, square jaw or a narrow one",
          lambda r, f: scale(r, f["center"], (1.35, 1.0, 1.0), lambda p: _smooth(abs(r.t(p) - 0.2) / 0.2) * _front(r, p)))
     face("chin_length", "A long chin or a short one",
-         lambda r, f: grab(r, f["chin"], 0.06, Vector((0, 0, -0.025)), mirror=False))
+         lambda r, f: grab(r, f["chin"], 0.06, Vector((0, 0, -0.017)), mirror=False))
     face("chin_reach", "A jutting chin or a receding one",
          lambda r, f: grab(r, f["chin"], 0.05, Vector((0, -0.025, 0)), mirror=False))
     face("cheekbones", "High, sharp cheekbones or flat ones",
@@ -410,6 +415,10 @@ def build(gender, name, build="humanoid_slim"):
     armature, body = build_base(gender, name, build)
     ids = add_shape_keys(armature, body)
     made = parts.build_parts(armature, body, base_head(gender, build))
+    # Weapons ride the prop bones, as the official champions' do, so the moves' clips (whose
+    # wrists stay human, 14 §3.3) hold them where their champions held theirs.
+    from . import wrists
+    wrists.rebind_weapons(armature, [o for o in bpy.data.objects if o.name.startswith(("part.weapon.", "part.offhand."))])
     mesh.GIRTH = None
     unwrap(body, head_group="head")
     for obj in [o for o in bpy.data.objects if o.name.startswith("part.")]:

@@ -10,7 +10,7 @@ import sys
 import bpy
 from mathutils import Quaternion, Vector
 
-from . import clips, head, mesh, rig
+from . import clips, head, mesh, rig, wrists
 from .clips import at, ik
 
 SHARED = ["walk", "cast_utility", "cc_stunned", "cc_rooted", "cc_airborne", "cc_knockback", "cc_suppressed", "cc_sleep",
@@ -232,6 +232,8 @@ def build(name, shape, parts, own, height, extras=None, only=None, shared=None, 
     # The library's clips fill in only what the champion doesn't make itself (its own `walk`
     # carries its weapon; the library's hangs the arms at rest).
     baked = bake_shared(armature, [n for n in (shared or SHARED) if n not in made]) if only is None else []
+    # Weapons onto the prop bones and every clip's wrists kept human (14 §3.3).
+    wrists.fix(armature, [body])
     print(f"{name}: {len(armature.data.bones)} bones, {mesh.triangle_count(body)} triangles, {len(made)} own clips, shared {baked}")
     return armature, body
 

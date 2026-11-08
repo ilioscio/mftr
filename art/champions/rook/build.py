@@ -268,7 +268,7 @@ SLAM_HEAD = at(0.04, 1.55, 0.19, "r")
 LEAN = merge(feet(), maul(REST_HEAD, at(0.05, 0.30, 1.45, "r"), left=-0.17),
              {"spine_01": (7, 0, -4), "spine_02": (4, 0, -4), "chest": (2, 0, 0), "head": (-6, 0, 6)})
 # Two-handed guard: the maul diagonal across his body, head up by his left shoulder.
-GUARD = merge(feet((0.27, 0.18), (0.27, -0.14)), maul(at(0.55, -0.70, 2.30, "r"), at(0.12, 0.28, 1.20, "r"), left=-0.12, pole=(1.0, 0.1, -0.8)),
+GUARD = merge(feet((0.27, 0.18), (0.27, -0.14)), maul(at(0.50, -0.45, 2.15, "r"), at(0.10, 0.45, 1.00, "r"), left=-0.12, pole=(1.0, 0.1, -0.8)),
               {"spine_01": (12, 0, 12), "spine_02": (4, 0, 8), "head": (-10, 0, -16)})
 GUARD_DOWN = {"pelvis": (0, 0, -0.09)}
 # On the shoulder (runs): the right hand forward of the shoulder, the head behind; FK aims so

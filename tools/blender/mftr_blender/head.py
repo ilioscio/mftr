@@ -19,6 +19,9 @@ import bmesh
 from mathutils import Euler, Matrix, Vector
 
 SIDES = 16
+# The creator heads' bone structure (`Head.features`): each feature's strength.
+FEATURES = {"brow": 1.0, "sockets": 1.0, "nose": 1.0, "lips": 1.0, "chin": 1.0, "cheekbones": 1.0, "cheeks": 1.0,
+            "jaw": 1.0, "temples": 1.0}
 # The resolution heads are built at when a Head doesn't say (champion generators raise it).
 DEFAULT_DETAIL = 1
 # (t, half-width, front depth, back depth): t from under the chin (0) to the crown (1).
@@ -41,7 +44,7 @@ class Head:
     def __init__(self, base=(0, -0.01, 1.63), height=0.25, scale=1.0, jaw=0.35, chin=1.0, eye=1.0,
                  skin=(0.86, 0.64, 0.50), hair=(0.24, 0.16, 0.11), hair_style="short",
                  eye_color=(0.16, 0.11, 0.08), lips=(0.62, 0.36, 0.32), beard=None, scar=False,
-                 metal=(0.34, 0.35, 0.39), detail=None):
+                 metal=(0.34, 0.35, 0.39), detail=None, features=None):
         self.base = Vector(base)
         self.height = height * scale
         self.scale = scale
@@ -51,18 +54,77 @@ class Head:
         self.skin, self.hair, self.hair_style = skin, hair, hair_style
         self.eye_color, self.lips = eye_color, lips
         self.beard, self.scar, self.metal = beard, scar, metal
-        # 1: the block-out's resolution; 2: 24 sides and twice the rings (14 §2.3, D59 budget).
+        # 1: the block-out's resolution; 2: 24 sides and twice the rings (14 §2.3, D59 budget);
+        # 3: 28 sides and three times the rings, for a face sculpted into the skull (`features`).
         self.detail = DEFAULT_DETAIL if detail is None else detail
-        self.sides = SIDES if self.detail < 2 else 24
+        self.sides = SIDES if self.detail < 2 else (24 if self.detail < 3 else 28)
+        # The champion creator's heads (20 §5): the face's bone structure in the skull's own
+        # surface (brow ridge, eye sockets, cheekbones, jaw corners, chin, a nose and lips), so
+        # the face sliders and sculpting move a face, not an egg. A dict of strengths by feature
+        # (1.0 each by default); None keeps the plain skull with stuck-on nose and mouth.
+        self.features = None if features is None else dict(FEATURES, **features)
 
     def rows(self, ts):
-        """`ts` refined for the detail level: midpoints between neighbors at detail 2."""
+        """`ts` refined for the detail level: midpoints between neighbors at detail 2, thirds at
+        detail 3."""
         if self.detail < 2:
             return list(ts)
+        k = 2
         out = []
         for a, b in zip(ts, ts[1:]):
-            out += [a, (a + b) / 2]
+            out += [a + (b - a) * j / k for j in range(k)]
         return out + [ts[-1]]
+
+    def angles(self):
+        """The skull's columns, around from the character's left. A sculpted face (`features`)
+        gets them dense across the face and sparse round the back (as a face's topology is laid
+        out), with one on the middle line for the nose's ridge; plain heads, even."""
+        n = self.sides
+        if not self.features:
+            return [2 * math.pi * (i + 0.5) / n for i in range(n)]
+        out = []
+        for i in range(n):
+            x = 2 * math.pi * i / n - math.pi  # 0 at the middle of the face
+            out.append(-math.pi / 2 + x - 0.45 * math.sin(x))
+        return out
+
+    def relief(self, t, a):
+        """The face's bone structure at height `t`, angle `a` (`features`): (forward, outward)
+        offsets in meters before scale. `phi` is the angle from the middle of the face."""
+        f = self.features
+        if not f:
+            return 0.0, 0.0
+        phi = (a + math.pi / 2 + math.pi) % (2 * math.pi) - math.pi
+
+        def g(d, w):
+            return math.exp(-(d / w) ** 2)
+
+        pair = lambda c, w: g(phi - c, w) + g(phi + c, w)  # noqa: E731
+        fwd = (
+            0.016 * f["brow"] * g(t - 0.665, 0.05) * g(phi, 0.7)
+            - 0.005 * f["sockets"] * g(t - 0.59, 0.05) * pair(0.36, 0.22)
+            + 0.010 * f["nose"] * g(t - 0.56, 0.08) * g(phi, 0.16)
+            + 0.032 * f["nose"] * g(t - 0.45, 0.05) * g(phi, 0.17)
+            + 0.006 * f["nose"] * g(t - 0.42, 0.035) * pair(0.2, 0.1)
+            + 0.005 * f["lips"] * g(t - 0.31, 0.035) * g(phi, 0.35)
+            + 0.007 * f["lips"] * g(t - 0.255, 0.03) * g(phi, 0.32)
+            - 0.003 * f["lips"] * g(t - 0.278, 0.012) * g(phi, 0.3)
+            + 0.016 * f["chin"] * g(t - 0.08, 0.07) * g(phi, 0.4)
+        )
+        out = (
+            0.011 * f["cheekbones"] * g(t - 0.48, 0.07) * pair(0.8, 0.32)
+            - 0.006 * f["cheeks"] * g(t - 0.34, 0.07) * pair(0.65, 0.3)
+            + 0.02 * f["jaw"] * g(t - 0.17, 0.08) * pair(1.15, 0.4)
+            - 0.004 * f["temples"] * g(t - 0.72, 0.08) * pair(1.05, 0.32)
+        )
+        return fwd, out
+
+    def lips_at(self, t, a):
+        """How much a point of the skull is lip (0–1), for its color."""
+        if not self.features:
+            return 0.0
+        phi = (a + math.pi / 2 + math.pi) % (2 * math.pi) - math.pi
+        return math.exp(-((t - 0.262) / 0.02) ** 2) * math.exp(-(phi / 0.24) ** 2)
 
     def _radii(self, t):
         for (t0, w0, f0, b0), (t1, w1, f1, b1) in zip(SKULL, SKULL[1:]):
@@ -84,7 +146,11 @@ class Head:
         if t < 0.2:
             f *= 1.0 + (self.chin - 1.0) * (1.0 - t / 0.2)
         depth = b if s > 0 else f
-        return self.base + Vector((w * c * self.scale, depth * s * self.scale, t * self.height))
+        p = self.base + Vector((w * c * self.scale, depth * s * self.scale, t * self.height))
+        if self.features:
+            fwd, out = self.relief(t, a)
+            p += Vector((c * out, -fwd + s * out, 0)) * self.scale
+        return p
 
     def front(self, t, x):
         """A point on the face at height `t` and sideways offset `x` (m), slightly proud of it."""
@@ -138,7 +204,7 @@ def build(bm, layers, groups, mats, head: Head):
     g = groups["head"]
     skin, cloth = mats["skin"], mats["cloth"]
     SIDES = head.sides  # noqa: N806
-    angles = [2 * math.pi * (i + 0.5) / SIDES for i in range(SIDES)]
+    angles = head.angles()
 
     # Skull.
     rings = [[bm.verts.new(head.surface(t, a)) for a in angles] for t in head.rows([r[0] for r in SKULL])]
@@ -148,6 +214,10 @@ def build(bm, layers, groups, mats, head: Head):
         bm.faces.new((rings[-1][i], rings[-1][(i + 1) % SIDES], crown))
     bm.faces.new(list(reversed(rings[0])))
     _paint(bm, [v for r in rings for v in r] + [crown], skin, head.skin, g, layers)
+    if head.features:
+        # The lips: a crisp piece on the sculpted mouth (vertex color would smear into a blush).
+        mouth = _box(bm, head.front(0.262, 0) + Vector((0, 0.001, 0)), Vector((0.038, 0.008, 0.0075)) * head.scale)
+        _paint(bm, mouth, skin, head.lips, g, layers)
 
     # Face: eyes (whites and pupils), brows, nose, mouth.
     e = head.eye
@@ -160,8 +230,18 @@ def build(bm, layers, groups, mats, head: Head):
         brow = _box(bm, head.front(0.68, sx * 1.08) + Vector((0, -0.002, 0)), Vector((0.03, 0.007, 0.007)) * head.scale,
                     rot=(0, 5 if x < 0 else -5, 0))
         _paint(bm, brow, cloth, head.hair, g, layers)
-    # The nose: a pyramid from the bridge and the two nostrils out to its tip.
     k = head.scale
+    if head.features:
+        # Nose and mouth are sculpted into the skull (`relief`); ears stay plates.
+        _ears(bm, head, skin, g, layers)
+        if head.scar:
+            _scar(bm, head, skin, g, layers)
+        if head.beard:
+            _beard(bm, layers, g, mats, head, angles)
+        if head.hair_style != "bald":
+            hair(bm, layers, groups, mats, head)
+        return
+    # The nose: a pyramid from the bridge and the two nostrils out to its tip.
     bridge = bm.verts.new(head.front(0.6, 0) + Vector((0, 0.004, 0)))
     nl = bm.verts.new(head.front(0.42, 0.015 * k) + Vector((0, 0.002, 0)))
     nr = bm.verts.new(head.front(0.42, -0.015 * k) + Vector((0, 0.002, 0)))
@@ -188,6 +268,21 @@ def build(bm, layers, groups, mats, head: Head):
         return
 
     hair(bm, layers, groups, mats, head)
+
+
+def _ears(bm, head, skin, g, layers):
+    k = head.scale
+    for side in (1, -1):
+        p = head.surface(0.5, 0 if side > 0 else math.pi) + Vector((0.004 * side, 0.012, 0))
+        ear = _box(bm, p, Vector((0.012, 0.03, 0.052)) * k, rot=(0, 0, -12 * side))
+        _paint(bm, ear, skin, tuple(c * 0.93 for c in head.skin), g, layers)
+
+
+def _scar(bm, head, skin, g, layers):
+    k = head.scale
+    p = head.front(0.6, 0.052 * k) + Vector((0, -0.003, 0))
+    scar = _box(bm, p, Vector((0.006, 0.004, 0.07)) * k, rot=(0, -18, 0))
+    _paint(bm, scar, skin, tuple(min(1.0, c * 1.12) for c in head.skin), g, layers)
 
 
 def hair(bm, layers, groups, mats, head: Head):

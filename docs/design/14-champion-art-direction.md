@@ -102,6 +102,19 @@ hold** (two keys a few frames apart with a small drift) rather than a frozen one
   its head (`champion.place_socket` moves `socket_projectile` there), not from the fist.
 - Heavy weapons lead with the body: hips and chest turn before the arms, the arms before the
   weapon.
+- **Wrists stay human.** Weapons are modeled along the hand that holds them, and clips aim a
+  weapon by aiming that hand, which once bent wrists 90–180° off the forearm. So every
+  champion build ends with `wrists.fix`. It moves each weapon piece (a mesh island that's long or
+  stands off from the hand, plus small pieces touching one) from `hand_*` to `prop_*`, which then
+  deforms. Then, on every frame of every clip, it limits the wrist to 35° off the forearm's line:
+  - the weapon stays exactly where the clip put it, because the prop bone is keyed to hold it there;
+  - the arm is re-solved so the fist (the prop bone's head) closes on the weapon, and the elbow
+    and shoulder take up the turn;
+  - the off hand's grips were solved against that same weapon, so they still hold it.
+
+  Where a pose puts the fist too close to the shoulder for a straight wrist, the build prints the
+  frames. Fix those poses where they're authored (Rook's guard was one). The creator's weapon
+  and offhand parts ride the prop bones too, so the move clips hold them the same way.
 
 ### 3.4 Interpolation
 

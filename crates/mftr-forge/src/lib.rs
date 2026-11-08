@@ -789,7 +789,7 @@ mod tests {
             for (p, q) in plain.meshes[mi].iter().zip(&carved.meshes[mi]) {
                 for (a, b) in p.positions.iter().zip(&q.positions) {
                     // The hat's cone round the skull (not its brim, out past the head).
-                    if (a[0] * a[0] + a[2] * a[2]).sqrt() < 0.16 && a[1] > crown - 0.06 && a[1] < crown + 0.1 {
+                    if (a[0] * a[0] + a[2] * a[2]).sqrt() < 0.2 && a[1] > crown - 0.06 && a[1] < crown + 0.1 {
                         lifts.push(((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt());
                     }
                 }
