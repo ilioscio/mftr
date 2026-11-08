@@ -18,6 +18,8 @@ pub struct MftrCreator {
     recipe: Recipe,
     /// The art folder (the catalog's), set by `set_art`.
     art: String,
+    /// The last preview forged: what the brush paints on (CR5b).
+    last: Option<Arc<mftr_pack::Loaded>>,
 }
 
 #[godot_api]
@@ -25,7 +27,7 @@ impl MftrCreator {
     /// A new champion: the defaults (a slim masculine base, Rook's kit).
     #[func]
     fn create() -> Gd<MftrCreator> {
-        Gd::from_init_fn(|base| MftrCreator { base, recipe: Recipe::default(), art: String::new() })
+        Gd::from_init_fn(|base| MftrCreator { base, recipe: Recipe::default(), art: String::new(), last: None })
     }
 
     /// Where the catalog is (`art/`): the bases and the clip library.
@@ -415,15 +417,72 @@ impl MftrCreator {
 
     /// The preview: the champion forged as it is now (`null` if it can't be).
     #[func]
-    fn preview(&self) -> Option<Gd<MftrModel>> {
+    fn preview(&mut self) -> Option<Gd<MftrModel>> {
         let cat = catalog(&self.art)?;
         match cat.forge(&self.recipe.name, &self.recipe.looks) {
-            Ok(pack) => Some(MftrModel::from_pack(Arc::new(pack))),
+            Ok(pack) => {
+                let pack = Arc::new(pack);
+                self.last = Some(pack.clone());
+                Some(MftrModel::from_pack(pack))
+            }
             Err(e) => {
                 godot_error!("MFTR creator preview: {e}");
                 None
             }
         }
+    }
+
+    /// The decals (20 §7): `[{id, label}]`.
+    #[func]
+    fn decals(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for (id, label) in mftr_forge::image::DECALS {
+            let mut d = VarDictionary::new();
+            d.set("id", id);
+            d.set("label", label);
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// Paint where the ray `origin + t·dir` (in the preview model's space, rest pose) meets the
+    /// last preview (CR5b): a round brush of `radius` meters in palette `color` (-1 erases), or
+    /// the decal `decal` that size. Returns what was painted (`"body"` or a part id), or "" when
+    /// nothing was (a miss, or an image with all its colors used).
+    #[func]
+    fn brush(&mut self, origin: Vector3, dir: Vector3, radius: f32, color: i64, decal: GString) -> GString {
+        use mftr_forge::image::{self, Image, Texels, Tool};
+        let Some(last) = self.last.clone() else { return GString::new() };
+        let model = &last.model;
+        let Some((mi, hit, normal)) = image::raycast(model, [origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z])
+        else {
+            return GString::new();
+        };
+        let Some(target) = image::target_of(model, mi) else { return GString::new() };
+        let looks = &mut self.recipe.looks;
+        if !looks.images.iter().any(|i| i.target == target) {
+            if looks.images.len() >= image::MAX_IMAGES || color < 0 {
+                return GString::new();
+            }
+            looks.images.push(Image::new(&target));
+        }
+        let decal = decal.to_string();
+        let tool = match (color, decal.is_empty()) {
+            (c, _) if c < 0 => Tool::Brush(None),
+            (c, true) => Tool::Brush(Some(c.clamp(0, 63) as u8)),
+            (c, false) => Tool::Decal(&decal, c.clamp(0, 63) as u8),
+        };
+        let texels = Texels::of(model, &target);
+        let img = looks.images.iter_mut().find(|i| i.target == target).expect("added above");
+        let changed = image::stroke(img, &texels, hit, normal, radius, tool);
+        looks.images.retain(|i| !i.is_empty());
+        if changed { GString::from(target.as_str()) } else { GString::new() }
+    }
+
+    /// Wipe every brush stroke and decal.
+    #[func]
+    fn clear_images(&mut self) {
+        self.recipe.looks.images.clear();
     }
 
     /// What stops the champion from being saved (empty when nothing does).

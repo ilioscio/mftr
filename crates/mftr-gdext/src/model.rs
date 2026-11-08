@@ -9,8 +9,9 @@
 use std::sync::Arc;
 
 use godot::classes::audio_stream_wav::Format;
+use godot::classes::image::Format as ImageFormat;
 use godot::classes::mesh::{ArrayType, PrimitiveType};
-use godot::classes::{ArrayMesh, AudioStreamWav, MeshInstance3D, Node3D, RefCounted, Skeleton3D};
+use godot::classes::{ArrayMesh, AudioStreamWav, Image, ImageTexture, MeshInstance3D, Node3D, RefCounted, Skeleton3D};
 use godot::prelude::*;
 use mftr_pack::animator::{Action, ActionKind, AnimEvent, Animator, Drive, Phase};
 use mftr_pack::pose::Trs;
@@ -116,6 +117,17 @@ impl MftrModel {
             .flatten()
             .map(|p| GString::from(p.material.and_then(|i| m.materials.get(i)).map_or("cloth", |s| s.as_str())))
             .collect()
+    }
+
+    /// The paint image of surface `i` (CR5b, D70: a forged champion's brush strokes and
+    /// decals), for the shader's `paint`; `null` for surfaces without one.
+    #[func]
+    fn surface_paint(&self, i: i64) -> Option<Gd<ImageTexture>> {
+        let prim = self.pack.model.meshes.iter().flatten().nth(usize::try_from(i).ok()?)?;
+        let p = prim.paint.as_ref()?;
+        let data = PackedByteArray::from(p.rgba.as_slice());
+        let img = Image::create_from_data(p.size as i32, p.size as i32, false, ImageFormat::RGBA8, &data)?;
+        ImageTexture::create_from_image(&img)
     }
 
     /// A new `Node3D` with a `Skeleton3D` ("Skeleton", in the rest pose) and the skinned mesh
@@ -365,6 +377,10 @@ impl MftrModel {
                 let colors: PackedColorArray =
                     prim.colors.iter().map(|c| Color::from_rgba(c[0], c[1], c[2], c[3])).collect();
                 arrays.set(ArrayType::COLOR.ord() as usize, &colors.to_variant());
+            }
+            if prim.uvs.len() == n {
+                let uvs: PackedVector2Array = prim.uvs.iter().map(|u| Vector2::new(u[0], u[1])).collect();
+                arrays.set(ArrayType::TEX_UV.ord() as usize, &uvs.to_variant());
             }
             if skinned && prim.joints.len() == n && prim.weights.len() == n {
                 let map = &lib.joint_to_bone;

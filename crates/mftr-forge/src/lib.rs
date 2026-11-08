@@ -12,6 +12,7 @@
 //! attaches the library's clips. The result is an ordinary validated pack (`mftr_pack::Loaded`)
 //! that the client draws and animates like any other. It is deterministic and has no Godot in it.
 
+pub mod image;
 pub mod looks;
 pub mod moves;
 pub mod paint;
@@ -150,6 +151,9 @@ impl Catalog {
             paint::fill(&mut model, target, from, paint::PALETTE[*color as usize % paint::PALETTE.len()]);
         }
         paint::glow(&mut model, looks.signature);
+        let worn: Vec<image::Image> =
+            looks.images.iter().filter(|i| i.target == "body" || looks.outfit.contains(&i.target)).cloned().collect();
+        image::apply(&mut model, &worn);
         let scale = looks.proportions.factor(0) * looks.proportions.factor(1).sqrt();
         attach_clips(&mut model, &self.library.model, scale);
         let mut clips = library_clips(&self.library);
@@ -626,6 +630,75 @@ mod tests {
             let report = mftr_pack::champion::validate_text(&text);
             assert_eq!(report.errors(), 0, "{id}: {:?}", report.findings);
         }
+    }
+
+    #[test]
+    fn the_brush_paints_where_it_touches_and_the_image_survives_a_file() {
+        let c = catalog();
+        let mut r = recipe::Recipe::default();
+        r.looks.outfit = vec!["torso.tunic".into()];
+        let f = c.forge("Painted", &r.looks).unwrap();
+        // Straight at the chest from the front (glTF +Z is the front).
+        let (mi, hit, n) = image::raycast(&f.model, [0.0, 1.35, 3.0], [0.0, 0.0, -1.0]).expect("hits the chest");
+        assert_eq!(image::target_of(&f.model, mi).as_deref(), Some("torso.tunic"));
+        let texels = image::Texels::of(&f.model, "torso.tunic");
+        assert!(texels.at.iter().filter(|t| t.is_some()).count() > 400, "the tunic covers its image");
+        let mut img = image::Image::new("torso.tunic");
+        assert!(image::stroke(&mut img, &texels, hit, n, 0.08, image::Tool::Decal("star", 18)));
+        assert!(image::stroke(
+            &mut img,
+            &texels,
+            [hit[0] + 0.1, hit[1] - 0.1, hit[2]],
+            n,
+            0.03,
+            image::Tool::Brush(Some(5))
+        ));
+        let painted = img.pixels.iter().filter(|p| **p != 0).count();
+        assert!((10..1500).contains(&painted), "{painted} pixels");
+        assert_eq!(img.colors, vec![18, 5]);
+        r.looks.images = vec![img.clone()];
+        // Through the champion file and back.
+        let back = recipe::Recipe::from_text(&r.to_text()).unwrap();
+        assert_eq!(back.looks.images, vec![img]);
+        // The forged tunic carries it; the body doesn't.
+        let f = c.forge("Painted", &back.looks).unwrap();
+        let painted_prims = |target: &str| {
+            image::meshes_of(&f.model, target)
+                .iter()
+                .flat_map(|&m| &f.model.meshes[m])
+                .filter(|p| p.paint.is_some())
+                .count()
+        };
+        assert!(painted_prims("torso.tunic") > 0);
+        assert_eq!(painted_prims("body"), 0);
+        // Erasing it all leaves nothing to write.
+        let mut img = back.looks.images[0].clone();
+        image::stroke(&mut img, &texels, hit, n, 2.0, image::Tool::Brush(None));
+        assert!(img.is_empty() && img.colors.is_empty());
+    }
+
+    #[test]
+    #[ignore]
+    fn print_grumbles_war_paint() {
+        let c = catalog();
+        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art");
+        let text = std::fs::read_to_string(art.join("champions/examples/grumble.champion.ron")).unwrap();
+        let mut r = recipe::Recipe::from_text(&text).unwrap();
+        let f = c.forge("Grumble", &r.looks).unwrap();
+        let texels = image::Texels::of(&f.model, "body");
+        let mut img = image::Image::new("body");
+        let top = f.model.meshes.iter().flatten().flat_map(|p| p.positions.iter().map(|v| v[1])).fold(0.0, f32::max);
+        for (y, x, radius, tool) in [
+            (top * 0.70, 0.0, 0.13, image::Tool::Decal("chevron", 63)),
+            (top * 0.925, 0.03, 0.05, image::Tool::Decal("stripes", 17)),
+            (top * 0.925, -0.03, 0.05, image::Tool::Decal("stripes", 17)),
+        ] {
+            let (mi, hit, n) = image::raycast(&f.model, [x, y, 3.0], [0.0, 0.0, -1.0]).unwrap();
+            println!("hit {:?} at {hit:?}", image::target_of(&f.model, mi));
+            image::stroke(&mut img, &texels, hit, n, radius, tool);
+        }
+        r.looks.images = vec![img];
+        println!("{}", looks::write(&r.looks));
     }
 
     #[test]

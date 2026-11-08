@@ -56,7 +56,8 @@ def export(out_dir, pack_id, kind):
         use_selection=True,
         export_yup=True,
         export_apply=False,
-        export_texcoords=False,
+        # Creator bases carry UVs for paint images (CR5b, D70); nothing else is textured.
+        export_texcoords=kind == "base",
         export_normals=False,
         export_tangents=False,
         export_vertex_color="ACTIVE",

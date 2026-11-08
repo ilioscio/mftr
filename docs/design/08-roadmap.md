@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–4, 5a, 6, 7 and 8 ✅ (champions as data; forged models; the creator and Test; clothes; fill paint; moves; the budget; the heavy humanoid) | 5b, 9, 10; refit prices; swap the official models |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–8 ✅ (champions as data; forged models; the creator and Test; clothes; paint: fills, brush and decals; moves and passives; the budget; the heavy humanoid) | 9, 10; resources; refit prices; swap the official models |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1497,6 +1497,30 @@ replace the shared head anyway.
   rigs. A test holds Bastion's idle on a base to his own pose.
 - **Next:** the owner's look at the three (art pass on the heavy parts: antlers, ice, a chain);
   then CR5b (brush and decals) and CR9 (free sculpting).
+
+### CR slice 5b status (2026-11-07): ✅ done (brush, decals, eraser)
+- **UVs through the pipeline:** the creator bases and their parts are unwrapped in Blender
+  (`creator.unwrap`: smart projection; the body's head gets a corner of its own, about three
+  times the density, since faces are what's painted most) and exported as TEXCOORD_0, for kind
+  `base` only (`mftr-pack` refuses UVs anywhere else: the game stays textureless, D70). The base
+  budget went from 2 to 3.5 MB: seams split vertices and their morph deltas (the bases are
+  2.8–2.9 MB); bases never cross the network.
+- **Paint images** (`mftr_forge::image`, D70): one per target, 128×128 for the body and 64×64
+  for a part, each pixel unpainted or one of up to 15 palette colors. In the champion file:
+  `images: [("target", [palette indices], ["hex row", ...])]`, rows trimmed of trailing zeros
+  (the parser's lists went from 64 to 128 items for the rows). The forge puts each on its
+  target's primitives; the champion shader draws it over the vertex colors (nearest, not on the
+  team accent or what glows); the game draws customs' paint as the creator does.
+- **Strokes are painted on the model:** a stroke covers every texel whose place on the surface
+  lies within its radius of where the ray hit (the texels rasterized from the UVs at the forged
+  shape), so strokes cross seams and never bleed into another island. Tools: brush, eraser, and
+  six decals (ring, diamond, cross, chevron, star, stripes) stamped in the surface's frame.
+- **The creator:** the Paint step's Fill, Brush, Decal and Erase tools, a size slider and the
+  decal picker; while brushing, the model holds its rest pose, left-click paints and right-drag
+  turns it. `--creator-brush decal:X,Y:COLOR` strokes once for screenshots. Grumble wears war
+  paint (a chevron on the chest, stripes across the eyes).
+- **Left:** the texel density is PS1-coarse on parts (about 2 cm a texel on a tunic); an artist's
+  UV layout would spend it better. Painting on the in-match model's pose, and symmetry, later.
 
 ### CR6 follow-up (2026-11-07): passives ✅; resources not yet
 - **Passives** (D74): a champion file's `passive:` is one of nine of the items' unique passives

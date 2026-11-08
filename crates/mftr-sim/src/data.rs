@@ -32,7 +32,8 @@ pub const FORMAT: u64 = 0;
 /// A champion file at most this long (bytes).
 pub const MAX_INPUT: usize = 64 * 1024;
 const MAX_DEPTH: usize = 16;
-const MAX_ITEMS: usize = 64;
+/// Items in a list (a creator paint image's 128 rows, CR5b).
+const MAX_ITEMS: usize = 128;
 /// Champion and ability names: 1–32 bytes.
 pub const MAX_NAME: usize = 32;
 /// The longest duration a champion file may hold (10 minutes).

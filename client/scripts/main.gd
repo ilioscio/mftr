@@ -254,6 +254,10 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--creator-step" and i + 1 < args.size():
 			_creator_step = args[i + 1]
+		elif args[i] == "--creator-brush" and i + 1 < args.size():
+			# A brush or decal stroke at a point of the stage (fractions of its size), to check
+			# painting in screenshots (CR5b): `decal:0.5,0.45:0` (a palette color last), `brush:0.5,0.6`.
+			_creator_brush = args[i + 1]
 			i += 1
 		elif args[i] == "--champion-file" and i + 1 < args.size():
 			# A champion made in the creator (CR2): registered here, its model forged.
@@ -638,6 +642,7 @@ var _practice_start := ""               # `--practice FILE`: start a practice du
 var _start_creator := false              # `--creator`: open the champion creator (20) at start
 var _creator_load := ""                  # `--creator-load FILE`: …with this champion file
 var _creator_step := ""                  # `--creator-step NAME`: …on this step (screenshots)
+var _creator_brush := ""                 # `--creator-brush TOOL:X,Y`: …and paint once there (screenshots)
 var _editor_map := ""                    # `--editor-map bridge|crossroads|FILE`: …on that map
 var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's reference image
 var _shot_ward := false                  # `--shot-ward`: place a stealth ward ahead at 2.5 s
@@ -1286,6 +1291,11 @@ func _attach_model(body: MeshInstance3D, team: Color, champion: String, pack: Mf
 		m.set_shader_parameter("team_accent", team)
 		m.set_shader_parameter("identity", CHAMPION_COLORS.get(champion, Color(0.5, 0.5, 0.5)))
 		m.set_shader_parameter("identity_mix", 0.6 if template else 0.0)
+		# A champion made in the creator: its brush strokes and decals (CR5b).
+		var paint: ImageTexture = source.surface_paint(i)
+		if paint != null:
+			m.set_shader_parameter("paint", paint)
+			m.set_shader_parameter("has_paint", true)
 		m.next_pass = outline
 		mesh.set_surface_override_material(i, m)
 		mats.append(m)
@@ -6668,6 +6678,11 @@ func _open_creator() -> void:
 		screen.call_deferred("load_file", _creator_load)
 	if _creator_step != "":
 		screen.call_deferred("_show_step", _creator_step)
+	if _creator_brush != "":
+		await get_tree().create_timer(1.0).timeout
+		var parts := _creator_brush.split(":")
+		var xy := parts[1].split(",")
+		screen.paint_at_fraction(parts[0], Vector2(float(xy[0]), float(xy[1])), int(parts[2]) if parts.size() > 2 else -1)
 	screen.saved.connect(func(_path): champion_models.clear())
 	screen.test.connect(_start_practice)
 	screen.closed.connect(func(): _show_menu(""))

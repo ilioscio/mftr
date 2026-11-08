@@ -33,8 +33,10 @@ pub const MAX_NON_ACCENT_SLOTS: usize = 4;
 /// Mesh + animations (400 KB + 600 KB, 10 §9).
 pub const MODEL_BYTES_BUDGET: usize = 1000 * 1024;
 /// A champion creator base (CR2): its mesh and every slider's two morph targets, shared by every
-/// champion of its build and gender (20 §11.4).
-pub const BASE_BYTES_BUDGET: usize = 2_000_000;
+/// champion of its build and gender (20 §11.4). Raised from 2 MB for the paint UVs (CR5b), whose
+/// seams split vertices and with them every morph target's deltas. Bases ship with the game and
+/// never cross the network (customs send recipes, 20 §11.2).
+pub const BASE_BYTES_BUDGET: usize = 3_500_000;
 pub const MAX_CLIP_FRAMES: u32 = 12 * FPS;
 /// Root motion tolerance (10 §8.4): clips play in place, the sim moves the unit.
 pub const ROOT_XZ_TOLERANCE_M: f32 = 0.01;

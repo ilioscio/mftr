@@ -117,6 +117,8 @@ pub struct Looks {
     pub outfit: Vec<String>,
     /// Fills (CR5a, 20 §9): `"body"` or a worn part's id, its region, a palette index.
     pub paint: Vec<(String, u8, u8)>,
+    /// Brush strokes and decals (CR5b, D70): one paint image per target at most.
+    pub images: Vec<crate::image::Image>,
     /// The signature hue (14 §4), 0–359 degrees: glowing parts, and the effects (CR6).
     pub signature: u16,
     /// The moves the champion is animated with (CR6, 20 §8): without them, the shared clip
@@ -134,6 +136,7 @@ impl Default for Looks {
             skin: 2,
             outfit: Vec::new(),
             paint: Vec::new(),
+            images: Vec::new(),
             signature: 200,
             moves: None,
         }
@@ -259,6 +262,45 @@ pub fn read(v: Value, at: &str) -> Result<Looks, DataError> {
             paint.push((target, region, color));
         }
     }
+    let mut images: Vec<crate::image::Image> = Vec::new();
+    if let Some((v, iat)) = f.take("images") {
+        let Value::List(None, items) = v else {
+            return err(&iat, "expected a list of `(\"target\", [colors], [rows])`");
+        };
+        if items.len() > crate::image::MAX_IMAGES {
+            return err(&iat, format!("at most {} images", crate::image::MAX_IMAGES));
+        }
+        for (i, item) in items.into_iter().enumerate() {
+            let at = format!("{iat}[{i}]");
+            let Value::List(None, mut t) = item else { return err(&at, "expected `(\"target\", [colors], [rows])`") };
+            if t.len() != 3 {
+                return err(&at, "expected `(\"target\", [colors], [rows])`");
+            }
+            let Value::List(None, rows) = t.pop().unwrap() else { return err(&at, "the rows are a list of strings") };
+            let rows: Vec<String> = rows
+                .into_iter()
+                .map(|r| match r {
+                    Value::Str(s) => Ok(s),
+                    _ => err(&at, "the rows are a list of strings"),
+                })
+                .collect::<Result<_, _>>()?;
+            let Value::List(None, cs) = t.pop().unwrap() else {
+                return err(&at, "the colors are a list of palette indices");
+            };
+            let colors: Vec<u8> = cs
+                .into_iter()
+                .map(|c| data::int(c, &at, crate::paint::PALETTE.len() as u64 - 1).map(|c| c as u8))
+                .collect::<Result<_, _>>()?;
+            let Value::Str(target) = t.pop().unwrap() else { return err(&at, "the target is a string") };
+            if target != "body" && !outfit.contains(&target) {
+                return err(&at, format!("`{target}` isn't worn"));
+            }
+            if images.iter().any(|m| m.target == target) {
+                return err(&at, format!("`{target}` has two images"));
+            }
+            images.push(crate::image::Image::from_rows(&target, colors, &rows).or_else(|e| err(&at, e))?);
+        }
+    }
     let signature = match f.take("signature") {
         Some((v, sat)) => data::int(v, &sat, 359)? as u16,
         None => 200,
@@ -281,7 +323,7 @@ pub fn read(v: Value, at: &str) -> Result<Looks, DataError> {
         None => None,
     };
     f.done()?;
-    Ok(Looks { build, gender, shape, proportions, skin, outfit, paint, signature, moves })
+    Ok(Looks { build, gender, shape, proportions, skin, outfit, paint, images, signature, moves })
 }
 
 /// A champion file's looks, if it has any.
@@ -323,6 +365,19 @@ pub fn write(l: &Looks) -> String {
     if !l.paint.is_empty() {
         let fills: Vec<String> = l.paint.iter().map(|(t, r, c)| format!("(\"{t}\", {r}, {c})")).collect();
         out += &format!("        paint: [{}],\n", fills.join(", "));
+    }
+    let images: Vec<&crate::image::Image> = l.images.iter().filter(|i| !i.is_empty()).collect();
+    if !images.is_empty() {
+        out += "        images: [\n";
+        for img in images {
+            let colors: Vec<String> = img.colors.iter().map(u8::to_string).collect();
+            out += &format!("            (\"{}\", [{}], [\n", img.target, colors.join(", "));
+            for row in img.rows() {
+                out += &format!("                \"{row}\",\n");
+            }
+            out += "            ]),\n";
+        }
+        out += "        ],\n";
     }
     out += &format!("        signature: {},\n", l.signature);
     if let Some(m) = &l.moves {

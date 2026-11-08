@@ -347,6 +347,62 @@ def add_shape_keys(armature, body):
     return ids
 
 
+# Where the body's islands go in its paint image (u0, v0, u1, v1): the head gets a corner of its
+# own, about three times the density of the rest, since faces are what players paint most (war
+# paint, tattoos); the rest of the body fills the band below. Parts use the whole square.
+HEAD_RECT = (0.0, 0.0, 0.4, 0.4)
+REST_RECT = (0.0, 0.42, 1.0, 1.0)
+
+
+def _project(obj, faces, rect):
+    """Smart-project `faces` (indices) of `obj` and fit their UVs into `rect`."""
+    import bmesh as _bm
+    bpy.ops.object.mode_set(mode="EDIT")
+    bm = _bm.from_edit_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    want = set(faces)
+    for f in bm.faces:
+        f.select_set(f.index in want)
+    _bm.update_edit_mesh(obj.data)
+    bpy.ops.uv.smart_project(angle_limit=math.radians(85), island_margin=0.02, area_weight=0.0, scale_to_bounds=True)
+    bm = _bm.from_edit_mesh(obj.data)
+    uv = bm.loops.layers.uv.active
+    u0, v0, u1, v1 = rect
+    for f in bm.faces:
+        if f.index in want:
+            for loop in f.loops:
+                x, y = loop[uv].uv
+                # Blender's v runs up; images' rows run down from the top (glTF flips v).
+                loop[uv].uv = (u0 + x * (u1 - u0), 1.0 - (v0 + (1.0 - y) * (v1 - v0)))
+    _bm.update_edit_mesh(obj.data)
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def unwrap(obj, head_group=None):
+    """UVs for paint images (CR5b, D70): Blender's smart projection, islands packed with a margin
+    so a brush stroke lands on one place of the model; with `head_group`, the faces skinned to
+    it get `HEAD_RECT` and the rest `REST_RECT`."""
+    if bpy.context.object and bpy.context.object.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+    for o in bpy.context.selected_objects:
+        o.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    if not obj.data.uv_layers:
+        obj.data.uv_layers.new(name="Paint")
+    everything = [p.index for p in obj.data.polygons]
+    g = obj.vertex_groups.get(head_group) if head_group else None
+    if g is None:
+        _project(obj, everything, (0.0, 0.0, 1.0, 1.0))
+    else:
+        in_head = {v.index for v in obj.data.vertices if any(e.group == g.index and e.weight > 0.5 for e in v.groups)}
+        head = [p.index for p in obj.data.polygons if all(v in in_head for v in p.vertices)]
+        rest = [i for i in everything if i not in set(head)]
+        _project(obj, rest, REST_RECT)
+        _project(obj, head, HEAD_RECT)
+    obj.select_set(False)
+
+
 def build(gender, name, build="humanoid_slim"):
     """The base of `build` for `gender` with its sliders and every catalog part (CR4). Returns
     (armature, body, parts made)."""
@@ -355,6 +411,9 @@ def build(gender, name, build="humanoid_slim"):
     ids = add_shape_keys(armature, body)
     made = parts.build_parts(armature, body, base_head(gender, build))
     mesh.GIRTH = None
+    unwrap(body, head_group="head")
+    for obj in [o for o in bpy.data.objects if o.name.startswith("part.")]:
+        unwrap(obj)
     armature["mftr_build"] = name
     armature["mftr_sliders"] = ",".join(ids)
     print(f"{name}: {mesh.triangle_count(body)} triangles, {len(ids)} sliders ({2 * len(ids)} shape keys), {len(made)} parts")

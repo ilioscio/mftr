@@ -1,7 +1,8 @@
 // Champion models (10 §2, "faceted PS1"): flat shading from screen-space derivatives, vertex
 // colors as albedo (alpha = baked occlusion), a three-band toon ramp so neighbouring facets
 // step visibly, a soft rim, the team accent on the `accent` slot (05 §1.3), and the impact
-// flash (10 §4.4). One material per surface; `slot` says which. No textures.
+// flash (10 §4.4). One material per surface; `slot` says which. No textures, but for the
+// champion creator's paint images (D70, CR5b): palette colors over the vertex colors, nearest.
 shader_type spatial;
 render_mode specular_disabled;
 #include "res://shaders/clouds.gdshaderinc"
@@ -16,6 +17,10 @@ uniform float glow_white = 0.35;
 // Until a champion ships its own model, the shared template wears its identity color.
 uniform vec3 identity : source_color = vec3(1.0);
 uniform float identity_mix = 0.0;
+// A forged champion's brush strokes and decals: RGBA, alpha 0 where unpainted. Palette values
+// are stored as they are in vertex colors, so no sRGB hint.
+uniform sampler2D paint : filter_nearest, repeat_disable;
+uniform bool has_paint = false;
 // 1 on the frame a hit lands, fading to 0 within ~3 frames.
 uniform float flash = 0.0;
 // Vertex colors are authored for a neutral studio light; the arena's sun and ambient are
@@ -27,6 +32,10 @@ void fragment() {
 	// Faceted: one normal per triangle, from the derivatives of the view-space position.
 	NORMAL = normalize(cross(dFdy(VERTEX), dFdx(VERTEX)));
 	vec3 c = COLOR.rgb;
+	if (has_paint && slot <= 2) {
+		vec4 p = texture(paint, UV);
+		c = mix(c, p.rgb, p.a);
+	}
 	if (slot == 4) {
 		c = team_accent * (0.75 + 0.25 * dot(COLOR.rgb, vec3(0.3333)));
 	} else if (slot == 5) {

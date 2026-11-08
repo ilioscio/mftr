@@ -112,6 +112,10 @@ fn check_targets(r: &mut Report, m: &Model, kind: &str) {
         if m.meshes.iter().flatten().any(|p| !p.targets.is_empty()) {
             r.err("morph targets are for champion creator bases only");
         }
+        // Textureless outside the creator's paint images (D70, 05 §2).
+        if m.meshes.iter().flatten().any(|p| !p.uvs.is_empty()) {
+            r.err("UVs (TEXCOORD_0) are for champion creator bases only");
+        }
         return;
     }
     if names.is_empty() {

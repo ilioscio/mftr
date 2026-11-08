@@ -22,7 +22,7 @@ const STEPS := [
 	["face", "3  Face", "Shape the head: each slider blends between two sculpted extremes.", true],
 	["body", "4  Body", "Proportions scale the skeleton; shape sliders reshape the body.", true],
 	["clothes", "5  Clothes", "Clothes, armor, accessories and weapons: one part per slot. They follow your sliders.", true],
-	["paint", "6  Paint", "Fill each part's colors from the palette; the signature hue lights what glows. Brush and decals: CR5b.", true],
+	["paint", "6  Paint", "Fill each part's colors from the palette; the signature hue lights what glows. Brush, decals and the eraser paint right on the model.", true],
 	["moves", "7  Moveset", "A move for the attack and each of Q W E R: its animation, effects and sounds, and its numbers (tuned in Balance).", true],
 	["balance", "8  Balance", "Every number has a price; every champion spends the same budget. Turn power and cooldowns, then fit.", true],
 	["name", "9  Name", "Name the champion and save it.", true],
@@ -39,6 +39,13 @@ var dirty := false
 var seed_n := 1
 
 var _viewport: SubViewport
+# The Paint step's tool (CR5b): "fill" a region, or paint on the model with a "brush", a
+# "decal" or the "erase" brush; the brush color (a palette index), size (m) and decal.
+var _paint_tool := "fill"
+var _brush_color := 18
+var _brush_size := 0.1
+var _decal := "star"
+var _painting := false
 var _camera: Camera3D
 var _pivot: Node3D
 var _model_node: Node3D = null
@@ -276,13 +283,48 @@ func _show_step(id: String) -> void:
 					_paint_region = i
 					_show_step("paint")))
 			_panel.add_child(row)
+			var tools := HBoxContainer.new()
+			for t in [["fill", "Fill"], ["brush", "Brush"], ["decal", "Decal"], ["erase", "Erase"]]:
+				var b := Button.new()
+				b.text = t[1]
+				b.toggle_mode = true
+				b.button_pressed = _paint_tool == t[0]
+				b.pressed.connect(func():
+					_paint_tool = t[0]
+					_hold_rest()
+					_show_step("paint"))
+				tools.add_child(b)
+			_panel.add_child(tools)
+			if _paint_tool == "fill":
+				_hint("Pick a part and a region, then a color.")
+			else:
+				_hint("Left-click and drag on the model to paint; right-drag turns it.")
+				var size := HSlider.new()
+				size.min_value = 0.015
+				size.max_value = 0.3
+				size.step = 0.005
+				size.value = _brush_size
+				size.value_changed.connect(func(v): _brush_size = v)
+				_panel.add_child(size)
+			if _paint_tool == "decal":
+				var dpick := OptionButton.new()
+				var decals: Array = creator.decals()
+				for i in decals.size():
+					dpick.add_item(decals[i].label)
+					if decals[i].id == _decal:
+						dpick.select(i)
+				dpick.item_selected.connect(func(i): _decal = decals[i].id)
+				_panel.add_child(dpick)
 			var grid := GridContainer.new()
 			grid.columns = 8
 			var palette: PackedColorArray = creator.palette()
 			for k in palette.size():
-				grid.add_child(_swatch(palette[k], false, func():
-					creator.fill(_paint_target, _paint_region, k)
-					_changed(true)
+				grid.add_child(_swatch(palette[k], _paint_tool != "fill" and k == _brush_color, func():
+					if _paint_tool == "fill":
+						creator.fill(_paint_target, _paint_region, k)
+						_changed(true)
+					else:
+						_brush_color = k
 					_show_step("paint")))
 			_panel.add_child(grid)
 			var sig := Label.new()
@@ -301,6 +343,7 @@ func _show_step(id: String) -> void:
 			clear.text = "Clear paint"
 			clear.pressed.connect(func():
 				creator.clear_paint()
+				creator.clear_images()
 				_changed(true)
 				_show_step("paint"))
 			_panel.add_child(clear)
@@ -555,8 +598,41 @@ func _process(delta: float) -> void:
 		_rebuild_in -= delta
 		if _rebuild_in < 0.0:
 			_rebuild()
-	if _animator != null and _skeleton != null:
+	if _animator != null and _skeleton != null and not _brushing():
 		_animator.drive(_skeleton, {}, 0.0, delta)
+
+
+## Painting on the model (CR5b): it holds still in its rest pose, where the brush aims.
+func _brushing() -> bool:
+	return step == "paint" and _paint_tool != "fill"
+
+
+func _hold_rest() -> void:
+	if _brushing() and _skeleton != null:
+		_skeleton.reset_bone_poses()
+
+
+## A stroke with `tool` at a point of the stage given as fractions of its size (`--creator-brush`).
+func paint_at_fraction(tool: String, f: Vector2, color := -1) -> void:
+	_paint_tool = tool
+	if color >= 0:
+		_brush_color = color
+	_show_step("paint")
+	_hold_rest()
+	_paint_at(f * Vector2(_viewport.size))
+
+
+## Paint where the stage's `pos` looks at the model.
+func _paint_at(pos: Vector2) -> void:
+	if _model_node == null or _camera == null:
+		return
+	var inv := _model_node.global_transform.affine_inverse()
+	var origin := inv * _camera.project_ray_origin(pos)
+	var dir := (inv.basis * _camera.project_ray_normal(pos)).normalized()
+	var color := -1 if _paint_tool == "erase" else _brush_color
+	var decal := _decal if _paint_tool == "decal" else ""
+	if creator.brush(origin, dir, _brush_size, color, decal) != "":
+		_changed(true)
 
 
 func _rebuild() -> void:
@@ -574,11 +650,16 @@ func _rebuild() -> void:
 		mat.shader = load("res://shaders/champion_model.gdshader")
 		mat.set_shader_parameter("slot", SLOTS.find(slots[i]))
 		mat.set_shader_parameter("team_accent", TEAM)
+		var paint: ImageTexture = m.surface_paint(i)
+		if paint != null:
+			mat.set_shader_parameter("paint", paint)
+			mat.set_shader_parameter("has_paint", true)
 		mesh.set_surface_override_material(i, mat)
 	_pivot.add_child(_model_node)
 	_update_status()
 	_skeleton = _model_node.get_node("Skeleton")
 	_animator = m.new_animator()
+	_hold_rest()
 	_pivot.rotation.y = _yaw
 	var head := _skeleton.find_bone("head")
 	if head >= 0:
@@ -597,6 +678,19 @@ func _place_camera() -> void:
 
 
 func _stage_input(event: InputEvent) -> void:
+	if _brushing():
+		# Left paints (a decal once a click, a brush along the drag); right turns the model.
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+			_painting = event.pressed
+			if event.pressed:
+				_paint_at(event.position)
+			return
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
+			_dragging = event.pressed
+			return
+		if event is InputEventMouseMotion and _painting and _paint_tool != "decal":
+			_paint_at(event.position)
+			return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			_dragging = event.pressed
