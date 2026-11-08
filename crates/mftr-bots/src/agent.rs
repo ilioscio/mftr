@@ -395,7 +395,7 @@ impl Agent {
             return None;
         }
         for slot in [0u8, 1, 2, 3, 5, 4] {
-            if !me.state.can_cast(c.now, slot) {
+            if !me.can_cast(c.now, slot) {
                 continue;
             }
             let range = match me.ability(slot).map(|a| a.effect) {

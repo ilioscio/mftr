@@ -18,6 +18,9 @@ pub struct LeagueConfig {
     pub matches: usize,
     pub minutes: f64,
     pub seed: u64,
+    /// Write every match (its lineups and winner) and every champion's price parts here, as CSV,
+    /// for a refit by regression (`tools/league_fit.py`).
+    pub log: Option<String>,
 }
 
 /// One random champion, registered.
@@ -54,7 +57,8 @@ fn random_champion(i: usize, d: &mut Dice) -> ChampionId {
         r.tune(slot, 1.0 + d.signed() * 0.35, 1.0 + d.signed() * 0.3);
     }
     r.tune_stats([1.0 + d.signed() * 0.18, 1.0 + d.signed() * 0.18, 1.0 + d.signed() * 0.18, 1.0 + d.signed() * 0.05]);
-    r.auto_fit();
+    // Everyone spends the same budget: what wins is then what the price misses.
+    r.kit = balance::fit_to(&r.kit, balance::BUDGET);
     let def = mftr_sim::champion::ChampionDef { name: Box::leak(r.name.clone().into_boxed_str()), ..r.kit };
     ChampionId::register(def).expect("room in the registry")
 }
@@ -80,6 +84,7 @@ pub fn run(cfg: &LeagueConfig) -> Vec<(ChampionId, f32, u32, u32)> {
     let mut d = Dice::new(cfg.seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
     let roster: Vec<ChampionId> = (0..cfg.champions.max(10)).map(|i| random_champion(i, &mut d)).collect();
     let mut tally: Vec<(u32, u32)> = vec![(0, 0); roster.len()];
+    let mut log = String::from("match,winner,blue,red\n");
     let ticks = (cfg.minutes * 60.0 * mftr_sim::TICK_HZ as f64) as u32;
     for m in 0..cfg.matches {
         // Ten different champions, at random.
@@ -94,6 +99,24 @@ pub fn run(cfg: &LeagueConfig) -> Vec<(ChampionId, f32, u32, u32)> {
         let result =
             mftr_server::run_bot_match_with(server, ticks, &BotMatchOptions { team: lineup, ..Default::default() });
         let winner = result.winner.map(|(t, _)| t);
+        if let Some(w) = winner {
+            let side = |t: Team| -> String {
+                result
+                    .champions
+                    .iter()
+                    .filter(|c| c.team == t)
+                    .filter_map(|c| roster.iter().position(|r| *r == c.champion))
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            log += &format!(
+                "{m},{},{},{}\n",
+                if w == Team::Blue { "blue" } else { "red" },
+                side(Team::Blue),
+                side(Team::Red)
+            );
+        }
         // Only decided matches count: a draw says nothing about who's stronger.
         for c in result.champions.iter().filter(|_| winner.is_some()) {
             if let Some(i) = roster.iter().position(|r| *r == c.champion) {
@@ -133,6 +156,15 @@ pub fn run(cfg: &LeagueConfig) -> Vec<(ChampionId, f32, u32, u32)> {
     {
         let xs: Vec<f64> = played.iter().map(|r| balance::price(r.0.def()).parts()[k].1 as f64).collect();
         println!("  {name:<11} r = {:+.2}", correlation(&xs, &rates));
+    }
+    if let Some(path) = &cfg.log {
+        let mut parts = String::from("champion,durability,attack,speed,damage,control,mobility,protection\n");
+        for (i, c) in roster.iter().enumerate() {
+            let p = balance::price(c.def()).parts();
+            parts += &format!("{i},{}\n", p.iter().map(|(_, v)| format!("{v:.3}")).collect::<Vec<_>>().join(","));
+        }
+        let _ = std::fs::write(format!("{path}.matches.csv"), &log);
+        let _ = std::fs::write(format!("{path}.champions.csv"), parts);
     }
     let spread: Vec<f64> = rates.iter().map(|r| r * 100.0).collect();
     if !spread.is_empty() {

@@ -96,7 +96,7 @@ pub fn clear(a: &mut Agent, c: &Ctx, i: usize) -> Option<CommandKind> {
     let target = list[0];
     // Claim a big monster when Claim would finish it (sooner when an enemy is close).
     if let Some(Effect::Claim(cl)) = me.ability(5).map(|ab| ab.effect)
-        && me.state.can_cast(c.now, 5)
+        && me.can_cast(c.now, 5)
     {
         let power =
             if me.state.progress.camps >= mftr_sim::jungle::CLAIM_UPGRADE_CAMPS { cl.upgraded } else { cl.damage };
@@ -114,7 +114,7 @@ pub fn clear(a: &mut Agent, c: &Ctx, i: usize) -> Option<CommandKind> {
     }
     // Area abilities on the pack.
     for slot in 0..3u8 {
-        if !me.state.can_cast(c.now, slot) {
+        if !me.can_cast(c.now, slot) {
             continue;
         }
         let Some(ab) = me.ability(slot) else { continue };

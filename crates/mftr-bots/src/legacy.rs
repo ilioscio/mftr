@@ -138,7 +138,7 @@ impl LegacyBot {
             return Some(CommandKind::MoveTo(mftr_sim::QPoint::from_vec2(to)));
         }
         let hp = st.health / me.stats.max_health.max(1.0);
-        let ready = |slot: u8| st.can_cast(t, slot);
+        let ready = |slot: u8| me.can_cast(t, slot);
         let hidden = world.hidden(team);
         let visible = |u: &&Unit| u.state.alive() && !hidden.contains(&u.id);
         let fountain = world.map().layout.fountains[team as usize].map(|(c, _)| c);
@@ -414,7 +414,7 @@ impl LegacyBot {
         // Claim a big monster in reach once Claim would finish it.
         if let (Some(m), Some(mftr_sim::ability::Effect::Claim(c))) = (target.monster, me.ability(5).map(|a| a.effect))
             && m.def().big
-            && st.can_cast(t, 5)
+            && me.can_cast(t, 5)
             && d <= c.range
         {
             let power = if st.progress.camps >= mftr_sim::jungle::CLAIM_UPGRADE_CAMPS { c.upgraded } else { c.damage };

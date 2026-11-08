@@ -300,6 +300,29 @@ pub fn auto_fit(def: &ChampionDef) -> ChampionDef {
     out
 }
 
+/// Scale power up or down until `def` costs about `target` points (within one), staying inside
+/// the limits every kit keeps (`limits::problems`): the random league's champions all spend the
+/// same budget, so what wins among them is what the price misses.
+pub fn fit_to(def: &ChampionDef, target: f32) -> ChampionDef {
+    let ok = |d: &ChampionDef| crate::limits::problems(d).is_empty();
+    let (mut lo, mut hi) = (0.3f32, 1.8f32);
+    let mut best = *def;
+    for _ in 0..24 {
+        let k = (lo + hi) / 2.0;
+        let d = scaled(def, k);
+        if price(&d).total() > target || !ok(&d) {
+            hi = k;
+        } else {
+            lo = k;
+            best = d;
+        }
+        if hi - lo < 0.002 {
+            break;
+        }
+    }
+    best
+}
+
 fn scaled(def: &ChampionDef, k: f32) -> ChampionDef {
     let mut out = *def;
     let dmg = |d: &mut crate::ability::Damage| {
@@ -343,6 +366,18 @@ fn scaled(def: &ChampionDef, k: f32) -> ChampionDef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fit_to_reaches_the_target_from_either_side() {
+        // Down to it from above.
+        let d = fit_to(ChampionId::Wren.def(), 100.0);
+        assert!((98.5..=100.0).contains(&price(&d).total()), "{}", price(&d).total());
+        // Up toward it from below, as far as the limits allow (Quill's ultimate hits its bounds).
+        let before = price(ChampionId::Quill.def()).total();
+        let d = fit_to(ChampionId::Quill.def(), 100.0);
+        assert!(price(&d).total() > before + 2.0 && price(&d).total() <= 100.0);
+        assert!(crate::limits::problems(&d).is_empty());
+    }
 
     #[test]
     fn a_costly_resource_makes_a_kit_cheaper() {

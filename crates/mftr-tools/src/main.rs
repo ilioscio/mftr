@@ -149,6 +149,7 @@ fn main() {
                 matches: num("--matches", 20.0) as usize,
                 minutes: num("--minutes", 25.0),
                 seed: num("--seed", 1.0) as u64,
+                log: get("--log"),
             };
             mftr_tools::league::run(&cfg);
         }

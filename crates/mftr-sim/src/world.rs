@@ -1071,6 +1071,18 @@ pub struct Unit {
 }
 
 impl Unit {
+    /// Whether `slot` could be cast at `at`: `UnitState::can_cast`, and its cost affordable
+    /// (01 §9, D75). What bots and the HUD should ask; a costless kit's answer is the state's.
+    pub fn can_cast(&self, at: SimTime, slot: u8) -> bool {
+        let st = &self.state;
+        if !st.can_cast(at, slot) {
+            return false;
+        }
+        let Some(r) = self.champion.map(|c| c.def().resource) else { return true };
+        let cost = r.cost(slot);
+        cost <= 0.0 || r.available(st.resource, st.health, st.progress.level) >= cost
+    }
+
     /// A unit with no brain, owner or champion, at full health.
     pub fn new(id: UnitId, kind: UnitKind, team: Team, pos: Vec2, radii: (f32, f32), stats: Stats) -> Unit {
         let mut state = UnitState::new(pos, stats.move_speed);

@@ -217,7 +217,7 @@ pub fn ability_last_hit(a: &mut Agent, c: &Ctx) -> Option<CommandKind> {
     }
     let enemy_close = c.b.enemies.iter().any(|e| e.state.pos.distance(me.state.pos) < 1000.0);
     for slot in 0..3u8 {
-        if !me.state.can_cast(now, slot) {
+        if !me.can_cast(now, slot) {
             continue;
         }
         let Some(ab) = me.ability(slot) else { continue };
@@ -408,7 +408,7 @@ pub fn wave_spell(a: &mut Agent, c: &Ctx) -> Option<CommandKind> {
         return None;
     }
     for slot in 0..3u8 {
-        if !me.state.can_cast(c.now, slot) {
+        if !me.can_cast(c.now, slot) {
             continue;
         }
         let Some(ab) = me.ability(slot) else { continue };
