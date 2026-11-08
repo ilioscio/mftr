@@ -23,6 +23,7 @@ pub mod game;
 pub mod hub;
 pub mod inspect;
 pub mod lobby;
+pub mod local;
 pub use game::{Fog, Match, Replay, ReplayCheck, ReplayEntry};
 pub use hub::{Hub, HubConfig, QueueSpec};
 use lobby::Lobby;

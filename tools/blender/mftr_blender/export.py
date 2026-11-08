@@ -30,7 +30,8 @@ def stashed_actions(armature):
 
 
 def export(out_dir, pack_id, kind):
-    """Export the scene's MFTR armature and its meshes. `kind`: champion, library or rig."""
+    """Export the scene's MFTR armature and its meshes. `kind`: champion, library, rig or base
+    (a champion creator base: its shape keys export as morph targets, CR2)."""
     scene = bpy.context.scene
     scene.render.fps = clips.FPS
     scene.render.fps_base = 1.0
@@ -65,13 +66,17 @@ def export(out_dir, pack_id, kind):
         export_cameras=False,
         export_lights=False,
         export_extras=False,
-        export_morph=False,
+        # Creator bases (CR2) carry their sliders as morph targets: positions only, dense.
+        export_morph=kind == "base",
+        export_morph_normal=False,
+        export_morph_tangent=False,
+        export_try_sparse_sk=False,
         export_skins=True,
         export_def_bones=False,
         export_influence_nb=4,
         export_leaf_bone=False,
         export_rest_position_armature=True,
-        export_animations=kind != "rig",
+        export_animations=kind not in ("rig", "base"),
         export_animation_mode="ACTIONS",
         export_force_sampling=True,
         export_frame_step=1,
@@ -103,7 +108,7 @@ def sidecar_text(arm, pack_id, kind):
         f"    fps: {clips.FPS},",
         "    clips: [",
     ]
-    for act in (stashed_actions(arm) if kind != "rig" else []):
+    for act in (stashed_actions(arm) if kind not in ("rig", "base") else []):
         start, end = act.frame_range
         frames = int(round(end - start))
         stride = act.get("mftr_stride_speed")

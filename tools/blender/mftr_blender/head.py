@@ -187,6 +187,18 @@ def build(bm, layers, groups, mats, head: Head):
     if head.hair_style == "bald":
         return
 
+    hair(bm, layers, groups, mats, head)
+
+
+def hair(bm, layers, groups, mats, head: Head):
+    """Hair alone (`head.hair_style`), on the head's surface: the creator's hair parts (CR4) use
+    it without the skull and face."""
+    g = groups["head"]
+    cloth = mats["cloth"]
+    SIDES = head.sides  # noqa: N806
+    angles = [2 * math.pi * (i + 0.5) / SIDES for i in range(SIDES)]
+    if head.hair_style == "bald":
+        return
     # Hair: the skull's surface pushed out, from a hairline high at the front, low at the nape.
     def hairline(a):
         front = max(0.0, -math.sin(a))

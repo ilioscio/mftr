@@ -138,6 +138,13 @@ impl ChampionId {
         (0..taken).map(|i| ChampionId(i as u16)).find(|c| c.def().name.eq_ignore_ascii_case(name))
     }
 
+    /// Every registered champion, the official ten first.
+    pub fn registered() -> Vec<ChampionId> {
+        load_official();
+        let taken = *TAKEN.lock().unwrap_or_else(|e| e.into_inner());
+        (0..taken).map(|i| ChampionId(i as u16)).collect()
+    }
+
     /// Add a champion definition (a recipe's kit) and return its id: the existing one if the
     /// same definition is registered already.
     pub fn register(def: ChampionDef) -> Result<ChampionId, RegistryFull> {

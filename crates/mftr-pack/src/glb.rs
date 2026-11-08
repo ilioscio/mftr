@@ -47,7 +47,13 @@ pub struct Primitive {
     pub indices: Vec<u32>,
     pub joints: Vec<[u32; 4]>,
     pub weights: Vec<[f32; 4]>,
+    /// Morph targets (champion creator bases only, CR2): each a position delta per vertex, in
+    /// the mesh's `target_names` order.
+    pub targets: Vec<Vec<[f32; 3]>>,
 }
+
+/// Most morph targets a mesh may carry (a creator base: two per slider).
+pub const MAX_TARGETS: usize = 128;
 
 #[derive(Clone, Debug)]
 pub struct Channel {
@@ -74,6 +80,8 @@ pub struct Model {
     pub meshes: Vec<Vec<Primitive>>,
     pub materials: Vec<String>,
     pub animations: Vec<Animation>,
+    /// Each mesh's morph target names (`mesh.extras.targetNames`; empty without targets).
+    pub target_names: Vec<Vec<String>>,
 }
 
 /// A node's world transform: translation, rotation (xyzw), scale.
@@ -268,9 +276,7 @@ pub fn parse(bytes: &[u8]) -> Result<Model, String> {
             if mode != 4 {
                 return Err(format!("mesh {mi}: only triangle lists are allowed"));
             }
-            if p.get("targets").is_some() {
-                return Err(format!("mesh {mi}: morph targets are not allowed"));
-            }
+            // Morph targets read here; only creator bases may have them (the validator).
             let attrs = p.get("attributes").ok_or(format!("mesh {mi}: primitive without attributes"))?;
             for k in attrs.keys() {
                 if !ALLOWED_ATTRIBUTES.contains(&k) {
@@ -316,6 +322,25 @@ pub fn parse(bytes: &[u8]) -> Result<Model, String> {
                 None => (0..count as u32).collect(),
             };
             let triangles = indices.len() / 3;
+            let mut targets = Vec::new();
+            let target_list = p.get("targets").map(Json::as_arr).unwrap_or(&[]);
+            if target_list.len() > MAX_TARGETS {
+                return Err(format!("mesh {mi}: more than {MAX_TARGETS} morph targets"));
+            }
+            for t in target_list {
+                if t.keys().any(|k| k != "POSITION") {
+                    return Err(format!("mesh {mi}: morph targets move positions only"));
+                }
+                let a = t
+                    .get("POSITION")
+                    .and_then(Json::as_index)
+                    .ok_or(format!("mesh {mi}: a target without POSITION"))?;
+                let deltas = r.vec3(a)?;
+                if deltas.len() != count || deltas.iter().flatten().any(|v| !v.is_finite() || v.abs() > 10.0) {
+                    return Err(format!("mesh {mi}: a morph target's size or values are wrong"));
+                }
+                targets.push(deltas);
+            }
             prims.push(Primitive {
                 material: opt_index(p.get("material"))?,
                 triangles,
@@ -325,8 +350,25 @@ pub fn parse(bytes: &[u8]) -> Result<Model, String> {
                 indices,
                 joints,
                 weights,
+                targets,
             });
         }
+        let n = prims.first().map_or(0, |p| p.targets.len());
+        if prims.iter().any(|p| p.targets.len() != n) {
+            return Err(format!("mesh {mi}: primitives disagree on morph targets"));
+        }
+        let names: Vec<String> = mesh
+            .get("extras")
+            .and_then(|e| e.get("targetNames"))
+            .map(Json::as_arr)
+            .unwrap_or(&[])
+            .iter()
+            .map(|v| v.as_str().unwrap_or("").to_string())
+            .collect();
+        if n > 0 && names.len() != n {
+            return Err(format!("mesh {mi}: {n} morph targets but {} names", names.len()));
+        }
+        m.target_names.push(names);
         m.meshes.push(prims);
     }
 

@@ -21,9 +21,11 @@ use mftr_sim::{ChampionId, Team, UnitId, UnitKind, Vec2};
 use std::net::UdpSocket;
 use std::time::Instant;
 
+mod creator;
 mod itemtext;
 mod maps;
 mod model;
+mod practice;
 mod release;
 
 struct MftrExtension;
@@ -235,7 +237,7 @@ impl MatchClient {
     /// Every champion's name, for pickers.
     #[func]
     fn champion_names(&self) -> PackedStringArray {
-        ChampionId::ALL.iter().map(|c| GString::from(c.def().name)).collect()
+        ChampionId::registered().iter().map(|c| GString::from(c.def().name)).collect()
     }
 
     /// The server's key fingerprint (empty until its handshake reply arrives).

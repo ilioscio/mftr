@@ -1,0 +1,439 @@
+//! `mftr-forge`: builds a champion's model from its recipe (CR2, 20 §11.3, D69).
+//!
+//! A champion made in the creator has no model file: its champion file says how it looks
+//! ([`looks::Looks`]), and the forge builds the model from the **catalog**, which ships with the
+//! game:
+//! - a **base** per build and gender (`art/creator/<build>/export/<build>_<gender>.glb`, a
+//!   validated pack of kind `base`): the body, with every slider's two extremes as morph targets;
+//! - the shared **clip library** (`art/library/biped`), whose clips play on any `biped`.
+//!
+//! The forge blends the morph targets by the slider values, scales the skeleton for the
+//! proportions (bones get longer or bigger and the mesh follows them), recolors the skin and
+//! attaches the library's clips. The result is an ordinary validated pack (`mftr_pack::Loaded`)
+//! that the client draws and animates like any other. It is deterministic and has no Godot in it.
+
+pub mod looks;
+pub mod recipe;
+
+use std::path::Path;
+
+use mftr_pack::glb::{Model, qmul, rotate};
+use mftr_pack::{Loaded, pose, sidecar};
+
+pub use looks::Looks;
+
+/// What the forge builds from: the bases it has and the clip library.
+pub struct Catalog {
+    bases: Vec<(String, Loaded)>,
+    library: Loaded,
+}
+
+impl Catalog {
+    /// Load the catalog under `art` (the folder the packs live in): every base that's there,
+    /// validated, and the clip library. Fails without the library or any base.
+    pub fn load(art: &Path) -> Result<Catalog, String> {
+        let library = mftr_pack::load_file(&art.join("library/biped/export/biped_library.glb"))?;
+        let mut bases = Vec::new();
+        for (build, gendered) in looks::BUILDS {
+            let keys: Vec<String> = if gendered {
+                ["masculine", "feminine"].iter().map(|g| format!("{build}_{g}")).collect()
+            } else {
+                vec![build.to_string()]
+            };
+            for key in keys {
+                let path = art.join(format!("creator/{build}/export/{key}.glb"));
+                if path.exists() {
+                    let base = mftr_pack::load_file(&path)?;
+                    if base.kind != "base" {
+                        return Err(format!("{}: not a creator base", path.display()));
+                    }
+                    bases.push((key, base));
+                }
+            }
+        }
+        if bases.is_empty() {
+            return Err(format!("no creator bases under {}", art.join("creator").display()));
+        }
+        Ok(Catalog { bases, library })
+    }
+
+    pub fn base(&self, key: &str) -> Option<&Loaded> {
+        self.bases.iter().find(|(k, _)| k == key).map(|(_, b)| b)
+    }
+
+    /// The sliders a base offers, in its order (each target pair `<id>+`, `<id>-`).
+    pub fn sliders(&self, key: &str) -> Vec<String> {
+        let Some(b) = self.base(key) else { return Vec::new() };
+        let mut out: Vec<String> = Vec::new();
+        for n in b.model.target_names.iter().flatten() {
+            let id = n.trim_end_matches(['+', '-']).to_string();
+            if !out.contains(&id) {
+                out.push(id);
+            }
+        }
+        out
+    }
+
+    /// Build the champion `name` as `looks` describes it.
+    pub fn forge(&self, name: &str, looks: &Looks) -> Result<Loaded, String> {
+        let key = looks.base_key();
+        let base = self.base(&key).ok_or(format!("no base `{key}` in the catalog"))?;
+        let sliders = self.sliders(&key);
+        for (id, _) in &looks.shape {
+            if !sliders.contains(id) {
+                return Err(format!("`{key}` has no slider `{id}`"));
+            }
+        }
+        let mut model = base.model.clone();
+        shape(&mut model, looks);
+        proportion(&mut model, &looks.proportions);
+        skin(&mut model, looks::SKIN_TONES[looks.skin as usize % looks::SKIN_TONES.len()]);
+        attach_clips(&mut model, &self.library.model, looks.proportions.factor(0) * looks.proportions.factor(1).sqrt());
+        let side = sidecar::Sidecar {
+            id: name.to_string(),
+            kind: "champion".to_string(),
+            archetype: "biped".to_string(),
+            rig_version: 1,
+            fps: 30,
+            clips: library_clips(&self.library),
+        };
+        let library = pose::Library::new(&model, &side)?;
+        Ok(Loaded {
+            kind: "champion".to_string(),
+            model,
+            library,
+            vfx: self.library.vfx.clone(),
+            sounds: self.library.sounds.clone(),
+        })
+    }
+}
+
+/// The library pack's clips as sidecar entries (the forged model plays them all).
+fn library_clips(lib: &Loaded) -> Vec<sidecar::Clip> {
+    lib.library
+        .clips
+        .iter()
+        .map(|c| sidecar::Clip {
+            name: c.name.clone(),
+            frames: (c.length * 30.0).round() as u32,
+            looping: c.looping,
+            layer: match c.layer {
+                pose::Layer::Full => "full",
+                pose::Layer::Upper => "upper",
+                pose::Layer::Additive => "additive",
+            }
+            .to_string(),
+            stride_speed: c.stride_speed,
+            markers: c
+                .markers
+                .iter()
+                .map(|(n, t)| sidecar::Marker { name: n.clone(), frame: (t * 30.0).round() as u32 })
+                .collect(),
+        })
+        .collect()
+}
+
+/// Blend the morph targets: each slider's `+` by its value above 0, its `-` below.
+fn shape(model: &mut Model, looks: &Looks) {
+    for (mi, prims) in model.meshes.iter_mut().enumerate() {
+        let names = &model.target_names[mi];
+        for p in prims.iter_mut() {
+            for (ti, name) in names.iter().enumerate() {
+                let id = name.trim_end_matches(['+', '-']);
+                let v = looks.slider(id);
+                let w = if name.ends_with('+') { v.max(0.0) } else { (-v).max(0.0) };
+                if w == 0.0 {
+                    continue;
+                }
+                for (pos, d) in p.positions.iter_mut().zip(&p.targets[ti]) {
+                    for k in 0..3 {
+                        pos[k] += d[k] * w;
+                    }
+                }
+            }
+            // The forged model is a champion: it carries no targets.
+            p.targets.clear();
+        }
+    }
+    for n in &mut model.target_names {
+        n.clear();
+    }
+}
+
+/// Which proportion (index into `Proportions::NAMES`) scales a bone, and how: `true` stretches
+/// it along its length, `false` scales it whole.
+fn proportion_of(bone: &str) -> Option<(usize, bool)> {
+    let base = bone.trim_end_matches("_l").trim_end_matches("_r");
+    match base {
+        "thigh" | "calf" => Some((1, true)),
+        "upperarm" | "forearm" => Some((2, true)),
+        "spine_01" | "spine_02" | "chest" => Some((3, true)),
+        "head" => Some((4, false)),
+        "hand" => Some((5, false)),
+        _ => None,
+    }
+}
+
+fn add3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+fn sub3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn inv(q: [f32; 4]) -> [f32; 4] {
+    [-q[0], -q[1], -q[2], q[3]]
+}
+
+/// World rest transforms (translation, rotation) of every node; scales are 1 in our rigs.
+fn world(model: &Model) -> Vec<([f32; 3], [f32; 4])> {
+    let mut out: Vec<Option<([f32; 3], [f32; 4])>> = vec![None; model.nodes.len()];
+    fn solve(m: &Model, i: usize, out: &mut Vec<Option<([f32; 3], [f32; 4])>>) -> ([f32; 3], [f32; 4]) {
+        if let Some(w) = out[i] {
+            return w;
+        }
+        let n = &m.nodes[i];
+        let w = match n.parent {
+            None => (n.translation, n.rotation),
+            Some(p) => {
+                let (pt, pr) = solve(m, p, out);
+                (add3(pt, rotate(pr, n.translation)), qmul(pr, n.rotation))
+            }
+        };
+        out[i] = Some(w);
+        w
+    }
+    (0..model.nodes.len()).map(|i| solve(model, i, &mut out)).collect()
+}
+
+/// How a bone scales, in its own frame: along `axis` by `along` (a stretched bone: limbs,
+/// spine) and by `whole` in every direction (head, hands).
+#[derive(Clone, Copy)]
+struct BoneScale {
+    axis: [f32; 3],
+    along: f32,
+    whole: f32,
+}
+
+impl BoneScale {
+    const NONE: BoneScale = BoneScale { axis: [0.0, 1.0, 0.0], along: 1.0, whole: 1.0 };
+
+    /// `v` (in the bone's frame) scaled.
+    fn apply(&self, v: [f32; 3]) -> [f32; 3] {
+        let d = v[0] * self.axis[0] + v[1] * self.axis[1] + v[2] * self.axis[2];
+        let k = d * (self.along - 1.0);
+        [
+            (v[0] + self.axis[0] * k) * self.whole,
+            (v[1] + self.axis[1] * k) * self.whole,
+            (v[2] + self.axis[2] * k) * self.whole,
+        ]
+    }
+}
+
+/// Scale the skeleton (20 §6.1) and carry the mesh with it. A stretched bone (limbs, spine)
+/// scales along its length (toward its longest child, whatever the export's axis convention),
+/// a scaled one (head, hands) whole. A child's offset from its parent scales by the parent's
+/// scale, so longer legs lift everything above them; `height` scales it all. Every vertex is
+/// carried by its bones (linear blend): into a bone's old frame, scaled, out of its new one.
+fn proportion(model: &mut Model, p: &looks::Proportions) {
+    let height = p.factor(0);
+    let n = model.nodes.len();
+    let scales: Vec<BoneScale> = (0..n)
+        .map(|b| {
+            let Some((i, stretch)) = proportion_of(&model.nodes[b].name) else { return BoneScale::NONE };
+            if !stretch {
+                return BoneScale { whole: p.factor(i), ..BoneScale::NONE };
+            }
+            let child = (0..n)
+                .filter(|&c| model.nodes[c].parent == Some(b))
+                .map(|c| model.nodes[c].translation)
+                .max_by(|a, b| len(*a).total_cmp(&len(*b)));
+            match child {
+                Some(t) if len(t) > 1e-6 => {
+                    let l = len(t);
+                    BoneScale { axis: [t[0] / l, t[1] / l, t[2] / l], along: p.factor(i), whole: 1.0 }
+                }
+                _ => BoneScale::NONE,
+            }
+        })
+        .collect();
+    let old = world(model);
+    for i in 0..n {
+        let parent = model.nodes[i].parent.map_or(BoneScale::NONE, |q| scales[q]);
+        let t = parent.apply(model.nodes[i].translation);
+        model.nodes[i].translation = [t[0] * height, t[1] * height, t[2] * height];
+    }
+    // The legs hang from the pelvis: longer legs would push the feet into the ground, so lift
+    // the pelvis until the feet stand where they stood (scaled by height).
+    if let (Some(pelvis), Some(foot)) = (model.node_by_name("pelvis"), model.node_by_name("foot_l")) {
+        let sunk = old[foot].0[1] * height - world(model)[foot].0[1];
+        let frame = model.nodes[pelvis].parent.map_or([0.0, 0.0, 0.0, 1.0], |q| world(model)[q].1);
+        let up = rotate(inv(frame), [0.0, sunk, 0.0]);
+        model.nodes[pelvis].translation = add3(model.nodes[pelvis].translation, up);
+    }
+    let new = world(model);
+    let Some(joints) = model.skins.first().cloned() else { return };
+    for prims in &mut model.meshes {
+        for prim in prims.iter_mut() {
+            for (vi, pos) in prim.positions.iter_mut().enumerate() {
+                let (js, ws) = match (prim.joints.get(vi), prim.weights.get(vi)) {
+                    (Some(j), Some(w)) => (*j, *w),
+                    _ => continue,
+                };
+                let mut acc = [0.0f32; 3];
+                let mut total = 0.0;
+                for k in 0..4 {
+                    let (j, w) = (js[k] as usize, ws[k]);
+                    let Some(&node) = joints.get(j) else { continue };
+                    if w <= 0.0 {
+                        continue;
+                    }
+                    let (ot, or) = old[node];
+                    let (nt, nr) = new[node];
+                    let local = scales[node].apply(rotate(inv(or), sub3(*pos, ot)));
+                    let moved = add3(nt, rotate(nr, [local[0] * height, local[1] * height, local[2] * height]));
+                    for c in 0..3 {
+                        acc[c] += moved[c] * w;
+                    }
+                    total += w;
+                }
+                if total > 0.0 {
+                    *pos = [acc[0] / total, acc[1] / total, acc[2] / total];
+                }
+            }
+        }
+    }
+}
+
+fn len(v: [f32; 3]) -> f32 {
+    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+}
+
+/// Recolor the skin slot: each color times the tone over the base's skin, so the base's
+/// shading (a darker nose, cavity) stays.
+fn skin(model: &mut Model, tone: [f32; 3]) {
+    let Some(slot) = model.materials.iter().position(|m| m == "skin") else { return };
+    let ratio = [tone[0] / looks::BASE_SKIN[0], tone[1] / looks::BASE_SKIN[1], tone[2] / looks::BASE_SKIN[2]];
+    for prims in &mut model.meshes {
+        for p in prims.iter_mut().filter(|p| p.material == Some(slot)) {
+            for c in &mut p.colors {
+                // The eyes' whites share the slot: leave near-white alone.
+                if c[0] > 0.9 && c[1] > 0.88 {
+                    continue;
+                }
+                for k in 0..3 {
+                    c[k] = (c[k] * ratio[k]).min(1.0);
+                }
+            }
+        }
+    }
+}
+
+/// Copy the library's clips onto `model`, by bone name. Translation tracks (the pelvis's bob,
+/// the root's slides) scale with the body, so a taller champion's hips bob from its own height.
+fn attach_clips(model: &mut Model, lib: &Model, translation_scale: f32) {
+    model.animations = lib
+        .animations
+        .iter()
+        .map(|a| {
+            let mut a = a.clone();
+            a.channels.retain_mut(|c| {
+                let Some(node) = model.node_by_name(&lib.nodes[c.node].name) else { return false };
+                c.node = node;
+                if c.path == "translation" {
+                    for v in &mut c.values {
+                        for x in v.iter_mut() {
+                            *x *= translation_scale;
+                        }
+                    }
+                }
+                true
+            });
+            a
+        })
+        .collect();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn catalog() -> Catalog {
+        Catalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art")).unwrap()
+    }
+
+    fn head_top(m: &Model) -> f32 {
+        m.meshes.iter().flatten().flat_map(|p| p.positions.iter().map(|v| v[1])).fold(f32::MIN, f32::max)
+    }
+
+    #[test]
+    fn the_catalog_has_both_slim_bases_and_their_sliders() {
+        let c = catalog();
+        for key in ["humanoid_slim_masculine", "humanoid_slim_feminine"] {
+            let s = c.sliders(key);
+            assert!(s.len() >= 20, "{key}: {s:?}");
+            assert!(s.contains(&"nose_reach".to_string()));
+        }
+    }
+
+    #[test]
+    fn a_plain_forge_is_the_base_with_clips() {
+        let c = catalog();
+        let looks = Looks { skin: 2, ..Looks::default() };
+        let f = c.forge("Plain", &looks).unwrap();
+        let base = c.base("humanoid_slim_masculine").unwrap();
+        assert_eq!(f.kind, "champion");
+        assert!(f.library.clip("walk").is_some());
+        for (a, b) in f.model.meshes.iter().flatten().zip(base.model.meshes.iter().flatten()) {
+            for (p, q) in a.positions.iter().zip(&b.positions) {
+                assert!((0..3).all(|k| (p[k] - q[k]).abs() < 1e-5), "{p:?} {q:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn sliders_and_proportions_change_the_model() {
+        let c = catalog();
+        let plain = c.forge("Plain", &Looks::default()).unwrap();
+        let mut long_nose = Looks::default();
+        long_nose.set_slider("nose_reach", 1.0);
+        let nosed = c.forge("Nosed", &long_nose).unwrap();
+        // Faces −Z in Blender, +Z in glTF: the nose tip reaches further toward +Z.
+        let front = |m: &Model| {
+            m.meshes.iter().flatten().flat_map(|p| p.positions.iter().map(|v| v[2])).fold(f32::MIN, f32::max)
+        };
+        assert!(front(&nosed.model) > front(&plain.model) + 0.02);
+        let mut tall = Looks::default();
+        tall.proportions.set(0, 1.0);
+        tall.proportions.set(1, 1.0);
+        let t = c.forge("Tall", &tall).unwrap();
+        let ratio = head_top(&t.model) / head_top(&plain.model);
+        assert!(ratio > 1.2 && ratio < 1.35, "{ratio}");
+        // The skeleton moved with it.
+        let hb = |m: &Model| world(m)[m.node_by_name("head").unwrap()].0[1];
+        assert!(hb(&t.model) / hb(&plain.model) > 1.2);
+    }
+
+    #[test]
+    fn unknown_sliders_and_bases_fail() {
+        let c = catalog();
+        let mut l = Looks::default();
+        l.set_slider("tail_length", 1.0);
+        assert!(c.forge("X", &l).err().unwrap().contains("tail_length"));
+        let l = Looks { build: "quadruped".into(), ..Looks::default() };
+        assert!(c.forge("X", &l).is_err());
+    }
+
+    #[test]
+    fn forging_is_deterministic() {
+        let c = catalog();
+        let mut l = Looks::default();
+        l.set_slider("jaw_width", 0.7);
+        l.proportions.set(4, -0.5);
+        let a = c.forge("A", &l).unwrap();
+        let b = c.forge("A", &l).unwrap();
+        let flat = |m: &Model| m.meshes.iter().flatten().flat_map(|p| p.positions.clone()).collect::<Vec<_>>();
+        assert_eq!(flat(&a.model), flat(&b.model));
+    }
+}

@@ -159,6 +159,8 @@ def _rewrite(path, doc, arrays):
             used.update(prim["attributes"].values())
             if "indices" in prim:
                 used.add(prim["indices"])
+            for target in prim.get("targets", []):
+                used.update(target.values())
     for skin in doc.get("skins", []):
         if "inverseBindMatrices" in skin:
             used.add(skin["inverseBindMatrices"])
@@ -198,6 +200,8 @@ def _rewrite(path, doc, arrays):
             prim["attributes"] = {k: remap[v] for k, v in prim["attributes"].items()}
             if "indices" in prim:
                 prim["indices"] = remap[prim["indices"]]
+            if "targets" in prim:
+                prim["targets"] = [{k: remap[v] for k, v in t.items()} for t in prim["targets"]]
     for skin in doc.get("skins", []):
         if "inverseBindMatrices" in skin:
             skin["inverseBindMatrices"] = remap[skin["inverseBindMatrices"]]

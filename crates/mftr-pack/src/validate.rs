@@ -90,6 +90,7 @@ pub fn validate_model(model: &Model, glb_len: usize, side: &Sidecar) -> Report {
     ));
     check_header(&mut r, side);
     check_mesh(&mut r, model, glb_len, &side.kind);
+    check_targets(&mut r, model, &side.kind);
     if side.kind == "prop" {
         check_prop(&mut r, model);
         return r;
@@ -101,6 +102,38 @@ pub fn validate_model(model: &Model, glb_len: usize, side: &Sidecar) -> Report {
     };
     check_clips(&mut r, model, side, &joints);
     r
+}
+
+/// Morph targets (CR2): only a champion creator base has them, as slider pairs `<id>+` and
+/// `<id>-`, ids made of `a–z`, `0–9` and `_`.
+fn check_targets(r: &mut Report, m: &Model, kind: &str) {
+    let names: Vec<&String> = m.target_names.iter().flatten().collect();
+    if kind != "base" {
+        if m.meshes.iter().flatten().any(|p| !p.targets.is_empty()) {
+            r.err("morph targets are for champion creator bases only");
+        }
+        return;
+    }
+    if names.is_empty() {
+        r.err("a creator base needs its sliders as morph targets");
+    }
+    for n in &names {
+        let Some(id) = n.strip_suffix('+').or_else(|| n.strip_suffix('-')) else {
+            r.err(format!("morph target `{n}`: a slider's `+` or `-`"));
+            continue;
+        };
+        if id.is_empty()
+            || id.len() > 32
+            || !id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        {
+            r.err(format!("morph target `{n}`: slider ids are a–z, 0–9 and _"));
+        }
+        let other = if n.ends_with('+') { format!("{id}-") } else { format!("{id}+") };
+        if !names.iter().any(|x| **x == other) {
+            r.err(format!("slider `{id}` has no `{other}`"));
+        }
+    }
+    r.summary.push(format!("{} sliders", names.len() / 2));
 }
 
 /// A map prop (structures, trees, rocks): one skinned mesh on a `root` bone (and optional
@@ -129,9 +162,12 @@ fn check_prop(r: &mut Report, m: &Model) {
 }
 
 fn check_header(r: &mut Report, side: &Sidecar) {
-    if !matches!(side.kind.as_str(), "champion" | "library" | "minion" | "monster" | "shopkeeper" | "rig" | "prop") {
+    if !matches!(
+        side.kind.as_str(),
+        "champion" | "library" | "minion" | "monster" | "shopkeeper" | "rig" | "prop" | "base"
+    ) {
         r.err(format!(
-            "sidecar kind `{}` must be champion, library, minion, monster, shopkeeper, rig or prop",
+            "sidecar kind `{}` must be champion, library, minion, monster, shopkeeper, rig, prop or base",
             side.kind
         ));
     }
@@ -189,8 +225,9 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
     } else if tris < target.0 || tris > target.1 {
         r.warn(format!("{tris} triangles, outside the {}–{} target", target.0, target.1));
     }
-    if bytes > rules::MODEL_BYTES_BUDGET {
-        r.warn(format!("{bytes} bytes, over the {} byte mesh + animation budget", rules::MODEL_BYTES_BUDGET));
+    let budget = if kind == "base" { rules::BASE_BYTES_BUDGET } else { rules::MODEL_BYTES_BUDGET };
+    if bytes > budget {
+        r.warn(format!("{bytes} bytes, over the {budget} byte mesh + animation budget"));
     }
 
     // Material slots (10 §2).

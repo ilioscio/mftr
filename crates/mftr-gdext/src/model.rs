@@ -22,8 +22,72 @@ pub struct MftrModel {
     pack: Arc<mftr_pack::Loaded>,
 }
 
+/// The champion creator's catalog (CR2), loaded once from the art folder.
+static CATALOG: std::sync::Mutex<Option<Arc<mftr_forge::Catalog>>> = std::sync::Mutex::new(None);
+
+pub(crate) fn catalog(art: &str) -> Option<Arc<mftr_forge::Catalog>> {
+    let mut c = CATALOG.lock().unwrap_or_else(|e| e.into_inner());
+    if c.is_none() {
+        match mftr_forge::Catalog::load(std::path::Path::new(art)) {
+            Ok(cat) => *c = Some(Arc::new(cat)),
+            Err(e) => {
+                godot_error!("MFTR creator catalog: {e}");
+                return None;
+            }
+        }
+    }
+    c.clone()
+}
+
+impl MftrModel {
+    /// A model of a pack built here (the creator's preview, CR3).
+    pub(crate) fn from_pack(pack: Arc<mftr_pack::Loaded>) -> Gd<MftrModel> {
+        Gd::from_init_fn(|base| MftrModel { base, pack })
+    }
+}
+
 #[godot_api]
 impl MftrModel {
+    /// Check and register a champion file from disk (`--champion-file`, the creator): its
+    /// champion's name, or "" if it was refused (the reason goes to the error log).
+    #[func]
+    fn load_champion_file(path: GString) -> GString {
+        let path = path.to_string();
+        match std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|t| mftr_client::load_champion_file(&t))
+        {
+            Ok(id) => GString::from(id.def().name),
+            Err(e) => {
+                godot_error!("MFTR champion file {path} refused: {e}");
+                GString::new()
+            }
+        }
+    }
+
+    /// Forge the model of `champion` from its champion file's looks and the catalog under `art`
+    /// (CR2, `mftr-forge`): `null` for a champion with no file or no looks.
+    #[func]
+    fn forge(art: GString, champion: GString) -> Option<Gd<MftrModel>> {
+        let text = mftr_client::champion_file(&champion.to_string())?;
+        let looks = match mftr_forge::looks::of_champion_file(&text) {
+            Ok(Some(l)) => l,
+            Ok(None) => return None,
+            Err(e) => {
+                godot_error!("MFTR {champion}'s looks: {e}");
+                return None;
+            }
+        };
+        let cat = catalog(&art.to_string())?;
+        match cat.forge(&champion.to_string(), &looks) {
+            Ok(pack) => Some(Gd::from_init_fn(|base| MftrModel { base, pack: Arc::new(pack) })),
+            Err(e) => {
+                godot_error!("MFTR {champion} couldn't be forged: {e}");
+                None
+            }
+        }
+    }
+
     /// Loads and validates `<id>.glb` and its `<id>.anims.ron` (an absolute path). `null` if it
     /// fails validation or can't be read (the reason goes to the error log).
     #[func]

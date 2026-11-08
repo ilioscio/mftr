@@ -58,9 +58,10 @@ fn err<T>(at: &str, msg: impl Into<String>) -> Result<T, DataError> {
 
 // --- Syntax -----------------------------------------------------------------------------------
 
-/// A parsed value: numbers keep their text until a field says what type they are.
+/// A parsed value: numbers keep their text until a field says what type they are. Public so
+/// other readers of champion files (the creator's `looks`, `mftr-forge`) share this one.
 #[derive(Clone, Debug, PartialEq)]
-enum Value {
+pub enum Value {
     Num(String),
     Str(String),
     /// A bare identifier: a unit variant (`Magic`, `None`).
@@ -282,7 +283,8 @@ impl Parser<'_> {
     }
 }
 
-fn parse(text: &str) -> Result<Value, DataError> {
+/// Parse a value (the whole text, capped at [`MAX_INPUT`]).
+pub fn parse(text: &str) -> Result<Value, DataError> {
     if text.len() > MAX_INPUT {
         return err("input", format!("longer than {MAX_INPUT} bytes"));
     }
@@ -298,13 +300,13 @@ fn parse(text: &str) -> Result<Value, DataError> {
 // --- Typed reading ----------------------------------------------------------------------------
 
 /// A struct's fields, taken one by one; [`Fields::done`] fails on any left over.
-struct Fields {
+pub struct Fields {
     at: String,
     list: Vec<(String, Value)>,
 }
 
 impl Fields {
-    fn of(v: Value, at: &str, want: Option<&str>) -> Result<Fields, DataError> {
+    pub fn of(v: Value, at: &str, want: Option<&str>) -> Result<Fields, DataError> {
         match v {
             Value::Fields(name, list) => {
                 match (name.as_deref(), want) {
@@ -323,13 +325,13 @@ impl Fields {
         if self.at.is_empty() { key.to_string() } else { format!("{}.{key}", self.at) }
     }
 
-    fn take(&mut self, key: &str) -> Option<(Value, String)> {
+    pub fn take(&mut self, key: &str) -> Option<(Value, String)> {
         let i = self.list.iter().position(|(k, _)| k == key)?;
         let (_, v) = self.list.remove(i);
         Some((v, self.path(key)))
     }
 
-    fn req(&mut self, key: &str) -> Result<(Value, String), DataError> {
+    pub fn req(&mut self, key: &str) -> Result<(Value, String), DataError> {
         match self.take(key) {
             Some(x) => Ok(x),
             None => err(&self.at_or_top(), format!("`{key}` is missing")),
@@ -340,31 +342,31 @@ impl Fields {
         if self.at.is_empty() { "champion".to_string() } else { self.at.clone() }
     }
 
-    fn f32(&mut self, key: &str) -> Result<f32, DataError> {
+    pub fn f32(&mut self, key: &str) -> Result<f32, DataError> {
         let (v, at) = self.req(key)?;
         num(v, &at)
     }
 
-    fn f32_or(&mut self, key: &str, default: f32) -> Result<f32, DataError> {
+    pub fn f32_or(&mut self, key: &str, default: f32) -> Result<f32, DataError> {
         match self.take(key) {
             Some((v, at)) => num(v, &at),
             None => Ok(default),
         }
     }
 
-    fn ms(&mut self, key: &str) -> Result<SimDuration, DataError> {
+    pub fn ms(&mut self, key: &str) -> Result<SimDuration, DataError> {
         let (v, at) = self.req(key)?;
         ms(v, &at)
     }
 
-    fn ms_or(&mut self, key: &str) -> Result<SimDuration, DataError> {
+    pub fn ms_or(&mut self, key: &str) -> Result<SimDuration, DataError> {
         match self.take(key) {
             Some((v, at)) => ms(v, &at),
             None => Ok(SimDuration(0)),
         }
     }
 
-    fn done(self) -> Result<(), DataError> {
+    pub fn done(self) -> Result<(), DataError> {
         match self.list.first() {
             Some((k, _)) => err(&self.path(k), "unknown field"),
             None => Ok(()),
@@ -372,7 +374,8 @@ impl Fields {
     }
 }
 
-fn num(v: Value, at: &str) -> Result<f32, DataError> {
+/// A finite number ≥ 0.
+pub fn num(v: Value, at: &str) -> Result<f32, DataError> {
     let Value::Num(t) = v else { return err(at, "expected a number") };
     match t.parse::<f32>() {
         Ok(x) if x.is_finite() && x >= 0.0 => Ok(x),
@@ -381,7 +384,8 @@ fn num(v: Value, at: &str) -> Result<f32, DataError> {
     }
 }
 
-fn int(v: Value, at: &str, max: u64) -> Result<u64, DataError> {
+/// A whole number from 0 to `max`.
+pub fn int(v: Value, at: &str, max: u64) -> Result<u64, DataError> {
     let Value::Num(t) = v else { return err(at, "expected a whole number") };
     match t.parse::<u64>() {
         Ok(x) if x <= max => Ok(x),
@@ -395,7 +399,7 @@ fn ms(v: Value, at: &str) -> Result<SimDuration, DataError> {
 }
 
 /// An enum value: `Name` or `Name(fields...)`.
-fn variant(v: Value, at: &str) -> Result<(String, Option<Fields>), DataError> {
+pub fn variant(v: Value, at: &str) -> Result<(String, Option<Fields>), DataError> {
     match v {
         Value::Ident(name) => Ok((name, None)),
         Value::Fields(Some(name), list) => Ok((name, Some(Fields { at: at.to_string(), list }))),
@@ -403,7 +407,8 @@ fn variant(v: Value, at: &str) -> Result<(String, Option<Fields>), DataError> {
     }
 }
 
-fn unit(v: Value, at: &str) -> Result<String, DataError> {
+/// A bare name (a unit variant).
+pub fn unit(v: Value, at: &str) -> Result<String, DataError> {
     match v {
         Value::Ident(name) => Ok(name),
         _ => err(at, "expected a name"),
@@ -638,7 +643,14 @@ fn ability(v: Value, at: &str) -> Result<Ability, DataError> {
 
 /// Read a champion file (`Champion(format: 0, ...)`).
 pub fn read_champion(text: &str) -> Result<ChampionDef, DataError> {
+    read_champion_and_looks(text).map(|(def, _)| def)
+}
+
+/// A champion file's kit, and its `looks` (how the creator built it, CR2) unread: the sim
+/// doesn't use them, and `mftr-forge` checks them.
+pub fn read_champion_and_looks(text: &str) -> Result<(ChampionDef, Option<(Value, String)>), DataError> {
     let mut f = Fields::of(parse(text)?, "", Some("Champion"))?;
+    let looks = f.take("looks");
     let (v, at) = f.req("format")?;
     let format = int(v, &at, u32::MAX as u64)?;
     if format != FORMAT {
@@ -683,7 +695,7 @@ pub fn read_champion(text: &str) -> Result<ChampionDef, DataError> {
         abilities[i] = ability(item, &format!("{lat}[{i}]"))?;
     }
     f.done()?;
-    Ok(ChampionDef { name, class, stats, growth, attack, abilities })
+    Ok((ChampionDef { name, class, stats, growth, attack, abilities }, looks))
 }
 
 // --- Writing ----------------------------------------------------------------------------------
@@ -849,13 +861,20 @@ fn quote(s: &str) -> String {
 /// Write a champion file. `comment` (one or more lines) goes at the top as `//` lines.
 /// [`read_champion`] gives back exactly `def`.
 pub fn write_champion(def: &ChampionDef, comment: &str) -> String {
+    write_champion_as(def, def.name, comment, "")
+}
+
+/// [`write_champion`] under another name, with `extra` (whole field lines, like a recipe's
+/// `looks`) after the format line.
+pub fn write_champion_as(def: &ChampionDef, name: &str, comment: &str, extra: &str) -> String {
     let mut out = String::new();
     for line in comment.lines() {
         let _ = writeln!(out, "// {line}");
     }
     let _ = writeln!(out, "Champion(");
     let _ = writeln!(out, "    format: {FORMAT},");
-    let _ = writeln!(out, "    name: {},", quote(def.name));
+    out += extra;
+    let _ = writeln!(out, "    name: {},", quote(name));
     let _ = writeln!(out, "    class: {},", def.class.name());
     let _ = writeln!(out, "    stats: {},", write_stats(&def.stats));
     let _ = writeln!(out, "    growth: {},", write_stats(&def.growth));

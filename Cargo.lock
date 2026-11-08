@@ -451,13 +451,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "mftr-forge"
+version = "0.19.0"
+dependencies = [
+ "mftr-pack",
+ "mftr-sim",
+]
+
+[[package]]
 name = "mftr-gdext"
 version = "0.19.0"
 dependencies = [
  "godot",
  "mftr-client",
+ "mftr-forge",
  "mftr-net",
  "mftr-pack",
+ "mftr-server",
  "mftr-sim",
 ]
 

@@ -286,6 +286,23 @@ struct RosterFetch {
     have: Vec<u8>,
 }
 
+/// Champion files this client knows (CR2): from a server's roster, or loaded from disk (the
+/// creator, `--champion-file`), by champion name in lowercase. The model is forged from a
+/// file's looks (`mftr-forge`).
+static FILES: std::sync::Mutex<BTreeMap<String, String>> = std::sync::Mutex::new(BTreeMap::new());
+
+/// Check and register a champion file, and remember its text: the champion's id.
+pub fn load_champion_file(text: &str) -> Result<ChampionId, String> {
+    let id = mftr_sim::limits::load_champion_file(text)?;
+    FILES.lock().unwrap_or_else(|e| e.into_inner()).insert(id.def().name.to_lowercase(), text.to_string());
+    Ok(id)
+}
+
+/// The champion file of the champion named `name` (any case), if this client has one.
+pub fn champion_file(name: &str) -> Option<String> {
+    FILES.lock().unwrap_or_else(|e| e.into_inner()).get(&name.to_lowercase()).cloned()
+}
+
 /// Champion files fetched before, by text hash: a client that joins the same server again (or
 /// another with the same champions) doesn't fetch them twice.
 static FETCHED: std::sync::Mutex<BTreeMap<u64, String>> = std::sync::Mutex::new(BTreeMap::new());
@@ -1114,7 +1131,7 @@ impl ClientSession {
         let Some(f) = self.roster_fetch.take() else { return };
         let mut ids = Vec::new();
         for text in &f.texts {
-            match mftr_sim::limits::load_champion_file(text) {
+            match load_champion_file(text) {
                 Ok(id) => ids.push(id),
                 Err(e) => {
                     // A file this client won't accept: it doesn't join (11 §4).

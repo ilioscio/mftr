@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slice 1 ✅ (champions as data, files, classes, customs on the wire) | Slices 2–10 |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–3 ✅ (champions as data; forged models from sliders; the creator screen and Test) | Slices 4–10 |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1337,6 +1337,53 @@ replace the shared head anyway.
 - **Check:** `custom_champion_end_to_end` (netlab): over a lossy link a real client session
   fetches Grumble, goes through champion select, plays him predicted, and the server's replay
   re-simulates with every hash matching.
+
+### CR slice 2 status (2026-11-07): ✅ done (block-out sliders)
+- **The catalog:** `art/creator/humanoid_slim/` builds a base per gender
+  (`mftr_blender.creator`): the template's lofted body as an undersuit (no armor, the team
+  accent kept, limbs ×1.3 and torso ×1.1 for 14 §2.2's heroic proportions), sculpted hands, the
+  shared head, and **23 sliders** as shape keys, each a `+` and a `-` extreme: head width, face
+  length, jaw width, chin length and reach, cheekbones, hollow cheeks, brow ridge, nose length,
+  reach, width and hook, mouth width, eye size, ear size and point; body bulk, belly, chest,
+  hips, shoulders, muscle, neck. The extremes are **block-outs** (scripted grab-brush strokes and
+  region scales, D49) for an artist to re-sculpt; the ids are the contract. Exported as packs of
+  kind `base` (5,482 triangles, ~1 MB each with dense morph targets).
+- **`mftr-pack`:** reads morph targets (positions only, ≤ 128, names from `targetNames`) and
+  allows them only in `base` packs, whose targets must come in `<id>+`/`<id>-` pairs; bases get
+  their own 2 MB budget. The exporter keeps morph targets for bases.
+- **`mftr-forge`** (new crate): reads a champion file's `looks` (build, gender, `shape` slider
+  values, `proportions`, `skin` tone; strict, through the sim's reader, whose value API is now
+  public), blends the base's morph targets, scales the skeleton (limbs and spine stretch toward
+  their child, head and hands scale whole, height scales all; the pelvis lifts so longer legs
+  stand on the ground; the mesh rides its bones), recolors skin from 16 tones, and attaches the
+  shared clip library (translation tracks scaled with the body). The result is an ordinary
+  `Loaded` pack. Deterministic; 7 tests.
+- **The client:** `--champion-file FILE` registers a champion file locally (the creator will
+  too); champion files from a server's roster are remembered by name; a champion without its
+  own pack is forged from its file's looks (`MftrModel.forge`), else the template. Grumble now
+  has looks (troll green, a heavy brow and jaw, pointed ears, a belly, long arms, big hands) and
+  stands beside Rook in `--lineup`.
+- **Next for the bases:** an artist pass on the sliders; the heavy humanoid build (CR8).
+
+### CR slice 3 status (2026-11-07): ✅ done (the shell)
+- **The screen** (`client/scripts/creator.gd`, from the start menu's *Champion creator* or
+  `--creator`): the nine steps down the left (those not built yet dimmed and saying which slice
+  brings them), a live 3D preview in the middle (drag or Q/E turns it, the wheel zooms; face steps
+  frame the head from its own bone, others the whole body), the step's controls on the right.
+  Build and gender; the face's and body's sliders; the six proportions; 16 skin tones; the kit
+  (an official champion's, borrowed whole until the moveset step, CR6); the name. Randomize (gentle,
+  sometimes bold), Reset shape, New, Load, Save (Ctrl+S), and what still stops a save.
+- **`MftrCreator`** (Rust, `mftr-gdext`): the champion being made, a `mftr_forge::recipe::Recipe`
+  (name, kit, looks), written to and read from a champion file with the kit's numbers and its
+  `looks`; saving registers it, so it can be played at once. Previews are forged on change
+  (60 ms after the last slider move).
+- **Test** (20 §10): saves, then starts a **practice server in the client's own process**
+  (`mftr_server::local::LocalServer`: a free port on 127.0.0.1, a fresh key pinned in the address)
+  running the Duel Sandbox with one bot and the champion file, and joins it as that champion. Esc
+  leaves, stops the server and reopens the creator on the same file. The damage meter and dummies
+  of 20 §10 come later.
+- **Files:** champions save to `user://champions/<name>.champion.ron`; `--creator-load FILE` and
+  `--creator-step NAME` open the screen on them (for screenshots).
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
