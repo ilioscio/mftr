@@ -319,6 +319,69 @@ def catalog(head):
                        [(0.09, 0.02), (0.16, 0.014), (0.24, 0.008)], "metal", IRON, ref=tuple(axis)),
         mesh.path_part("hand_r", [at(1.06, across * -0.02), at(1.06, across * -0.12)], 4, [(0.05, 0.03), (0.0, 0.0)], "metal", IRON,
                        ref=tuple(axis))])
+
+    # More to make a figure from (20 §7.1): hair, headwear and faces with character, light
+    # armor, gear on the back, a spear and a hammer, a lantern, wrapped feet.
+    add("hair.long", "hair", "Long hair", [
+        _head_shell(head, _line(0.80, 0.50, 0.25), 1.06, HAIR, "cloth"),
+        mesh.path_part("head", [tuple(hc + Vector((0, 0.09 * k, 0.02 * k))), tuple(hc + Vector((0, 0.13 * k, -0.16 * k))),
+                                tuple(hc + Vector((0, 0.12 * k, -0.42 * k)))], 6, [(0.10 * k, 0.035), (0.11 * k, 0.035), (0.07 * k, 0.02)],
+                       "cloth", HAIR, ref=(1, 0, 0))])
+    add("hair.braids", "hair", "Braids", [_head_shell(head, _line(0.80, 0.45, 0.30), 1.05, HAIR, "cloth")] + [
+        part for sgn in (1, -1) for part in (
+            mesh.path_part("head", [tuple(hc + Vector((sgn * 0.10 * k, 0.02, -0.04 * k))), tuple(hc + Vector((sgn * 0.12 * k, -0.01, -0.2 * k))),
+                                    tuple(hc + Vector((sgn * 0.11 * k, -0.05, -0.4 * k)))], 6, [(0.028, 0.028), (0.026, 0.026), (0.018, 0.018)],
+                           "cloth", HAIR),
+            mesh.box_part("head", tuple(hc + Vector((sgn * 0.115 * k, -0.03, -0.3 * k))), (0.04, 0.04, 0.03), "metal", GOLD))])
+    add("head.crown", "head", "Crown", [
+        loft("head", tuple(hc + Vector((0, 0, 0.05 * k))), tuple(hc + Vector((0, 0, 0.10 * k))), 16,
+             [(0, 0.118 * k, 0.122 * k), (1, 0.122 * k, 0.126 * k)], "metal", GOLD)] + [
+        mesh.path_part("head", [tuple(hc + Vector((math.cos(a_) * 0.12 * k, math.sin(a_) * 0.12 * k, 0.095 * k))),
+                                tuple(hc + Vector((math.cos(a_) * 0.125 * k, math.sin(a_) * 0.125 * k, 0.16 * k)))], 4, [(0.022, 0.022), (0, 0)],
+                       "metal", GOLD) for a_ in [2 * math.pi * j / 8 for j in range(8)]] + [
+        mesh.box_part("head", tuple(head.front(0.86, 0) + Vector((0, -0.02, 0))), (0.035, 0.015, 0.035), "emissive", GLOW, rot=(0, 45, 0))])
+    add("face.eyepatch", "face", "Eyepatch", [
+        mesh.box_part("head", tuple(head.front(0.585, 0.034 * k) + Vector((0, -0.014, 0))), (0.055, 0.012, 0.045), "cloth", LEATHER_DARK),
+        loft("head", tuple(hc + Vector((0, 0, 0.005))), tuple(hc + Vector((0, 0, 0.015))), 16,
+             [(0, 0.113 * k, 0.118 * k), (1, 0.113 * k, 0.118 * k)], "cloth", LEATHER_DARK)])
+    add("face.scarf", "face", "Bandit scarf", [
+        loft("neck", P("neck", 0.0), tuple(Vector((0, hc.y - 0.005, head.front(0.32, 0).z))), 12,
+             [(0, 0.12, 0.11), (0.6, 0.125 * k, 0.12 * k), (1, 0.12 * k, 0.118 * k)], "cloth", CLOTH_RED),
+        mesh.box_part("neck", P("neck", 0.3, (0, -0.1, -0.08)), (0.10, 0.03, 0.14), "cloth", CLOTH_RED, rot=(-20, 0, 0), taper=0.5)])
+    add("torso.jerkin", "torso", "Leather jerkin", [
+        loft("chest", P("spine_01", 0.0), P("chest", 0.95), 16,
+             [(0, 0.195, 0.145), (0.5, 0.225, 0.158), (0.85, 0.235, 0.162), (1, 0.2, 0.14)], "cloth", LEATHER),
+        mesh.box_part("chest", P("chest", 0.45, (0, -0.165, 0)), (0.05, 0.02, 0.5), "cloth", LEATHER_DARK, rot=(0, 30, 0)),
+        mesh.box_part("chest", P("chest", 0.45, (0, 0.165, 0)), (0.05, 0.02, 0.5), "cloth", LEATHER_DARK, rot=(0, -30, 0)),
+        mesh.box_part("chest", P("chest", 0.4, (0.06, -0.18, 0.04)), (0.03, 0.02, 0.03), "metal", GOLD)],
+        hides=["spine_01", "spine_02", "chest"])
+    add("back.backpack", "back", "Traveler's pack", [
+        mesh.box_part("chest", P("chest", 0.35, (0, 0.2, 0)), (0.32, 0.16, 0.38), "cloth", LEATHER, bevel=0.3),
+        loft("chest", P("chest", 0.95, (-0.2, 0.2, 0.06)), P("chest", 0.95, (0.2, 0.2, 0.06)), 10, [(0, 0.07, 0.07), (1, 0.07, 0.07)], "cloth",
+             CLOTH_RED),
+        mesh.box_part("chest", P("chest", 0.2, (0.17, 0.2, 0)), (0.06, 0.1, 0.14), "cloth", LEATHER_DARK)])
+    # Carried point up: the blade on the end above the fist.
+    add("weapon.spear", "weapon", "Spear", [
+        mesh.path_part("hand_r", [at(0.9), at(-1.25)], 6, [(0.022, 0.022), (0.024, 0.024)], "cloth", WOOD, ref=tuple(across)),
+        mesh.path_part("hand_r", [at(-1.22), at(-1.34), at(-1.52)], 4, [(0.03, 0.01), (0.05, 0.012), (0.0, 0.0)], "metal", IRON, ref=tuple(across)),
+        mesh.path_part("hand_r", [at(-1.18), at(-1.24)], 6, [(0.032, 0.032), (0.032, 0.032)], "accent", ACCENT, ref=tuple(across))],
+        accent=True)
+    add("weapon.hammer", "weapon", "War hammer", [
+        mesh.path_part("hand_r", [at(-0.12), at(0.58)], 6, [(0.026, 0.026), (0.028, 0.028)], "cloth", WOOD, ref=tuple(across)),
+        mesh.path_part("hand_r", [at(0.62, across * -0.11), at(0.62, across * 0.11)], 6, [(0.07, 0.07), (0.07, 0.07)], "metal", IRON,
+                       ref=tuple(axis)),
+        mesh.path_part("hand_r", [at(0.62, across * -0.13), at(0.62, across * -0.11)], 6, [(0.075, 0.075), (0.075, 0.075)], "metal", GOLD,
+                       ref=tuple(axis))])
+    add("offhand.lantern", "offhand", "Lantern", [
+        mesh.path_part("hand_l", [P("prop_l", 0.0, (0, 0, 0)), P("prop_l", 0.0, (0, 0, -0.16))], 4, [(0.008, 0.008), (0.008, 0.008)], "metal", IRON),
+        mesh.box_part("hand_l", P("prop_l", 0.0, (0, 0, -0.25)), (0.09, 0.09, 0.14), "emissive", GLOW, bevel=0.2),
+        mesh.box_part("hand_l", P("prop_l", 0.0, (0, 0, -0.17)), (0.11, 0.11, 0.025), "metal", IRON),
+        mesh.box_part("hand_l", P("prop_l", 0.0, (0, 0, -0.33)), (0.11, 0.11, 0.025), "metal", IRON)])
+    add("feet.wraps", "feet", "Foot wraps", pair(
+        loft("calf_l", P("calf_l", 0.55), P("calf_l", 1.0), 8, [(0, 0.075, 0.075), (1, 0.068, 0.07)], "cloth", CLOTH))
+        + pair(loft("foot_l", P("foot_l", 0.0, (0, 0, -0.005)), P("toe_l", 0.8, (0, 0, -0.005)), 6,
+                    [(0, 0.062, 0.05), (0.6, 0.06, 0.04), (1, 0.048, 0.028)], "cloth", CLOTH)),
+        hides=["foot_l", "foot_r", "toe_l", "toe_r"])
     return out
 
 

@@ -270,9 +270,24 @@ Each one has:
 - its own effects by phase;
 - the sounds of an official move.
 
-On a creature build it plays that build's clip for its shape. The first eight are Whirlwind,
-Shoulder Charge, Chain Hook, Battle Cry, Shadow Step, Leap Strike (a dash set), Meteor Call (R)
-and Lance of Light (R, a beam). `art/champions/examples/stormwarden.champion.ron` is made from
+On a creature build it plays that build's clip for its shape. There are fifteen:
+
+| Kind | Moves |
+|---|---|
+| Fighter | Whirlwind, Shoulder Charge, Chain Hook, Battle Cry, Leap Strike (a dash set), Riposte (a shield) |
+| Caster | Arcane Bolt, Frost Nova, Benediction (a heal) |
+| Skirmisher | Shadow Step, Smoke Bomb (a dash that hides), Knife Fan |
+| Ultimate | Meteor Call, Lance of Light (a beam), Earthsplitter (a line that knocks up) |
+
+The humanoid bases also have 52 parts now. New this pass:
+
+| Slot | New parts |
+|---|---|
+| Hair | long hair, braids |
+| Head and face | crown, eyepatch, bandit scarf |
+| Torso and back | leather jerkin, traveler's pack |
+| Weapons and offhand | spear, war hammer, lantern |
+| Feet | foot wraps | `art/champions/examples/stormwarden.champion.ron` is made from
 them. A new move is a new entry in the file and its clip; it needs no new code.
 
 *Status (2026-11-08), creature builds:* each move plays a clip for its shape, made in the

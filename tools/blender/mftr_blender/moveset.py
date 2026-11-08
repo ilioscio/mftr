@@ -21,6 +21,9 @@ from .library import _clip, arms
 # A ready stance: knees soft, feet apart, the weight low.
 STANCE = merge(sym("thigh", -10, 0, 0), sym("calf", 18, 0, 0), sym("foot", -8, 0, 0), {"spine_01": (6, 0, 0)})
 READY = merge(STANCE, arms((0.3, 0.12, -1), (0.2, 0.45, -0.8)))
+# Arms raised in front: the way through for a swing from the hips to over the head (an arm
+# swung 180° in one key would go the short way, out to the side).
+FRONT = arms((0.2, 1, 0.1), (0.1, 1, 0.3))
 WIDE = merge({"thigh_l": (-8, 12, 0), "thigh_r": (-8, -12, 0), "calf_l": (24, 0, 0), "calf_r": (24, 0, 0), "foot_l": (-14, -10, 0),
               "foot_r": (-14, 10, 0)})
 
@@ -139,7 +142,7 @@ def meteor_call(arm):
     haul = merge(sym("thigh", -48, 0, 0), sym("calf", 80, 0, 0), sym("foot", -30, 0, 0), arms((0.3, 0.8, -0.4), (0.15, 1, -0.6)),
                  {"spine_01": (30, 0, 0), "spine_02": (16, 0, 0), "chest": (6, 0, 0), "head": (-16, 0, 0)})
     keys = [(0, READY, {"pelvis": (0, 0, -0.03)}, "ease"), (6, merge(READY, {"spine_01": (12, 0, 0)}), {"pelvis": (0, 0, -0.08)}, "ease"),
-            (14, reach, {"pelvis": (0, 0, 0.05)}, "hold"), (16, reach, {"pelvis": (0, 0, 0.06)}, "whip"),
+            (10, merge(READY, FRONT), {"pelvis": (0, 0, -0.02)}, "ease"), (14, reach, {"pelvis": (0, 0, 0.05)}, "hold"), (16, reach, {"pelvis": (0, 0, 0.06)}, "whip"),
             (18, haul, {"pelvis": (0, 0, -0.26)}, "hold"), (28, haul, {"pelvis": (0, 0, -0.25)}, "settle"), (44, READY, {"pelvis": (0, 0, -0.03)})]
     return _clip(arm, "move_meteor_call", 44, keys, markers={"fire": 18})
 
@@ -165,7 +168,107 @@ def channel(arm):
     return _clip(arm, "move_channel", 80, keys, markers={"fire": 26})
 
 
-ALL = [whirlwind, shoulder_charge, hook_throw, battle_cry, vanish, leap, meteor_call, channel]
+def arcane_bolt(arm):
+    # Line, 300 ms windup (fire 9): turns side-on and draws the right hand in to the chest, the
+    # left reaching forward to aim; drives the palm out with the hips, and the hand recoils.
+    draw = merge({"thigh_l": (-16, 0, 0), "calf_l": (20, 0, 0), "thigh_r": (6, 0, 0), "calf_r": (22, 0, 0), "foot_r": (-10, 0, 0)},
+                 arms((0.2, 0.9, -0.2), (0.0, 1, 0.1), (0.5, -0.4, -0.6), (-0.7, 0.4, 0.3)),
+                 {"spine_01": (2, 0, -22), "spine_02": (0, 0, -16), "chest": (0, 0, -8), "head": (0, 0, 30)})
+    drive = merge({"thigh_l": (-24, 0, 0), "calf_l": (24, 0, 0), "thigh_r": (14, 0, 0), "calf_r": (16, 0, 0), "foot_r": (-24, 0, 0)},
+                  arms((0.4, 0.1, -0.9), (0.2, 0.5, -0.7), (-0.05, 1, 0.05), (-0.05, 1, 0.08)),
+                  {"hand_r": (-30, 0, 0), "spine_01": (8, 0, 14), "spine_02": (4, 0, 12), "chest": (2, 0, 6), "head": (-4, 0, -12)})
+    recoil = merge(drive, arms((0.4, 0.1, -0.9), (0.2, 0.5, -0.7), (0.1, 0.9, 0.3), (0.1, 0.6, 0.6)), {"spine_01": (2, 0, 10)})
+    keys = [(0, READY, {"pelvis": (0, 0, -0.03)}, "ease"), (8, draw, {"pelvis": (0, 0.03, -0.05)}, "whip"), (9, drive, {"pelvis": (0, -0.05, -0.07)}, "hold"),
+            (12, recoil, {"pelvis": (0, -0.03, -0.06)}, "settle"), (26, READY, {"pelvis": (0, 0, -0.03)})]
+    return _clip(arm, "move_arcane_bolt", 26, keys, markers={"fire": 9})
+
+
+def frost_nova(arm):
+    # Area round the caster, 250 ms windup (fire 8): both fists come up over the head on a
+    # rising breath, then are driven down into the ground as one knee drops; held there.
+    up = merge(sym("thigh", -4, 0, 0), sym("calf", 6, 0, 0), sym("foot", 10, 0, 0), arms((0.2, 0.3, 1), (0.05, 0.4, 0.9)),
+               {"spine_01": (-8, 0, 0), "spine_02": (-6, 0, 0), "head": (-14, 0, 0)})
+    kneel = merge({"thigh_l": (-70, 0, 0), "calf_l": (80, 0, 0), "foot_l": (-10, 0, 0), "thigh_r": (10, 0, 0), "calf_r": (110, 0, 0), "foot_r": (40, 0, 0)},
+                  arms((0.15, 0.5, -0.85), (0.05, 0.3, -1)), {"spine_01": (34, 0, 0), "spine_02": (16, 0, 0), "head": (-20, 0, 0)})
+    keys = [(0, READY, {"pelvis": (0, 0, -0.03)}, "ease"), (3, merge(READY, FRONT), {"pelvis": (0, 0, 0.0)}, "ease"),
+            (6, up, {"pelvis": (0, 0, 0.04)}, "whip"), (8, kneel, {"pelvis": (0, 0, -0.42)}, "hold"),
+            (16, kneel, {"pelvis": (0, 0, -0.41)}, "settle"), (34, READY, {"pelvis": (0, 0, -0.03)})]
+    return _clip(arm, "move_frost_nova", 34, keys, markers={"fire": 8})
+
+
+def benediction(arm):
+    # Support (instant, fire 2): lifts the right hand open to the sky, the left over the heart,
+    # the head bowed; the hand lowers slowly as if letting the light go.
+    bless = merge(STANCE, arms((0.2, 0.1, -1), (-0.6, 0.5, 0.4), (0.3, 0.2, 1), (0.1, 0.2, 1)),
+                  {"hand_r": (40, 0, 0), "spine_01": (-4, 0, 0), "chest": (-4, 0, 0), "head": (24, 0, 0)})
+    lower = merge(bless, arms((0.2, 0.1, -1), (-0.6, 0.5, 0.4), (0.6, 0.4, 0.4), (0.4, 0.6, 0.3)), {"head": (16, 0, 0)})
+    keys = [(0, READY, {"pelvis": (0, 0, -0.03)}, "ease"), (2, merge(READY, {"head": (10, 0, 0)}), {"pelvis": (0, 0, -0.04)}, "settle"),
+            (8, bless, {"pelvis": (0, 0, 0.0)}, "hold"), (18, bless, {"pelvis": (0, 0, 0.0)}, "ease"), (26, lower, {"pelvis": (0, 0, -0.02)}, "ease"),
+            (36, READY, {"pelvis": (0, 0, -0.03)})]
+    return _clip(arm, "move_benediction", 36, keys, markers={"fire": 2})
+
+
+def smoke_roll(arm):
+    # Dash with a veil: the start (instant, fire 3) dashes a bomb down at the feet; the travel is
+    # a forward roll, tucked; the land comes up out of it in a crouch, ready.
+    throw = merge(STANCE, arms((0.3, 0.1, -1), (0.2, 0.4, -0.8), (0.1, 0.6, -0.8), (0.0, 0.5, -0.9)), {"spine_01": (24, 0, 0), "head": (-10, 0, 0)})
+    tuck = merge(sym("thigh", -100, 0, 0), sym("calf", 130, 0, 0), sym("foot", 20, 0, 0), arms((0.3, 0.6, -0.5), (-0.3, 0.6, 0.3)),
+                 {"spine_01": (40, 0, 0), "spine_02": (26, 0, 0), "chest": (10, 0, 0), "neck": (20, 0, 0), "head": (20, 0, 0)})
+    crouch = merge(sym("thigh", -50, 0, 0), sym("calf", 80, 0, 0), sym("foot", -30, 0, 0), arms((0.4, 0.4, -0.7), (0.2, 0.7, -0.3)),
+                   {"spine_01": (24, 0, 0), "head": (-14, 0, 0)})
+    a = _clip(arm, "move_smoke_roll_start", 8, [(0, READY, {"pelvis": (0, 0, -0.03)}, "ease"), (3, throw, {"pelvis": (0, 0, -0.1)}, "snap"),
+                                               (8, merge(tuck, {"pelvis": (40, 0, 0)}), {"pelvis": (0, 0, -0.45)})], markers={"fire": 3})
+    keys = [(f, merge(tuck, {"pelvis": (40 + 360.0 * f / 12, 0, 0)}), {"pelvis": (0, 0, -0.45 + 0.08 * math.sin(math.pi * f / 12))}, "snap")
+            for f in range(0, 13, 3)]
+    b = _clip(arm, "move_smoke_roll_travel", 12, keys, loop=True)
+    c = _clip(arm, "move_smoke_roll_land", 16, [(0, merge(tuck, {"pelvis": (400, 0, 0)}), {"pelvis": (0, 0, -0.45)}, "settle"),
+                                               (5, crouch, {"pelvis": (0, 0, -0.32)}, "hold"), (8, crouch, {"pelvis": (0, 0, -0.3)}, "ease"),
+                                               (16, READY, {"pelvis": (0, 0, -0.03)})])
+    return [a, b, c]
+
+
+def riposte(arm):
+    # Shield (instant, fire 2): snaps into a high guard, the weapon arm up across the face, the
+    # weight back; two small parries (the guard ticks against blows), then lowers.
+    guard = merge({"thigh_l": (-20, 0, 0), "calf_l": (26, 0, 0), "thigh_r": (10, 0, 0), "calf_r": (30, 0, 0), "foot_r": (-16, 0, 0)},
+                  arms((0.5, 0.2, -0.8), (0.0, 0.8, 0.4), (0.2, 0.5, 0.6), (-0.6, 0.4, 0.6)),
+                  {"spine_01": (-4, 0, -12), "spine_02": (-2, 0, -8), "head": (6, 0, 10)})
+    parry = merge(guard, arms((0.5, 0.2, -0.8), (0.0, 0.8, 0.4), (0.4, 0.5, 0.6), (-0.4, 0.5, 0.7)), {"spine_01": (-6, 0, -16)})
+    keys = [(0, READY, {"pelvis": (0, 0, -0.03)}, "ease"), (2, guard, {"pelvis": (0, 0.05, -0.08)}, "hold"), (8, guard, {"pelvis": (0, 0.05, -0.08)}, "snap"),
+            (10, parry, {"pelvis": (0, 0.07, -0.08)}, "settle"), (16, guard, {"pelvis": (0, 0.05, -0.08)}, "snap"),
+            (18, parry, {"pelvis": (0, 0.07, -0.08)}, "settle"), (24, guard, {"pelvis": (0, 0.05, -0.08)}, "ease"), (36, READY, {"pelvis": (0, 0, -0.03)})]
+    return _clip(arm, "move_riposte", 36, keys, markers={"fire": 2})
+
+
+def knife_fan(arm):
+    # Line, 350 ms windup (fire 11): crosses both hands to the left hip, coiling, then sweeps
+    # them out low and wide in a fan as the body unwinds, a step forward on the throw.
+    cross = merge(STANCE, arms((-0.1, 0.5, -0.8), (-0.8, 0.3, -0.3), (0.5, 0.4, -0.7), (0.9, 0.3, -0.1)),
+                  {"spine_01": (12, 0, 24), "spine_02": (6, 0, 16), "head": (-4, 0, -24)})
+    fan = merge({"thigh_l": (-34, 0, 0), "calf_l": (30, 0, 0), "thigh_r": (14, 0, 0), "calf_r": (20, 0, 0), "foot_r": (-24, 0, 0)},
+                arms((0.8, 0.6, -0.2), (0.7, 0.7, 0.0), (0.8, 0.6, -0.2), (0.7, 0.7, 0.0)),
+                {"spine_01": (16, 0, -6), "spine_02": (6, 0, -4), "head": (-12, 0, 0)})
+    keys = [(0, READY, {"pelvis": (0, 0, -0.03)}, "ease"), (10, cross, {"pelvis": (0, 0.03, -0.08)}, "whip"), (11, fan, {"pelvis": (0, -0.08, -0.1)}, "hold"),
+            (15, fan, {"pelvis": (0, -0.08, -0.1)}, "settle"), (28, READY, {"pelvis": (0, 0, -0.03)})]
+    return _clip(arm, "move_knife_fan", 28, keys, markers={"fire": 11})
+
+
+def earthsplitter(arm):
+    # Line ultimate, 550 ms windup (fire 16): heaves the weapon up and back in both hands, the
+    # body arching, rising onto the toes; brings it down to the ground in front with everything,
+    # a deep lunge, and holds as the split runs out.
+    heave = merge(sym("thigh", -6, 0, 0), sym("calf", 10, 0, 0), sym("foot", 14, 0, 0), arms((0.25, -0.3, 1), (0.1, -0.6, 0.8)),
+                  {"spine_01": (-16, 0, 0), "spine_02": (-12, 0, 0), "chest": (-8, 0, 0), "head": (-14, 0, 0)})
+    split = merge({"thigh_l": (-70, 0, 0), "calf_l": (70, 0, 0), "foot_l": (-4, 0, 0), "thigh_r": (24, 0, 0), "calf_r": (30, 0, 0), "foot_r": (-30, 0, 0)},
+                  arms((0.15, 0.9, -0.4), (0.05, 1, -0.5)), {"spine_01": (40, 0, 0), "spine_02": (18, 0, 0), "chest": (8, 0, 0), "head": (-26, 0, 0)})
+    keys = [(0, READY, {"pelvis": (0, 0, -0.03)}, "ease"), (6, merge(READY, {"spine_01": (14, 0, 0)}), {"pelvis": (0, 0, -0.1)}, "ease"),
+            (10, merge(READY, FRONT), {"pelvis": (0, 0, -0.04)}, "ease"), (14, heave, {"pelvis": (0, 0.04, 0.04)}, "hold"), (15, heave, {"pelvis": (0, 0.04, 0.05)}, "whip"),
+            (16, split, {"pelvis": (0, -0.12, -0.32)}, "hold"), (26, split, {"pelvis": (0, -0.12, -0.31)}, "settle"), (44, READY, {"pelvis": (0, 0, -0.03)})]
+    return _clip(arm, "move_earthsplitter", 44, keys, markers={"fire": 16})
+
+
+ALL = [whirlwind, shoulder_charge, hook_throw, battle_cry, vanish, leap, meteor_call, channel,
+       arcane_bolt, frost_nova, benediction, smoke_roll, riposte, knife_fan, earthsplitter]
 
 
 def add(arm):
