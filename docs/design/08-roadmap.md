@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–4, 5a and 6 ✅ (champions as data; forged models; the creator and Test; clothes; fill paint; moves) | 5b, 7–10 |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–4, 5a, 6 and 7 ✅ (champions as data; forged models; the creator and Test; clothes; fill paint; moves; the budget) | 5b, 8–10; refit prices |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1444,6 +1444,28 @@ replace the shared head anyway.
   on his maul at rest and swings it like Rook.
 - **Next:** more moves made for the creator (not only the ten kits'), and per-move tuning of the
   speed curve in the preview (20 §8.4).
+
+### CR slice 7 status (2026-11-07): ✅ built (the price model is a first fit)
+- **The price** (`mftr_sim::balance`, D71): a kit is priced by what it's expected to do at a
+  mid-game reference (level 9, basic abilities rank 3, ultimates rank 2, typical item stats):
+  durability (effective health), the basic attack's damage per second, move speed, and each
+  ability's damage, crowd control, mobility and protection **per second of cooldown, times the
+  chance it lands** (a deterministic version of the bots' model, D62: a skillshot at 70% of its
+  range against an average champion reacting in 0.25 s; point-and-click always lands; novas need
+  the target close). The weights are a least-squares fit pulling the official ten toward 100,
+  regularized toward hand-set ones: they land at 96–108 (Quill 80).
+- **The budget:** 100 points, refused over 110 (10%), wherever a champion file is checked
+  (`mftr-pack`, the server's custom champions, the client's roster). Auto-fit scales power down,
+  cooldowns up and the body a little until it fits.
+- **The creator:** the Balance step: the price and its parts, a power and a cooldown knob per
+  slot (against the move's own numbers), health, armor, magic resist and move speed (against the
+  stance champion's), Auto-fit. A patchwork kit usually starts over budget; picking an attack now
+  brings its champion's body stats too.
+- **The random league** (`mftr-tools league --champions N --matches M --minutes T`): random legal
+  champions (random moves, random tuning, fitted to the budget) in ARAM bot matches with random
+  lineups; each one's price and win rate (decided matches only), and how each part of the price
+  correlates with winning (positive: priced too cheap). The first runs are too small to refit
+  the weights from; the refit is the next step.
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.

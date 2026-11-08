@@ -142,6 +142,16 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("league") => {
+            // CR7 (20 §9.3): random champions within the budget, in bot matches.
+            let cfg = mftr_tools::league::LeagueConfig {
+                champions: num("--champions", 20.0) as usize,
+                matches: num("--matches", 20.0) as usize,
+                minutes: num("--minutes", 25.0),
+                seed: num("--seed", 1.0) as u64,
+            };
+            mftr_tools::league::run(&cfg);
+        }
         Some("loadtest") => {
             // 13 §8: many matches in one hub, in process; what a server spends per match.
             let scenario = match get("--mode").as_deref() {

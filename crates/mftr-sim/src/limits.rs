@@ -227,10 +227,19 @@ pub fn problems(def: &ChampionDef) -> Vec<String> {
     out
 }
 
-/// Read a champion file and check it: the definition, or every problem on one line.
+/// Read a champion file and check it, its price included (D71): the definition, or every
+/// problem on one line.
 pub fn read_champion_file(text: &str) -> Result<ChampionDef, String> {
     let def = crate::data::read_champion(text).map_err(|e| e.to_string())?;
-    let problems = problems(&def);
+    let mut problems = problems(&def);
+    // The balance budget (D71): a champion that costs more than it may isn't played.
+    if let Some(over) = crate::balance::over(&def) {
+        problems.push(format!(
+            "costs {:.0} points, over the {:.0}-point budget by {over:.0} (20 §9)",
+            crate::balance::price(&def).total(),
+            crate::balance::BUDGET
+        ));
+    }
     if problems.is_empty() { Ok(def) } else { Err(format!("`{}`: {}", def.name, problems.join("; "))) }
 }
 

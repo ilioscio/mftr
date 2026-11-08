@@ -36,6 +36,9 @@ impl Recipe {
             out.push(format!("name: `{n}` is an official champion's"));
         }
         out.extend(mftr_sim::limits::problems(&self.kit));
+        if let Some(over) = mftr_sim::balance::over(&self.kit) {
+            out.push(format!("{over:.0} points over the budget (20 §9): tune it down or Auto-fit"));
+        }
         out
     }
 
@@ -82,8 +85,11 @@ impl Recipe {
         let src = c.def();
         match slot {
             "attack" => {
+                // The attack's champion is the stance: its body's stats come along (20 §9).
                 self.kit.attack = src.attack;
                 self.kit.class = src.class;
+                self.kit.stats = src.stats;
+                self.kit.growth = src.growth;
             }
             _ => {
                 let i = ["q", "w", "e", "r"].iter().position(|s| *s == slot).unwrap_or(0);
@@ -101,6 +107,134 @@ impl Recipe {
             d.stats == self.kit.stats && d.attack == self.kit.attack && d.abilities == self.kit.abilities
         })
     }
+}
+
+/// The knobs the balance step turns (CR7, 20 §9.5): each relative to the move's own numbers.
+impl Recipe {
+    /// The official ability (or attack) a slot's move came from.
+    fn source(&self, slot: &str) -> Option<(ChampionId, &'static str)> {
+        crate::moves::parse(self.moves().get(slot))
+    }
+
+    fn source_ability(&self, slot: &str) -> Option<mftr_sim::ability::Ability> {
+        let (c, from) = self.source(slot)?;
+        let j = ["q", "w", "e", "r"].iter().position(|s| *s == from)?;
+        Some(c.def().abilities[j])
+    }
+
+    /// A slot's power (its damage, healing and shields, × its move's) and cooldown (× its move's).
+    pub fn tuning(&self, slot: &str) -> (f32, f32) {
+        let i = ["q", "w", "e", "r"].iter().position(|s| *s == slot);
+        let (Some(i), Some(src)) = (i, self.source_ability(slot)) else {
+            let (c, _) = self.source("attack").unwrap_or((ChampionId::Rook, "attack"));
+            let a = c.def();
+            return (
+                self.kit.stats.attack_damage / a.stats.attack_damage.max(1.0),
+                a.attack.attack_speed / self.kit.attack.attack_speed.max(0.01),
+            );
+        };
+        let now = &self.kit.abilities[i];
+        (power_of(now) / power_of(&src).max(1e-3), now.cooldown.0 as f32 / src.cooldown.0.max(1) as f32)
+    }
+
+    /// Set a slot's power and cooldown (factors of its move's own numbers, clamped to 0.5–1.6 and
+    /// 0.6–2). "attack" scales attack damage and the attack's period.
+    pub fn tune(&mut self, slot: &str, power: f32, cooldown: f32) {
+        let (power, cooldown) = (power.clamp(0.5, 1.6), cooldown.clamp(0.6, 2.0));
+        if slot == "attack" {
+            let (c, _) = self.source("attack").unwrap_or((ChampionId::Rook, "attack"));
+            let a = c.def();
+            self.kit.stats.attack_damage = a.stats.attack_damage * power;
+            self.kit.attack.attack_speed = a.attack.attack_speed / cooldown;
+            return;
+        }
+        let (Some(i), Some(src)) = (["q", "w", "e", "r"].iter().position(|s| *s == slot), self.source_ability(slot))
+        else {
+            return;
+        };
+        let mut a = scale_power(&src, power);
+        a.cooldown = src.cooldown.scaled_ms(cooldown);
+        a.per_rank.cooldown = src.per_rank.cooldown.scaled_ms(cooldown);
+        self.kit.abilities[i] = a;
+    }
+
+    /// The body's stats against its stance champion's: health, armor, magic resist, move speed.
+    pub fn stat_tuning(&self) -> [f32; 4] {
+        let (c, _) = self.source("attack").unwrap_or((ChampionId::Rook, "attack"));
+        let (a, b) = (&c.def().stats, &self.kit.stats);
+        [
+            b.max_health / a.max_health,
+            b.armor / a.armor.max(1.0),
+            b.magic_resist / a.magic_resist.max(1.0),
+            b.move_speed / a.move_speed,
+        ]
+    }
+
+    /// Set them (each 0.8–1.2 of the stance champion's; move speed 0.94–1.06).
+    pub fn tune_stats(&mut self, k: [f32; 4]) {
+        let (c, _) = self.source("attack").unwrap_or((ChampionId::Rook, "attack"));
+        let (a, ga) = (c.def().stats, c.def().growth);
+        let f = |v: f32| v.clamp(0.8, 1.2);
+        self.kit.stats.max_health = a.max_health * f(k[0]);
+        self.kit.growth.max_health = ga.max_health * f(k[0]);
+        self.kit.stats.armor = a.armor * f(k[1]);
+        self.kit.growth.armor = ga.armor * f(k[1]);
+        self.kit.stats.magic_resist = a.magic_resist * f(k[2]);
+        self.kit.growth.magic_resist = ga.magic_resist * f(k[2]);
+        self.kit.stats.move_speed = (a.move_speed * k[3].clamp(0.94, 1.06)).clamp(300.0, 360.0);
+    }
+
+    /// Scale everything down until it fits the budget (20 §9.3).
+    pub fn auto_fit(&mut self) {
+        self.kit = mftr_sim::balance::auto_fit(&self.kit);
+    }
+}
+
+/// An ability's damage, healing and shield amounts, summed (what `scale_power` scales).
+fn power_of(a: &mftr_sim::ability::Ability) -> f32 {
+    use mftr_sim::ability::Effect;
+    let d = |d: &mftr_sim::ability::Damage| d.base + 100.0 * (d.ad_ratio + d.ap_ratio);
+    match &a.effect {
+        Effect::Line(s) => d(&s.damage),
+        Effect::Area(s) => d(&s.damage),
+        Effect::Beam(s) => d(&s.damage),
+        Effect::Lunge(l) => d(&l.damage),
+        Effect::Shield(s) => s.amount,
+        Effect::Support(s) => s.heal + s.shield + 100.0 * (s.heal_ap + s.shield_ap + s.heal_missing),
+        Effect::Dash(d) => d.range,
+        Effect::Blink(b) => b.range,
+        Effect::Claim(_) => 0.0,
+    }
+}
+
+fn scale_power(src: &mftr_sim::ability::Ability, k: f32) -> mftr_sim::ability::Ability {
+    use mftr_sim::ability::Effect;
+    let mut a = *src;
+    let d = |d: &mut mftr_sim::ability::Damage| {
+        d.base *= k;
+        d.ad_ratio *= k;
+        d.ap_ratio *= k;
+    };
+    a.per_rank.damage *= k;
+    match &mut a.effect {
+        Effect::Line(s) => d(&mut s.damage),
+        Effect::Area(s) => d(&mut s.damage),
+        Effect::Beam(s) => d(&mut s.damage),
+        Effect::Lunge(l) => d(&mut l.damage),
+        Effect::Shield(s) => s.amount *= k,
+        Effect::Support(s) => {
+            s.heal *= k;
+            s.shield *= k;
+            s.heal_ap *= k;
+            s.shield_ap *= k;
+            s.heal_missing *= k;
+        }
+        // Movement: power is distance.
+        Effect::Dash(x) => x.range = (x.range * k).clamp(100.0, 800.0),
+        Effect::Blink(b) => b.range = (b.range * k).clamp(100.0, 600.0),
+        Effect::Claim(_) => {}
+    }
+    a
 }
 
 /// A small deterministic generator for the creator's Randomize (xorshift).
@@ -165,10 +299,33 @@ mod tests {
         assert_eq!(r.kit.attack, ChampionId::Vesper.def().attack);
         assert_eq!(r.kit.class, ChampionId::Vesper.def().class);
         assert_eq!(r.kit.abilities[0], ChampionId::Ember.def().abilities[0]);
+        // A patchwork of three kits costs more than one: fit it to the budget.
+        r.auto_fit();
         assert!(r.problems().is_empty(), "{:?}", r.problems());
         let back = Recipe::from_text(&r.to_text()).unwrap();
         assert_eq!(back.looks.moves, r.looks.moves);
         assert_eq!(back.kit_from(), None);
+    }
+
+    #[test]
+    fn tuning_moves_the_price() {
+        let mut r = Recipe { name: "Tuned".into(), ..Recipe::default() };
+        r.borrow_kit(ChampionId::Ember);
+        let base = mftr_sim::balance::price(&r.kit).total();
+        assert_eq!(r.tuning("q"), (1.0, 1.0));
+        r.tune("q", 1.5, 0.7);
+        let (p, c) = r.tuning("q");
+        assert!((p - 1.5).abs() < 0.01 && (c - 0.7).abs() < 0.01, "{p} {c}");
+        let up = mftr_sim::balance::price(&r.kit).total();
+        assert!(up > base + 3.0, "{base} -> {up}");
+        // Pushed well over the budget, then fitted back under it.
+        for s in ["q", "w", "e", "r"] {
+            r.tune(s, 1.6, 0.6);
+        }
+        r.tune_stats([1.2, 1.2, 1.2, 1.06]);
+        assert!(r.problems().iter().any(|p| p.contains("over the budget")));
+        r.auto_fit();
+        assert!(mftr_sim::balance::over(&r.kit).is_none());
     }
 
     #[test]

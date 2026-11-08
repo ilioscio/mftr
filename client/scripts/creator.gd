@@ -24,7 +24,7 @@ const STEPS := [
 	["clothes", "5  Clothes", "Clothes, armor, accessories and weapons: one part per slot. They follow your sliders.", true],
 	["paint", "6  Paint", "Fill each part's colors from the palette; the signature hue lights what glows. Brush and decals: CR5b.", true],
 	["moves", "7  Moveset", "A move for the attack and each of Q W E R: its animation, effects and sounds, and its numbers (tuned in Balance).", true],
-	["balance", "8  Balance", "The point budget: coming (CR7). Borrowed kits are balanced already.", false],
+	["balance", "8  Balance", "Every number has a price; every champion spends the same budget. Turn power and cooldowns, then fit.", true],
 	["name", "9  Name", "Name the champion and save it.", true],
 ]
 const FACE_PREFIXES := ["head", "face", "jaw", "chin", "cheek", "brow", "nose", "mouth", "eyes", "ears"]
@@ -342,6 +342,56 @@ func _show_step(id: String) -> void:
 				var l := Label.new()
 				l.text = line
 				_panel.add_child(l)
+		"balance":
+			var price: Dictionary = creator.price()
+			var total: float = price.total
+			var bar := ProgressBar.new()
+			bar.max_value = price.cap
+			bar.value = minf(total, price.cap)
+			bar.show_percentage = false
+			bar.custom_minimum_size = Vector2(0, 18)
+			_panel.add_child(bar)
+			var tl := Label.new()
+			tl.text = "%.0f of %.0f points%s" % [total, price.budget, "  —  over!" if total > price.cap else ""]
+			tl.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4) if total > price.cap else Color(0.7, 0.95, 0.7))
+			_panel.add_child(tl)
+			for part in price.parts:
+				var pl := Label.new()
+				pl.text = "    %s  %.1f" % [String(part[0]).capitalize(), part[1]]
+				pl.theme_type_variation = "HintLabel"
+				_panel.add_child(pl)
+			_panel.add_child(HSeparator.new())
+			for slot in ["attack", "q", "w", "e", "r"]:
+				var t: PackedFloat32Array = creator.tuning(slot)
+				var head := Label.new()
+				head.text = ("Attack: damage and speed" if slot == "attack" else "%s: power and cooldown" % slot.to_upper())
+				_panel.add_child(head)
+				_tune_slider("Power ×", t[0], 0.5, 1.6, func(v):
+					var now: PackedFloat32Array = creator.tuning(slot)
+					creator.tune(slot, v, now[1])
+					_changed(false))
+				_tune_slider("Cooldown ×" if slot != "attack" else "Time between attacks ×", t[1], 0.6, 2.0, func(v):
+					var now: PackedFloat32Array = creator.tuning(slot)
+					creator.tune(slot, now[0], v)
+					_changed(false))
+			_panel.add_child(HSeparator.new())
+			var stats: PackedFloat32Array = creator.stat_tuning()
+			var names := ["Health ×", "Armor ×", "Magic resist ×", "Move speed ×"]
+			for i in 4:
+				var lo := 0.94 if i == 3 else 0.8
+				var hi := 1.06 if i == 3 else 1.2
+				_tune_slider(names[i], stats[i], lo, hi, func(v):
+					var now: PackedFloat32Array = creator.stat_tuning()
+					now[i] = v
+					creator.tune_stats(now)
+					_changed(false))
+			var fit := Button.new()
+			fit.text = "Auto-fit to the budget"
+			fit.pressed.connect(func():
+				creator.auto_fit()
+				_changed(false)
+				_show_step("balance"))
+			_panel.add_child(fit)
 		"name":
 			var edit := LineEdit.new()
 			edit.text = creator.name()
@@ -418,6 +468,30 @@ func _swatch(color: Color, selected: bool, act: Callable) -> Button:
 	b.add_theme_stylebox_override("pressed", sb)
 	b.pressed.connect(act)
 	return b
+
+
+func _tune_slider(text: String, value: float, lo: float, hi: float, set_value: Callable) -> void:
+	var row := HBoxContainer.new()
+	var l := Label.new()
+	l.text = text
+	l.custom_minimum_size = Vector2(150, 0)
+	row.add_child(l)
+	var s := HSlider.new()
+	s.min_value = lo
+	s.max_value = hi
+	s.step = 0.01
+	s.value = value
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var v := Label.new()
+	v.text = "%.2f" % value
+	v.custom_minimum_size = Vector2(44, 0)
+	s.value_changed.connect(func(x):
+		v.text = "%.2f" % x
+		set_value.call(x))
+	s.drag_ended.connect(func(_changed_value): _show_step(step))
+	row.add_child(s)
+	row.add_child(v)
+	_panel.add_child(row)
 
 
 func _skin_picker() -> void:

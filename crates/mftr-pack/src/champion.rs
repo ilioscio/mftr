@@ -24,7 +24,14 @@ pub fn is_champion_file(path: &Path) -> bool {
 /// Read and check a champion file's text. `Err` lists every problem.
 pub fn read(text: &str) -> Result<ChampionDef, Vec<String>> {
     let def = mftr_sim::data::read_champion(text).map_err(|e| vec![e.to_string()])?;
-    let problems = mftr_sim::limits::problems(&def);
+    let mut problems = mftr_sim::limits::problems(&def);
+    if let Some(over) = mftr_sim::balance::over(&def) {
+        problems.push(format!(
+            "costs {:.0} points, over the {:.0}-point budget by {over:.0} (20 §9)",
+            mftr_sim::balance::price(&def).total(),
+            mftr_sim::balance::BUDGET
+        ));
+    }
     if problems.is_empty() { Ok(def) } else { Err(problems) }
 }
 
@@ -35,6 +42,11 @@ pub fn validate_text(text: &str) -> Report {
         Ok(def) => {
             let names: Vec<&str> = def.abilities.iter().map(|a| a.name).collect();
             report.summary.push(format!("champion `{}`: {}", def.name, names.join(" / ")));
+            report.summary.push(format!(
+                "price {:.1} of {:.0} points",
+                mftr_sim::balance::price(&def).total(),
+                mftr_sim::balance::BUDGET
+            ));
             if ChampionId::ALL.iter().any(|c| c.def().name.eq_ignore_ascii_case(def.name) && *c.def() != def) {
                 report.findings.push(Finding {
                     level: Level::Warning,

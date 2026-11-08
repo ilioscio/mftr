@@ -7,6 +7,7 @@
 pub mod ability;
 pub mod anvils;
 pub mod augments;
+pub mod balance;
 pub mod champion;
 pub mod collision;
 pub mod combat;

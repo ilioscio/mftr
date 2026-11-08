@@ -320,6 +320,57 @@ impl MftrCreator {
         }
     }
 
+    /// The price (20 §9): `{total, budget, cap, parts: [[name, points]]}`.
+    #[func]
+    fn price(&self) -> VarDictionary {
+        let p = mftr_sim::balance::price(&self.recipe.kit);
+        let mut d = VarDictionary::new();
+        d.set("total", p.total());
+        d.set("budget", mftr_sim::balance::BUDGET);
+        d.set("cap", mftr_sim::balance::cap());
+        let mut parts = VarArray::new();
+        for (name, pts) in p.parts() {
+            let mut row = VarArray::new();
+            row.push(&GString::from(name).to_variant());
+            row.push(&pts.to_variant());
+            parts.push(&row.to_variant());
+        }
+        d.set("parts", &parts);
+        d
+    }
+
+    /// A slot's power and cooldown, against its move's numbers: `[power, cooldown]`.
+    #[func]
+    fn tuning(&self, slot: GString) -> PackedFloat32Array {
+        let (p, c) = self.recipe.tuning(&slot.to_string());
+        PackedFloat32Array::from(&[p, c][..])
+    }
+
+    #[func]
+    fn tune(&mut self, slot: GString, power: f32, cooldown: f32) {
+        self.recipe.tune(&slot.to_string(), power, cooldown);
+    }
+
+    /// Health, armor, magic resist and move speed against the stance champion's.
+    #[func]
+    fn stat_tuning(&self) -> PackedFloat32Array {
+        PackedFloat32Array::from(&self.recipe.stat_tuning()[..])
+    }
+
+    #[func]
+    fn tune_stats(&mut self, k: PackedFloat32Array) {
+        let v = k.as_slice();
+        if v.len() == 4 {
+            self.recipe.tune_stats([v[0], v[1], v[2], v[3]]);
+        }
+    }
+
+    /// Scale everything down until it fits the budget.
+    #[func]
+    fn auto_fit(&mut self) {
+        self.recipe.auto_fit();
+    }
+
     /// Every slider and proportion at random (a seeded roll).
     #[func]
     fn randomize(&mut self, seed: i64) {
