@@ -1482,6 +1482,29 @@ replace the shared head anyway.
   one fight model, D62, and don't use costs or passives on purpose), and combinations the price
   adds up but play multiplies (heals with shields, CC chains). Next: per-move bot hints, and a
   league per build and per resource to find which parts the price misses.
+- **Fair leagues and a regression refit** (2026-11-08): league champions are now fitted *to* the
+  budget from either side (`balance::fit_to`; before, Auto-fit only came down, and cheap ones
+  of 74–83 points won 61–69%), bots ask `Unit::can_cast` (costs included; they had kept
+  planning casts they couldn't pay), and `mftr-tools league --log` + `tools/league_fit.py` fit a
+  logistic regression of the winner on the two teams' price parts. Three logged leagues of 200
+  matches (about 80 games a champion: ±5.6 points of noise each):
+
+  | League | Weights | RMS from 50% | Inside 45–55% |
+  |---|---|---|---|
+  | 1 | before | 16.9 | 7 of 24 |
+  | 2 | refit 1 (damage up, durability and attack down) | 12.7 | 8 of 24 |
+  | 3 | refit 2 (a half step back on damage, protection) | 13.8 | 8 of 24 |
+
+  The spread came down from 17 to about 13 points and stopped there. **The 45–55% target is
+  still not met** (noise alone would leave about two thirds inside it). The regression's
+  verdicts flip between leagues (the attack: too dear, too dear, then too cheap), so the seven
+  summed parts can't say what decides these matches: single moves and how they combine (the
+  league's best, 87%, paired two blinks with Shade's veil, which bots can't see through), and
+  how one bot fight model (D62) plays them. **Next:** a per-move adjustment fitted from many
+  logged leagues (each move's indicator on each team, a few hundred matches per round), and
+  bots that use veils, blinks and costs as a player would. Weights now: durability 0.0185,
+  attack 0.161, speed 0.358, damage 0.292, control 122, mobility 0.0595, protection 0.406; the
+  official ten price 79–110, mean 100.
 
 ### CR slice 8 status (2026-11-07): ✅ built (Rook, Bastion and Cairn as recipes, awaiting the owner)
 - **The heavy humanoid** (`art/creator/humanoid_heavy/`, both genders): the brute's skeleton

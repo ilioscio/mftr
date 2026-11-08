@@ -70,17 +70,19 @@ pub struct Features {
     pub protection: f32,
 }
 
-/// Points per unit of each feature *(start)*: a least-squares fit pulling the official ten toward
+/// Points per unit of each feature *(start)*: first a least-squares fit pulling the official ten toward
 /// [`BUDGET`], regularized toward hand-set weights (they land at 80–108; Quill, an artillery mage
 /// whose beam is hard to price, lowest). Mobility then down and protection up by about a sixth:
 /// the first random leagues (08 CR7) found both signs in each run.
-const W_EHP: f32 = 0.0235;
-const W_DPS: f32 = 0.21;
-const W_SPEED: f32 = 0.22;
-const W_DAMAGE: f32 = 0.22;
-const W_CONTROL: f32 = 100.0;
-const W_MOBILITY: f32 = 0.052;
-const W_PROTECTION: f32 = 0.38;
+/// Then two rounds of logistic regression on fair, logged leagues (tools/league_fit.py), each
+/// re-anchored so the official ten average the budget (08 CR7: the spread from 17 to 13 points).
+const W_EHP: f32 = 0.01853;
+const W_DPS: f32 = 0.1613;
+const W_SPEED: f32 = 0.3584;
+const W_DAMAGE: f32 = 0.292;
+const W_CONTROL: f32 = 122.2;
+const W_MOBILITY: f32 = 0.05946;
+const W_PROTECTION: f32 = 0.4059;
 
 /// The chance an ability lands (see the module notes).
 pub fn hit_chance(a: &Ability) -> f32 {
