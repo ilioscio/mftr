@@ -56,9 +56,42 @@ impl Recipe {
         Ok(Recipe { name: kit.name.to_string(), kit, looks })
     }
 
-    /// Take an official champion's kit (stats, attack and abilities), keeping the name.
+    /// Take an official champion's kit (stats, attack and abilities) and its moves, keeping
+    /// the name.
     pub fn borrow_kit(&mut self, from: ChampionId) {
         self.kit = *from.def();
+        self.looks.moves = Some(crate::moves::Moves::of(from));
+    }
+
+    /// The moves now (a recipe without them animates as its kit's champion would, else Rook).
+    pub fn moves(&self) -> crate::moves::Moves {
+        self.looks.moves.clone().unwrap_or_else(|| crate::moves::Moves::of(self.kit_from().unwrap_or(ChampionId::Rook)))
+    }
+
+    /// Put move `id` on `slot` (CR6): its animation, effects and sounds, and its numbers in the
+    /// kit (the attack's spec, or the ability), which the balance step then tunes (CR7). The
+    /// attack's move also sets the class the bots play it as. False if it doesn't fit.
+    pub fn set_move(&mut self, slot: &str, id: &str) -> bool {
+        let Some((c, from)) = crate::moves::parse(id) else { return false };
+        if !crate::moves::fits(id, slot) {
+            return false;
+        }
+        let mut moves = self.moves();
+        moves.set(slot, id);
+        self.looks.moves = Some(moves);
+        let src = c.def();
+        match slot {
+            "attack" => {
+                self.kit.attack = src.attack;
+                self.kit.class = src.class;
+            }
+            _ => {
+                let i = ["q", "w", "e", "r"].iter().position(|s| *s == slot).unwrap_or(0);
+                let j = ["q", "w", "e", "r"].iter().position(|s| *s == from).unwrap_or(0);
+                self.kit.abilities[i] = src.abilities[j];
+            }
+        }
+        true
     }
 
     /// The official champion whose kit this is, if it's one of theirs unchanged.
@@ -121,6 +154,21 @@ mod tests {
         assert_eq!(back.kit_from(), Some(ChampionId::Lumen));
         // It's a champion file: the pack validator takes it, and the forge builds it.
         assert_eq!(mftr_pack::champion::validate_text(&text).errors(), 0);
+    }
+
+    #[test]
+    fn moves_carry_their_numbers() {
+        let mut r = Recipe { name: "Patchwork".into(), ..Recipe::default() };
+        assert!(r.set_move("attack", "vesper.attack"));
+        assert!(r.set_move("q", "ember.q"));
+        assert!(!r.set_move("q", "ember.r"));
+        assert_eq!(r.kit.attack, ChampionId::Vesper.def().attack);
+        assert_eq!(r.kit.class, ChampionId::Vesper.def().class);
+        assert_eq!(r.kit.abilities[0], ChampionId::Ember.def().abilities[0]);
+        assert!(r.problems().is_empty(), "{:?}", r.problems());
+        let back = Recipe::from_text(&r.to_text()).unwrap();
+        assert_eq!(back.looks.moves, r.looks.moves);
+        assert_eq!(back.kit_from(), None);
     }
 
     #[test]

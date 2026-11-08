@@ -279,6 +279,47 @@ impl MftrCreator {
         Color::from_rgb(c[0], c[1], c[2])
     }
 
+    /// The moves that fit `slot` ("attack", "q" … "r"): `[{id, label}]`.
+    #[func]
+    fn move_library(&self, slot: GString) -> VarArray {
+        let slot = slot.to_string();
+        let mut out = VarArray::new();
+        for (id, label) in mftr_forge::moves::library() {
+            if mftr_forge::moves::fits(&id, &slot) {
+                let mut d = VarDictionary::new();
+                d.set("id", id.as_str());
+                d.set("label", label.as_str());
+                out.push(&d.to_variant());
+            }
+        }
+        out
+    }
+
+    /// The move on `slot`.
+    #[func]
+    fn move_on(&self, slot: GString) -> GString {
+        GString::from(self.recipe.moves().get(&slot.to_string()))
+    }
+
+    /// Put a move on a slot. An attack also equips the weapon its animations hold (when the
+    /// catalog has it).
+    #[func]
+    fn set_move(&mut self, slot: GString, id: GString) {
+        let (slot, id) = (slot.to_string(), id.to_string());
+        if !self.recipe.set_move(&slot, &id) {
+            return;
+        }
+        if slot == "attack"
+            && let Some((c, _)) = mftr_forge::moves::parse(&id)
+        {
+            let (_, part) = mftr_forge::moves::weapon(c);
+            self.recipe.looks.outfit.retain(|p| !p.starts_with("weapon.") && !p.starts_with("offhand."));
+            if !part.is_empty() {
+                self.recipe.looks.outfit.push(part.to_string());
+            }
+        }
+    }
+
     /// Every slider and proportion at random (a seeded roll).
     #[func]
     fn randomize(&mut self, seed: i64) {

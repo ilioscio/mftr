@@ -13,6 +13,7 @@
 //! that the client draws and animates like any other. It is deterministic and has no Godot in it.
 
 pub mod looks;
+pub mod moves;
 pub mod paint;
 pub mod recipe;
 
@@ -28,6 +29,8 @@ pub use looks::Looks;
 pub struct Catalog {
     bases: Vec<(String, Loaded, Vec<Part>)>,
     library: Loaded,
+    /// The official champions' packs: the move library's clips, effects and sounds (CR6).
+    packs: moves::Packs,
 }
 
 /// A catalog part (CR4, 20 §7), as `<base>.parts.ron` lists it.
@@ -91,7 +94,15 @@ impl Catalog {
         if bases.is_empty() {
             return Err(format!("no creator bases under {}", art.join("creator").display()));
         }
-        Ok(Catalog { bases, library })
+        let mut packs = Vec::new();
+        for c in mftr_sim::ChampionId::ALL {
+            let id = c.def().name.to_lowercase();
+            let path = art.join(format!("champions/{id}/export/{id}.glb"));
+            if path.exists() {
+                packs.push((c, mftr_pack::load_file(&path)?));
+            }
+        }
+        Ok(Catalog { bases, library, packs: moves::Packs(packs) })
     }
 
     pub fn base(&self, key: &str) -> Option<&Loaded> {
@@ -138,23 +149,34 @@ impl Catalog {
             paint::fill(&mut model, target, from, paint::PALETTE[*color as usize % paint::PALETTE.len()]);
         }
         paint::glow(&mut model, looks.signature);
-        attach_clips(&mut model, &self.library.model, looks.proportions.factor(0) * looks.proportions.factor(1).sqrt());
+        let scale = looks.proportions.factor(0) * looks.proportions.factor(1).sqrt();
+        attach_clips(&mut model, &self.library.model, scale);
+        let mut clips = library_clips(&self.library);
+        let (mut vfx, mut sounds) = (self.library.vfx.clone(), self.library.sounds.clone());
+        if let Some(m) = &looks.moves {
+            // The moves' clips first; the library's fill in the rest (CC poses, utility casts).
+            let (anims, side) = moves::clips(m, &self.packs, &model, scale)?;
+            let names: Vec<String> = anims.iter().map(|a| a.name.clone()).collect();
+            model.animations.retain(|a| !names.contains(&a.name));
+            clips.retain(|c| !names.contains(&c.name));
+            model.animations.extend(anims);
+            clips.extend(side);
+            vfx = Some(moves::effects(m, &self.packs, looks.signature));
+            let own = moves::sounds(m, &self.packs);
+            let covered: Vec<String> = own.iter().flat_map(|s| s.spec.events.clone()).collect();
+            sounds.retain(|s| !s.spec.events.iter().any(|e| covered.contains(e)));
+            sounds.extend(own);
+        }
         let side = sidecar::Sidecar {
             id: name.to_string(),
             kind: "champion".to_string(),
             archetype: "biped".to_string(),
             rig_version: 1,
             fps: 30,
-            clips: library_clips(&self.library),
+            clips,
         };
         let library = pose::Library::new(&model, &side)?;
-        Ok(Loaded {
-            kind: "champion".to_string(),
-            model,
-            library,
-            vfx: self.library.vfx.clone(),
-            sounds: self.library.sounds.clone(),
-        })
+        Ok(Loaded { kind: "champion".to_string(), model, library, vfx, sounds })
     }
 }
 
@@ -584,6 +606,28 @@ mod tests {
         // A region that isn't there.
         l.paint = vec![("torso.tunic".into(), 15, 1)];
         assert!(c.forge("X", &l).err().unwrap().contains("no paint region"));
+    }
+
+    #[test]
+    fn moves_bring_their_clips_effects_and_sounds() {
+        let c = catalog();
+        let mut m = moves::Moves::of(mftr_sim::ChampionId::Vesper);
+        m.set("q", "ember.w");
+        m.set("e", "shade.e");
+        let l = Looks { moves: Some(m), signature: 0, ..Looks::default() };
+        let f = c.forge("Mixed", &l).unwrap();
+        for clip in ["idle", "attack_1", "q", "w", "e_start", "e_travel", "e_land", "r", "cc_stunned"] {
+            assert!(f.library.clip(clip).is_some(), "{clip}");
+        }
+        let fx = f.vfx.as_ref().unwrap();
+        // Ember's W (a delayed area) now on Q, in the signature hue (red).
+        assert!(fx.effects.iter().any(|e| e.event.starts_with("q.")));
+        assert!(!fx.effects.iter().any(|e| e.event.starts_with("q.") && e.kit == "arrow"));
+        assert!(f.sounds.iter().any(|s| s.spec.events.iter().any(|e| e.starts_with("attack."))));
+        // A misplaced ultimate.
+        let mut bad = moves::Moves::of(mftr_sim::ChampionId::Rook);
+        bad.set("q", "rook.r");
+        assert!(c.forge("X", &Looks { moves: Some(bad), ..Looks::default() }).is_err());
     }
 
     #[test]

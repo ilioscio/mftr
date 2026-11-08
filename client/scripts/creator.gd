@@ -23,7 +23,7 @@ const STEPS := [
 	["body", "4  Body", "Proportions scale the skeleton; shape sliders reshape the body.", true],
 	["clothes", "5  Clothes", "Clothes, armor, accessories and weapons: one part per slot. They follow your sliders.", true],
 	["paint", "6  Paint", "Fill each part's colors from the palette; the signature hue lights what glows. Brush and decals: CR5b.", true],
-	["moves", "7  Moveset", "Until the move library arrives (CR6), borrow an official champion's whole kit.", true],
+	["moves", "7  Moveset", "A move for the attack and each of Q W E R: its animation, effects and sounds, and its numbers (tuned in Balance).", true],
 	["balance", "8  Balance", "The point budget: coming (CR7). Borrowed kits are balanced already.", false],
 	["name", "9  Name", "Name the champion and save it.", true],
 ]
@@ -304,15 +304,38 @@ func _show_step(id: String) -> void:
 				_show_step("paint"))
 			_panel.add_child(clear)
 		"moves":
+			for slot in ["attack", "q", "w", "e", "r"]:
+				var l := Label.new()
+				l.text = "Attack" if slot == "attack" else slot.to_upper()
+				_panel.add_child(l)
+				var mpick := OptionButton.new()
+				var options: Array = creator.move_library(slot)
+				var on: String = creator.move_on(slot)
+				for i in options.size():
+					mpick.add_item(options[i].label)
+					if options[i].id == on:
+						mpick.select(i)
+				mpick.item_selected.connect(func(i):
+					creator.set_move(slot, options[i].id)
+					_changed(true)
+					_show_step("moves"))
+				_panel.add_child(mpick)
+			_panel.add_child(HSeparator.new())
+			var kl := Label.new()
+			kl.text = "Or take a whole kit"
+			_panel.add_child(kl)
 			var pick := OptionButton.new()
 			var kits: PackedStringArray = creator.kits()
+			pick.add_item("—")
 			for i in kits.size():
 				pick.add_item(kits[i])
 				if kits[i] == creator.kit():
-					pick.select(i)
+					pick.select(i + 1)
 			pick.item_selected.connect(func(i):
-				creator.set_kit(kits[i])
-				_changed(false)
+				if i == 0:
+					return
+				creator.set_kit(kits[i - 1])
+				_changed(true)
 				_show_step("moves"))
 			_panel.add_child(pick)
 			for line in creator.kit_summary():

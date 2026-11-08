@@ -16,6 +16,7 @@ Champion(
         outfit: ["shoulders.fur", "waist.skirt", "arms.bracers", "feet.boots", "weapon.maul"],
         paint: [("body", 0, 13), ("body", 1, 36), ("waist.skirt", 1, 35), ("feet.boots", 0, 14)],
         signature: 95,
+        moves: (attack: "rook.attack", q: "rook.q", w: "rook.w", e: "cairn.e", r: "shade.r"),
     ),
     name: "Grumble",
     class: Bruiser,

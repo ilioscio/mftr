@@ -115,6 +115,16 @@ def _hair(head, style, color):
 
 # --- The catalog ---------------------------------------------------------------------------------
 
+def _hand_axis(side):
+    """The hand bone's head, its direction, a direction across it, and its length (the current
+    shape's)."""
+    bones = {b[0]: b for b in rig.bone_table()}
+    h, t = Vector(bones[f"hand_{side}"][2]), Vector(bones[f"hand_{side}"][3])
+    axis = (t - h).normalized()
+    across = axis.cross(Vector((0, 1, 0))).normalized()
+    return h, axis, across, (t - h).length
+
+
 def catalog(head):
     """(id, slot, name, hides, accent, parts) for every part, on `head` (the base's Head)."""
     hc = head.base + Vector((0, 0.01, head.height * 0.55))
@@ -232,23 +242,31 @@ def catalog(head):
         mesh.box_part("chest", P("chest", 0.3, (0.05, 0.17, 0.0)), (0.10, 0.10, 0.50), "cloth", LEATHER, rot=(0, -25, 0)),
         mesh.box_part("chest", P("chest", 0.3, (0.13, 0.17, 0.26)), (0.09, 0.08, 0.10), "emissive", GLOW, rot=(0, -25, 0))])
     # Weapons (20 §7.3: a class each; moves name the classes they take, CR6).
+    # Weapons are laid along the hand that holds them, like the official champions' (Rook's maul,
+    # Lumen's staff): the fist closes on the grip, so the move's clips aim them as they aim theirs.
+    h, axis, across, hand_len = _hand_axis("r")
+    g = h + axis * (0.55 * hand_len)
+
+    def at(d, off=Vector()):
+        return tuple(g + axis * d + off)
+
     add("weapon.sword", "weapon", "Sword", [
-        mesh.path_part("hand_r", [P("prop_r", 0.0, (0, 0.06, 0)), P("prop_r", 0.0, (0, -0.02, 0))], 4, [(0.03, 0.012), (0.03, 0.012)],
-                       "cloth", LEATHER_DARK),
-        mesh.box_part("hand_r", P("prop_r", 0.0, (0, -0.03, 0)), (0.16, 0.025, 0.03), "metal", GOLD),
-        mesh.path_part("hand_r", [P("prop_r", 0.0, (0, -0.04, 0)), P("prop_r", 0.0, (0, -0.75, 0)), P("prop_r", 0.0, (0, -0.85, 0))], 4,
-                       [(0.035, 0.01), (0.03, 0.008), (0.0, 0.0)], "metal", IRON)])
+        mesh.path_part("hand_r", [at(-0.12), at(0.02)], 6, [(0.03, 0.03), (0.03, 0.03)], "cloth", LEATHER_DARK, ref=tuple(across)),
+        mesh.path_part("hand_r", [at(0.02, across * -0.10), at(0.02, across * 0.10)], 4, [(0.025, 0.03)] * 2, "metal", GOLD,
+                       ref=tuple(axis)),
+        mesh.path_part("hand_r", [at(0.04), at(0.80), at(0.92)], 4, [(0.04, 0.012), (0.035, 0.01), (0.0, 0.0)], "metal", IRON,
+                       ref=tuple(across))])
     add("weapon.staff", "weapon", "Staff", [
-        mesh.path_part("hand_r", [P("prop_r", 0.0, (0, 0.55, 0)), P("prop_r", 0.0, (0, -1.05, 0))], 6, [(0.022, 0.022), (0.02, 0.02)],
-                       "cloth", WOOD),
-        mesh.box_part("hand_r", P("prop_r", 0.0, (0, -1.12, 0)), (0.09, 0.09, 0.09), "emissive", GLOW, rot=(45, 0, 45))])
+        mesh.path_part("hand_r", [at(-0.62), at(1.0)], 6, [(0.024, 0.024), (0.028, 0.028)], "cloth", WOOD, ref=tuple(across)),
+        mesh.path_part("hand_r", [at(1.0), at(1.08), at(1.16)], 6, [(0.03, 0.03), (0.07, 0.07), (0.0, 0.0)], "emissive", GLOW,
+                       ref=tuple(across))])
     add("weapon.maul", "weapon", "Maul", [
-        mesh.path_part("hand_r", [P("prop_r", 0.0, (0, 0.30, 0)), P("prop_r", 0.0, (0, -0.95, 0))], 6, [(0.03, 0.03), (0.03, 0.03)],
-                       "cloth", WOOD),
-        mesh.box_part("hand_r", P("prop_r", 0.0, (0, -1.0, 0)), (0.40, 0.22, 0.22), "metal", IRON)])
+        mesh.path_part("hand_r", [at(-0.28), at(1.16)], 6, [(0.036, 0.036), (0.04, 0.04)], "cloth", WOOD, ref=tuple(across)),
+        mesh.path_part("hand_r", [at(1.30, across * -0.26), at(1.30, across * 0.26)], 4, [(0.22, 0.22)] * 2, "metal", IRON,
+                       ref=tuple(axis))])
     add("weapon.dagger", "weapon", "Dagger", [
-        mesh.path_part("hand_r", [P("prop_r", 0.0, (0, 0.03, 0)), P("prop_r", 0.0, (0, -0.35, 0)), P("prop_r", 0.0, (0, -0.42, 0))], 4,
-                       [(0.03, 0.01), (0.026, 0.008), (0.0, 0.0)], "metal", IRON)])
+        mesh.path_part("hand_r", [at(0.0), at(0.38), at(0.46)], 4, [(0.034, 0.01), (0.03, 0.008), (0.0, 0.0)], "metal", IRON,
+                       ref=tuple(across))])
     add("offhand.shield", "offhand", "Shield", [
         mesh.box_part("forearm_l", P("forearm_l", 0.6, (0.07, -0.02, 0)), (0.04, 0.40, 0.50), "metal", IRON, bevel=0.3),
         mesh.box_part("forearm_l", P("forearm_l", 0.6, (0.095, -0.02, 0)), (0.02, 0.16, 0.16), "accent", ACCENT, rot=(45, 0, 0))],

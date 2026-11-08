@@ -119,6 +119,9 @@ pub struct Looks {
     pub paint: Vec<(String, u8, u8)>,
     /// The signature hue (14 §4), 0–359 degrees: glowing parts, and the effects (CR6).
     pub signature: u16,
+    /// The moves the champion is animated with (CR6, 20 §8): without them, the shared clip
+    /// library's.
+    pub moves: Option<crate::moves::Moves>,
 }
 
 impl Default for Looks {
@@ -132,6 +135,7 @@ impl Default for Looks {
             outfit: Vec::new(),
             paint: Vec::new(),
             signature: 200,
+            moves: None,
         }
     }
 }
@@ -259,8 +263,25 @@ pub fn read(v: Value, at: &str) -> Result<Looks, DataError> {
         Some((v, sat)) => data::int(v, &sat, 359)? as u16,
         None => 200,
     };
+    let moves = match f.take("moves") {
+        Some((v, mat)) => {
+            let mut mf = Fields::of(v, &mat, None)?;
+            let mut ids: [String; 5] = Default::default();
+            for (i, slot) in crate::moves::SLOTS.iter().enumerate() {
+                let (m, at) = mf.req(slot)?;
+                let Value::Str(id) = m else { return err(&at, "expected a move id like \"ember.q\"") };
+                if !crate::moves::fits(&id, slot) {
+                    return err(&at, format!("`{id}` isn't a move for {slot}"));
+                }
+                ids[i] = id;
+            }
+            mf.done()?;
+            Some(crate::moves::Moves { ids })
+        }
+        None => None,
+    };
     f.done()?;
-    Ok(Looks { build, gender, shape, proportions, skin, outfit, paint, signature })
+    Ok(Looks { build, gender, shape, proportions, skin, outfit, paint, signature, moves })
 }
 
 /// A champion file's looks, if it has any.
@@ -304,6 +325,11 @@ pub fn write(l: &Looks) -> String {
         out += &format!("        paint: [{}],\n", fills.join(", "));
     }
     out += &format!("        signature: {},\n", l.signature);
+    if let Some(m) = &l.moves {
+        let pairs: Vec<String> =
+            crate::moves::SLOTS.iter().zip(&m.ids).map(|(s, id)| format!("{s}: \"{id}\"")).collect();
+        out += &format!("        moves: ({}),\n", pairs.join(", "));
+    }
     out += "    ),\n";
     out
 }

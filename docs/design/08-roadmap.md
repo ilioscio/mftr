@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–4 and 5a ✅ (champions as data; forged models; the creator screen and Test; clothes; fill paint) | 5b–10 |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–4, 5a and 6 ✅ (champions as data; forged models; the creator and Test; clothes; fill paint; moves) | 5b, 7–10 |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1422,6 +1422,28 @@ replace the shared head anyway.
 - **CR5b, left:** brush strokes and decals need paint images (D70): UVs on bases and parts through
   the exporter, the reader and the forge, a paint image per part in the recipe, and the shader
   sampling it.
+
+### CR slice 6 status (2026-11-07): ✅ done (the move library from the ten kits)
+- **The move library** (`mftr_forge::moves`): the ten champions' attacks and abilities, **50
+  moves** (`rook.attack`, `ember.q` …). A move brings its animation clips, its effects and sounds
+  (from its champion's pack, loaded with the catalog), the shape and numbers of its ability, and
+  the weapon class it is animated with (bow, heavy, blades, staff, crossbow, unarmed).
+- **Rules:** attacks go on the attack; abilities on any of Q W E R, but ultimates only on R and R
+  only takes ultimates (their numbers are an ultimate's).
+- **The recipe:** `looks.moves` (`attack`, `q` … `r`); the forge takes each slot's clips renamed
+  for it (`ember.w` on Q plays as `q`; a dash's `_start`/`_travel`/`_land` set follows), the
+  **stance** (idle, run, walk, death, recall, emotes, fidgets) from the attack's champion, the
+  library's CC poses and utility casts for the rest. Effects are renamed the same way and
+  **recolored in the signature hue** (colored ramp entries take its hue; whites and greys stay);
+  sounds follow their moves.
+- **The creator:** the Moveset step: a picker per slot (the moves that fit it) and "take a whole
+  kit". Picking a move copies its numbers into the kit (the attack's spec and class, or the
+  ability), for the balance step to tune; picking an attack equips the weapon its clips hold.
+- **Weapons in a grip:** the catalog's sword, staff, maul and dagger are now laid along the hand
+  like the official weapons, so a move's clips aim them as they aim the original's. Grumble leans
+  on his maul at rest and swings it like Rook.
+- **Next:** more moves made for the creator (not only the ten kits'), and per-move tuning of the
+  speed curve in the preview (20 §8.4).
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
