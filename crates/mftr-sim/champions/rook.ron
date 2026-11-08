@@ -6,6 +6,7 @@
 Champion(
     format: 0,
     name: "Rook",
+    class: Bruiser,
     stats: (max_health: 650, health_regen: 1.7, armor: 33, magic_resist: 32, attack_damage: 68, move_speed: 340),
     growth: (max_health: 102, health_regen: 0.08, armor: 4.5, magic_resist: 1.6, attack_damage: 3.8),
     attack: (range: 175, attack_speed: 0.7, windup_fraction: 0.28),

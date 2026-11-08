@@ -8,6 +8,7 @@
 Champion(
     format: 0,
     name: "Grumble",
+    class: Bruiser,
     stats: (max_health: 670, health_regen: 1.8, armor: 34, magic_resist: 32, attack_damage: 66, move_speed: 335),
     growth: (max_health: 106, health_regen: 0.08, armor: 4.6, magic_resist: 1.7, attack_damage: 3.6),
     attack: (range: 175, attack_speed: 0.65, windup_fraction: 0.3),

@@ -21,7 +21,7 @@ use crate::ability::{
     Ability, Beam, Blink, Cc, Damage, DamageKind, Dash, DelayedArea, Effect, LineSkillshot, Lunge, Pulses, RankScaling,
     ReactionClass, Shield, Support, Transforms,
 };
-use crate::champion::{AttackSpec, ChampionDef, Stats};
+use crate::champion::{AttackSpec, ChampionDef, Class, Stats};
 use crate::time::{SUBTICKS_PER_SECOND, SimDuration};
 use crate::veil::VeilSpec;
 
@@ -646,6 +646,12 @@ pub fn read_champion(text: &str) -> Result<ChampionDef, DataError> {
     }
     let (n, nat) = f.req("name")?;
     let name = name(n, &nat)?;
+    let (c, cat) = f.req("class")?;
+    let class_name = unit(c, &cat)?;
+    let Some(class) = Class::by_name(&class_name) else {
+        let all: Vec<&str> = Class::ALL.iter().map(|c| c.name()).collect();
+        return err(&cat, format!("`{class_name}`: expected one of {}", all.join(", ")));
+    };
     let (s, sat) = f.req("stats")?;
     let stats = stats(s, &sat)?;
     let growth = match f.take("growth") {
@@ -677,7 +683,7 @@ pub fn read_champion(text: &str) -> Result<ChampionDef, DataError> {
         abilities[i] = ability(item, &format!("{lat}[{i}]"))?;
     }
     f.done()?;
-    Ok(ChampionDef { name, stats, growth, attack, abilities })
+    Ok(ChampionDef { name, class, stats, growth, attack, abilities })
 }
 
 // --- Writing ----------------------------------------------------------------------------------
@@ -850,6 +856,7 @@ pub fn write_champion(def: &ChampionDef, comment: &str) -> String {
     let _ = writeln!(out, "Champion(");
     let _ = writeln!(out, "    format: {FORMAT},");
     let _ = writeln!(out, "    name: {},", quote(def.name));
+    let _ = writeln!(out, "    class: {},", def.class.name());
     let _ = writeln!(out, "    stats: {},", write_stats(&def.stats));
     let _ = writeln!(out, "    growth: {},", write_stats(&def.growth));
     let a = &def.attack;
@@ -932,6 +939,7 @@ mod tests {
         fails(&e.replace("format: 0,", "format: 0, format: 0,"), "line", "given twice");
         fails(&e.replace("format: 0", "format: 1"), "format", "isn't supported");
         fails(&e.replace("Champion(", "Hero("), "", "expected `Champion(...)`");
+        fails(&e.replace("class: Mage", "class: Wizard"), "class", "Wizard");
     }
 
     #[test]

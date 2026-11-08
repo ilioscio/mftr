@@ -7,6 +7,7 @@
 Champion(
     format: 0,
     name: "Quill",
+    class: Artillery,
     stats: (max_health: 540, health_regen: 1.3, armor: 20, magic_resist: 30, attack_damage: 48, ability_power: 70, move_speed: 325),
     growth: (max_health: 86, health_regen: 0.08, armor: 3.9, magic_resist: 1.3, attack_damage: 2.6),
     attack: (range: 550, attack_speed: 0.62, windup_fraction: 0.22, bolt_speed: 1500),

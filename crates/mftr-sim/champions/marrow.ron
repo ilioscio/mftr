@@ -7,6 +7,7 @@
 Champion(
     format: 0,
     name: "Marrow",
+    class: Battlemage,
     stats: (max_health: 610, health_regen: 1.6, armor: 26, magic_resist: 32, attack_damage: 52, ability_power: 60, move_speed: 335),
     growth: (max_health: 98, health_regen: 0.08, armor: 4.3, magic_resist: 1.5, attack_damage: 2.8),
     attack: (range: 475, attack_speed: 0.65, windup_fraction: 0.22, bolt_speed: 1500),

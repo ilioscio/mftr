@@ -15,7 +15,7 @@
 use std::fmt;
 use std::sync::{Mutex, Once, OnceLock};
 
-use crate::ability::{Ability, BARRIER, BLINK, Effect};
+use crate::ability::{Ability, BARRIER, BLINK};
 use crate::combat::stat_at_level;
 use crate::data;
 use crate::time::SimDuration;
@@ -153,48 +153,6 @@ impl ChampionId {
             .unwrap_or_else(|| panic!("champion {} isn't registered", self.0))
     }
 
-    /// The official champion whose per-champion code (bot archetypes, item build paths, the
-    /// client's effect names) a champion borrows: itself if official, else the one whose kit is
-    /// closest in kind. A stopgap until those become data (CR1).
-    pub fn stand_in(self) -> ChampionId {
-        if self.is_official() {
-            return self;
-        }
-        let d = self.def();
-        let effects = d.abilities.map(|a| a.effect);
-        let count = |f: fn(&Effect) -> bool| effects.iter().filter(|e| f(e)).count();
-        let physical = effects
-            .iter()
-            .filter_map(|e| match e {
-                Effect::Line(s) => Some(s.damage),
-                Effect::Area(s) => Some(s.damage),
-                Effect::Lunge(s) => Some(s.damage),
-                Effect::Beam(s) => Some(s.damage),
-                _ => None,
-            })
-            .filter(|dmg| dmg.kind == crate::ability::DamageKind::Physical)
-            .count()
-            >= 2;
-        let melee = d.attack.bolt_speed == 0.0;
-        if count(|e| matches!(e, Effect::Support(s) if s.range > 0.0)) > 0 {
-            ChampionId::Lumen
-        } else if count(|e| matches!(e, Effect::Beam(_))) > 0 {
-            ChampionId::Quill
-        } else if melee && count(|e| matches!(e, Effect::Lunge(_))) >= 2 {
-            ChampionId::Shade
-        } else if melee && physical {
-            ChampionId::Rook
-        } else if melee {
-            ChampionId::Bastion
-        } else if physical && count(|e| matches!(e, Effect::Lunge(_))) > 0 {
-            ChampionId::Wren
-        } else if physical {
-            ChampionId::Vesper
-        } else {
-            ChampionId::Ember
-        }
-    }
-
     /// Ability in `slot` (0–3 = Q W E R, 4 = D Blink, 5 = F Barrier).
     pub fn ability(self, slot: u8) -> Option<Ability> {
         match slot {
@@ -300,9 +258,60 @@ impl AttackSpec {
     }
 }
 
+/// What a champion is in a fight (01 §9's classes): the bots play it and shop for it by its
+/// class (17 §2), and its file says which it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Class {
+    Mage,
+    Marksman,
+    Tank,
+    Bruiser,
+    Enchanter,
+    Assassin,
+    Artillery,
+    Warden,
+    Battlemage,
+    Skirmisher,
+}
+
+impl Class {
+    pub const ALL: [Class; 10] = [
+        Class::Mage,
+        Class::Marksman,
+        Class::Tank,
+        Class::Bruiser,
+        Class::Enchanter,
+        Class::Assassin,
+        Class::Artillery,
+        Class::Warden,
+        Class::Battlemage,
+        Class::Skirmisher,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Class::Mage => "Mage",
+            Class::Marksman => "Marksman",
+            Class::Tank => "Tank",
+            Class::Bruiser => "Bruiser",
+            Class::Enchanter => "Enchanter",
+            Class::Assassin => "Assassin",
+            Class::Artillery => "Artillery",
+            Class::Warden => "Warden",
+            Class::Battlemage => "Battlemage",
+            Class::Skirmisher => "Skirmisher",
+        }
+    }
+
+    pub fn by_name(name: &str) -> Option<Class> {
+        Class::ALL.into_iter().find(|c| c.name() == name)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChampionDef {
     pub name: &'static str,
+    pub class: Class,
     /// Level 1.
     pub stats: Stats,
     /// Added per level on the 02 §1 curve (move speed doesn't grow).
@@ -378,7 +387,6 @@ mod registry_tests {
         for (i, c) in ChampionId::ALL.into_iter().enumerate() {
             assert_eq!(c.index() as usize, i);
             assert!(c.is_official());
-            assert_eq!(c.stand_in(), c);
             assert_eq!(format!("{c:?}"), c.def().name);
         }
         assert_eq!(ChampionId::from_u8(10), None);
@@ -396,15 +404,6 @@ mod registry_tests {
         assert_eq!(format!("{a:?}"), "Registry Test A");
         // An official definition registers as itself.
         assert_eq!(ChampionId::register(*ChampionId::Wren.def()), Ok(ChampionId::Wren));
-    }
-
-    #[test]
-    fn a_custom_champion_borrows_the_closest_official_kit() {
-        let rookish = ChampionId::register(custom("Registry Test Rookish")).unwrap();
-        assert_eq!(rookish.stand_in(), ChampionId::Rook);
-        let mut healer = *ChampionId::Lumen.def();
-        healer.name = "Registry Test Healer";
-        assert_eq!(ChampionId::register(healer).unwrap().stand_in(), ChampionId::Lumen);
     }
 
     #[test]

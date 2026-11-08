@@ -3,7 +3,7 @@
 //! ability lands on a given target.
 
 use mftr_sim::ability::{Ability, Cc, DamageKind, Effect};
-use mftr_sim::champion::max_rank;
+use mftr_sim::champion::{Class, max_rank};
 use mftr_sim::combat::resist_multiplier;
 use mftr_sim::{ChampionId, SimTime, Unit, Vec2};
 
@@ -24,18 +24,17 @@ pub enum Archetype {
 
 impl Archetype {
     pub fn of(c: ChampionId) -> Archetype {
-        match c.stand_in() {
-            ChampionId::Ember => Archetype::Mage,
-            ChampionId::Vesper => Archetype::Marksman,
-            ChampionId::Bastion => Archetype::Tank,
-            ChampionId::Rook => Archetype::Bruiser,
-            ChampionId::Lumen => Archetype::Enchanter,
-            ChampionId::Shade => Archetype::Assassin,
-            ChampionId::Quill => Archetype::Artillery,
-            ChampionId::Cairn => Archetype::Warden,
-            ChampionId::Marrow => Archetype::Battlemage,
-            ChampionId::Wren => Archetype::Skirmisher,
-            _ => unreachable!("a stand-in is an official champion"),
+        match c.def().class {
+            Class::Mage => Archetype::Mage,
+            Class::Marksman => Archetype::Marksman,
+            Class::Tank => Archetype::Tank,
+            Class::Bruiser => Archetype::Bruiser,
+            Class::Enchanter => Archetype::Enchanter,
+            Class::Assassin => Archetype::Assassin,
+            Class::Artillery => Archetype::Artillery,
+            Class::Warden => Archetype::Warden,
+            Class::Battlemage => Archetype::Battlemage,
+            Class::Skirmisher => Archetype::Skirmisher,
         }
     }
 

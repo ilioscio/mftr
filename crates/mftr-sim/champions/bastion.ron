@@ -7,6 +7,7 @@
 Champion(
     format: 0,
     name: "Bastion",
+    class: Tank,
     stats: (max_health: 680, health_regen: 1.8, armor: 36, magic_resist: 32, attack_damage: 62, move_speed: 335),
     growth: (max_health: 110, health_regen: 0.08, armor: 4.8, magic_resist: 1.8, attack_damage: 3.5),
     attack: (range: 150, attack_speed: 0.65, windup_fraction: 0.3),

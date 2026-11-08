@@ -6,6 +6,7 @@
 Champion(
     format: 0,
     name: "Shade",
+    class: Assassin,
     stats: (max_health: 590, health_regen: 1.5, armor: 28, magic_resist: 32, attack_damage: 70, move_speed: 345),
     growth: (max_health: 95, health_regen: 0.08, armor: 4.3, magic_resist: 1.5, attack_damage: 3.9),
     attack: (range: 125, attack_speed: 0.72, windup_fraction: 0.25),

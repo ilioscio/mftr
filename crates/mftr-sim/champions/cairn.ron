@@ -7,6 +7,7 @@
 Champion(
     format: 0,
     name: "Cairn",
+    class: Warden,
     stats: (max_health: 660, health_regen: 1.8, armor: 34, magic_resist: 34, attack_damage: 58, ability_power: 20, move_speed: 335),
     growth: (max_health: 106, health_regen: 0.08, armor: 4.7, magic_resist: 1.9, attack_damage: 3.2),
     attack: (range: 150, attack_speed: 0.62, windup_fraction: 0.3),

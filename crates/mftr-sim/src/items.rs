@@ -1504,11 +1504,12 @@ pub fn buy_order(id: u8) -> Vec<u8> {
     out
 }
 
-/// Bot build paths (components first, so recipes discount them), after a starter.
+/// Bot build paths (components first, so recipes discount them), after a starter: one per
+/// class (the artillery mage shops like the mage, the warden like the tank).
 pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
-    use crate::champion::ChampionId;
-    match champion.stand_in() {
-        ChampionId::Ember | ChampionId::Quill => &[
+    use crate::champion::Class;
+    match champion.def().class {
+        Class::Mage | Class::Artillery => &[
             SQUIRES_RING,
             BOOTS,
             CHARGED_WAND,
@@ -1525,7 +1526,7 @@ pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
             CHAIN_COAT,
             AMBER_RELIQUARY,
         ],
-        ChampionId::Marrow => &[
+        Class::Battlemage => &[
             SQUIRES_RING,
             BOOTS,
             CHARGED_WAND,
@@ -1542,7 +1543,7 @@ pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
             CHARGED_WAND,
             GRAND_GRIMOIRE,
         ],
-        ChampionId::Vesper => &[
+        Class::Marksman => &[
             SQUIRES_BLADE,
             BOOTS,
             GREATSWORD,
@@ -1563,7 +1564,7 @@ pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
             GREATSWORD,
             CRIMSON_FANG,
         ],
-        ChampionId::Wren => &[
+        Class::Skirmisher => &[
             SQUIRES_BLADE,
             BOOTS,
             HEAVY_PICK,
@@ -1583,7 +1584,7 @@ pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
             GREATSWORD,
             CRIMSON_FANG,
         ],
-        ChampionId::Shade => &[
+        Class::Assassin => &[
             SQUIRES_BLADE,
             BOOTS,
             LONG_KNIFE,
@@ -1605,7 +1606,7 @@ pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
             LONG_KNIFE,
             VEILRUNNER_DAGGER,
         ],
-        ChampionId::Rook => &[
+        Class::Bruiser => &[
             SQUIRES_BLADE,
             BOOTS,
             VITAL_CRYSTAL,
@@ -1625,7 +1626,7 @@ pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
             HEAVY_PICK,
             LIONHEART_TALISMAN,
         ],
-        ChampionId::Bastion | ChampionId::Cairn => &[
+        Class::Tank | Class::Warden => &[
             SQUIRES_BUCKLER,
             BOOTS,
             VITAL_CRYSTAL,
@@ -1650,7 +1651,7 @@ pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
             TITAN_BELT,
             STONEWALL_AEGIS,
         ],
-        ChampionId::Lumen => &[
+        Class::Enchanter => &[
             SQUIRES_RING,
             BOOTS,
             WARDING_CLOAK,
@@ -1667,7 +1668,6 @@ pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
             GLOWING_GARNET,
             INFERNO_DIADEM,
         ],
-        _ => unreachable!("a stand-in is an official champion"),
     }
 }
 

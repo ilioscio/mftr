@@ -1311,6 +1311,14 @@ replace the shared head anyway.
   trample). In a 12-minute ARAM bot match he went 13/10/21 on a bruiser build borrowed from Rook,
   and the replay re-simulated with all 72 hashes matching.
 
+### CR slice 1c status (2026-11-07): ✅ done
+- **Classes:** every champion file names its `class` (01 §9's ten: Mage, Marksman, Tank,
+  Bruiser, Enchanter, Assassin, Artillery, Warden, Battlemage, Skirmisher). The bots' archetype
+  is the class, and item build paths are per class (the artillery mage shops like the mage, the
+  warden like the tank). Those were the only places that branched on the ten; everything else
+  (the bots' fight model, the client's effect names) already read the kit. `stand_in` is gone.
+  Bot matches and golden hashes are unchanged.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.
