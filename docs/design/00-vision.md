@@ -39,6 +39,7 @@ Every feature is judged against these, in priority order.
 ### 5. Data-driven and moddable
 - Champions, abilities, items, augments, maps and modes are **data** composed from reusable effect primitives. Code is the escape hatch, not the default.
 - Custom game modes and community content are first-class. Mayhem-style augments rely on this.
+- **Players make champions.** The champion creator ([20](20-champion-creator.md)) builds a champion from a build, a sculpted face and body, painted clothes and a kit of moves within a fair budget. The official roster is made in it too.
 
 ## Non-goals
 

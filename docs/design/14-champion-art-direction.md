@@ -24,6 +24,12 @@ person.
 | **R spin** | The brightest thing on screen is a crisp **ring at the area's true radius**; inside it, translucent grey wind and red staff streaks. Every knocked-up minion gets its own flash. | §4.2 edges vs interiors |
 | **Color** | Gold plate, oxblood cloth, red-and-gold staff ends. His smears, sparks, dash streak, ring and ambient embers are **all gold/orange**. The kit is one palette. | §4 signature colors |
 
+**With the champion creator** ([20](20-champion-creator.md), D68), these rules apply to the
+catalog (base meshes, parts, moves, effects) and to the official recipes. The creator enforces
+the ones a player could break: silhouette preview at the gameplay camera, limb thickness, the
+team accent band, and effect sizes from gameplay data. The signature color (§4) is a field of
+every recipe.
+
 ## 2. Silhouette and shape
 
 ### 2.1 One shape per champion

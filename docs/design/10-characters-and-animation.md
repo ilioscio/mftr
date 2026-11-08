@@ -2,6 +2,8 @@
 
 How champions look, move and animate, and the pipeline that builds them. This expands [05 §4](05-art-and-assets.md#4-champions). It's written so that first-party champions and community champions ([11](11-content-packs-and-mods.md)) go through the **same** rig, rules, tools and validator.
 
+**Coming change (D68):** champions will be made in the champion creator ([20](20-champion-creator.md)) as recipes, built at load from a catalog. The rig standard, timing contract, animation set, runtime blending and budgets here all still apply. What changes is the pipeline (§8): Blender makes base meshes, morphs, parts and moves for the catalog instead of whole champions, and the ten champions' clips become the humanoid move library.
+
 **Quality bar:** every champion ships with its *complete* animation set (§5). Not a placeholder set to finish later. Genre entries that cut corners here (Dawngate, Paragon, Infinite Crisis) felt floaty and unreadable, and players notice that in the first minute. Most of the "feel" lives in the timing contract (§4) and the release and impact frames (§4.4), not in the polygon count.
 
 ## 1. Principles

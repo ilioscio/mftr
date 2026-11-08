@@ -37,6 +37,8 @@ These rules apply to every asset, including future skins and mods.
 ### Texture policy
 Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlases, SDF icon/glyph atlases, the few UI images that must be bitmaps. Anything else needs a **texture budget review** in the PR, with the size impact reported by CI.
 
+**Exception (D70): paint images.** Champion-creator parts may carry a hand-painted image: palette-indexed (16 colors from the shared palette), 64×64 or 128×128, nearest-filtered, stored in the champion's recipe ([20 §11.1](20-champion-creator.md#111-the-recipe)). Nothing else gains textures.
+
 ## 3. Map construction
 
 - Authored as **vector data** in `maps-src/`: lane splines, wall and brush polygons, river path, height control points.

@@ -13,15 +13,16 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | M2 ARAM | ✅ slices 1–6 | Ten humans finish a match on a community-hosted server (the release workflow has now run on every tag through v0.18.2) |
 | M3 Mayhem | ✅ slices 1–6, stress exit met | Playtesters rate Mayhem fun |
 | A Characters & animation | ✅ all ten, rebuilt by C | The owner's approval of the concepts; the blind side-by-side |
-| M4 Crossroads | Slices 1–4 ✅; 7 and most of 8 built by other tracks (D64, D62) | Slice 5 (epic objectives, waits on E5), slice 6 (Draft with bans and roles), roster 10 → 16–20 |
+| M4 Crossroads | Slices 1–4 ✅; 7 and most of 8 built by other tracks (D64, D62) | Slice 5 (epic objectives, waits on E5), slice 6 (Draft with bans and roles), roster 10 → 16–20 (made in the creator, waits on CR, D72) |
 | E Map editor | Slices 1–4 and 6 ✅ | Slice 5: the owner's Classic map |
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D72) | Everything |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
-**Next to build:** E5 (once the owner's map is exported), then M4 slice 5, slice 6 and the roster. **Next to run:** the M1 blind playtest and an M2/M3 community match, now that testers update themselves (U).
+**Next to build:** the champion creator (CR, from CR1: champions as data), ahead of the roster, which is now made in it (D72). Beside it: E5 (once the owner's map is exported), then M4 slices 5 and 6. **Next to run:** the M1 blind playtest and an M2/M3 community match, now that testers update themselves (U).
 
 ## M0 — Foundations
 **Goal:** the skeleton every later milestone builds on.
@@ -768,7 +769,7 @@ Classic's champion select is a free pick since S slice 3 (any champion no human 
 Bots v2 (below) plays roles: a coach assigns lanes and the jungler, bots gank, rotate to sieges and defenses, ward by persona, and buy by role. **Not yet:** vision denial, and a check that the rhythm (laning → skirmish → teamfight) shows in telemetry, which is the M4 exit.
 
 ### Roster (2026-11-04): 10 of 16–20
-Vesper, Rook, Ember, Bastion, Lumen, Shade, Quill, Cairn, Marrow, Wren. No champion added since A slice 14. Front-line kits are the next champion work (17 §15).
+Vesper, Rook, Ember, Bastion, Lumen, Shade, Quill, Cairn, Marrow, Wren. No champion added since A slice 14. Front-line kits are the next champion work (17 §15). **2026-11-07:** new champions wait for the champion creator (CR, D72); the ten are rebuilt in it as recipes (D68).
 
 ## E — Map editor (before M4 slice 5)
 The map editor of [12](12-map-editor.md) (D56): the official 5v5 map is drawn with it, and
@@ -1228,10 +1229,50 @@ health bars, the minimap and effects. A colorblind mode recolors all of them fro
 with presets for protanopia, deuteranopia and tritanopia, and checks that every place a team is
 told by color also has a shape or a mark that says it.
 
+## CR — Champion creator (next, ahead of the roster)
+
+Players make their own champions, and the official roster is made the same way
+([20](20-champion-creator.md), D68–D72): a build, a gender, a face and a body from sculpted
+sliders and free sculpting, clothes from a catalog, painted by hand, a kit from a move library,
+numbers within a priced budget, a name, and a **Test** button into a practice room. A champion
+becomes a **recipe** (a few KB of choices) that a new crate, `mftr-forge`, builds into a model
+and a kit at load. The first version supports the slim and heavy humanoid builds (both on
+`biped`).
+
+**Exit:** the ten official champions are recipes and the owner prefers them to the hand-made
+ones; a new player makes a recognizable famous figure in under 20 minutes (playtest); a match of
+ten customs loads and runs within 05 §8–9's budgets.
+
+### CR slices (in order of dependency)
+1. **Data-driven champions:** the sim takes champion data at runtime (D8); the ten kits move to
+   RON; recipe format v0 (kit and stats) and its validation in `mftr-pack`; the server pushes
+   recipes and clients predict from compiled kits. Exit: every champion plays from data with the
+   golden hashes unchanged.
+2. **`mftr-forge`:** mesh, skeleton, colors and animation from a recipe; slim humanoid base
+   meshes (both genders) and the first 20 sliders; base mesh, morph, part and move exports in the
+   Blender add-on; the client draws forged champions.
+3. **The creator shell:** the step flow, preview stage, save, load and presets; the build,
+   gender, face and body editors; Test into the practice room (20 §10).
+4. **Clothes:** the first ~60 parts, fitting, body masks, conflicts, cloth chains, budget meters.
+5. **Paint:** palette-indexed paint images (D70), fill, brush, decals, the signature color.
+6. **Moveset:** the humanoid move library from the ten kits (~50 moves), passives, resources,
+   the VFX and SFX catalogs, tuning in the preview, runtime IK fix-ups.
+7. **Balance:** the price table priced by hit probability, the random league, Auto-fit and caps
+   (D71); the ten official recipes fit the budget.
+8. **Heavy humanoid:** base meshes, sliders, parts and moves; Rook, Bastion and Cairn rebuilt.
+9. **Free sculpting:** brushes, envelopes, sculpt bindings for parts.
+10. **More builds**, one slice each: beast, serpentoid, spectre, machine.
+
+### CR status (2026-11-07): designed
+The design is [20](20-champion-creator.md). A parametric face pass on the ten champions (a
+`Face` with jaw, cheekbone, brow, nose, eye and mouth knobs in `head.py`) was tried first and
+dropped: procedural faces still looked programmer-made, and the creator's sculpted sliders
+replace the shared head anyway.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.
-- Mod and content pipeline (community champions, skins within readability rules, custom modes): server-pushed packs with signatures, the trust prompt, cache and blocklist ([11](11-content-packs-and-mods.md), D51).
+- Mod and content pipeline (community champions as creator recipes, community catalog packs, skins within readability rules, custom modes): server-pushed packs with signatures, the trust prompt, cache and blocklist ([11](11-content-packs-and-mods.md), D51, [20 §13](20-champion-creator.md#13-hosting-trust-and-moderation)).
 - Localization framework.
 
 ## M6 — Federation

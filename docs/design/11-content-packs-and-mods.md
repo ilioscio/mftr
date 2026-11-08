@@ -87,6 +87,9 @@ Every file is decoded by lewton when the pack is validated. Before any samples a
 
 **Never accepted:** GDScript, C#, native libraries, Godot resources or scenes, shader source, HTML, any other file type, or anything that isn't listed above. First-party champions ship as packs too, so the official content proves the format is enough.
 
+### 3.3 Champion recipes and catalog packs (D68)
+Champions made in the creator ([20](20-champion-creator.md)) travel as **recipes**: RON choices and numbers, plus palette-indexed paint images stored raw (D70). A recipe holds no glTF, audio or SVG; everything it names is in the catalog every client already has, so pushing one is cheap and parses only RON and raw bytes. `mftr-pack` checks every slider and sculpt offset against its bounds, the part and bone budgets, the paint images' sizes, and the kit's price and limits ([20 §9](20-champion-creator.md#9-balance)). Community **catalog packs** (new parts and moves) come later and are packs in the sense of this document.
+
 ## 4. Validation
 
 `mftr-pack` (Rust) is the **only** code that reads pack bytes, on the server, the client and in `mftr-tools`. The client builds Godot meshes, skeletons and animations **from validated arrays through gdext**. Pack bytes never reach Godot's `ResourceLoader`, and a CI test enforces that.
