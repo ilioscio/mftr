@@ -325,10 +325,72 @@ pub struct ChampionDef {
     pub growth: Stats,
     pub attack: AttackSpec,
     pub abilities: [Ability; 4],
+    /// What the abilities cost (01 §9, 20 §8.1). `Resource::NONE` (costless) for the official
+    /// ten for now.
+    pub resource: Resource,
     /// The champion's own passive (01 §9, 20 §8.1): one of the items' unique passives (18 §4),
     /// innate. `Passive::None` for the official ten for now. Unique as items' are: an item of the
     /// same kind counts instead only if it's stronger.
     pub passive: crate::items::Passive,
+}
+
+/// A kit's resource (01 §9, 20 §8.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResourceKind {
+    /// Costless.
+    None,
+    /// A pool that grows with level and refills slowly (and at the fountain).
+    Mana,
+    /// A small pool that refills fast.
+    Energy,
+    /// Starts empty, builds on basic attacks that land (`regen` a hit), drains out of use.
+    Rage,
+    /// Abilities cost health; no pool.
+    Health,
+}
+
+/// The resource, its pool and each ability's cost (Q W E R). In the unit's state,
+/// `UnitState::resource` is what's been **spent** of a mana or energy pool (0 is full, so a
+/// costless unit's state is unchanged) or the rage built up.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Resource {
+    pub kind: ResourceKind,
+    /// The pool at level 1 (mana grows 8% of it a level; energy and rage don't).
+    pub max: f32,
+    /// A second (mana, energy), or a basic attack that lands (rage).
+    pub regen: f32,
+    pub costs: [f32; 4],
+}
+
+/// Rage drains this much a second.
+pub const RAGE_DECAY: f32 = 4.0;
+
+impl Resource {
+    pub const NONE: Resource = Resource { kind: ResourceKind::None, max: 0.0, regen: 0.0, costs: [0.0; 4] };
+
+    /// The pool at `level`.
+    pub fn max_at(&self, level: u8) -> f32 {
+        match self.kind {
+            ResourceKind::Mana => self.max * (1.0 + 0.08 * (level.max(1) - 1) as f32),
+            _ => self.max,
+        }
+    }
+
+    /// What there is to spend now: `state` is `UnitState::resource`, `health` the unit's.
+    pub fn available(&self, state: f32, health: f32, level: u8) -> f32 {
+        match self.kind {
+            ResourceKind::None => f32::INFINITY,
+            ResourceKind::Mana | ResourceKind::Energy => (self.max_at(level) - state).max(0.0),
+            ResourceKind::Rage => state,
+            // Never down to zero by a cast.
+            ResourceKind::Health => (health - 1.0).max(0.0),
+        }
+    }
+
+    /// The cost of `slot` (Q W E R; utility spells are free).
+    pub fn cost(&self, slot: u8) -> f32 {
+        if self.kind == ResourceKind::None { 0.0 } else { self.costs.get(slot as usize).copied().unwrap_or(0.0) }
+    }
 }
 
 impl ChampionDef {

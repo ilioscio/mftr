@@ -170,8 +170,46 @@ pub fn features(def: &ChampionDef) -> Features {
             Effect::Claim(_) => {}
         }
     }
+    resource(def, &mut f);
     passive(def, &mut f, ad, ap);
     f
+}
+
+/// A resource (01 §9) gates the abilities: what they're worth is scaled by how much of the time
+/// the champion can afford them at the reference (spend at full rotation against income: regen,
+/// and a full pool spread over a minute's fighting), down to 70% for a kit that can't keep up.
+/// Health costs come out of durability instead (a 30 s fight's worth).
+fn resource(def: &ChampionDef, f: &mut Features) {
+    use crate::champion::ResourceKind;
+    let r = def.resource;
+    if r.kind == ResourceKind::None {
+        return;
+    }
+    let spend: f32 = (0..4)
+        .map(|slot| {
+            let rank = max_rank(slot as u8, LEVEL).max(1);
+            let cd =
+                (def.abilities[slot].cooldown_at(rank).0 as f32 / crate::time::SUBTICKS_PER_SECOND as f32).max(0.5);
+            r.cost(slot as u8) / cd
+        })
+        .sum();
+    if spend <= 0.0 {
+        return;
+    }
+    let income = match r.kind {
+        ResourceKind::Mana | ResourceKind::Energy => r.regen + r.max_at(LEVEL) / 60.0,
+        ResourceKind::Rage => r.regen * def.attack.attack_speed * 0.6,
+        ResourceKind::Health => {
+            f.ehp = (f.ehp - spend * 30.0).max(0.0);
+            return;
+        }
+        ResourceKind::None => return,
+    };
+    let k = 0.7 + 0.3 * (income / spend).min(1.0);
+    f.damage *= k;
+    f.control *= k;
+    f.mobility *= k;
+    f.protection *= k;
 }
 
 /// A champion's own passive (20 §8.1), priced like the rest: what it adds a second at the
@@ -305,6 +343,19 @@ fn scaled(def: &ChampionDef, k: f32) -> ChampionDef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_costly_resource_makes_a_kit_cheaper() {
+        use crate::champion::{Resource, ResourceKind};
+        let base = *ChampionId::Ember.def();
+        let free = price(&base).total();
+        let thirsty = Resource { kind: ResourceKind::Mana, max: 200.0, regen: 2.0, costs: [80.0, 90.0, 100.0, 150.0] };
+        let easy = Resource { kind: ResourceKind::Mana, max: 600.0, regen: 20.0, costs: [10.0, 10.0, 10.0, 20.0] };
+        let p_thirsty = price(&ChampionDef { resource: thirsty, ..base }).total();
+        let p_easy = price(&ChampionDef { resource: easy, ..base }).total();
+        assert!(p_thirsty < p_easy && p_easy <= free + 1e-3, "{p_thirsty} {p_easy} {free}");
+        assert!(p_thirsty > free * 0.7);
+    }
 
     #[test]
     fn a_passive_costs_a_few_points() {

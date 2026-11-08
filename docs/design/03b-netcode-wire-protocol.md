@@ -138,6 +138,9 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 > Stat Anvil steps and up to 16 effects (kind, tenths of a second left, a value: a slow's
 > percent, a shield's points, plates, stacks). Nothing in snapshots changes.
 
+> **Protocol 32:** the resource (01 §9, D75): a unit's state ends with one bit, then the mana
+> or energy spent (or rage built) as an f32 when it isn't 0.
+>
 > **Protocol 31:** custom champions (CR1d, [20](20-champion-creator.md)). Champion numbers are
 > five bits: the official ten 0–9, the server's custom champions 10–30 in its roster's order, 31
 > none. Hello gains `roster` (the hash of the custom roster the client has loaded, 0 for none). A

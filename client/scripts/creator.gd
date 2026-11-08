@@ -393,6 +393,26 @@ func _show_step(id: String) -> void:
 			for p in passives:
 				if p.id == held:
 					_hint(p.hint)
+			# The resource (01 §9): costless, or what Q W E R spend.
+			var rl := Label.new()
+			rl.text = "Resource"
+			_panel.add_child(rl)
+			var rpick := OptionButton.new()
+			var resources: Array = creator.resources()
+			var on_res: String = creator.resource()
+			rpick.add_item("None (costless)")
+			for i in resources.size():
+				rpick.add_item(resources[i].label)
+				if resources[i].id == on_res:
+					rpick.select(i + 1)
+			rpick.item_selected.connect(func(i):
+				creator.set_resource("" if i == 0 else resources[i - 1].id)
+				_changed(true)
+				_show_step("moves"))
+			_panel.add_child(rpick)
+			for r in resources:
+				if r.id == on_res:
+					_hint(r.hint)
 			_panel.add_child(HSeparator.new())
 			var kl := Label.new()
 			kl.text = "Or take a whole kit"

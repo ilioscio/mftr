@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–9 ✅ (champions as data; forged models; the creator and Test; clothes; paint: fills, brush and decals; moves and passives; the budget; the heavy humanoid; free sculpting) | 10 (more builds); resources; refit prices; swap the official models |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–9 ✅ (champions as data; forged models; the creator and Test; clothes; paint: fills, brush and decals; moves and passives; the budget; the heavy humanoid; free sculpting) | 10 (more builds); refit prices; swap the official models |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1555,9 +1555,15 @@ replace the shared head anyway.
   Spellblade, Cleave, Fleet, Sunder, Thorns, Last stand, Second wind) or none; the random league
   gives its champions one. Grumble, the example, regenerates out of harm. The official ten have
   none yet.
-- **Resources** (mana, energy, rage, health cost; 20 §8.1) aren't in the sim at all: every kit is
-  costless. They need casting costs, regeneration, a HUD bar, the snapshot and the bots: a slice
-  of their own, with the owner's word on whether the official ten get them.
+- **Resources** ✅ (2026-11-08, D75): `resource: Mana(max, regen, costs: [Q, W, E, R])`, `Energy`,
+  `Rage` (regen per hit that lands), `Health(costs)` or none, in the sim (a cast that can't pay
+  doesn't start; regeneration, rage drain, the fountain refills mana and energy), on the wire
+  (protocol 32: one bit when nothing's spent), in the HUD (a bar under the health), in the price
+  (a thirsty kit is cheaper, down to 70% of its abilities' worth; health costs come out of
+  durability), in the creator's Moveset step (four presets) and the random league. Unit state
+  keeps mana *spent* (0 is full), so costless kits keep their exact state and hashes: the
+  official ten stay costless until the owner says otherwise. Grumble runs on rage. Bots don't
+  plan around costs yet: a cast they can't pay is simply refused.
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.

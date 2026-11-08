@@ -314,6 +314,31 @@ impl MftrCreator {
         out
     }
 
+    /// The resources (01 §9): `[{id, label, hint}]`.
+    #[func]
+    fn resources(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for (id, label, hint, _) in mftr_forge::passives::RESOURCES {
+            let mut d = VarDictionary::new();
+            d.set("id", id);
+            d.set("label", label);
+            d.set("hint", hint);
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// The kit's resource's id ("" costless).
+    #[func]
+    fn resource(&self) -> GString {
+        GString::from(mftr_forge::passives::resource_id(&self.recipe.kit.resource))
+    }
+
+    #[func]
+    fn set_resource(&mut self, id: GString) {
+        self.recipe.set_resource(&id.to_string());
+    }
+
     /// The kit's passive's id ("" for none).
     #[func]
     fn passive(&self) -> GString {

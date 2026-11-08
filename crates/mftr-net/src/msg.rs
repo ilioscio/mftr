@@ -1391,6 +1391,11 @@ fn write_unit_state(w: &mut BitWriter, s: &UnitState) {
     write_time(w, s.recall_until);
     write_gear(w, &s.progress.gear);
     write_fx(w, &s.fx);
+    // The resource (01 §9): one bit when there's none spent or built.
+    w.write_bool(s.resource != 0.0);
+    if s.resource != 0.0 {
+        w.write_f32(s.resource);
+    }
 }
 
 /// A time that is usually unset (0): one bit then.
@@ -1663,6 +1668,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
     let recall_until = read_time(r)?;
     let gear = read_gear(r)?;
     let fx = read_fx(r)?;
+    let resource = if r.read_bool()? { read_finite(r)? } else { 0.0 };
     let progress = Progress {
         level,
         xp,
@@ -1732,6 +1738,7 @@ fn read_unit_state(r: &mut BitReader) -> Result<UnitState, DecodeError> {
         potion_until,
         recall_until,
         fx,
+        resource,
     })
 }
 
@@ -2908,6 +2915,8 @@ mod tests {
             attacks: 201,
             potion_rate: 8.0,
             potion_until: SimTime(77_000),
+            // Mana spent (01 §9): rides the wire behind one bit.
+            resource: 42.5,
             recall_until: SimTime(90_000),
             fx: Fx {
                 wounds: 40,

@@ -13,7 +13,7 @@ pub mod packet;
 pub mod secure;
 
 /// Bumped on any wire-format change. Client and server must match exactly.
-pub const PROTOCOL_VERSION: u16 = 31;
+pub const PROTOCOL_VERSION: u16 = 32;
 
 /// The release this build belongs to ("0.16.1"): the workspace version, the same in the client,
 /// the server and the tools. A server tells it to clients on another protocol, so their players

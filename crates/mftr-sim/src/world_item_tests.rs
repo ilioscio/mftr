@@ -265,6 +265,53 @@ fn a_champions_own_passive_acts_on_its_hits() {
     let _ = me;
 }
 
+/// Resources (01 §9): mana pays for casts and runs out, rage builds on hits, health costs health.
+#[test]
+fn resources_pay_for_casts() {
+    use crate::champion::{ChampionDef, Resource, ResourceKind};
+    let cast_q = |w: &mut World, seq: u32| {
+        let k = w.tick().0 + 1;
+        w.step(&[command(0, seq, k, CommandKind::Cast { slot: 0, target: at(1250.0, 1000.0) })]);
+        w.take_events().iter().any(|e| matches!(e, SimEvent::CastStarted { slot: 0, .. }))
+    };
+    let mana = Resource { kind: ResourceKind::Mana, max: 100.0, regen: 2.0, costs: [60.0, 0.0, 0.0, 0.0] };
+    let id =
+        ChampionId::register(ChampionDef { name: "Mana Test", resource: mana, ..*ChampionId::Rook.def() }).unwrap();
+    let (mut w, me, _) = duel(id, &[], ChampionId::Ember);
+    w.unit_mut(me).unwrap().state.progress.ranks = [1; 4];
+    assert!(cast_q(&mut w, 1));
+    run(&mut w, 10);
+    let spent = w.unit(me).unwrap().state.resource;
+    assert!((55.0..60.0).contains(&spent), "{spent}");
+    // Off cooldown but 40 mana left: no cast.
+    w.unit_mut(me).unwrap().state.cooldowns[0] = SimTime(0);
+    assert!(!cast_q(&mut w, 2));
+    // Mana comes back.
+    run(&mut w, 120);
+    assert!(w.unit(me).unwrap().state.resource < spent - 3.0);
+
+    let rage = Resource { kind: ResourceKind::Rage, max: 100.0, regen: 10.0, costs: [30.0, 0.0, 0.0, 0.0] };
+    let id =
+        ChampionId::register(ChampionDef { name: "Rage Test", resource: rage, ..*ChampionId::Rook.def() }).unwrap();
+    let (mut w, me, them) = duel(id, &[], ChampionId::Ember);
+    w.unit_mut(me).unwrap().state.progress.ranks = [1; 4];
+    assert!(!cast_q(&mut w, 1), "no rage yet");
+    w.unit_mut(them).unwrap().state.pos = Vec2::new(1150.0, 1000.0);
+    let k = w.tick().0 + 1;
+    w.step(&[command(0, 2, k, CommandKind::Attack(them))]);
+    run(&mut w, 150);
+    assert!(w.unit(me).unwrap().state.resource >= 30.0 - 4.0 * 5.0, "rage {}", w.unit(me).unwrap().state.resource);
+
+    let blood = Resource { kind: ResourceKind::Health, max: 0.0, regen: 0.0, costs: [80.0, 0.0, 0.0, 0.0] };
+    let id =
+        ChampionId::register(ChampionDef { name: "Blood Test", resource: blood, ..*ChampionId::Rook.def() }).unwrap();
+    let (mut w, me, _) = duel(id, &[], ChampionId::Ember);
+    w.unit_mut(me).unwrap().state.progress.ranks = [1; 4];
+    let before = w.unit(me).unwrap().state.health;
+    assert!(cast_q(&mut w, 1));
+    assert!(w.unit(me).unwrap().state.health < before - 70.0);
+}
+
 /// The Pilgrim's quest (18 §6): Tithe pays on hits on champions, three charges; at 500 quest
 /// gold the Ledger becomes the Astrolabe, its wards full.
 #[test]

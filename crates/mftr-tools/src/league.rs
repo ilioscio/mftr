@@ -44,6 +44,12 @@ fn random_champion(i: usize, d: &mut Dice) -> ChampionId {
     if let Some((id, ..)) = all.get(k) {
         r.set_passive(id);
     }
+    // A resource, or costless (one chance in five).
+    let res = mftr_forge::passives::RESOURCES;
+    let k = (((d.signed() + 1.0) * 0.5) * (res.len() + 1) as f32) as usize;
+    if let Some((id, ..)) = res.get(k) {
+        r.set_resource(id);
+    }
     for slot in moves::SLOTS {
         r.tune(slot, 1.0 + d.signed() * 0.35, 1.0 + d.signed() * 0.3);
     }

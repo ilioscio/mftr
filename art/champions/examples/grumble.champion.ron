@@ -1,7 +1,7 @@
 // Old Grumble, the Bridge Troll: an example champion file (CR1b, 20 §11.1), the kind the
 // champion creator makes. Not an official champion: `mftr-tools botmatch --champion-file
 // art/champions/examples/grumble.champion.ron --team Grumble` puts him in a bot match.
-// War paint on his chest and face (brush and decals, CR5b). A heavy brute who heals fast out of harm (a troll's passive): a slowing ground slam, a roar that heals him, a boulder he lobs to knock a
+// War paint on his chest and face (brush and decals, CR5b). A heavy brute who runs on rage and heals fast out of harm (a troll's passive): a slowing ground slam, a roar that heals him, a boulder he lobs to knock a
 // group up, and a charge that runs a target down.
 // Numbers are *(start)* values; durations are in milliseconds. The format is in
 // `crates/mftr-sim/src/data.rs`, the limits every kit must respect in `crates/mftr-sim/src/limits.rs`.
@@ -154,6 +154,7 @@ Champion(
     growth: (max_health: 106, health_regen: 0.08, armor: 4.6, magic_resist: 1.7, attack_damage: 3.6),
     attack: (range: 175, attack_speed: 0.65, windup_fraction: 0.3),
     passive: Warmth(max_hp: 0.02, after_ms: 6000),
+    resource: Rage(max: 100, regen: 10, costs: [20, 30, 30, 60]),
     abilities: [
         (
             name: "Ground Slam",

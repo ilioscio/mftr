@@ -219,6 +219,7 @@ pub fn problems(def: &ChampionDef) -> Vec<String> {
         ability(&mut Check { out: &mut out, at: format!("{slot} {}: ", a.name) }, a, i);
     }
     passive(&mut Check { out: &mut out, at: "passive: ".into() }, &def.passive);
+    resource(&mut Check { out: &mut out, at: "resource: ".into() }, &def.resource);
     let mut names: Vec<&str> = def.abilities.iter().map(|a| a.name).collect();
     names.sort_unstable();
     names.dedup();
@@ -226,6 +227,32 @@ pub fn problems(def: &ChampionDef) -> Vec<String> {
         out.push("abilities: each needs its own name".into());
     }
     out
+}
+
+/// A kit's resource (01 §9): pools and costs within reason, and every cost payable from a full
+/// pool.
+fn resource(c: &mut Check, r: &crate::champion::Resource) {
+    use crate::champion::ResourceKind;
+    match r.kind {
+        ResourceKind::None => {}
+        ResourceKind::Mana | ResourceKind::Energy | ResourceKind::Rage => {
+            c.range("max", r.max, 50.0, 1000.0);
+            let hi = match r.kind {
+                ResourceKind::Mana => 30.0,
+                ResourceKind::Energy => 80.0,
+                _ => 40.0,
+            };
+            c.range("regen", r.regen, 0.5, hi);
+            for (i, cost) in r.costs.iter().enumerate() {
+                c.range(&format!("costs[{i}]"), *cost, 0.0, r.max);
+            }
+        }
+        ResourceKind::Health => {
+            for (i, cost) in r.costs.iter().enumerate() {
+                c.range(&format!("costs[{i}]"), *cost, 0.0, 300.0);
+            }
+        }
+    }
 }
 
 /// A champion's own passive (20 §8.1): about an item's strength at most, so no passive

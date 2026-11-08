@@ -71,9 +71,56 @@ pub fn get(id: &str) -> Option<Passive> {
     PASSIVES.iter().find(|e| e.0 == id).map(|e| e.3)
 }
 
+/// The resources a kit can run on (20 §8.1, 01 §9): (id, name, what it does, the resource). The
+/// costs are a start the Balance step's price reflects (a thirsty kit is cheaper).
+pub const RESOURCES: [(&str, &str, &str, mftr_sim::champion::Resource); 4] = {
+    use mftr_sim::champion::{Resource, ResourceKind};
+    [
+        (
+            "mana",
+            "Mana",
+            "A pool that grows with level and refills slowly, and at the fountain.",
+            Resource { kind: ResourceKind::Mana, max: 300.0, regen: 6.0, costs: [40.0, 50.0, 60.0, 100.0] },
+        ),
+        (
+            "energy",
+            "Energy",
+            "A small pool that refills fast: bursts, then a breath.",
+            Resource { kind: ResourceKind::Energy, max: 200.0, regen: 40.0, costs: [50.0, 40.0, 60.0, 0.0] },
+        ),
+        (
+            "rage",
+            "Rage",
+            "Starts empty, builds on basic attacks that land, drains out of use.",
+            Resource { kind: ResourceKind::Rage, max: 100.0, regen: 10.0, costs: [20.0, 30.0, 30.0, 60.0] },
+        ),
+        (
+            "health",
+            "Health",
+            "Abilities cost health.",
+            Resource { kind: ResourceKind::Health, max: 0.0, regen: 0.0, costs: [30.0, 40.0, 50.0, 80.0] },
+        ),
+    ]
+};
+
+/// The id of the resource kind `r` is ("" costless).
+pub fn resource_id(r: &mftr_sim::champion::Resource) -> &'static str {
+    RESOURCES.iter().find(|e| e.3.kind == r.kind).map_or("", |e| e.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_resource_is_legal() {
+        let rook = *mftr_sim::ChampionId::Rook.def();
+        for (id, _, _, r) in RESOURCES {
+            let def = mftr_sim::champion::ChampionDef { resource: r, ..rook };
+            assert!(mftr_sim::limits::problems(&def).is_empty(), "{id}: {:?}", mftr_sim::limits::problems(&def));
+            assert_eq!(resource_id(&r), id);
+        }
+    }
 
     #[test]
     fn every_passive_is_legal_and_written() {

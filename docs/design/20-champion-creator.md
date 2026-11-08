@@ -235,7 +235,7 @@ Every champion has a **basic attack**, a **passive**, a **resource** and **Q W E
 |---|---|---|
 | Basic attack | the build's attack moves | bow shot, crossbow bolt, staff bolt, maul blow, blade slash, punch |
 | Passive | the passive catalog (shared; D74: the items' unique passives, nine to start) | on-hit magic, empowered every third hit, spellblade, cleave, a speed burst on hits, sunder, thorns, shield at low health, regeneration out of combat |
-| Resource | fixed list | mana, energy, rage, health cost, none |
+| Resource | fixed list (D75) | mana, energy, rage, health cost, none |
 | Q W E R | the build's move library | line skillshots, lobbed areas, novas, dashes, lunges, blinks, shields, heals, beams, pulls, nets, slams |
 
 ### 8.2 Moves

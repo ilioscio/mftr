@@ -115,6 +115,21 @@ impl Recipe {
         }
     }
 
+    /// The resource by id (`passives::RESOURCES`), "" for costless. False if there's no such one.
+    pub fn set_resource(&mut self, id: &str) -> bool {
+        if id.is_empty() {
+            self.kit.resource = mftr_sim::champion::Resource::NONE;
+            return true;
+        }
+        match crate::passives::RESOURCES.iter().find(|e| e.0 == id) {
+            Some(e) => {
+                self.kit.resource = e.3;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The catalog id of the kit's passive ("" for none).
     pub fn passive(&self) -> &'static str {
         crate::passives::of(self.kit.passive).map_or("", |e| e.0)

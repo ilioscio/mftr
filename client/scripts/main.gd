@@ -3886,6 +3886,12 @@ func _draw_bottom_hud(font: Font) -> void:
 			overlay.draw_texture_rect(ItemIcons.icon(pot), Rect2(hb.position + Vector2(2.0 * k, -2.0 * k), Vector2(pi, pi)), false)
 		Hud.text(overlay, font, hb.position + Vector2(pi + 6.0 * k, hb.size.y / 2.0 + 5.0 * k), "%d s" % ceili(potion), roundi(12.0 * k), Color(0.6, 1.0, 0.65))
 	Hud.text(overlay, bold, hb.position + Vector2(0, hb.size.y / 2.0 + 5.0 * k), hp_text, roundi(14.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, hb.size.x)
+	# The resource (01 §9): a thin bar under the health, in its color (health costs have none).
+	var rkind: String = own_status.get("resource_kind", "")
+	if rkind != "" and rkind != "health":
+		var rcolor: Color = {"mana": Color(0.3, 0.55, 1.0), "energy": Color(1.0, 0.86, 0.3), "rage": Color(0.92, 0.25, 0.2)}[rkind]
+		var rb := Rect2(hb.position.x, hb.end.y + 2.0 * k, hb.size.x, 7.0 * k)
+		Hud.bar(overlay, rb, own_status.get("resource", 0.0), maxf(own_status.get("resource_max", 1.0), 1.0), rcolor, 0.0, Color.WHITE, 0.0, 0.0)
 	# Jungle buffs: their names and seconds left, just above the health bar.
 	var bx := hb.position.x
 	for buff in [["insight", "Insight", Color(0.45, 0.68, 1.0)], ["cinder", "Cinder", Color(1.0, 0.5, 0.25)]]:

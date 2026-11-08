@@ -589,6 +589,9 @@ pub struct UnitState {
     pub recall_until: SimTime,
     /// Timed item effects (18): Wounds, burns, Sunder, speed buffs, stasis.
     pub fx: crate::gear::Fx,
+    /// The resource (01 §9): mana or energy spent (0 is a full pool), or rage built up
+    /// (`champion::Resource`). Always 0 for a costless kit.
+    pub resource: f32,
 }
 
 /// A cast waiting to repeat (Echo): lines fly again from the caster's position then, areas land
@@ -635,6 +638,7 @@ impl UnitState {
             potion_until: SimTime(0),
             recall_until: SimTime(0),
             fx: crate::gear::Fx::NONE,
+            resource: 0.0,
         }
     }
 
@@ -998,6 +1002,10 @@ impl UnitState {
             h.write_u64(self.recall_until.0);
         }
         self.fx.hash_into(h);
+        // A full pool (or a costless kit) hashes as before resources existed.
+        if self.resource != 0.0 {
+            h.write_f32(self.resource);
+        }
     }
 }
 
@@ -2557,6 +2565,17 @@ impl World {
             if u.state.shield > 0.0 && u.state.shield_until <= s1 {
                 u.state.shield = 0.0;
             }
+            if u.state.resource > 0.0
+                && let Some(r) = u.champion.map(|c| c.def().resource)
+            {
+                use crate::champion::ResourceKind;
+                let back = match r.kind {
+                    ResourceKind::Mana | ResourceKind::Energy => r.regen * TICK_DT,
+                    ResourceKind::Rage => crate::champion::RAGE_DECAY * TICK_DT,
+                    _ => u.state.resource,
+                };
+                u.state.resource = (u.state.resource - back).max(0.0);
+            }
         }
         self.tick = k;
     }
@@ -3574,8 +3593,13 @@ fn try_cast(
     let haste = unit.stats.ability_haste + hyper;
     let (stats, gameplay_radius) = (unit.stats, unit.gameplay_radius);
     let timing = if unit.kind == UnitKind::Champion { ability.timing(slot) } else { Timing::NONE };
+    let resource = unit.champion.map_or(crate::champion::Resource::NONE, |c| c.def().resource);
     let st = &mut unit.state;
     if !st.can_cast(t, slot) {
+        return;
+    }
+    let cost = resource.cost(slot);
+    if cost > 0.0 && resource.available(st.resource, st.health, st.progress.level) < cost {
         return;
     }
     let to = target - st.pos;
@@ -3778,6 +3802,16 @@ fn try_cast(
         cooldown = SimDuration((cooldown.0 as f64 * 100.0 / (100.0 + haste as f64)).round() as u64);
     }
     st.cooldowns[slot as usize] = t.plus(cooldown);
+    // The cost, once the cast is sure to happen (01 §9).
+    if cost > 0.0 {
+        use crate::champion::ResourceKind;
+        match resource.kind {
+            ResourceKind::Mana | ResourceKind::Energy => st.resource += cost,
+            ResourceKind::Rage => st.resource = (st.resource - cost).max(0.0),
+            ResourceKind::Health => st.health = (st.health - cost).max(1.0),
+            ResourceKind::None => {}
+        }
+    }
     if mods.spellblade && slot < 4 {
         st.spellblade_until = t.plus(SimDuration::from_millis(augments::SPELLBLADE_MS));
     }
@@ -4006,6 +4040,15 @@ fn land_attack(
 /// Kindle, Cleave, Spoils, then life steal on the attack's damage (with Overflow), then what
 /// the target returns (Thorns).
 fn on_hit(units: &mut [Unit], landed: &[(UnitId, UnitId, f32, SimTime)], events: &mut Vec<SimEvent>) {
+    for &(owner, _, _, _) in landed {
+        // Rage builds on basic attacks that land (01 §9).
+        if let Some(o) = units.iter_mut().find(|u| u.id == owner && u.kind == UnitKind::Champion)
+            && let Some(r) = o.champion.map(|c| c.def().resource)
+            && r.kind == crate::champion::ResourceKind::Rage
+        {
+            o.state.resource = (o.state.resource + r.regen).min(r.max_at(o.state.progress.level));
+        }
+    }
     for &(owner, target, dealt, at) in landed {
         let Some(o) = units.iter().find(|u| u.id == owner && u.kind == UnitKind::Champion) else { continue };
         let (passives, stats, team, level) = (gear::of(o), o.stats, o.team, o.state.progress.level);
@@ -4884,6 +4927,12 @@ fn fountains_and_relics(units: &mut [Unit], map: &Map, prediction: bool, s1: Sim
                 }
                 let max = u.stats.max_health;
                 u.state.health = (u.state.health + max * lane::FOUNTAIN_HEAL * TICK_DT).min(max);
+                if let Some(r) = u.champion.map(|c| c.def().resource)
+                    && matches!(r.kind, crate::champion::ResourceKind::Mana | crate::champion::ResourceKind::Energy)
+                {
+                    let refill = r.max_at(u.state.progress.level) * lane::FOUNTAIN_HEAL * TICK_DT;
+                    u.state.resource = (u.state.resource - refill).max(0.0);
+                }
             } else if !prediction {
                 let by = Hitter::plain(UnitId(0), UnitKind::Turret);
                 deal_damage(u, &by, DamageOrigin::Fountain, lane::FOUNTAIN_DPS * TICK_DT, DamageKind::True, s1, events);

@@ -21,7 +21,7 @@ use crate::ability::{
     Ability, Beam, Blink, Cc, Damage, DamageKind, Dash, DelayedArea, Effect, LineSkillshot, Lunge, Pulses, RankScaling,
     ReactionClass, Shield, Support, Transforms,
 };
-use crate::champion::{AttackSpec, ChampionDef, Class, Stats};
+use crate::champion::{AttackSpec, ChampionDef, Class, Resource, ResourceKind, Stats};
 use crate::items::Passive;
 use crate::time::{SUBTICKS_PER_SECOND, SimDuration};
 use crate::veil::VeilSpec;
@@ -700,8 +700,39 @@ pub fn read_champion_and_looks(text: &str) -> Result<(ChampionDef, Option<(Value
         Some((v, at)) => passive(v, &at)?,
         None => Passive::None,
     };
+    let resource = match f.take("resource") {
+        Some((v, at)) => resource(v, &at)?,
+        None => Resource::NONE,
+    };
     f.done()?;
-    Ok((ChampionDef { name, class, stats, growth, attack, abilities, passive }, looks))
+    Ok((ChampionDef { name, class, stats, growth, attack, abilities, passive, resource }, looks))
+}
+
+/// A kit's resource (01 §9): `Mana(max, regen, costs: [Q, W, E, R])`, `Energy(...)`,
+/// `Rage(max, regen: per hit, costs)`, `Health(costs)`, or `None`.
+fn resource(v: Value, at: &str) -> Result<Resource, DataError> {
+    let (kind, fields) = variant(v, at)?;
+    let kind = match kind.as_str() {
+        "None" => return Ok(Resource::NONE),
+        "Mana" => ResourceKind::Mana,
+        "Energy" => ResourceKind::Energy,
+        "Rage" => ResourceKind::Rage,
+        "Health" => ResourceKind::Health,
+        other => return err(at, format!("`{other}`: a resource is Mana, Energy, Rage, Health or None")),
+    };
+    let Some(mut f) = fields else { return err(at, "a resource needs its costs: `Mana(..., costs: [...])`") };
+    let (max, regen) = if kind == ResourceKind::Health { (0.0, 0.0) } else { (f.f32("max")?, f.f32("regen")?) };
+    let (c, cat) = f.req("costs")?;
+    let Value::List(None, items) = c else { return err(&cat, "expected four costs: `[Q, W, E, R]`") };
+    if items.len() != 4 {
+        return err(&cat, "expected four costs: `[Q, W, E, R]`");
+    }
+    let mut costs = [0.0; 4];
+    for (i, item) in items.into_iter().enumerate() {
+        costs[i] = num(item, &format!("{cat}[{i}]"))?;
+    }
+    f.done()?;
+    Ok(Resource { kind, max, regen, costs })
 }
 
 /// A champion's own passive (20 §8.1): the kinds a champion may take, with their numbers.
@@ -974,6 +1005,22 @@ pub fn write_champion_as(def: &ChampionDef, name: &str, comment: &str, extra: &s
     if let Some(p) = write_passive(&def.passive) {
         let _ = writeln!(out, "    passive: {p},");
     }
+    let r = &def.resource;
+    if r.kind != ResourceKind::None {
+        let costs: Vec<String> = r.costs.iter().map(|c| c.to_string()).collect();
+        let name = match r.kind {
+            ResourceKind::Mana => "Mana",
+            ResourceKind::Energy => "Energy",
+            ResourceKind::Rage => "Rage",
+            _ => "Health",
+        };
+        let pool = if r.kind == ResourceKind::Health {
+            String::new()
+        } else {
+            format!("max: {}, regen: {}, ", r.max, r.regen)
+        };
+        let _ = writeln!(out, "    resource: {name}({pool}costs: [{}]),", costs.join(", "));
+    }
     let _ = writeln!(out, "    abilities: [");
     for ab in &def.abilities {
         let _ = writeln!(out, "        (");
@@ -1015,6 +1062,20 @@ mod tests {
             let def = c.def();
             let text = write_champion(def, "");
             assert_eq!(read_champion(&text).as_ref(), Ok(def), "{}\n{text}", def.name);
+        }
+    }
+
+    #[test]
+    fn resources_round_trip() {
+        for r in [
+            Resource { kind: ResourceKind::Mana, max: 400.0, regen: 8.0, costs: [50.0, 60.0, 70.0, 100.0] },
+            Resource { kind: ResourceKind::Energy, max: 200.0, regen: 50.0, costs: [40.0, 30.0, 0.0, 0.0] },
+            Resource { kind: ResourceKind::Rage, max: 100.0, regen: 8.0, costs: [0.0, 50.0, 0.0, 100.0] },
+            Resource { kind: ResourceKind::Health, max: 0.0, regen: 0.0, costs: [30.0, 0.0, 60.0, 0.0] },
+        ] {
+            let def = ChampionDef { resource: r, ..*ChampionId::Rook.def() };
+            let text = write_champion(&def, "");
+            assert_eq!(read_champion(&text), Ok(def), "{text}");
         }
     }
 

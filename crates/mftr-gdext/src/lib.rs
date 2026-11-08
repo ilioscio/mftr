@@ -1411,6 +1411,24 @@ impl MatchClient {
         d.set("abilities", &names);
         if let (Some(s), Some(t)) = (self.session.own_state_now(), self.session.input_sim_time(now)) {
             d.set("health", s.health);
+            // The resource (01 §9): its kind ("" costless), what there is now, the pool, Q W E R's costs.
+            let r = champ.def().resource;
+            let kind = match r.kind {
+                mftr_sim::champion::ResourceKind::None => "",
+                mftr_sim::champion::ResourceKind::Mana => "mana",
+                mftr_sim::champion::ResourceKind::Energy => "energy",
+                mftr_sim::champion::ResourceKind::Rage => "rage",
+                mftr_sim::champion::ResourceKind::Health => "health",
+            };
+            d.set("resource_kind", kind);
+            if !kind.is_empty() {
+                let level = s.progress.level;
+                let have = r.available(s.resource, s.health, level);
+                d.set("resource", if have.is_finite() { have } else { 0.0 });
+                d.set("resource_max", r.max_at(level));
+                let costs: PackedFloat32Array = r.costs.iter().copied().collect();
+                d.set("resource_costs", &costs);
+            }
             let (stats, attack) = items::champion_stats(champ.def(), &s.progress.stats_key());
             d.set("max_health", stats.max_health);
             d.set("attack_damage", stats.attack_damage);
