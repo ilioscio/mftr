@@ -10,6 +10,7 @@ pub mod augments;
 pub mod champion;
 pub mod collision;
 pub mod combat;
+pub mod data;
 pub mod gear;
 pub mod hash;
 pub mod horde;

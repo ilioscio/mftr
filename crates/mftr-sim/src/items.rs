@@ -1507,7 +1507,7 @@ pub fn buy_order(id: u8) -> Vec<u8> {
 /// Bot build paths (components first, so recipes discount them), after a starter.
 pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
     use crate::champion::ChampionId;
-    match champion {
+    match champion.stand_in() {
         ChampionId::Ember | ChampionId::Quill => &[
             SQUIRES_RING,
             BOOTS,
@@ -1667,13 +1667,14 @@ pub fn build_path(champion: crate::champion::ChampionId) -> &'static [u8] {
             GLOWING_GARNET,
             INFERNO_DIADEM,
         ],
+        _ => unreachable!("a stand-in is an official champion"),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::champion::{EMBER, VESPER};
+    use crate::champion::ChampionId;
 
     #[test]
     fn catalog_is_consistent() {
@@ -1711,7 +1712,13 @@ mod tests {
     #[test]
     fn stat_stack_applies_flat_then_percent() {
         let inv = [SPARK_SHARD, GRAND_GRIMOIRE, 0, 0, 0, 0];
-        let (s, _) = apply_items(EMBER.stats, EMBER.attack.attack_speed, &inv, &[0; 4], crate::augments::Growth::NONE);
+        let (s, _) = apply_items(
+            ChampionId::Ember.def().stats,
+            ChampionId::Ember.def().attack.attack_speed,
+            &inv,
+            &[0; 4],
+            crate::augments::Growth::NONE,
+        );
         assert!((s.ability_power - 220.0 * 1.35).abs() < 1e-3, "{}", s.ability_power);
     }
 
@@ -1719,14 +1726,23 @@ mod tests {
     fn attack_speed_caps_and_boots_dont_stack() {
         let inv = [ARC_TEMPEST, ARC_TEMPEST, GALE_SABER, BATTLE_BOOTS, ARC_BOW, ARC_BOW];
         // +185% attack speed: 0.8 → 2.28; from a 1.0 base it would be 2.85, capped at 2.5.
-        let (s, attack_speed) =
-            apply_items(VESPER.stats, VESPER.attack.attack_speed, &inv, &[0; 4], crate::augments::Growth::NONE);
+        let (s, attack_speed) = apply_items(
+            ChampionId::Vesper.def().stats,
+            ChampionId::Vesper.def().attack.attack_speed,
+            &inv,
+            &[0; 4],
+            crate::augments::Growth::NONE,
+        );
         assert!((attack_speed - 2.28).abs() < 1e-4, "{attack_speed}");
-        assert_eq!(apply_items(VESPER.stats, 1.0, &inv, &[0; 4], crate::augments::Growth::NONE).1, ATTACK_SPEED_CAP);
+        assert_eq!(
+            apply_items(ChampionId::Vesper.def().stats, 1.0, &inv, &[0; 4], crate::augments::Growth::NONE).1,
+            ATTACK_SPEED_CAP
+        );
         // One pair of boots (+45) and the Gale Saber's 7%: (325 + 45) × 1.07 = 395.9.
         assert!((s.move_speed - 395.9).abs() < 1e-3, "{}", s.move_speed);
         let two_boots = [SWIFT_BOOTS, BOOTS, 0, 0, 0, 0];
-        let (s, _) = apply_items(VESPER.stats, 0.8, &two_boots, &[0; 4], crate::augments::Growth::NONE);
+        let (s, _) =
+            apply_items(ChampionId::Vesper.def().stats, 0.8, &two_boots, &[0; 4], crate::augments::Growth::NONE);
         assert_eq!(s.move_speed, 385.0, "only the first pair counts");
     }
 
@@ -1734,13 +1750,19 @@ mod tests {
     #[test]
     fn new_stats_stack() {
         let inv = [STALWART_SABATONS, LIONHEART_TALISMAN, TITANBANE_BOW, STARSTEEL_BLADE, HOLLOW_SCEPTER, 0];
-        let (s, _) = apply_items(VESPER.stats, 0.8, &inv, &[0; 4], crate::augments::Growth::NONE);
+        let (s, _) = apply_items(ChampionId::Vesper.def().stats, 0.8, &inv, &[0; 4], crate::augments::Growth::NONE);
         assert!((s.tenacity - (1.0 - 0.7 * 0.8)).abs() < 1e-5, "{}", s.tenacity);
         assert!((s.crit_chance - 0.5).abs() < 1e-5);
         assert!((s.crit_damage - 0.4).abs() < 1e-5);
         assert!((s.armor_pen - 0.3).abs() < 1e-5);
         assert!((s.magic_pen_pct - 0.4).abs() < 1e-5);
-        let (s, _) = apply_items(VESPER.stats, 0.8, &[FORTUNES_DIE; 6], &[0; 4], crate::augments::Growth::NONE);
+        let (s, _) = apply_items(
+            ChampionId::Vesper.def().stats,
+            0.8,
+            &[FORTUNES_DIE; 6],
+            &[0; 4],
+            crate::augments::Growth::NONE,
+        );
         assert_eq!(s.crit_chance, 0.9);
     }
 
@@ -1749,23 +1771,32 @@ mod tests {
     fn augments_add_flat_then_convert_then_scale() {
         // Whetstone (+20 AD) and a Long Knife (+10 AD), then Conversion: the 30 bonus AD
         // becomes 33 AP.
-        let (s, _) =
-            apply_items(VESPER.stats, 0.8, &[LONG_KNIFE, 0, 0, 0, 0, 0], &[2, 9, 0, 0], crate::augments::Growth::NONE);
-        assert!((s.attack_damage - VESPER.stats.attack_damage).abs() < 1e-4);
-        assert!((s.ability_power - (VESPER.stats.ability_power + 33.0)).abs() < 1e-3, "{}", s.ability_power);
+        let (s, _) = apply_items(
+            ChampionId::Vesper.def().stats,
+            0.8,
+            &[LONG_KNIFE, 0, 0, 0, 0, 0],
+            &[2, 9, 0, 0],
+            crate::augments::Growth::NONE,
+        );
+        assert!((s.attack_damage - ChampionId::Vesper.def().stats.attack_damage).abs() < 1e-4);
+        assert!(
+            (s.ability_power - (ChampionId::Vesper.def().stats.ability_power + 33.0)).abs() < 1e-3,
+            "{}",
+            s.ability_power
+        );
         // Apex Form: +25% health, AD, AP, armor and magic resist, after flat bonuses.
         let (s, _) = apply_items(
-            EMBER.stats,
+            ChampionId::Ember.def().stats,
             0.8,
             &[VITAL_CRYSTAL, 0, 0, 0, 0, 0],
             &[17, 0, 0, 0],
             crate::augments::Growth::NONE,
         );
-        assert!((s.max_health - (EMBER.stats.max_health + 150.0) * 1.25).abs() < 1e-2);
-        assert!((s.armor - EMBER.stats.armor * 1.25).abs() < 1e-4);
+        assert!((s.max_health - (ChampionId::Ember.def().stats.max_health + 150.0) * 1.25).abs() < 1e-2);
+        assert!((s.armor - ChampionId::Ember.def().stats.armor * 1.25).abs() < 1e-4);
         // Swift Hands adds to the item attack speed bonus: 0.8 × (1 + 0.12 + 0.30).
         let (_, attack_speed) = apply_items(
-            VESPER.stats,
+            ChampionId::Vesper.def().stats,
             0.8,
             &[QUICK_DAGGER, 0, 0, 0, 0, 0],
             &[6, 0, 0, 0],

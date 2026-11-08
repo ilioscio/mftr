@@ -24,7 +24,7 @@ pub enum Archetype {
 
 impl Archetype {
     pub fn of(c: ChampionId) -> Archetype {
-        match c {
+        match c.stand_in() {
             ChampionId::Ember => Archetype::Mage,
             ChampionId::Vesper => Archetype::Marksman,
             ChampionId::Bastion => Archetype::Tank,
@@ -35,6 +35,7 @@ impl Archetype {
             ChampionId::Cairn => Archetype::Warden,
             ChampionId::Marrow => Archetype::Battlemage,
             ChampionId::Wren => Archetype::Skirmisher,
+            _ => unreachable!("a stand-in is an official champion"),
         }
     }
 
@@ -404,11 +405,12 @@ mod tests {
 
     #[test]
     fn roles_go_to_the_champions_that_fit_them() {
-        use ChampionId::*;
-        let roles = assign_roles(&[Vesper, Lumen, Rook, Shade, Ember], &[None; 5]);
+        let [vesper, lumen, rook, shade, ember] =
+            [ChampionId::Vesper, ChampionId::Lumen, ChampionId::Rook, ChampionId::Shade, ChampionId::Ember];
+        let roles = assign_roles(&[vesper, lumen, rook, shade, ember], &[None; 5]);
         assert_eq!(roles, [Role::Bottom, Role::Support, Role::Top, Role::Jungle, Role::Mid]);
         // A human's role is kept, the rest rearrange around it.
-        let roles = assign_roles(&[Vesper, Lumen, Rook, Shade, Ember], &[None, None, None, Some(Role::Mid), None]);
+        let roles = assign_roles(&[vesper, lumen, rook, shade, ember], &[None, None, None, Some(Role::Mid), None]);
         assert_eq!(roles[3], Role::Mid);
         assert!(!roles.iter().enumerate().any(|(i, r)| i != 3 && *r == Role::Mid));
     }

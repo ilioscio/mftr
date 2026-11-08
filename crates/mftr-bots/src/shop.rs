@@ -298,7 +298,7 @@ fn class_pool(c: ChampionId) -> Vec<u8> {
 /// A shuffled build: the path's starter and boots, its legendaries swapped for random ones of
 /// the class (each bought from its components up).
 fn shuffled(c: ChampionId, base: &[u8], seed: u64) -> Vec<u8> {
-    let mut rng = mftr_sim::rng::Pcg32::new(seed, c as u64 + 1);
+    let mut rng = mftr_sim::rng::Pcg32::new(seed, c.index() as u64 + 1);
     let mut pool = class_pool(c);
     let mut out = Vec::new();
     for &id in base {

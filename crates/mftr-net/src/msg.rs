@@ -1745,9 +1745,11 @@ fn minion_from_wire(v: u64) -> MinionKind {
     }
 }
 
-/// Five bits: room for 31 champions (31 means none).
+/// Five bits: room for 31 champions (31 means none). Only official champions travel as
+/// numbers; others will travel through the match's roster (CR1).
 fn write_champion(w: &mut BitWriter, c: Option<ChampionId>) {
-    w.write(c.map_or(31, |c| c as u64), 5);
+    debug_assert!(c.is_none_or(|c| c.is_official()), "{c:?} has no wire number yet");
+    w.write(c.map_or(31, |c| c.index() as u64), 5);
 }
 
 fn read_champion(r: &mut BitReader) -> Result<Option<ChampionId>, DecodeError> {
@@ -3064,7 +3066,7 @@ mod tests {
     #[test]
     fn snapshot_round_trip_is_lossless_for_own_state_and_events() {
         let own_state = sample_state();
-        let spec = match mftr_sim::champion::EMBER.abilities[3].effect {
+        let spec = match mftr_sim::ChampionId::Ember.def().abilities[3].effect {
             mftr_sim::ability::Effect::Line(s) => s,
             _ => unreachable!(),
         };
@@ -3262,7 +3264,7 @@ mod tests {
     /// back to the same events; anything that differs breaks the volley.
     #[test]
     fn volleys_are_batched_losslessly() {
-        let spec = match mftr_sim::champion::EMBER.abilities[0].effect {
+        let spec = match mftr_sim::ChampionId::Ember.def().abilities[0].effect {
             mftr_sim::ability::Effect::Line(s) => s,
             _ => unreachable!(),
         };

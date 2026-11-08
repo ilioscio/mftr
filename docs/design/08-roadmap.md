@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D72) | Everything |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slice 1a ✅ (champions as data) | Slices 1b–10 |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1244,10 +1244,19 @@ ones; a new player makes a recognizable famous figure in under 20 minutes (playt
 ten customs loads and runs within 05 §8–9's budgets.
 
 ### CR slices (in order of dependency)
-1. **Data-driven champions:** the sim takes champion data at runtime (D8); the ten kits move to
-   RON; recipe format v0 (kit and stats) and its validation in `mftr-pack`; the server pushes
-   recipes and clients predict from compiled kits. Exit: every champion plays from data with the
-   golden hashes unchanged.
+1. **Data-driven champions** (D73), in four steps:
+   - **1a** champion files and the registry: the ten kits are `crates/mftr-sim/champions/<id>.ron`,
+     read by the sim's own strict reader; `ChampionId` is a handle into a registry that any
+     definition can join. Exit: every champion plays from data with the golden hashes unchanged.
+   - **1b** recipes v0 in `mftr-pack`: a champion pack that is only a kit, validated, registered
+     and playable from the command line (`--champion-file`).
+   - **1c** per-champion code to data: the bots' archetype and shop logic, item build paths and
+     the client's effect names come from the kit (a class and tags), not from a `match` on the
+     ten. Until then a non-official champion borrows the closest official one's (`stand_in`).
+   - **1d** customs on the wire: the match's roster travels in the Welcome (champion files and
+     their hashes), the server pushes them, the host setting `champions = official | customs |
+     both`, replays record the roster. Exit: a match with a custom champion, predicted exactly,
+     replays to the same hashes.
 2. **`mftr-forge`:** mesh, skeleton, colors and animation from a recipe; slim humanoid base
    meshes (both genders) and the first 20 sliders; base mesh, morph, part and move exports in the
    Blender add-on; the client draws forged champions.
@@ -1268,6 +1277,26 @@ The design is [20](20-champion-creator.md). A parametric face pass on the ten ch
 `Face` with jaw, cheekbone, brow, nose, eye and mouth knobs in `head.py`) was tried first and
 dropped: procedural faces still looked programmer-made, and the creator's sculpted sliders
 replace the shared head anyway.
+
+### CR slice 1a status (2026-11-07): ✅ done
+- **Champion files:** the ten kits are `crates/mftr-sim/champions/<id>.ron` (inside the crate, so
+  the Nix build, which only sees `crates/`, embeds them), generated once from the old Rust
+  constants and checked by a write → read round trip. Durations are whole milliseconds, numbers
+  read with Rust's own parser, so every value is bit-identical.
+- **The reader** (`mftr-sim/src/data.rs`): a strict, dependency-free (D15) reader and writer for
+  the RON subset champion files use: unknown, duplicate and missing fields fail with their path
+  (`abilities[2].effect.radius`), numbers must be finite and ≥ 0, durations ≤ 10 min, names 1–32
+  bytes; input (64 KB), nesting and list lengths are capped first. Claim can't be a champion
+  ability.
+- **The registry:** `ChampionId` is a `u16` handle; the official ten keep ids 0–9 (named
+  constants, so `ChampionId::Rook` still reads and matches), any other definition joins with
+  `ChampionId::register` (the same definition gets the same id; 4,096 at most), and `Debug`
+  prints names as before. Only official champions have a wire number until 1d.
+- **Stand-ins:** the bots' archetypes and item build paths `match` on the ten; a non-official
+  champion borrows the official one whose kit is closest in kind (`ChampionId::stand_in`) until
+  1c makes them data.
+- **Checks:** golden hashes unchanged; registry tests (a registered champion spawns and plays);
+  reader strictness tests.
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.

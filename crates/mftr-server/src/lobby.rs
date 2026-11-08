@@ -327,7 +327,7 @@ mod tests {
             let mut champs: Vec<ChampionId> =
                 l.slots().iter().filter(|s| s.team() == team).map(|s| s.champion).collect();
             let n = champs.len();
-            champs.sort_by_key(|c| *c as u8);
+            champs.sort_by_key(|c| c.index());
             champs.dedup();
             assert_eq!(champs.len(), n, "{team:?}");
         }

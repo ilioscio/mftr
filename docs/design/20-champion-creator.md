@@ -1,6 +1,6 @@
 # 20 — Champion Creator
 
-Status: **Draft v0.1** (2026-11-07). Decisions D68–D72; open questions in §15.
+Status: **Draft v0.1** (2026-11-07). Decisions D68–D73; open questions in §15.
 
 Players make their own champions: a body, a face, clothes they paint themselves, a kit picked
 from a catalog of moves, and numbers they tune within a fair budget. The official roster is made
@@ -458,8 +458,10 @@ each. It ships with the game, and grows with each release.
 ### 11.5 In the sim
 
 Champions can't stay a fixed list of Rust constants (`ChampionDef` in `mftr-sim/champion.rs`,
-D26). The sim takes champion data at runtime (D8 at last). A champion's identity in a match is
-its recipe hash, and the server's Welcome carries the compiled kits (or their hashes, which
+D26). The sim takes champion data at runtime (D8 at last, D73): champion files are read by the
+sim's own strict reader (`mftr-sim/src/data.rs`), and a `ChampionId` is a handle into a registry
+that any definition can join, with the official ten at ids 0–9. A champion's identity in a match
+is its recipe hash, and the server's Welcome carries the compiled kits (or their hashes, which
 clients check against their own compile). Client prediction runs the same compiled kit, so it
 stays exact.
 
@@ -475,6 +477,7 @@ stays exact.
   **Shade** (a masked face under a hood) needs a mask and a hood. Both are ordinary parts.
 - **The Blender pipeline stays**, aimed at the catalog instead of at whole champions.
   `art/champions/<id>/` becomes the source for each official champion's recipe and references.
+  Their kits are data already (`crates/mftr-sim/champions/<id>.ron`, D73).
 
 ## 13. Hosting, trust and moderation
 
@@ -494,7 +497,7 @@ stays exact.
 
 | Slice | What | Exit |
 |---|---|---|
-| **CR1** Data-driven champions | The sim takes champion data at runtime; the ten kits move to RON (D8); the recipe format v0 (kit and stats only) and `mftr-pack` validation; the server pushes recipes; client prediction on compiled kits | Every current champion plays from data with golden hashes unchanged |
+| **CR1** Data-driven champions | The sim takes champion data at runtime; the ten kits move to RON (D8, D73); the recipe format v0 (kit and stats only) and `mftr-pack` validation; per-champion code becomes data; the server pushes recipes; client prediction on compiled kits | Every current champion plays from data with golden hashes unchanged; a match with a custom champion replays to the same hashes |
 | **CR2** `mftr-forge` | Mesh, skeleton, colors and animation from a recipe; base meshes and the first 20 face and body sliders for slim humanoid (both genders); the new Blender exports; the client draws forged champions | A forged slim humanoid runs, casts and dies in a match |
 | **CR3** The creator shell | The step flow, preview stage, save, load and presets; build, gender, face and body editors with sliders; Test into the practice room | Make and test a champion without leaving the game |
 | **CR4** Clothes | The part catalog's first ~60 parts, fitting, body masks, conflicts, cloth chains, budget meters | The ten champions' outfits rebuilt from parts |

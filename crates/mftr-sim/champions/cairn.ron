@@ -1,0 +1,46 @@
+// Cairn: Warden: tank and protector (melee).
+// Warden: slows to peel, a shield for an ally, a delayed root, and a delayed knock-up around
+// itself to hold a choke.
+// Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability
+// numbers are rank 1, and `per_rank` adds to them each rank (M2 slice 2). Durations are in
+// milliseconds. The format is in `crates/mftr-sim/src/data.rs`.
+Champion(
+    format: 0,
+    name: "Cairn",
+    stats: (max_health: 660, health_regen: 1.8, armor: 34, magic_resist: 34, attack_damage: 58, ability_power: 20, move_speed: 335),
+    growth: (max_health: 106, health_regen: 0.08, armor: 4.7, magic_resist: 1.9, attack_damage: 3.2),
+    attack: (range: 150, attack_speed: 0.62, windup_fraction: 0.3),
+    abilities: [
+        (
+            name: "Stone Lash",
+            cooldown_ms: 7000,
+            effect: Line(windup_ms: 250, speed: 1500, radius: 50, range: 800, damage: (kind: Magic, base: 60, ap_ratio: 0.4), cc: Slow(pct: 40, ms: 1500)),
+            reaction: Poke,
+            per_rank: (damage: 30, cooldown_ms: 500),
+            transforms: [Multishot, Echo, Wide],
+        ),
+        (
+            name: "Shelter",
+            cooldown_ms: 12000,
+            effect: Support(range: 700, shield: 100, shield_ap: 0.3, duration_ms: 2500),
+            reaction: None,
+            per_rank: (damage: 30, cooldown_ms: 800),
+        ),
+        (
+            name: "Rockfall",
+            cooldown_ms: 14000,
+            effect: Area(windup_ms: 250, range: 750, radius: 180, delay_ms: 1000, damage: (kind: Magic, base: 50, ap_ratio: 0.4), cc: Root(ms: 1000)),
+            reaction: HardCc,
+            per_rank: (damage: 30, cooldown_ms: 1000),
+            transforms: [Echo, Wide],
+        ),
+        (
+            name: "Monolith",
+            cooldown_ms: 80000,
+            effect: Area(windup_ms: 250, radius: 325, delay_ms: 1350, damage: (kind: Magic, base: 140, ap_ratio: 0.5), cc: Knockup(ms: 1000)),
+            reaction: HardCc,
+            per_rank: (damage: 80, cooldown_ms: 15000),
+            transforms: [Echo, Wide],
+        ),
+    ],
+)

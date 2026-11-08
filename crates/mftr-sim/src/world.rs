@@ -4956,7 +4956,6 @@ fn update_stuck(state: &mut UnitState, desired: f32, achieved: f32, radius: f32,
 mod tests {
     use super::*;
     use crate::ability::Cc;
-    use crate::champion::EMBER;
     use crate::lane;
     use crate::map::bridge_point;
     use crate::time::SUBTICKS;
@@ -5284,7 +5283,7 @@ mod tests {
         // Contact when the gap is 60 + 65 = 125 u: 675 u at 1300 u/s after the 0.3 s windup.
         let expected = 576.0 + 675.0 / 1300.0 * 1920.0;
         assert!((at.0 as f32 - expected).abs() <= 1.0, "{} vs {expected}", at.0);
-        let Effect::Line(sigil) = EMBER.abilities[3].effect else { panic!() };
+        let Effect::Line(sigil) = ChampionId::Ember.def().abilities[3].effect else { panic!() };
         let Cc::Stun(stun) = sigil.cc else { panic!() };
         let e = w.unit(enemy).unwrap().state;
         assert_eq!(e.stunned_until, at.plus(stun));
@@ -6825,7 +6824,7 @@ mod tests {
         w.step(&[cast(0, 6, 5, 0, (2000.0, 1000.0))]);
         let ev = w.take_events();
         assert!(matches!(ev[0], SimEvent::CastStarted { slot: 0, .. }));
-        let q = EMBER.abilities[0];
+        let q = ChampionId::Ember.def().abilities[0];
         assert_eq!(w.unit(me).unwrap().state.cooldowns[0], SimTime::at(Tick(5), SubTick::START).plus(q.cooldown_at(2)));
     }
 
@@ -7056,7 +7055,7 @@ mod tests {
         w.unit_mut(ember).unwrap().state.progress.items[0] = FOCUS_CHARM;
         w.step(&[]);
         w.step(&[cast(0, 1, 2, 0, (2000.0, 1000.0))]);
-        let q = EMBER.abilities[0].cooldown_at(1);
+        let q = ChampionId::Ember.def().abilities[0].cooldown_at(1);
         let expect = SimDuration((q.0 as f64 * 100.0 / 110.0).round() as u64);
         assert_eq!(w.unit(ember).unwrap().state.cooldowns[0], SimTime::at(Tick(2), SubTick::START).plus(expect));
 
@@ -7120,7 +7119,7 @@ mod tests {
 
     #[allow(non_snake_case)]
     fn VESPER_STATS_AT_10() -> crate::champion::Stats {
-        crate::champion::VESPER.stats_at(10)
+        crate::champion::ChampionId::Vesper.def().stats_at(10)
     }
 
     #[test]
