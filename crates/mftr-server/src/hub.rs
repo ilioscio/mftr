@@ -294,12 +294,38 @@ impl Hub {
             self.routes.remove(&from);
         }
         self.stats.bytes_in += bytes.len() as u64;
-        let Ok((_, ClientMessage::Hello { protocol, resume, spectate, queue, .. })) = msg::decode_client(bytes) else {
-            self.stats.decode_errors += 1;
-            return Vec::new();
+        let message = match msg::decode_client(bytes) {
+            Ok((_, m @ (ClientMessage::Hello { .. } | ClientMessage::MapRequest { .. }))) => m,
+            _ => {
+                self.stats.decode_errors += 1;
+                return Vec::new();
+            }
+        };
+        let customs = &self.cfg.base.customs;
+        let (protocol, resume, spectate, queue, roster) = match message {
+            ClientMessage::Hello { protocol, resume, spectate, queue, roster, .. } => {
+                (protocol, resume, spectate, queue, roster)
+            }
+            // Before joining: a piece of one of the server's champion files (CR1d).
+            ClientMessage::MapRequest { hash, have } => {
+                let Some(text) = customs.file(hash).cloned() else { return Vec::new() };
+                let header = self.front_header(from, now);
+                let Some(bytes) = crate::file_chunk(&text, hash, have, &header) else { return Vec::new() };
+                self.stats.bytes_out += bytes.len() as u64;
+                return vec![(from, bytes)];
+            }
+            _ => return Vec::new(),
         };
         if protocol != PROTOCOL_VERSION {
             return vec![(from, self.reject(RejectReason::ProtocolMismatch))];
+        }
+        // The client loads the server's champion files before anything else (CR1d).
+        if !customs.is_empty() && roster != customs.hash() {
+            let roster = ServerMessage::Roster(customs.roster());
+            let header = self.front_header(from, now);
+            let bytes = msg::encode_server(&header, &roster);
+            self.stats.bytes_out += bytes.len() as u64;
+            return vec![(from, bytes)];
         }
         // A returning player goes back to the instance holding their seat.
         if let Some(i) = self.instances.iter().position(|i| i.core.holds_token(resume)) {
@@ -395,6 +421,13 @@ impl Hub {
         // Every instance ticks on the same grid, so they're due together and step in parallel.
         let start = (now / TICK_DT_F64).ceil() * TICK_DT_F64;
         Instance { id, queue, core: ServerCore::new(cfg, start), created: now, created_unix }
+    }
+
+    /// The next packet header for a connection at the front desk.
+    fn front_header(&mut self, to: ClientKey, now: f64) -> PacketHeader {
+        let front = self.front.entry(to).or_insert(Front { send: SendTracker::default(), last_heard: now });
+        front.last_heard = now;
+        PacketHeader { seq: front.send.next_seq(), ack: 0, ack_bits: 0 }
     }
 
     fn queues_packet(&mut self, to: ClientKey, now: f64) -> Option<(ClientKey, Vec<u8>)> {
@@ -516,6 +549,7 @@ mod tests {
                 resume,
                 spectate,
                 queue,
+                roster: 0,
             },
         )
     }

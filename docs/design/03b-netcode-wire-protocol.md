@@ -138,6 +138,14 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 > Stat Anvil steps and up to 16 effects (kind, tenths of a second left, a value: a slow's
 > percent, a shield's points, plates, stacks). Nothing in snapshots changes.
 
+> **Protocol 31:** custom champions (CR1d, [20](20-champion-creator.md)). Champion numbers are
+> five bits: the official ten 0–9, the server's custom champions 10–30 in its roster's order, 31
+> none. Hello gains `roster` (the hash of the custom roster the client has loaded, 0 for none). A
+> server with custom champions answers any other Hello with `Roster` (server kind 7: each
+> champion file's text hash and length, in wire order) before anything else; the client fetches
+> each file with `MapRequest` (now any file the server offers by hash), checks and registers it,
+> and says hello again. Replies to a client that hasn't joined carry their own packet sequence.
+
 > **Protocol 30:** veils (Shade's Veil Step, 01 §8). A new event `Veiled` (23: the caster,
 > its team, the cloud's center and radius, when it forms and fades) goes to everyone; others'
 > display flags gain `veiled` (the caster's own team sees it faded); a veiled caster is culled

@@ -54,10 +54,18 @@ pub struct Lobby {
     starts_at: Option<f64>,
     /// Co-op: the bots' tier is voted (17 §9), starting from this one.
     bot_vote: Option<Tier>,
+    /// The champions drawn from (the official ten, the server's customs, or both: CR1d).
+    pool: Vec<ChampionId>,
 }
 
 impl Lobby {
     pub fn new(seed: u64, max_players: u8, bots: u8, pick: bool) -> Self {
+        Self::from_pool(seed, max_players, bots, pick, ChampionId::ALL.to_vec())
+    }
+
+    /// A lobby drawing from `pool` (never empty: the official ten if it is).
+    pub fn from_pool(seed: u64, max_players: u8, bots: u8, pick: bool, pool: Vec<ChampionId>) -> Self {
+        let pool = if pool.is_empty() { ChampionId::ALL.to_vec() } else { pool };
         let mut lobby = Self {
             slots: Vec::new(),
             bench: [Vec::new(), Vec::new()],
@@ -67,6 +75,7 @@ impl Lobby {
             blue_only: false,
             starts_at: None,
             bot_vote: None,
+            pool,
         };
         for _ in 0..bots.min(max_players) {
             lobby.add(true);
@@ -75,7 +84,11 @@ impl Lobby {
     }
 
     pub fn blue_only(seed: u64, max_players: u8, bots: u8, pick: bool) -> Self {
-        let mut lobby = Self::new(seed, max_players, 0, pick);
+        Self::blue_only_from(seed, max_players, bots, pick, ChampionId::ALL.to_vec())
+    }
+
+    pub fn blue_only_from(seed: u64, max_players: u8, bots: u8, pick: bool, pool: Vec<ChampionId>) -> Self {
+        let mut lobby = Self::from_pool(seed, max_players, 0, pick, pool);
         lobby.blue_only = true;
         for _ in 0..bots.min(max_players) {
             lobby.add_to(Team::Blue, true);
@@ -190,14 +203,14 @@ impl Lobby {
         let taken = |c: &ChampionId, lobby: &Lobby| {
             lobby.slots.iter().any(|s| s.team() == team && s.champion == *c) || lobby.bench[team as usize].contains(c)
         };
-        let free: Vec<ChampionId> = ChampionId::ALL.into_iter().filter(|c| !taken(c, self)).collect();
+        let free: Vec<ChampionId> = self.pool.iter().copied().filter(|c| !taken(c, self)).collect();
         if !free.is_empty() {
             return Some(free[self.rng.next_u32() as usize % free.len()]);
         }
         let bench = &mut self.bench[team as usize];
         if bench.is_empty() {
             // More players than champions on one team: duplicates are unavoidable.
-            return Some(ChampionId::ALL[self.rng.next_u32() as usize % ChampionId::ALL.len()]);
+            return Some(self.pool[self.rng.next_u32() as usize % self.pool.len()]);
         }
         Some(bench.remove(0))
     }
@@ -230,8 +243,10 @@ impl Lobby {
                 }
                 let old = self.slots[i].champion;
                 // Draw before benching the old one, so a reroll never gives it back.
-                let free: Vec<ChampionId> = ChampionId::ALL
-                    .into_iter()
+                let free: Vec<ChampionId> = self
+                    .pool
+                    .iter()
+                    .copied()
                     .filter(|c| {
                         !self.slots.iter().any(|s| s.team() as usize == team && s.champion == *c)
                             && !self.bench[team].contains(c)
@@ -246,6 +261,8 @@ impl Lobby {
                 self.bench[team].push(old);
             }
             // A pick: any champion no human teammate has; a bot teammate trades.
+            // A pick from outside the pool (another server's champion) isn't one.
+            LobbyAction::Take(c) if self.pick && !self.pool.contains(&c) => {}
             LobbyAction::Take(c) if self.pick => {
                 let old = self.slots[i].champion;
                 let holder = self.slots.iter().position(|s| s.team() as usize == team && s.champion == c);

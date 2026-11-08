@@ -227,6 +227,19 @@ pub fn problems(def: &ChampionDef) -> Vec<String> {
     out
 }
 
+/// Read a champion file and check it: the definition, or every problem on one line.
+pub fn read_champion_file(text: &str) -> Result<ChampionDef, String> {
+    let def = crate::data::read_champion(text).map_err(|e| e.to_string())?;
+    let problems = problems(&def);
+    if problems.is_empty() { Ok(def) } else { Err(format!("`{}`: {}", def.name, problems.join("; "))) }
+}
+
+/// [`read_champion_file`], then register it: its id (the same one if it's registered already).
+pub fn load_champion_file(text: &str) -> Result<crate::champion::ChampionId, String> {
+    let def = read_champion_file(text)?;
+    crate::champion::ChampionId::register(def).map_err(|_| "too many champions registered".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

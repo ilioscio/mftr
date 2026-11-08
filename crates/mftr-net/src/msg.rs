@@ -52,6 +52,9 @@ pub enum ClientMessage {
         /// The queue to play (13 §2), an index into the server's `Queues`; `None` asks for
         /// them (a server with a single queue places the player in it).
         queue: Option<u8>,
+        /// The custom roster this client has loaded (`champions::roster_hash`; 0 = none). A
+        /// server with customs answers any other with its `Roster` first (CR1d).
+        roster: u64,
     },
     /// The `player` field of each command is ignored by the server (taken from the connection).
     Input {
@@ -66,7 +69,8 @@ pub enum ClientMessage {
     Bye,
     /// Champion select (M2 slice 5).
     Lobby(LobbyAction),
-    /// A custom map's text, from byte `have` on (the client has the bytes before it).
+    /// A custom map's text, or one of the server's champion files (`Roster`), by its hash, from
+    /// byte `have` on (the client has the bytes before it).
     MapRequest {
         hash: u64,
         have: u32,
@@ -343,6 +347,10 @@ pub enum ServerMessage {
     Queues(Vec<QueueInfo>),
     /// A unit's details, answering `ClientMessage::Inspect`.
     Inspect(Box<UnitInfo>),
+    /// The server's custom champions (CR1d), answering a Hello whose `roster` isn't theirs:
+    /// each champion file's text hash and length, in wire order (wire numbers 10 and up). The
+    /// client fetches them with `MapRequest`, loads them, and says hello again.
+    Roster(Vec<(u64, u32)>),
 }
 
 /// One unit's details for the inspect window (01 §13): its live stats, inventory, augments and
@@ -1745,17 +1753,17 @@ fn minion_from_wire(v: u64) -> MinionKind {
     }
 }
 
-/// Five bits: room for 31 champions (31 means none). Only official champions travel as
-/// numbers; others will travel through the match's roster (CR1).
+/// Five bits: the official ten are 0–9, the server's customs 10–30 (`champions`), 31 none.
 fn write_champion(w: &mut BitWriter, c: Option<ChampionId>) {
-    debug_assert!(c.is_none_or(|c| c.is_official()), "{c:?} has no wire number yet");
-    w.write(c.map_or(31, |c| c.index() as u64), 5);
+    let v = c.and_then(crate::champions::to_wire);
+    debug_assert!(c.is_none() || v.is_some(), "{c:?} isn't on this server's roster");
+    w.write(v.map_or(31, u64::from), 5);
 }
 
 fn read_champion(r: &mut BitReader) -> Result<Option<ChampionId>, DecodeError> {
     match r.read(5)? {
         31 => Ok(None),
-        v => ChampionId::from_u8(v as u8).map(Some).ok_or(DecodeError::Invalid("champion")),
+        v => crate::champions::from_wire(v as u8).map(Some).ok_or(DecodeError::Invalid("champion")),
     }
 }
 
@@ -1969,7 +1977,7 @@ fn open(bytes: &[u8]) -> Result<(BitReader<'_>, PacketHeader, u64), DecodeError>
 
 pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
     match msg {
-        ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate, queue } => {
+        ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate, queue, roster } => {
             let mut w = begin(header, 0);
             w.write_u16(*protocol);
             w.write_u32(*client_time_us);
@@ -1980,6 +1988,7 @@ pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
             if let Some(q) = queue {
                 w.write_u8(*q);
             }
+            w.write_u64(*roster);
             w.finish()
         }
         ClientMessage::Input { client_time_us, event_ack, snapshot_ack, commands } => {
@@ -2050,7 +2059,8 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
             let resume = if current { r.read_u64()? } else { 0 };
             let spectate = current && r.read_bool()?;
             let queue = if current && r.read_bool()? { Some(r.read_u8()?) } else { None };
-            ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate, queue }
+            let roster = if current { r.read_u64()? } else { 0 };
+            ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate, queue, roster }
         }
         1 => {
             let client_time_us = r.read_u32()?;
@@ -2301,6 +2311,16 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             write_unit_info(&mut w, info);
             w.finish()
         }
+        ServerMessage::Roster(files) => {
+            let mut w = begin(header, 7);
+            let n = files.len().min(crate::champions::MAX_CUSTOMS);
+            w.write_u8(n as u8);
+            for (hash, len) in &files[..n] {
+                w.write_u64(*hash);
+                w.write_u32(*len);
+            }
+            w.finish()
+        }
         ServerMessage::Queues(queues) => {
             let mut w = begin(header, 5);
             let n = queues.len().min(MAX_QUEUES);
@@ -2508,6 +2528,14 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             ServerMessage::Queues(queues)
         }
         6 => ServerMessage::Inspect(Box::new(read_unit_info(&mut r)?)),
+        7 => {
+            let n = r.read_u8()? as usize;
+            if n > crate::champions::MAX_CUSTOMS {
+                return Err(DecodeError::Invalid("roster size"));
+            }
+            let files = (0..n).map(|_| Ok((r.read_u64()?, r.read_u32()?))).collect::<Result<Vec<_>, DecodeError>>()?;
+            ServerMessage::Roster(files)
+        }
         1 => {
             let tick = Tick(r.read_u32()?);
             let since_tick_us = r.read_u32()?;
@@ -2705,6 +2733,7 @@ mod tests {
             resume: 0xdead_beef_0123_4567,
             spectate: true,
             queue: Some(7),
+            roster: 0,
         };
         assert_eq!(decode_client(&encode_client(&hdr(), &hello)).unwrap().1, hello);
         let hello = ClientMessage::Hello {
@@ -2714,6 +2743,7 @@ mod tests {
             resume: 0,
             spectate: false,
             queue: None,
+            roster: 0,
         };
         assert_eq!(decode_client(&encode_client(&hdr(), &hello)).unwrap().1, hello);
         for a in [LobbyAction::Reroll, LobbyAction::Take(ChampionId::Shade), LobbyAction::Ready(true)] {

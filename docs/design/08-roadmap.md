@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slice 1a ✅ (champions as data) | Slices 1b–10 |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slice 1 ✅ (champions as data, files, classes, customs on the wire) | Slices 2–10 |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1318,6 +1318,25 @@ replace the shared head anyway.
   warden like the tank). Those were the only places that branched on the ten; everything else
   (the bots' fight model, the client's effect names) already read the kit. `stand_in` is gone.
   Bot matches and golden hashes are unchanged.
+
+### CR slice 1d status (2026-11-07): ✅ done (protocol 31)
+- **Wire numbers** (`mftr_net::champions`): the official ten are 0–9 everywhere; a server's custom
+  champions 10–30 in its roster's order. Each side maps them to its own registry ids (a
+  process-wide table: a server sets it at start, a client once it has loaded the roster).
+- **The roster handshake:** a server started with `--champion-file FILE...` answers any Hello
+  whose `roster` hash isn't its own with `Roster` (each file's hash and length); the client fetches
+  the files with `MapRequest` (now any file the server offers), checks them with the same reader
+  and limits as `mftr-pack`, registers them and says hello again. Files fetched once are cached
+  for the process. Drivers needed no change: while fetching, `hello_packet` sends the next
+  request. Pre-join replies now carry their own packet sequence (the client dropped repeated
+  sequence 0 as duplicates).
+- **Host setting:** `--champions official|customs|both` (default `official`, `both` once files
+  are given); champion select draws from the pool, and Classic's picks must come from it.
+- **Replays** carry their champion files (`champion-begin` … `champion-end`, before the joins
+  that name them) and read names with spaces.
+- **Check:** `custom_champion_end_to_end` (netlab): over a lossy link a real client session
+  fetches Grumble, goes through champion select, plays him predicted, and the server's replay
+  re-simulates with every hash matching.
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
