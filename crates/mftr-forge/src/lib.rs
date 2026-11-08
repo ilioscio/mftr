@@ -867,6 +867,94 @@ mod tests {
         println!("{}", r.to_text());
     }
 
+    /// Wrote the examples of the serpentoid, spectre and machine builds
+    /// (`art/champions/examples/<name>.champion.ron`).
+    #[test]
+    #[ignore]
+    fn write_build_examples() {
+        let c = catalog();
+        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/examples");
+        type Example = (
+            &'static str,
+            &'static str,
+            &'static str,
+            [&'static str; 5],
+            &'static str,
+            &'static str,
+            &'static [(&'static str, f32)],
+            &'static [&'static str],
+            u16,
+        );
+        let examples: [Example; 3] = [
+            (
+                "Venomcoil",
+                "serpent",
+                "A serpent who spits from range: a burning spit, a draining coil, a veiled slither and a firestorm.",
+                ["vesper.attack", "ember.q", "marrow.w", "shade.e", "ember.r"],
+                "arcane_strikes",
+                "mana",
+                &[("head_hood", 0.8), ("head_size", 0.3), ("body_tail", 0.4)],
+                &["head.crown", "shoulders.collar"],
+                140,
+            ),
+            (
+                "Hollow Warden",
+                "spectre",
+                "A wraith of the old wards: a falling star, a soothing light, a tumble through the air and a bone cage.",
+                ["lumen.attack", "quill.q", "lumen.w", "vesper.e", "marrow.r"],
+                "last_stand",
+                "mana",
+                &[("head_hood", 0.6), ("body_arms", 0.5), ("body_tail", 0.6)],
+                &["face.mask", "back.lantern"],
+                260,
+            ),
+            (
+                "Gearback",
+                "machine",
+                "A siege engine on a wheel: a ricochet bolt, a bulwark, a charging lunge and the earth heaved up.",
+                ["rook.attack", "wren.q", "bastion.w", "rook.e", "cairn.r"],
+                "third_blow",
+                "energy",
+                &[("body_wheel", 0.5), ("body_bulk", 0.4), ("head_size", -0.3)],
+                &["shoulders.plates", "back.stack"],
+                25,
+            ),
+        ];
+        for (name, build, blurb, moves, passive, resource, shape, outfit, hue) in examples {
+            let mut r = recipe::Recipe { name: name.into(), ..recipe::Recipe::default() };
+            r.looks.build = build.into();
+            r.looks.gender = looks::Gender::None;
+            for (slot, id) in moves::SLOTS.iter().zip(moves) {
+                assert!(r.set_move(slot, id), "{name}: {slot} {id}");
+            }
+            assert!(r.set_passive(passive) && r.set_resource(resource));
+            for (k, v) in shape {
+                r.looks.set_slider(k, *v);
+            }
+            r.looks.outfit = outfit.iter().map(|s| s.to_string()).collect();
+            r.looks.signature = hue;
+            r.auto_fit();
+            assert!(r.problems().is_empty(), "{name}: {:?}", r.problems());
+            c.forge(name, &r.looks).unwrap();
+            let file = name.to_lowercase().replace(' ', "_");
+            let text = format!(
+                "// {name}: an example champion of the {build} build (CR10, 20 §3), written by mftr-forge's
+// write_build_examples test. {blurb}
+{}",
+                r.to_text().lines().filter(|l| !l.starts_with("//")).collect::<Vec<_>>().join(
+                    "
+"
+                )
+            );
+            std::fs::write(
+                art.join(format!("{file}.champion.ron")),
+                text + "
+",
+            )
+            .unwrap();
+        }
+    }
+
     #[test]
     #[ignore]
     fn print_grumbles_war_paint() {
@@ -919,6 +1007,47 @@ mod tests {
         l2.set_slider("head_snout", 1.0);
         l2.proportions.set(0, 0.5);
         assert!(c.forge("Beastie", &l2).is_ok());
+    }
+
+    #[test]
+    fn every_build_forges_any_kit_and_takes_its_parts() {
+        let c = catalog();
+        for (build, gendered) in looks::BUILDS {
+            let key = if gendered { format!("{build}_masculine") } else { build.to_string() };
+            assert!(c.base(&key).is_some(), "no base for {build}");
+            let looks = Looks {
+                build: build.to_string(),
+                gender: if gendered { looks::Gender::Masculine } else { looks::Gender::None },
+                // One part from each of its first two slots.
+                outfit: {
+                    let mut seen: Vec<&str> = Vec::new();
+                    let mut out = Vec::new();
+                    for p in c.parts(&key) {
+                        if out.len() < 2 && !seen.contains(&p.slot.as_str()) {
+                            seen.push(&p.slot);
+                            out.push(p.id.clone());
+                        }
+                    }
+                    out
+                },
+                moves: Some(moves::Moves {
+                    ids: ["vesper.attack", "ember.q", "bastion.w", "wren.e", "quill.r"].map(String::from),
+                }),
+                ..Looks::default()
+            };
+            let f = c.forge("Anyone", &looks).unwrap_or_else(|e| panic!("{build}: {e}"));
+            for clip in ["idle", "run", "q", "w", "r"] {
+                assert!(
+                    f.model.animations.iter().any(|a| a.name == clip || a.name.starts_with(&format!("{clip}_"))),
+                    "{build}: no `{clip}`"
+                );
+            }
+            for s in c.sliders(&key) {
+                let mut l = looks.clone();
+                l.set_slider(&s, 1.0);
+                c.forge("Anyone", &l).unwrap_or_else(|e| panic!("{build} {s}: {e}"));
+            }
+        }
     }
 
     #[test]

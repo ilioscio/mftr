@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–9 ✅ (champions as data; forged models; the creator and Test; clothes; paint: fills, brush and decals; moves and passives; the budget; the heavy humanoid; free sculpting) | 10: serpentoid, spectre, machine; refit prices; swap the official models |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–10 ✅ (champions as data; forged models; the creator and Test; clothes; paint; moves, passives and resources; the budget; six builds; free sculpting) | art passes on the new builds; refit prices; the owner's call on the official models |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1497,6 +1497,29 @@ replace the shared head anyway.
   rigs. A test holds Bastion's idle on a base to his own pose.
 - **Next:** the owner's look at the three (art pass on the heavy parts: antlers, ice, a chain);
   then CR5b (brush and decals) and CR9 (free sculpting).
+
+### CR slice 10b status (2026-11-08): ✅ the serpentoid, the floating spectre, the rolling machine
+- **Three builds** on `creature` skeletons of their own (`art/creator/<build>/build.py`, sharing
+  `mftr_blender.builds`: a build is its bone table, body, sliders, parts and clips; the helper
+  makes the base, the shape keys, the parts, the UVs and the export, and sets the skeleton so
+  the body stands on the ground):
+  - **Serpentoid** (`serpent`): a spine chain rearing up from a coil, a hood that flares; it
+    slithers. Sliders: head, hood, jaw, bulk, tail, neck. Parts: horns, a crown, a collar,
+    dorsal spines, belly plates.
+  - **Floating spectre** (`spectre`): a hooded wraith over a trailing wisp, long clawed arms; it
+    hovers and glides. Sliders: head, hood, bulk, shoulders, arms, tail. Parts: a crown, a bone
+    mask, chains, a soul lantern, bracers.
+  - **Rolling machine** (`machine`): a boiler on one drive wheel that turns a full turn a stride,
+    jointed arms with clamps, a sensor head. Sliders: head, bulk, chest, wheel, arms. Parts: an
+    antenna, shoulder plates, a smokestack, a boiler plate, a drill arm.
+- Each carries the move library's clips (howl, slam, pounce, the dash set) and its stance, so any
+  kit plays on it; a test forges every build with a mixed kit and every slider at full.
+- **The exit** (a champion of each plays a match): Venomcoil (serpentoid, mana), Hollow Warden
+  (spectre, mana) and Gearback (machine, energy) in `art/champions/examples/`, each through the
+  practice match: moving, fighting, casting.
+- **Left (art):** all three are block-outs of 600–900 triangles against the 5–8k target, the
+  serpent's hood is a flat flap, and the creator's camera frames them as it frames a humanoid.
+  An artist's pass is the next step for every non-humanoid build (D49).
 
 ### CR slice 10a status (2026-11-08): ✅ the four-legged beast
 - **The build** (`art/creator/beast/`, no genders yet): a champion-sized beast on the jungle

@@ -1,0 +1,53 @@
+// Venomcoil: an example champion of the serpent build (CR10, 20 §3), written by mftr-forge's
+// write_build_examples test. A serpent who spits from range: a burning spit, a draining coil, a veiled slither and a firestorm.
+Champion(
+    format: 0,
+    looks: (
+        build: "serpent",
+        shape: (head_hood: 0.8, head_size: 0.3, body_tail: 0.4),
+        skin: 2,
+        outfit: ["head.crown", "shoulders.collar"],
+        signature: 140,
+        moves: (attack: "vesper.attack", q: "ember.q", w: "marrow.w", e: "shade.e", r: "ember.r"),
+    ),
+    name: "Venomcoil",
+    class: Marksman,
+    stats: (max_health: 620, health_regen: 1.4, armor: 28, magic_resist: 30, attack_damage: 61, move_speed: 325),
+    growth: (max_health: 96, health_regen: 0.08, armor: 4.4, magic_resist: 1.3, attack_damage: 3.2),
+    attack: (range: 525, attack_speed: 0.8, windup_fraction: 0.18, bolt_speed: 2200),
+    passive: OnHitMagic(base: 18, ap_ratio: 0.2),
+    resource: Mana(max: 300, regen: 6, costs: [40, 50, 60, 100]),
+    abilities: [
+        (
+            name: "Ember Lance",
+            cooldown_ms: 4000,
+            effect: Line(windup_ms: 250, speed: 1600, radius: 35, range: 1100, damage: (kind: Magic, base: 70, ap_ratio: 0.6)),
+            reaction: Burst,
+            per_rank: (damage: 40, cooldown_ms: 500),
+            transforms: [Multishot, Echo, Wide],
+        ),
+        (
+            name: "Grasping Bones",
+            cooldown_ms: 11000,
+            effect: Line(windup_ms: 300, speed: 1300, radius: 60, range: 850, damage: (kind: Magic, base: 70, ap_ratio: 0.5), cc: Root(ms: 1000)),
+            reaction: HardCc,
+            per_rank: (damage: 35, cooldown_ms: 800),
+            transforms: [Multishot, Echo, Wide],
+        ),
+        (
+            name: "Veil Step",
+            cooldown_ms: 12000,
+            effect: Dash(range: 400, speed: 1400, veil: (radius: 300, duration_ms: 5000)),
+            reaction: None,
+            per_rank: (cooldown_ms: 1000),
+        ),
+        (
+            name: "Binding Sigil",
+            cooldown_ms: 20000,
+            effect: Line(windup_ms: 300, speed: 1300, radius: 60, range: 1150, damage: (kind: Magic, base: 100, ap_ratio: 0.5), cc: Stun(ms: 1250)),
+            reaction: HardCc,
+            per_rank: (damage: 80, cooldown_ms: 3000),
+            transforms: [Multishot, Echo, Wide],
+        ),
+    ],
+)

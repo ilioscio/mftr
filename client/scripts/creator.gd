@@ -33,7 +33,8 @@ const PROPORTION_NAMES := {"height": "Height", "legs": "Leg length", "arms": "Ar
 var creator := MftrCreator.create()
 var art_root := ""
 var step := "build"
-const BUILD_NAMES := {"humanoid_slim": "Slim humanoid", "humanoid_heavy": "Heavy humanoid", "beast": "Four-legged beast"}
+const BUILD_NAMES := {"humanoid_slim": "Slim humanoid", "humanoid_heavy": "Heavy humanoid", "beast": "Four-legged beast",
+	"serpent": "Serpentoid", "spectre": "Floating spectre", "machine": "Rolling machine"}
 var file_path := ""
 var dirty := false
 var seed_n := 1
@@ -225,7 +226,7 @@ func _show_step(id: String) -> void:
 					if not b[1]:
 						creator.set_gender("")
 					_changed(true))
-			_hint("Both humanoids share the moves and parts; the heavy one is the brute (Rook, Bastion, Cairn). The beast has its own moves' animations (any kit, animated by its shapes) and parts. More builds (serpentoid, spectre, machine) arrive as their own slices (CR10).")
+			_hint("Both humanoids share the moves and parts; the heavy one is the brute (Rook, Bastion, Cairn). The beast has its own moves' animations (any kit, animated by its shapes) and parts. The serpentoid, spectre and machine likewise.")
 		"gender":
 			for g in [["masculine", "Masculine"], ["feminine", "Feminine"]]:
 				_choice(g[1], creator.gender() == g[0], func():

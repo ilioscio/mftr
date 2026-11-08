@@ -1,0 +1,52 @@
+// Gearback: an example champion of the machine build (CR10, 20 §3), written by mftr-forge's
+// write_build_examples test. A siege engine on a wheel: a ricochet bolt, a bulwark, a charging lunge and the earth heaved up.
+Champion(
+    format: 0,
+    looks: (
+        build: "machine",
+        shape: (body_wheel: 0.5, body_bulk: 0.4, head_size: -0.3),
+        skin: 2,
+        outfit: ["shoulders.plates", "back.stack"],
+        signature: 25,
+        moves: (attack: "rook.attack", q: "wren.q", w: "bastion.w", e: "rook.e", r: "cairn.r"),
+    ),
+    name: "Gearback",
+    class: Bruiser,
+    stats: (max_health: 632.45, health_regen: 1.7, armor: 32.109, magic_resist: 31.136002, attack_damage: 64.86787, move_speed: 340),
+    growth: (max_health: 99.246, health_regen: 0.08, armor: 4.5, magic_resist: 1.6, attack_damage: 3.8),
+    attack: (range: 175, attack_speed: 0.7, windup_fraction: 0.28),
+    passive: ThirdHit(base: 45, bonus_ad: 0.4),
+    resource: Energy(max: 200, regen: 40, costs: [50, 40, 60, 0]),
+    abilities: [
+        (
+            name: "Ricochet",
+            cooldown_ms: 5241,
+            effect: Line(windup_ms: 250, speed: 1800, radius: 40, range: 950, damage: (kind: Physical, base: 27.300003, ad_ratio: 0.81900007)),
+            reaction: Poke,
+            per_rank: (damage: 27.300003, cooldown_ms: 419),
+            transforms: [Multishot, Echo, Wide],
+        ),
+        (
+            name: "Bulwark",
+            cooldown_ms: 12579,
+            effect: Support(shield: 127.40001, duration_ms: 3000),
+            reaction: None,
+            per_rank: (damage: 27.300003, cooldown_ms: 1048),
+        ),
+        (
+            name: "Lunge",
+            cooldown_ms: 10483,
+            effect: Lunge(range: 550, speed: 1500, damage: (kind: Physical, base: 45.500004, ad_ratio: 0.54600006), cc: Slow(pct: 30, ms: 1000)),
+            reaction: None,
+            per_rank: (damage: 27.300003, cooldown_ms: 839),
+        ),
+        (
+            name: "Monolith",
+            cooldown_ms: 83863,
+            effect: Area(windup_ms: 250, radius: 325, delay_ms: 1350, damage: (kind: Magic, base: 127.40001, ap_ratio: 0.45500004), cc: Knockup(ms: 1000)),
+            reaction: HardCc,
+            per_rank: (damage: 72.8, cooldown_ms: 15724),
+            transforms: [Echo, Wide],
+        ),
+    ],
+)
