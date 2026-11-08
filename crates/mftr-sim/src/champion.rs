@@ -325,6 +325,10 @@ pub struct ChampionDef {
     pub growth: Stats,
     pub attack: AttackSpec,
     pub abilities: [Ability; 4],
+    /// The champion's own passive (01 §9, 20 §8.1): one of the items' unique passives (18 §4),
+    /// innate. `Passive::None` for the official ten for now. Unique as items' are: an item of the
+    /// same kind counts instead only if it's stronger.
+    pub passive: crate::items::Passive,
 }
 
 impl ChampionDef {

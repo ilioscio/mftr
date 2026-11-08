@@ -1290,8 +1290,19 @@ impl Passives {
     }
 }
 
+/// Where a counted passive is a champion's own (its "item" in [`Passives`]): no item has id 0.
+pub const INNATE: u8 = 0;
+
 pub fn passives(inventory: &[u8; INVENTORY]) -> Passives {
+    passives_with(inventory, Passive::None)
+}
+
+/// [`passives`] with a champion's own passive (20 §8.1) counted too, as [`INNATE`].
+pub fn passives_with(inventory: &[u8; INVENTORY], innate: Passive) -> Passives {
     let mut out = Passives::NONE;
+    if let Some(k) = innate.kind() {
+        out.0[k] = Some((innate, INNATE));
+    }
     for it in inventory.iter().filter_map(|id| item(*id)) {
         for p in it.passives {
             let Some(k) = p.kind() else { continue };

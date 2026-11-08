@@ -38,6 +38,12 @@ fn random_champion(i: usize, d: &mut Dice) -> ChampionId {
         let id = pick(slot, d);
         r.set_move(slot, &id);
     }
+    // A passive from the catalog, or none (one chance in ten).
+    let all = mftr_forge::passives::PASSIVES;
+    let k = (((d.signed() + 1.0) * 0.5) * (all.len() + 1) as f32) as usize;
+    if let Some((id, ..)) = all.get(k) {
+        r.set_passive(id);
+    }
     for slot in moves::SLOTS {
         r.tune(slot, 1.0 + d.signed() * 0.35, 1.0 + d.signed() * 0.3);
     }
@@ -109,7 +115,8 @@ pub fn run(cfg: &LeagueConfig) -> Vec<(ChampionId, f32, u32, u32)> {
         let price = balance::price(c.def()).total();
         let pct = if g > 0 { 100.0 * w as f64 / g as f64 } else { f64::NAN };
         let abilities: Vec<&str> = c.def().abilities.iter().map(|a| a.name).collect();
-        println!("{:<10} {:>6.1} {:>6} {:>5.0}%   {}", c.def().name, price, g, pct, abilities.join(" / "));
+        let passive = mftr_forge::passives::of(c.def().passive).map_or("no passive", |e| e.1);
+        println!("{:<10} {:>6.1} {:>6} {:>5.0}%   {} · {passive}", c.def().name, price, g, pct, abilities.join(" / "));
         out.push((*c, price, g, w));
     }
     // How each part of the price relates to winning, over champions that played.

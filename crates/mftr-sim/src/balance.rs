@@ -170,7 +170,47 @@ pub fn features(def: &ChampionDef) -> Features {
             Effect::Claim(_) => {}
         }
     }
+    passive(def, &mut f, ad, ap);
     f
+}
+
+/// A champion's own passive (20 §8.1), priced like the rest: what it adds a second at the
+/// reference, in the part it adds to. *(start)* shares: a cleave finds a second target half the
+/// time, a speed burst is in a fight half the time, a low-health shield is worth three times its
+/// average rate (it comes when it matters).
+fn passive(def: &ChampionDef, f: &mut Features, ad: f32, ap: f32) {
+    use crate::items::Passive;
+    let st = def.stats_at(LEVEL);
+    let rate = def.attack.attack_speed;
+    let ranged = def.attack.bolt_speed > 0.0;
+    let attack_dps = f.dps;
+    // Abilities cast a second (Q W E), for what follows them.
+    let casts: f32 = def.abilities[..3]
+        .iter()
+        .enumerate()
+        .map(|(slot, a)| {
+            let rank = max_rank(slot as u8, LEVEL).max(1);
+            1.0 / (a.cooldown_at(rank).0 as f32 / crate::time::SUBTICKS_PER_SECOND as f32).max(0.5)
+        })
+        .sum();
+    match def.passive {
+        Passive::OnHitMagic { base, ap_ratio } => f.dps += (base + ap_ratio * ap) * rate,
+        Passive::ThirdHit { base, bonus_ad } => f.dps += (base + bonus_ad * (ad - st.attack_damage)) * rate / 3.0,
+        // Half the casts are followed by an attack in time.
+        Passive::Spellblade { base_ad } => f.damage += base_ad * st.attack_damage * casts.min(rate) * 0.5,
+        Passive::Cleave { melee, ranged: far, .. } => f.dps += attack_dps * if ranged { far } else { melee } * 0.5,
+        Passive::Quicken { speed, ms } => f.speed += speed * (rate * ms as f32 / 1000.0).min(1.0) * 0.5,
+        Passive::Sunder { per_stack, stacks, .. } => f.dps += attack_dps * per_stack * stacks as f32 * 0.4,
+        Passive::Thorns { base, wounds, .. } => {
+            f.damage += base * 0.5;
+            f.protection += wounds * 10.0;
+        }
+        Passive::Rally { shield, cooldown_ms, .. } => {
+            f.protection += shield * 3.0 / (cooldown_ms as f32 / 1000.0).max(1.0)
+        }
+        Passive::Warmth { max_hp, .. } => f.protection += max_hp * st.max_health * 0.3,
+        _ => {}
+    }
 }
 
 /// What `def` costs.
@@ -265,6 +305,27 @@ fn scaled(def: &ChampionDef, k: f32) -> ChampionDef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_passive_costs_a_few_points() {
+        use crate::items::Passive;
+        let base = *ChampionId::Rook.def();
+        let plain = price(&base).total();
+        for p in [
+            Passive::OnHitMagic { base: 18.0, ap_ratio: 0.2 },
+            Passive::ThirdHit { base: 45.0, bonus_ad: 0.4 },
+            Passive::Spellblade { base_ad: 0.8 },
+            Passive::Cleave { melee: 0.35, ranged: 0.15, radius: 300.0 },
+            Passive::Quicken { speed: 25.0, ms: 2000 },
+            Passive::Sunder { per_stack: 0.04, stacks: 5, ms: 5000 },
+            Passive::Thorns { base: 12.0, bonus_armor: 0.15, wounds: 0.3 },
+            Passive::Rally { shield: 120.0, bonus_hp: 0.3, threshold: 0.3, duration_ms: 3000, cooldown_ms: 60_000 },
+            Passive::Warmth { max_hp: 0.02, after_ms: 6000 },
+        ] {
+            let with = price(&ChampionDef { passive: p, ..base }).total();
+            assert!((1.0..8.0).contains(&(with - plain)), "{p:?}: {:.1} points", with - plain);
+        }
+    }
 
     #[test]
     fn the_official_ten_fit_the_budget() {

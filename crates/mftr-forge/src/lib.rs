@@ -15,6 +15,7 @@
 pub mod looks;
 pub mod moves;
 pub mod paint;
+pub mod passives;
 pub mod recipe;
 
 use std::path::Path;

@@ -1937,6 +1937,8 @@ impl MatchClient {
                         s.champion.and_then(|c| c.ability(slot)).map_or("Ability".to_string(), |a| a.name.to_string()),
                         ["Q", "W", "E", "R", "D", "F"].get(slot as usize).copied().unwrap_or(""),
                     ),
+                    // A champion's own passive (20 §8.1) has no item.
+                    DamageOrigin::Item(items::INNATE) => ("Passive".to_string(), ""),
                     DamageOrigin::Item(id) => (items::item(id).map_or("Item".to_string(), |i| i.name.to_string()), ""),
                     DamageOrigin::Augment(id) => {
                         (augments::augment(id).map_or("Augment".to_string(), |a| a.name.to_string()), "")

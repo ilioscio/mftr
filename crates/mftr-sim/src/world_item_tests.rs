@@ -239,6 +239,32 @@ fn spellblade_and_cleave() {
     assert!(w.unit(me).unwrap().state.progress.gear.passive_ready[gear::SPELLBLADE].0 > 0, "spellblade used");
 }
 
+/// A champion's own passive (20 §8.1) acts as an item's does, from no item.
+#[test]
+fn a_champions_own_passive_acts_on_its_hits() {
+    let def = crate::champion::ChampionDef {
+        name: "Innate Test",
+        passive: Passive::OnHitMagic { base: 30.0, ap_ratio: 0.0 },
+        ..*ChampionId::Rook.def()
+    };
+    let id = ChampionId::register(def).unwrap();
+    let (mut w, me, them) = duel(id, &[], ChampionId::Ember);
+    w.unit_mut(them).unwrap().state.pos = Vec2::new(1150.0, 1000.0);
+    let k = w.tick().0 + 1;
+    w.step(&[command(0, 1, k, CommandKind::Attack(them))]);
+    let ev = run(&mut w, 60);
+    let hits = damage_on(&ev, them);
+    assert!(hits.iter().any(|h| h.2 == DamageOrigin::Item(INNATE) && (h.0 - 30.0).abs() < 15.0), "{hits:?}");
+    // Rook himself has none.
+    let (mut w, _, them) = duel(ChampionId::Rook, &[], ChampionId::Ember);
+    w.unit_mut(them).unwrap().state.pos = Vec2::new(1150.0, 1000.0);
+    let k = w.tick().0 + 1;
+    w.step(&[command(0, 1, k, CommandKind::Attack(them))]);
+    let ev = run(&mut w, 60);
+    assert!(damage_on(&ev, them).iter().all(|h| h.2 != DamageOrigin::Item(INNATE)));
+    let _ = me;
+}
+
 /// The Pilgrim's quest (18 §6): Tithe pays on hits on champions, three charges; at 500 quest
 /// gold the Ledger becomes the Astrolabe, its wards full.
 #[test]

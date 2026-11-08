@@ -321,6 +321,27 @@ func _show_step(id: String) -> void:
 					_changed(true)
 					_show_step("moves"))
 				_panel.add_child(mpick)
+			# The passive (20 §8.1): one from the shared catalog, or none.
+			var pl := Label.new()
+			pl.text = "Passive"
+			_panel.add_child(pl)
+			var ppick := OptionButton.new()
+			var passives: Array = creator.passives()
+			var held: String = creator.passive()
+			ppick.add_item("None")
+			for i in passives.size():
+				ppick.add_item(passives[i].label)
+				ppick.set_item_tooltip(i + 1, passives[i].hint)
+				if passives[i].id == held:
+					ppick.select(i + 1)
+			ppick.item_selected.connect(func(i):
+				creator.set_passive("" if i == 0 else passives[i - 1].id)
+				_changed(true)
+				_show_step("moves"))
+			_panel.add_child(ppick)
+			for p in passives:
+				if p.id == held:
+					_hint(p.hint)
 			_panel.add_child(HSeparator.new())
 			var kl := Label.new()
 			kl.text = "Or take a whole kit"

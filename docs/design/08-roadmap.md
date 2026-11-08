@@ -1498,6 +1498,19 @@ replace the shared head anyway.
 - **Next:** the owner's look at the three (art pass on the heavy parts: antlers, ice, a chain);
   then CR5b (brush and decals) and CR9 (free sculpting).
 
+### CR6 follow-up (2026-11-07): passives ✅; resources not yet
+- **Passives** (D74): a champion file's `passive:` is one of nine of the items' unique passives
+  with its own numbers (`mftr_sim::data`, bounded in `limits`, priced in `balance`: 2–5 points at
+  the catalog's numbers). The sim counts it with the inventory's (`gear::of`), as source
+  `items::INNATE` (the death recap says "Passive"; the item damage logs leave it out). The
+  creator's Moveset step picks one from `mftr_forge::passives` (Arcane strikes, Third blow,
+  Spellblade, Cleave, Fleet, Sunder, Thorns, Last stand, Second wind) or none; the random league
+  gives its champions one. Grumble, the example, regenerates out of harm. The official ten have
+  none yet.
+- **Resources** (mana, energy, rage, health cost; 20 §8.1) aren't in the sim at all: every kit is
+  costless. They need casting costs, regeneration, a HUD bar, the snapshot and the bots: a slice
+  of their own, with the owner's word on whether the official ten get them.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

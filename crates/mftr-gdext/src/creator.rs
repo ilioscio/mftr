@@ -165,6 +165,9 @@ impl MftrCreator {
             k.class.name(),
             if k.attack.bolt_speed == 0.0 { "melee" } else { "ranged" }
         )));
+        if let Some((_, label, _, _)) = mftr_forge::passives::of(k.passive) {
+            out.push(&GString::from(&format!("Passive  {label}")));
+        }
         for (slot, a) in ["Q", "W", "E", "R"].iter().zip(&k.abilities) {
             out.push(&GString::from(&format!("{slot}  {}", a.name)));
         }
@@ -293,6 +296,31 @@ impl MftrCreator {
             }
         }
         out
+    }
+
+    /// The passive catalog (20 §8.1): `[{id, label, hint}]`.
+    #[func]
+    fn passives(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for (id, label, hint, _) in mftr_forge::passives::PASSIVES {
+            let mut d = VarDictionary::new();
+            d.set("id", id);
+            d.set("label", label);
+            d.set("hint", hint);
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// The kit's passive's id ("" for none).
+    #[func]
+    fn passive(&self) -> GString {
+        GString::from(self.recipe.passive())
+    }
+
+    #[func]
+    fn set_passive(&mut self, id: GString) {
+        self.recipe.set_passive(&id.to_string());
     }
 
     /// The move on `slot`.

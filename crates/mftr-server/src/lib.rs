@@ -1780,7 +1780,10 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
                 let i = log_of(&mut logs, s.id);
                 let log = &mut logs[i].1;
                 match origin {
-                    mftr_sim::world::DamageOrigin::Item(item) => bump(&mut log.damage, *item, amount + absorbed),
+                    // Items only: a champion's own passive (INNATE) isn't one.
+                    mftr_sim::world::DamageOrigin::Item(item) if *item != mftr_sim::items::INNATE => {
+                        bump(&mut log.damage, *item, amount + absorbed)
+                    }
                     mftr_sim::world::DamageOrigin::Attack => {
                         log.attacks += 1;
                         log.crits += *crit as u32;

@@ -100,6 +100,26 @@ impl Recipe {
         true
     }
 
+    /// The passive from the catalog (20 §8.1), by id; "" for none. False if there's no such one.
+    pub fn set_passive(&mut self, id: &str) -> bool {
+        if id.is_empty() {
+            self.kit.passive = mftr_sim::items::Passive::None;
+            return true;
+        }
+        match crate::passives::get(id) {
+            Some(p) => {
+                self.kit.passive = p;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The catalog id of the kit's passive ("" for none).
+    pub fn passive(&self) -> &'static str {
+        crate::passives::of(self.kit.passive).map_or("", |e| e.0)
+    }
+
     /// The official champion whose kit this is, if it's one of theirs unchanged.
     pub fn kit_from(&self) -> Option<ChampionId> {
         ChampionId::ALL.into_iter().find(|c| {

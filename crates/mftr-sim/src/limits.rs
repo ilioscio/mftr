@@ -218,6 +218,7 @@ pub fn problems(def: &ChampionDef) -> Vec<String> {
         let slot = ["Q", "W", "E", "R"][i];
         ability(&mut Check { out: &mut out, at: format!("{slot} {}: ", a.name) }, a, i);
     }
+    passive(&mut Check { out: &mut out, at: "passive: ".into() }, &def.passive);
     let mut names: Vec<&str> = def.abilities.iter().map(|a| a.name).collect();
     names.sort_unstable();
     names.dedup();
@@ -225,6 +226,56 @@ pub fn problems(def: &ChampionDef) -> Vec<String> {
         out.push("abilities: each needs its own name".into());
     }
     out
+}
+
+/// A champion's own passive (20 §8.1): about an item's strength at most, so no passive
+/// outweighs a kit.
+fn passive(c: &mut Check, p: &crate::items::Passive) {
+    use crate::items::Passive;
+    let ms = |v: u64| v as f32;
+    match *p {
+        Passive::None => {}
+        Passive::OnHitMagic { base, ap_ratio } => {
+            c.range("base", base, 0.0, 60.0);
+            c.range("ap_ratio", ap_ratio, 0.0, 0.6);
+        }
+        Passive::ThirdHit { base, bonus_ad } => {
+            c.range("base", base, 0.0, 150.0);
+            c.range("bonus_ad", bonus_ad, 0.0, 1.0);
+        }
+        Passive::Spellblade { base_ad } => c.range("base_ad", base_ad, 0.0, 2.0),
+        Passive::Cleave { melee, ranged, radius } => {
+            c.range("melee", melee, 0.0, 0.6);
+            c.range("ranged", ranged, 0.0, 0.3);
+            c.range("radius", radius, 100.0, 400.0);
+        }
+        Passive::Quicken { speed, ms: d } => {
+            c.range("speed", speed, 0.0, 60.0);
+            c.range("ms", ms(d), 500.0, 4000.0);
+        }
+        Passive::Sunder { per_stack, stacks, ms: d } => {
+            c.range("per_stack × stacks", per_stack * stacks as f32, 0.0, 0.3);
+            c.range("stacks", stacks as f32, 1.0, 10.0);
+            c.range("ms", ms(d), 1000.0, 8000.0);
+        }
+        Passive::Thorns { base, bonus_armor, wounds } => {
+            c.range("base", base, 0.0, 40.0);
+            c.range("bonus_armor", bonus_armor, 0.0, 0.5);
+            c.range("wounds", wounds, 0.0, 0.5);
+        }
+        Passive::Rally { shield, bonus_hp, threshold, duration_ms, cooldown_ms } => {
+            c.range("shield", shield, 0.0, 400.0);
+            c.range("bonus_hp", bonus_hp, 0.0, 1.0);
+            c.range("threshold", threshold, 0.1, 0.5);
+            c.range("duration_ms", ms(duration_ms), 1000.0, 6000.0);
+            c.range("cooldown_ms", ms(cooldown_ms), 20_000.0, 180_000.0);
+        }
+        Passive::Warmth { max_hp, after_ms } => {
+            c.range("max_hp", max_hp, 0.0, 0.05);
+            c.range("after_ms", ms(after_ms), 3000.0, 15_000.0);
+        }
+        other => c.fail(format!("{other:?} isn't a champion passive")),
+    }
 }
 
 /// Read a champion file and check it, its price included (D71): the definition, or every

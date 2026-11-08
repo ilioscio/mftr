@@ -22,6 +22,7 @@ use crate::ability::{
     ReactionClass, Shield, Support, Transforms,
 };
 use crate::champion::{AttackSpec, ChampionDef, Class, Stats};
+use crate::items::Passive;
 use crate::time::{SUBTICKS_PER_SECOND, SimDuration};
 use crate::veil::VeilSpec;
 
@@ -694,8 +695,53 @@ pub fn read_champion_and_looks(text: &str) -> Result<(ChampionDef, Option<(Value
     for (i, item) in items.into_iter().enumerate() {
         abilities[i] = ability(item, &format!("{lat}[{i}]"))?;
     }
+    let passive = match f.take("passive") {
+        Some((v, at)) => passive(v, &at)?,
+        None => Passive::None,
+    };
     f.done()?;
-    Ok((ChampionDef { name, class, stats, growth, attack, abilities }, looks))
+    Ok((ChampionDef { name, class, stats, growth, attack, abilities, passive }, looks))
+}
+
+/// A champion's own passive (20 §8.1): the kinds a champion may take, with their numbers.
+/// Durations are milliseconds; shares and ratios are fractions.
+fn passive(v: Value, at: &str) -> Result<Passive, DataError> {
+    let (kind, fields) = variant(v, at)?;
+    let Some(mut f) = fields else { return err(at, format!("`{kind}` needs its fields: `{kind}(...)`")) };
+    let millis = |f: &mut Fields, key: &str| -> Result<u64, DataError> {
+        let (v, a) = f.req(key)?;
+        int(v, &a, 600_000)
+    };
+    let out = match kind.as_str() {
+        "OnHitMagic" => Passive::OnHitMagic { base: f.f32("base")?, ap_ratio: f.f32_or("ap_ratio", 0.0)? },
+        "ThirdHit" => Passive::ThirdHit { base: f.f32("base")?, bonus_ad: f.f32_or("bonus_ad", 0.0)? },
+        "Spellblade" => Passive::Spellblade { base_ad: f.f32("base_ad")? },
+        "Cleave" => Passive::Cleave { melee: f.f32("melee")?, ranged: f.f32("ranged")?, radius: f.f32("radius")? },
+        "Quicken" => Passive::Quicken { speed: f.f32("speed")?, ms: millis(&mut f, "ms")? },
+        "Sunder" => {
+            let per_stack = f.f32("per_stack")?;
+            let (s, sa) = f.req("stacks")?;
+            Passive::Sunder { per_stack, stacks: int(s, &sa, 20)? as u8, ms: millis(&mut f, "ms")? }
+        }
+        "Thorns" => Passive::Thorns {
+            base: f.f32("base")?,
+            bonus_armor: f.f32_or("bonus_armor", 0.0)?,
+            wounds: f.f32_or("wounds", 0.0)?,
+        },
+        "Rally" => Passive::Rally {
+            shield: f.f32("shield")?,
+            bonus_hp: f.f32_or("bonus_hp", 0.0)?,
+            threshold: f.f32("threshold")?,
+            duration_ms: millis(&mut f, "duration_ms")?,
+            cooldown_ms: millis(&mut f, "cooldown_ms")?,
+        },
+        "Warmth" => Passive::Warmth { max_hp: f.f32("max_hp")?, after_ms: millis(&mut f, "after_ms")? },
+        other => {
+            return err(at, format!("`{other}`: a champion's passive is one of {}", PASSIVE_KINDS.join(", ")));
+        }
+    };
+    f.done()?;
+    Ok(out)
 }
 
 // --- Writing ----------------------------------------------------------------------------------
@@ -854,6 +900,44 @@ fn write_effect(e: &Effect) -> String {
     }
 }
 
+/// The passive kinds a champion file takes ([`passive`]).
+pub const PASSIVE_KINDS: [&str; 9] =
+    ["OnHitMagic", "ThirdHit", "Spellblade", "Cleave", "Quicken", "Sunder", "Thorns", "Rally", "Warmth"];
+
+fn write_passive(p: &Passive) -> Option<String> {
+    Some(match *p {
+        Passive::None => return None,
+        Passive::OnHitMagic { base, ap_ratio } => {
+            Line::new().put("base", base).opt("ap_ratio", ap_ratio).wrap("OnHitMagic")
+        }
+        Passive::ThirdHit { base, bonus_ad } => {
+            Line::new().put("base", base).opt("bonus_ad", bonus_ad).wrap("ThirdHit")
+        }
+        Passive::Spellblade { base_ad } => Line::new().put("base_ad", base_ad).wrap("Spellblade"),
+        Passive::Cleave { melee, ranged, radius } => {
+            Line::new().put("melee", melee).put("ranged", ranged).put("radius", radius).wrap("Cleave")
+        }
+        Passive::Quicken { speed, ms } => Line::new().put("speed", speed).put("ms", ms).wrap("Quicken"),
+        Passive::Sunder { per_stack, stacks, ms } => {
+            Line::new().put("per_stack", per_stack).put("stacks", stacks).put("ms", ms).wrap("Sunder")
+        }
+        Passive::Thorns { base, bonus_armor, wounds } => {
+            Line::new().put("base", base).opt("bonus_armor", bonus_armor).opt("wounds", wounds).wrap("Thorns")
+        }
+        Passive::Rally { shield, bonus_hp, threshold, duration_ms, cooldown_ms } => Line::new()
+            .put("shield", shield)
+            .opt("bonus_hp", bonus_hp)
+            .put("threshold", threshold)
+            .put("duration_ms", duration_ms)
+            .put("cooldown_ms", cooldown_ms)
+            .wrap("Rally"),
+        Passive::Warmth { max_hp, after_ms } => {
+            Line::new().put("max_hp", max_hp).put("after_ms", after_ms).wrap("Warmth")
+        }
+        other => panic!("{other:?} isn't a champion passive"),
+    })
+}
+
 fn quote(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
@@ -886,6 +970,9 @@ pub fn write_champion_as(def: &ChampionDef, name: &str, comment: &str, extra: &s
         .opt("bolt_speed", a.bolt_speed)
         .wrap("");
     let _ = writeln!(out, "    attack: {attack},");
+    if let Some(p) = write_passive(&def.passive) {
+        let _ = writeln!(out, "    passive: {p},");
+    }
     let _ = writeln!(out, "    abilities: [");
     for ab in &def.abilities {
         let _ = writeln!(out, "        (");
@@ -928,6 +1015,33 @@ mod tests {
             let text = write_champion(def, "");
             assert_eq!(read_champion(&text).as_ref(), Ok(def), "{}\n{text}", def.name);
         }
+    }
+
+    #[test]
+    fn passives_round_trip_and_odd_ones_are_refused() {
+        use crate::items::Passive;
+        for p in [
+            Passive::OnHitMagic { base: 18.0, ap_ratio: 0.2 },
+            Passive::ThirdHit { base: 45.0, bonus_ad: 0.0 },
+            Passive::Spellblade { base_ad: 0.8 },
+            Passive::Cleave { melee: 0.35, ranged: 0.15, radius: 300.0 },
+            Passive::Quicken { speed: 25.0, ms: 2000 },
+            Passive::Sunder { per_stack: 0.04, stacks: 5, ms: 5000 },
+            Passive::Thorns { base: 12.0, bonus_armor: 0.15, wounds: 0.3 },
+            Passive::Rally { shield: 120.0, bonus_hp: 0.3, threshold: 0.3, duration_ms: 3000, cooldown_ms: 60_000 },
+            Passive::Warmth { max_hp: 0.02, after_ms: 6000 },
+        ] {
+            let def = ChampionDef { passive: p, ..*ChampionId::Rook.def() };
+            let text = write_champion(&def, "");
+            assert_eq!(read_champion(&text), Ok(def), "{text}");
+        }
+        let text = write_champion(ChampionId::Rook.def(), "").replace(
+            "    abilities: [",
+            "    passive: Smolder(base: 5, bonus_hp: 0, radius: 300),
+    abilities: [",
+        );
+        let e = read_champion(&text).unwrap_err().to_string();
+        assert!(e.contains("a champion's passive is one of"), "{e}");
     }
 
     fn ember() -> String {
