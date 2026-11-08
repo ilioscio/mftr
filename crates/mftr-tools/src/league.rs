@@ -101,7 +101,8 @@ fn correlation(xs: &[f64], ys: &[f64]) -> f64 {
 }
 
 /// Play `matches` ARAM bot matches of ten of `roster` at random (lineups from `d`, match seeds
-/// from `base`): each champion's (games, wins) over decided matches, and the log lines.
+/// from `base`): each champion's (games, wins) over decided matches, and the log lines; `casts`
+/// gathers each champion's Q W E R casts and minutes played (every match).
 fn play(
     roster: &[ChampionId],
     matches: usize,
@@ -109,6 +110,7 @@ fn play(
     base: u64,
     ticks: u32,
     log: &mut String,
+    casts: &mut [([u32; 4], f64)],
 ) -> Vec<(u32, u32)> {
     let mut tally: Vec<(u32, u32)> = vec![(0, 0); roster.len()];
     for m in 0..matches {
@@ -123,6 +125,15 @@ fn play(
         let result =
             mftr_server::run_bot_match_with(server, ticks, &BotMatchOptions { team: lineup, ..Default::default() });
         let winner = result.winner.map(|(t, _)| t);
+        let minutes = result.ticks as f64 / mftr_sim::TICK_HZ as f64 / 60.0;
+        for c in &result.champions {
+            if let Some(i) = roster.iter().position(|r| *r == c.champion) {
+                for s in 0..4 {
+                    casts[i].0[s] += c.item_log.casts[s];
+                }
+                casts[i].1 += minutes;
+            }
+        }
         if let Some(w) = winner {
             let side = |t: Team| -> String {
                 result
@@ -197,6 +208,7 @@ pub fn run(cfg: &LeagueConfig) -> Vec<(ChampionId, f32, u32, u32)> {
     let mut log = String::from("match,winner,blue,red\n");
     for round in 0..cfg.calibrate {
         let mut scratch = String::new();
+        let mut scratch_casts = vec![([0u32; 4], 0.0f64); roster.len()];
         let t = play(
             &roster,
             cfg.calibrate_matches,
@@ -204,6 +216,7 @@ pub fn run(cfg: &LeagueConfig) -> Vec<(ChampionId, f32, u32, u32)> {
             match_base + 100_000 * (round as u64 + 1),
             ticks,
             &mut scratch,
+            &mut scratch_casts,
         );
         let rms =
             (t.iter().filter(|g| g.0 > 0).map(|&(g, w)| (100.0 * w as f64 / g as f64 - 50.0).powi(2)).sum::<f64>()
@@ -223,7 +236,34 @@ pub fn run(cfg: &LeagueConfig) -> Vec<(ChampionId, f32, u32, u32)> {
             *c = ChampionId::register(def).expect("room in the registry");
         }
     }
-    let tally = play(&roster, cfg.matches, &mut d, match_base, ticks, &mut log);
+    let mut casts = vec![([0u32; 4], 0.0f64); roster.len()];
+    let tally = play(&roster, cfg.matches, &mut d, match_base, ticks, &mut log, &mut casts);
+    // How often bots use each move (casts a minute), the least used first: a move bots rarely
+    // cast makes its kit weaker than any price can say.
+    let mut uses: Vec<(String, f64, u32)> = Vec::new();
+    for (i, c) in roster.iter().enumerate() {
+        let (n, mins) = casts[i];
+        if mins <= 0.0 {
+            continue;
+        }
+        for (s, a) in c.def().abilities.iter().enumerate() {
+            // As a share of what its cooldown allows (rank 3, or 2 for an ultimate).
+            let cd = a.cooldown_at(if s == 3 { 2 } else { 3 }).0 as f64 / mftr_sim::time::SUBTICKS_PER_SECOND as f64;
+            let rate = n[s] as f64 / mins * cd.max(1.0) / 60.0;
+            match uses.iter_mut().find(|u| u.0 == a.name) {
+                Some(u) => {
+                    u.1 += rate;
+                    u.2 += 1;
+                }
+                None => uses.push((a.name.to_string(), rate, 1)),
+            }
+        }
+    }
+    uses.sort_by(|a, b| (a.1 / a.2 as f64).total_cmp(&(b.1 / b.2 as f64)));
+    println!("\nhow much of its cooldown each move is used (casts / most it could), least used first:");
+    for (name, rate, k) in &uses {
+        println!("  {name:<18} {:>4.0}%  ({k} champions)", 100.0 * rate / *k as f64);
+    }
     println!("\n{:<10} {:>6} {:>6} {:>6}   moves", "champion", "price", "games", "won%");
     let mut out = Vec::new();
     for (i, c) in roster.iter().enumerate() {

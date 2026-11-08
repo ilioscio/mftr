@@ -1617,6 +1617,8 @@ pub struct ItemLog {
     pub uses: Vec<(u8, u32)>,
     /// Damage to enemy champions by item effects (`DamageOrigin::Item`), per item.
     pub damage: Vec<(u8, f32)>,
+    /// Q W E R cast (a cast started), for how bots use each move (CR7's leagues).
+    pub casts: [u32; 4],
     /// Basic attacks that hit an enemy champion, and how many crit.
     pub attacks: u32,
     pub crits: u32,
@@ -1770,6 +1772,13 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
             if let SimEvent::ItemUsed { unit, item, .. } = e {
                 let i = log_of(&mut logs, *unit);
                 bump(&mut logs[i].1.uses, *item, 1u32);
+            }
+            if let SimEvent::CastStarted { unit, slot, .. } = e
+                && *slot < 4
+                && core.game.world.unit(*unit).is_some_and(|u| u.kind == UnitKind::Champion)
+            {
+                let i = log_of(&mut logs, *unit);
+                logs[i].1.casts[*slot as usize] += 1;
             }
             if let SimEvent::Damage { source, target, amount, absorbed, origin, crit, .. } = e
                 && let (Some(s), Some(t)) = (core.game.world.unit(*source), core.game.world.unit(*target))
