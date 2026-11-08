@@ -1,0 +1,63 @@
+// Marrow-neo: Marrow rebuilt in the champion creator, to play next to the hand-made Marrow (20 §12).
+// Generated from art/champions/marrow/marrow.champion.ron with the name changed (a test keeps them in step);
+// load the whole set with `mftr-server --champion-dir art/champions/neo --champions both`.
+// A bent bone-witch: a plum hood, a shawl, a long robe, a crooked staff.
+// The kit is a copy of crates/mftr-sim/champions/marrow.ron (a test checks they match); the
+// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// Marrow: Battlemage: short-range sustained magic.
+// Battlemage: a draining nova to fight in close, a rooting skillshot, a self heal, and a large
+// slowing area to win extended fights.
+// Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability
+// numbers are rank 1, and `per_rank` adds to them each rank (M2 slice 2). Durations are in
+// milliseconds. The format is in `crates/mftr-sim/src/data.rs`.
+Champion(
+    format: 0,
+    looks: (
+        build: "humanoid_slim",
+        gender: Feminine,
+        shape: (nose_length: 0.7, nose_hook: 0.8, chin_length: 0.5, cheeks_hollow: 0.6, brow_ridge: 0.4),
+        proportions: (height: -0.3, head: 0.2),
+        skin: 8,
+        outfit: ["head.hood", "shoulders.mantle", "torso.robe", "weapon.staff"],
+        paint: [("head.hood", 0, 54), ("torso.robe", 0, 55), ("shoulders.mantle", 0, 6)],
+        signature: 310,
+        moves: (attack: "marrow.attack", q: "marrow.q", w: "marrow.w", e: "marrow.e", r: "marrow.r"),
+    ),
+    name: "Marrow-neo",
+    class: Battlemage,
+    stats: (max_health: 610, health_regen: 1.6, armor: 26, magic_resist: 32, attack_damage: 52, ability_power: 60, move_speed: 335),
+    growth: (max_health: 98, health_regen: 0.08, armor: 4.3, magic_resist: 1.5, attack_damage: 2.8),
+    attack: (range: 475, attack_speed: 0.65, windup_fraction: 0.22, bolt_speed: 1500),
+    abilities: [
+        (
+            name: "Siphon",
+            cooldown_ms: 5000,
+            effect: Area(windup_ms: 200, radius: 300, damage: (kind: Magic, base: 50, ap_ratio: 0.45)),
+            reaction: None,
+            per_rank: (damage: 25, cooldown_ms: 400),
+        ),
+        (
+            name: "Grasping Bones",
+            cooldown_ms: 11000,
+            effect: Line(windup_ms: 300, speed: 1300, radius: 60, range: 850, damage: (kind: Magic, base: 70, ap_ratio: 0.5), cc: Root(ms: 1000)),
+            reaction: HardCc,
+            per_rank: (damage: 35, cooldown_ms: 800),
+            transforms: [Multishot, Echo, Wide],
+        ),
+        (
+            name: "Grave Pact",
+            cooldown_ms: 14000,
+            effect: Support(heal: 50, heal_ap: 0.3),
+            reaction: None,
+            per_rank: (damage: 25, cooldown_ms: 1000),
+        ),
+        (
+            name: "Ossuary",
+            cooldown_ms: 70000,
+            effect: Area(windup_ms: 250, range: 600, radius: 300, delay_ms: 1300, damage: (kind: Magic, base: 180, ap_ratio: 0.7), cc: Slow(pct: 50, ms: 2000)),
+            reaction: Burst,
+            per_rank: (damage: 100, cooldown_ms: 10000),
+            transforms: [Echo, Wide],
+        ),
+    ],
+)

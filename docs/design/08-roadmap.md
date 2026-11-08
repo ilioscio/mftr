@@ -1578,6 +1578,12 @@ replace the shared head anyway.
   crossbow missing (the catalog has none yet).
 - **The track exit** (20 §14) asks that the owner prefer them to the hand-made models before the
   game shows them; until then the hand-made ones stay.
+- **Side by side** (2026-11-08, the owner's request): `art/champions/neo/` holds the ten as
+  `Rook-neo`, `Ember-neo` … (generated from the recipes with the name changed; a test keeps them
+  in step), so they play next to the hand-made ones on any server that loads them:
+  `mftr-server --champion-dir art/champions/neo --champions both` (the new `--champion-dir`
+  loads every champion file in a folder). The client's `--champion NAME` now waits for a
+  server's custom champions to arrive before resolving the name (`--champion rook-neo`).
 
 ### CR slice 10b status (2026-11-08): ✅ the serpentoid, the floating spectre, the rolling machine
 - **Three builds** on `creature` skeletons of their own (`art/creator/<build>/build.py`, sharing

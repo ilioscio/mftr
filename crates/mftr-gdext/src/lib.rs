@@ -53,6 +53,8 @@ pub struct MatchClient {
     next_hello: f64,
     last_error: GString,
     champion_request: Option<ChampionId>,
+    /// A requested champion's name not known yet (a server's custom one).
+    champion_name: Option<String>,
     /// Reconnect token and spectate wish for the next connection.
     resume: u64,
     spectate: bool,
@@ -140,6 +142,7 @@ impl INode for MatchClient {
             next_hello: 0.0,
             last_error: GString::new(),
             champion_request: None,
+            champion_name: None,
             resume: 0,
             spectate: false,
             links: None,
@@ -193,6 +196,7 @@ impl MatchClient {
                 self.key_conflict = None;
                 self.session = ClientSession::new();
                 self.session.set_champion_request(self.champion_request);
+                self.session.set_champion_name(self.champion_name.clone());
                 self.session.set_resume(self.resume);
                 self.session.set_spectate(self.spectate);
                 self.next_hello = 0.0;
@@ -437,7 +441,10 @@ impl MatchClient {
     fn set_champion(&mut self, name: GString) -> bool {
         let name = name.to_string();
         self.champion_request = ChampionId::by_name(&name);
-        name.is_empty() || self.champion_request.is_some()
+        // Not known here: perhaps one of the server's custom champions, known once its files
+        // are fetched (`Rook-neo`). Kept, and the server picks if it never turns up.
+        self.champion_name = (self.champion_request.is_none() && !name.is_empty()).then_some(name);
+        true
     }
 
     /// Reconnect: the token (hex, from `session_token` of an earlier session) to present when

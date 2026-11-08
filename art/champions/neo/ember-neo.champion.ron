@@ -1,0 +1,62 @@
+// Ember-neo: Ember rebuilt in the champion creator, to play next to the hand-made Ember (20 §12).
+// Generated from art/champions/ember/ember.champion.ron with the name changed (a test keeps them in step);
+// load the whole set with `mftr-server --champion-dir art/champions/neo --champions both`.
+// A cocky pyromancer: a burning crest of hair, a tall ember-lined collar, a charcoal coat.
+// The kit is a copy of crates/mftr-sim/champions/ember.ron (a test checks they match); the
+// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// Ember: Skillshot mage.
+// Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability
+// numbers are rank 1, and `per_rank` adds to them each rank (M2 slice 2). Durations are in
+// milliseconds. The format is in `crates/mftr-sim/src/data.rs`.
+Champion(
+    format: 0,
+    looks: (
+        build: "humanoid_slim",
+        gender: Masculine,
+        shape: (cheekbones: 0.5, chin_reach: 0.3, eyes_size: 0.2, brow_ridge: -0.3),
+        proportions: (head: 0.1, arms: 0.1),
+        skin: 1,
+        outfit: ["hair.mohawk", "shoulders.mantle", "torso.coat", "arms.bracers", "feet.boots", "waist.belt"],
+        paint: [("hair.mohawk", 0, 25), ("shoulders.mantle", 0, 18), ("torso.coat", 0, 6)],
+        signature: 25,
+        moves: (attack: "ember.attack", q: "ember.q", w: "ember.w", e: "ember.e", r: "ember.r"),
+    ),
+    name: "Ember-neo",
+    class: Mage,
+    stats: (max_health: 600, health_regen: 1.5, armor: 22, magic_resist: 30, attack_damage: 50, ability_power: 80, move_speed: 325),
+    growth: (max_health: 90, health_regen: 0.08, armor: 4.2, magic_resist: 1.3, attack_damage: 3),
+    attack: (range: 525, attack_speed: 0.65, windup_fraction: 0.2, bolt_speed: 1600),
+    abilities: [
+        (
+            name: "Ember Lance",
+            cooldown_ms: 4000,
+            effect: Line(windup_ms: 250, speed: 1600, radius: 35, range: 1100, damage: (kind: Magic, base: 70, ap_ratio: 0.6)),
+            reaction: Burst,
+            per_rank: (damage: 40, cooldown_ms: 500),
+            transforms: [Multishot, Echo, Wide],
+        ),
+        (
+            name: "Cinder Bloom",
+            cooldown_ms: 9000,
+            effect: Area(windup_ms: 250, range: 900, radius: 160, delay_ms: 850, damage: (kind: Magic, base: 90, ap_ratio: 0.7)),
+            reaction: Burst,
+            per_rank: (damage: 40, cooldown_ms: 500),
+            transforms: [Echo, Wide],
+        ),
+        (
+            name: "Flicker",
+            cooldown_ms: 14000,
+            effect: Blink(range: 350),
+            reaction: None,
+            per_rank: (cooldown_ms: 1000),
+        ),
+        (
+            name: "Binding Sigil",
+            cooldown_ms: 20000,
+            effect: Line(windup_ms: 300, speed: 1300, radius: 60, range: 1150, damage: (kind: Magic, base: 100, ap_ratio: 0.5), cc: Stun(ms: 1250)),
+            reaction: HardCc,
+            per_rank: (damage: 80, cooldown_ms: 3000),
+            transforms: [Multishot, Echo, Wide],
+        ),
+    ],
+)

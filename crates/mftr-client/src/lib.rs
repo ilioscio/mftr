@@ -317,6 +317,9 @@ pub struct ClientSession {
     rules: mftr_sim::world::Rules,
     /// Requested in the hello (the server picks when `None`).
     champion_request: Option<ChampionId>,
+    /// A champion asked for by name that isn't known yet: a server's custom one (`Rook-neo`),
+    /// resolved once its file has been fetched with the roster (CR1d).
+    champion_name: Option<String>,
     /// Token to resume a dropped session with (0 = none), and the one from our Welcome.
     resume: u64,
     token: u64,
@@ -425,6 +428,7 @@ impl ClientSession {
             home: Vec2::ZERO,
             rules: mftr_sim::world::Rules::SANDBOX,
             champion_request: None,
+            champion_name: None,
             resume: 0,
             token: 0,
             spectate: false,
@@ -553,6 +557,12 @@ impl ClientSession {
         self.champion_request = champion;
     }
 
+    /// Ask for a champion by a name not known yet (a server's custom champion): resolved when
+    /// the server's roster has been fetched, else the server picks.
+    pub fn set_champion_name(&mut self, name: Option<String>) {
+        self.champion_name = name;
+    }
+
     pub fn champion(&self) -> ChampionId {
         self.champion
     }
@@ -623,6 +633,12 @@ impl ClientSession {
             let h = self.header();
             let bytes = msg::encode_client(&h, &msg);
             return self.finish_packet(bytes);
+        }
+        if self.champion_request.is_none()
+            && let Some(name) = &self.champion_name
+            && let Some(id) = ChampionId::by_name(name)
+        {
+            self.champion_request = Some(id);
         }
         let h = self.header();
         let bytes = msg::encode_client(
@@ -1059,6 +1075,7 @@ impl ClientSession {
         *self = Self {
             phase: Phase::Lobby,
             champion_request: old.champion_request,
+            champion_name: old.champion_name,
             spectate: old.spectate,
             queue: old.queue,
             mode: old.mode,

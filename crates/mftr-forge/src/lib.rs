@@ -1056,6 +1056,25 @@ mod tests {
     }
 
     #[test]
+    fn the_neo_set_matches_the_recipes_under_new_names() {
+        // art/champions/neo: the official ten rebuilt, to play beside the hand-made ones.
+        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art/champions");
+        let c = catalog();
+        for champ in mftr_sim::ChampionId::ALL {
+            let id = champ.def().name.to_lowercase();
+            let neo = std::fs::read_to_string(art.join(format!("neo/{id}-neo.champion.ron"))).unwrap();
+            let src = std::fs::read_to_string(art.join(format!("{id}/{id}.champion.ron"))).unwrap();
+            let (n, r) = (recipe::Recipe::from_text(&neo).unwrap(), recipe::Recipe::from_text(&src).unwrap());
+            assert_eq!(n.name, format!("{}-neo", champ.def().name));
+            assert_eq!(n.looks, r.looks, "{id}: regenerate art/champions/neo from the recipe");
+            assert_eq!(mftr_sim::champion::ChampionDef { name: champ.def().name, ..n.kit }, *champ.def(), "{id}");
+            assert!(n.problems().is_empty(), "{id}: {:?}", n.problems());
+            assert_eq!(mftr_pack::champion::validate_text(&neo).errors(), 0, "{id}");
+            c.forge(&n.name, &n.looks).unwrap();
+        }
+    }
+
+    #[test]
     fn a_plain_forge_is_the_base_with_clips() {
         let c = catalog();
         let looks = Looks { skin: 2, ..Looks::default() };

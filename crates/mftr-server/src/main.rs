@@ -5,7 +5,7 @@
 //! Usage: mftr-server [--bind 0.0.0.0:7777] [--key FILE] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,...]
 //!                    [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR]
 //!                    [--bot-tier recruit|veteran|elite|nightmare]
-//!                    [--champion-file FILE.champion.ron]... [--champions official|customs|both]
+//!                    [--champion-file FILE.champion.ron]... [--champion-dir DIR] [--champions official|customs|both]
 //!        mftr-server --scenario NAME [--bots N] [--lobby] [--max-players N] [--map FILE.mftrmap] [...]
 //!        mftr-server [--key FILE] --fingerprint
 //!
@@ -45,7 +45,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,horde,...] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR] [--bot-tier recruit|veteran|elite|nightmare] [--champion-file FILE.champion.ron]... [--champions official|customs|both]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|horde|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]\n       mftr-server --version";
+const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,horde,...] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR] [--bot-tier recruit|veteran|elite|nightmare] [--champion-file FILE.champion.ron]... [--champion-dir DIR] [--champions official|customs|both]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|horde|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]\n       mftr-server --version";
 /// Instances running at once, by default.
 const MAX_MATCHES: usize = 32;
 
@@ -170,6 +170,19 @@ fn main() -> std::io::Result<()> {
             "--champion-file" => {
                 let path = args.next().expect("--champion-file needs a file");
                 champion_files.push(std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}")));
+            }
+            "--champion-dir" => {
+                // Every `*.champion.ron` in a folder (art/champions/neo: the official ten rebuilt).
+                let dir = args.next().expect("--champion-dir needs a folder");
+                let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+                    .unwrap_or_else(|e| panic!("{dir}: {e}"))
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| p.to_string_lossy().ends_with(".champion.ron"))
+                    .collect();
+                paths.sort();
+                for p in paths {
+                    champion_files.push(std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display())));
+                }
             }
             "--champions" => {
                 let name = args.next().expect("--champions needs official, customs or both");
