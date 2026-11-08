@@ -113,6 +113,8 @@ pub struct Looks {
     pub shape: Vec<(String, f32)>,
     pub proportions: Proportions,
     pub skin: u8,
+    /// Catalog parts worn (CR4, 20 §7): ids like `torso.tunic`, one per slot.
+    pub outfit: Vec<String>,
 }
 
 impl Default for Looks {
@@ -123,6 +125,7 @@ impl Default for Looks {
             shape: Vec::new(),
             proportions: Proportions::default(),
             skin: 2,
+            outfit: Vec::new(),
         }
     }
 }
@@ -203,12 +206,29 @@ pub fn read(v: Value, at: &str) -> Result<Looks, DataError> {
         }
         pf.done()?;
     }
+    let mut outfit = Vec::new();
+    if let Some((o, oat)) = f.take("outfit") {
+        let Value::List(None, items) = o else { return err(&oat, "expected a list of part ids: `[\"torso.tunic\"]`") };
+        for (i, item) in items.into_iter().enumerate() {
+            let iat = format!("{oat}[{i}]");
+            let Value::Str(id) = item else { return err(&iat, "expected a part id") };
+            if id.len() > 48
+                || !id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'.')
+            {
+                return err(&iat, "part ids are a–z, 0–9, `_` and `.`");
+            }
+            if outfit.contains(&id) {
+                return err(&iat, format!("`{id}` is worn twice"));
+            }
+            outfit.push(id);
+        }
+    }
     let skin = match f.take("skin") {
         Some((s, sat)) => data::int(s, &sat, SKIN_TONES.len() as u64 - 1)? as u8,
         None => 2,
     };
     f.done()?;
-    Ok(Looks { build, gender, shape, proportions, skin })
+    Ok(Looks { build, gender, shape, proportions, skin, outfit })
 }
 
 /// A champion file's looks, if it has any.
@@ -243,6 +263,10 @@ pub fn write(l: &Looks) -> String {
         out += &format!("        proportions: ({}),\n", props.join(", "));
     }
     out += &format!("        skin: {},\n", l.skin);
+    if !l.outfit.is_empty() {
+        let ids: Vec<String> = l.outfit.iter().map(|p| format!("\"{p}\"")).collect();
+        out += &format!("        outfit: [{}],\n", ids.join(", "));
+    }
     out += "    ),\n";
     out
 }

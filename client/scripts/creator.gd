@@ -21,7 +21,7 @@ const STEPS := [
 	["gender", "2  Gender", "The base shape: every slider stays available after the choice.", true],
 	["face", "3  Face", "Shape the head: each slider blends between two sculpted extremes.", true],
 	["body", "4  Body", "Proportions scale the skeleton; shape sliders reshape the body.", true],
-	["clothes", "5  Clothes", "Clothes, armor, accessories and weapons from the catalog: coming next (CR4).", false],
+	["clothes", "5  Clothes", "Clothes, armor, accessories and weapons: one part per slot. They follow your sliders.", true],
 	["paint", "6  Paint", "Fill, brush and decals on every part: coming (CR5).", false],
 	["moves", "7  Moveset", "Until the move library arrives (CR6), borrow an official champion's whole kit.", true],
 	["balance", "8  Balance", "The point budget: coming (CR7). Borrowed kits are balanced already.", false],
@@ -227,6 +227,31 @@ func _show_step(id: String) -> void:
 			for id2 in creator.sliders():
 				if not _is_face(id2):
 					_slider(_label_of(id2), creator.slider(id2), func(v): creator.set_slider(id2, v))
+		"clothes":
+			var by_slot := {}
+			for p in creator.parts():
+				if not by_slot.has(p.slot):
+					by_slot[p.slot] = []
+				by_slot[p.slot].append(p)
+			var worn: PackedStringArray = creator.outfit()
+			for slot in creator.slots():
+				if not by_slot.has(slot):
+					continue
+				var l := Label.new()
+				l.text = String(slot).capitalize()
+				_panel.add_child(l)
+				var pick := OptionButton.new()
+				pick.add_item("None")
+				var options: Array = by_slot[slot]
+				for i in options.size():
+					pick.add_item("%s  (%d)" % [options[i].name, options[i].triangles])
+					if worn.has(options[i].id):
+						pick.select(i + 1)
+				pick.item_selected.connect(func(i):
+					creator.set_part(slot, "" if i == 0 else options[i - 1].id)
+					_changed(true))
+				_panel.add_child(pick)
+			_hint("Paint comes next (CR5); parts wear the catalog's colors until then.")
 		"moves":
 			var pick := OptionButton.new()
 			var kits: PackedStringArray = creator.kits()
@@ -367,6 +392,7 @@ func _rebuild() -> void:
 		mat.set_shader_parameter("team_accent", TEAM)
 		mesh.set_surface_override_material(i, mat)
 	_pivot.add_child(_model_node)
+	_update_status()
 	_skeleton = _model_node.get_node("Skeleton")
 	_animator = m.new_animator()
 	_pivot.rotation.y = _yaw
@@ -417,7 +443,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func _update_status() -> void:
 	var problems: PackedStringArray = creator.problems()
-	_status.text = "" if problems.is_empty() else "Can't save yet: " + "; ".join(problems)
+	var budget := "" if _model == null else "%d triangles (target 5,000–8,000, cap 12,000)\n" % _model.triangles()
+	_status.text = budget + ("" if problems.is_empty() else "Can't save yet: " + "; ".join(problems))
 
 
 func _randomize() -> void:

@@ -171,6 +171,45 @@ impl MftrCreator {
         out
     }
 
+    /// The slots parts go on, in order.
+    #[func]
+    fn slots(&self) -> PackedStringArray {
+        mftr_forge::SLOTS.iter().map(|s| GString::from(*s)).collect()
+    }
+
+    /// The parts the current base offers: `[{id, slot, name, triangles}]`.
+    #[func]
+    fn parts(&self) -> VarArray {
+        let mut out = VarArray::new();
+        let Some(cat) = catalog(&self.art) else { return out };
+        for p in cat.parts(&self.recipe.looks.base_key()) {
+            let mut d = VarDictionary::new();
+            d.set("id", p.id.as_str());
+            d.set("slot", p.slot.as_str());
+            d.set("name", p.name.as_str());
+            d.set("triangles", p.triangles as i64);
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// The parts worn.
+    #[func]
+    fn outfit(&self) -> PackedStringArray {
+        self.recipe.looks.outfit.iter().map(|s| GString::from(s.as_str())).collect()
+    }
+
+    /// Wear `id` on `slot` (whatever was there comes off); "" takes the slot's part off.
+    #[func]
+    fn set_part(&mut self, slot: GString, id: GString) {
+        let (slot, id) = (slot.to_string(), id.to_string());
+        let prefix = format!("{slot}.");
+        self.recipe.looks.outfit.retain(|p| !p.starts_with(&prefix));
+        if !id.is_empty() {
+            self.recipe.looks.outfit.push(id);
+        }
+    }
+
     /// Every slider and proportion at random (a seeded roll).
     #[func]
     fn randomize(&mut self, seed: i64) {

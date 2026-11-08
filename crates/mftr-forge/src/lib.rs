@@ -22,11 +22,35 @@ use mftr_pack::{Loaded, pose, sidecar};
 
 pub use looks::Looks;
 
-/// What the forge builds from: the bases it has and the clip library.
+/// What the forge builds from: the bases it has (each with its catalog parts) and the clip
+/// library.
 pub struct Catalog {
-    bases: Vec<(String, Loaded)>,
+    bases: Vec<(String, Loaded, Vec<Part>)>,
     library: Loaded,
 }
+
+/// A catalog part (CR4, 20 §7), as `<base>.parts.ron` lists it.
+#[derive(Clone, Debug, nanoserde::DeRon)]
+pub struct Part {
+    pub id: String,
+    pub slot: String,
+    pub name: String,
+    /// Body bones whose triangles it hides (the undersuit beneath it).
+    pub hides: Vec<String>,
+    /// It shows the team accent itself (a sash, a band).
+    pub accent: bool,
+    pub triangles: u32,
+}
+
+#[derive(Clone, Debug, nanoserde::DeRon)]
+struct PartList {
+    base: String,
+    parts: Vec<Part>,
+}
+
+/// The order parts are offered in, slot by slot.
+pub const SLOTS: [&str; 12] =
+    ["hair", "head", "face", "torso", "shoulders", "arms", "waist", "legs", "feet", "back", "weapon", "offhand"];
 
 impl Catalog {
     /// Load the catalog under `art` (the folder the packs live in): every base that's there,
@@ -47,7 +71,19 @@ impl Catalog {
                     if base.kind != "base" {
                         return Err(format!("{}: not a creator base", path.display()));
                     }
-                    bases.push((key, base));
+                    let list = path.with_extension("parts.ron");
+                    let parts = if list.exists() {
+                        let text = std::fs::read_to_string(&list).map_err(|e| e.to_string())?;
+                        let l: PartList =
+                            nanoserde::DeRon::deserialize_ron(&text).map_err(|e| format!("{}: {e}", list.display()))?;
+                        if l.base != key {
+                            return Err(format!("{}: lists parts for `{}`", list.display(), l.base));
+                        }
+                        l.parts
+                    } else {
+                        Vec::new()
+                    };
+                    bases.push((key, base, parts));
                 }
             }
         }
@@ -58,7 +94,12 @@ impl Catalog {
     }
 
     pub fn base(&self, key: &str) -> Option<&Loaded> {
-        self.bases.iter().find(|(k, _)| k == key).map(|(_, b)| b)
+        self.bases.iter().find(|(k, _, _)| k == key).map(|(_, b, _)| b)
+    }
+
+    /// The parts a base offers.
+    pub fn parts(&self, key: &str) -> &[Part] {
+        self.bases.iter().find(|(k, _, _)| k == key).map_or(&[], |(_, _, p)| p.as_slice())
     }
 
     /// The sliders a base offers, in its order (each target pair `<id>+`, `<id>-`).
@@ -85,6 +126,7 @@ impl Catalog {
             }
         }
         let mut model = base.model.clone();
+        dress(&mut model, self.parts(&key), &looks.outfit)?;
         shape(&mut model, looks);
         proportion(&mut model, &looks.proportions);
         skin(&mut model, looks::SKIN_TONES[looks.skin as usize % looks::SKIN_TONES.len()]);
@@ -131,6 +173,61 @@ fn library_clips(lib: &Loaded) -> Vec<sidecar::Clip> {
                 .collect(),
         })
         .collect()
+}
+
+/// Put on the outfit (CR4, 20 §7.2): keep the body and the worn parts' meshes, drop the rest of
+/// the catalog, hide the body's triangles under the parts that cover them, and keep the team
+/// accent showing and the champion within the triangle cap.
+fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), String> {
+    let mut worn: Vec<&Part> = Vec::new();
+    for id in outfit {
+        let part = catalog.iter().find(|p| p.id == *id).ok_or(format!("no part `{id}` for this base"))?;
+        if let Some(other) = worn.iter().find(|w| w.slot == part.slot) {
+            return Err(format!("`{}` and `{}` both go on the {}", other.id, part.id, part.slot));
+        }
+        worn.push(part);
+    }
+    let hidden: Vec<&str> = worn.iter().flat_map(|p| p.hides.iter().map(String::as_str)).collect();
+    if hidden.contains(&"pelvis") && !worn.iter().any(|p| p.accent) {
+        return Err("the outfit covers the team accent: wear a part that shows it (20 §7.2)".into());
+    }
+    let joints = model.skins.first().cloned().unwrap_or_default();
+    let hide_joint: Vec<bool> = joints.iter().map(|&n| hidden.contains(&model.nodes[n].name.as_str())).collect();
+    for node in &model.nodes {
+        let Some(mi) = node.mesh else { continue };
+        let prims = &mut model.meshes[mi];
+        match node.name.strip_prefix("part.") {
+            Some(id) => {
+                if !outfit.iter().any(|o| o == id) {
+                    prims.clear();
+                }
+            }
+            None if !hidden.is_empty() => {
+                for p in prims.iter_mut() {
+                    let under = |v: u32| {
+                        p.joints
+                            .get(v as usize)
+                            .is_some_and(|j| hide_joint.get(j[0] as usize).copied().unwrap_or(false))
+                    };
+                    let kept: Vec<u32> = p
+                        .indices
+                        .chunks(3)
+                        .filter(|t| !(under(t[0]) && under(t[1]) && under(t[2])))
+                        .flatten()
+                        .copied()
+                        .collect();
+                    p.triangles = kept.len() / 3;
+                    p.indices = kept;
+                }
+            }
+            None => {}
+        }
+    }
+    let tris = model.triangles();
+    if tris > mftr_pack::rules::TRIANGLES_MAX {
+        return Err(format!("{tris} triangles: over the {} cap (20 §7.2)", mftr_pack::rules::TRIANGLES_MAX));
+    }
+    Ok(())
 }
 
 /// Blend the morph targets: each slider's `+` by its value above 0, its `-` below.
@@ -423,6 +520,45 @@ mod tests {
         assert!(c.forge("X", &l).err().unwrap().contains("tail_length"));
         let l = Looks { build: "quadruped".into(), ..Looks::default() };
         assert!(c.forge("X", &l).is_err());
+    }
+
+    #[test]
+    fn an_outfit_goes_on_and_covers_the_body() {
+        let c = catalog();
+        let key = "humanoid_slim_masculine";
+        assert!(c.parts(key).len() >= 30);
+        let plain = c.forge("Plain", &Looks::default()).unwrap();
+        let mut l = Looks {
+            outfit: vec!["torso.breastplate".into(), "head.helmet".into(), "weapon.maul".into()],
+            ..Looks::default()
+        };
+        let dressed = c.forge("Knight", &l).unwrap();
+        let part_tris: u32 = c.parts(key).iter().filter(|p| l.outfit.contains(&p.id)).map(|p| p.triangles).sum();
+        let hidden = plain.model.triangles() + part_tris as usize - dressed.model.triangles();
+        assert!(hidden > 100, "the breastplate hides the undersuit beneath it: {hidden}");
+        // Undressed, the catalog's other parts are gone.
+        assert!(plain.model.triangles() < 6000);
+        // One part per slot; a part from nowhere; the accent rule.
+        l.outfit.push("torso.tunic".into());
+        assert!(c.forge("X", &l).err().unwrap().contains("both go on"));
+        let l = Looks { outfit: vec!["cape.dragon".into()], ..Looks::default() };
+        assert!(c.forge("X", &l).err().unwrap().contains("no part"));
+    }
+
+    #[test]
+    fn parts_follow_the_sliders() {
+        let c = catalog();
+        let mut l = Looks { outfit: vec!["head.helmet".into()], ..Looks::default() };
+        let narrow = c.forge("A", &l).unwrap();
+        l.set_slider("head_width", 1.0);
+        let wide = c.forge("B", &l).unwrap();
+        let width = |m: &Model| {
+            let node = m.nodes.iter().find(|n| n.name == "part.head.helmet").unwrap();
+            let xs: Vec<f32> =
+                m.meshes[node.mesh.unwrap()].iter().flat_map(|p| p.positions.iter().map(|v| v[0])).collect();
+            xs.iter().cloned().fold(f32::MIN, f32::max) - xs.iter().cloned().fold(f32::MAX, f32::min)
+        };
+        assert!(width(&wide.model) > width(&narrow.model) * 1.08);
     }
 
     #[test]

@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–3 ✅ (champions as data; forged models from sliders; the creator screen and Test) | Slices 4–10 |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–4 ✅ (champions as data; forged models; the creator screen and Test; clothes) | Slices 5–10 |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1384,6 +1384,28 @@ replace the shared head anyway.
   of 20 §10 come later.
 - **Files:** champions save to `user://champions/<name>.champion.ron`; `--creator-load FILE` and
   `--creator-step NAME` open the screen on them (for screenshots).
+
+### CR slice 4 status (2026-11-07): ✅ done (33 block-out parts)
+- **The parts** (`mftr_blender.parts`): 33 to start, in 12 slots: hair (short, ponytail,
+  topknot, crest), head (hood, helmet, wide hat, circlet, horns), face (mask, goggles), torso
+  (tunic, robe, breastplate, long coat), shoulders (pauldrons, mantle, fur collar), arms
+  (bracers, gauntlets), waist (belt and pouch, strip skirt), legs (greaves), feet (tall boots),
+  back (cape, quiver), weapon (sword, staff, maul, dagger), offhand (shield, bow, orb). Each is
+  its own skinned mesh (`part.<slot>.<id>`) in its base's export, built on the base's bones and
+  head (hair and head shells come from the head's own surface), and **carries the body's sliders**
+  (shape keys transferred from the three nearest body vertices), so a helmet widens with the
+  head. Block-outs (D49) in neutral colors. `<base>.parts.ron` lists each part's slot, name, the
+  body bones it hides and whether it shows the team accent.
+- **The validator:** a base's parts are a catalog, not worn at once, so its triangle target is
+  the body's; it may have several skinned meshes on its one skin.
+- **The forge:** a recipe's `looks.outfit` names the parts worn, one per slot. The forge keeps
+  the body and those parts, drops the rest of the catalog, hides the body's triangles under the
+  parts that cover them (a breastplate's undersuit), refuses an outfit that covers the team accent
+  without showing it (20 §7.2) or that passes the 12,000-triangle cap.
+- **The creator:** the Clothes step (a picker per slot, each part's triangles) and a triangle
+  meter under the preview. Grumble wears a fur collar, a strip skirt, bracers, boots and a maul.
+- **Left for later:** cloth chains on capes and coats (14 §3.5), and weapons held in a grip
+  (they hang at the rest pose until the moveset's clips hold them, CR6).
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.

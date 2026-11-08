@@ -101,6 +101,12 @@ impl MftrModel {
         }
     }
 
+    /// Triangles drawn (the creator's budget meter, 20 §7.2).
+    #[func]
+    fn triangles(&self) -> i64 {
+        self.pack.model.triangles() as i64
+    }
+
     /// The material slot of each surface of the mesh `instantiate` builds, in order.
     #[func]
     fn surface_slots(&self) -> PackedStringArray {

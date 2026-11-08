@@ -133,7 +133,11 @@ fn check_targets(r: &mut Report, m: &Model, kind: &str) {
             r.err(format!("slider `{id}` has no `{other}`"));
         }
     }
-    r.summary.push(format!("{} sliders", names.len() / 2));
+    let mut ids: Vec<&str> = names.iter().map(|n| n.trim_end_matches(['+', '-'])).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let parts = m.nodes.iter().filter(|n| is_part_node(&n.name) && n.mesh.is_some()).count();
+    r.summary.push(format!("{} sliders, {parts} catalog parts", ids.len()));
 }
 
 /// A map prop (structures, trees, rocks): one skinned mesh on a `root` bone (and optional
@@ -203,8 +207,24 @@ fn check_header(r: &mut Report, side: &Sidecar) {
     }
 }
 
+/// A creator base's catalog parts (CR4): meshes on nodes named `part.<slot>.<id>`.
+pub fn is_part_node(name: &str) -> bool {
+    name.starts_with("part.")
+}
+
+/// Triangles outside a base's catalog parts (the body the forge always keeps).
+fn body_triangles(m: &Model) -> usize {
+    m.nodes
+        .iter()
+        .filter(|n| !is_part_node(&n.name))
+        .filter_map(|n| n.mesh)
+        .map(|mi| m.meshes[mi].iter().map(|p| p.triangles).sum::<usize>())
+        .sum()
+}
+
 fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
-    let tris = m.triangles();
+    // A base's parts are a catalog to pick from, not worn at once: the budget is the body's.
+    let tris = if kind == "base" { body_triangles(m) } else { m.triangles() };
     let prop = kind == "prop";
     let target = match kind {
         "minion" => rules::MINION_TRIANGLES_TARGET,
@@ -299,7 +319,9 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
 
 /// Returns the skin's joint node indices (empty if the skin is unusable).
 fn check_skeleton(r: &mut Report, m: &Model) -> Vec<usize> {
-    let skinned: Vec<_> = m.nodes.iter().filter(|n| n.skin.is_some() && n.mesh.is_some()).collect();
+    // A creator base's catalog parts are skinned meshes of their own on the same skin.
+    let skinned: Vec<_> =
+        m.nodes.iter().filter(|n| n.skin.is_some() && n.mesh.is_some() && !is_part_node(&n.name)).collect();
     if m.skins.len() != 1 || skinned.len() != 1 {
         r.err(format!("expected one skinned mesh and one skin, found {} and {}", skinned.len(), m.skins.len()));
         return Vec::new();

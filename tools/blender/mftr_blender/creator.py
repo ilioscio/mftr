@@ -62,12 +62,17 @@ def _body_parts(gender):
     return out
 
 
+def base_head(gender):
+    """The base's head (call with the base's shape in use)."""
+    return head.Head(base=rig.shaped((0, -0.01, 1.63)), height=0.255, scale=1.12 if gender == "masculine" else 1.08,
+                     jaw=0.3 if gender == "masculine" else 0.45, chin=1.1 if gender == "masculine" else 0.9,
+                     eye=1.0 if gender == "masculine" else 1.15, skin=SKIN, hair=(0.20, 0.14, 0.10), hair_style="bald",
+                     detail=2)
+
+
 def _head_part(gender):
     def build(bm, layers, groups, mats):
-        h = head.Head(base=rig.shaped((0, -0.01, 1.63)), height=0.255, scale=1.12 if gender == "masculine" else 1.08,
-                      jaw=0.3 if gender == "masculine" else 0.45, chin=1.1 if gender == "masculine" else 0.9,
-                      eye=1.0 if gender == "masculine" else 1.15, skin=SKIN, hair=(0.20, 0.14, 0.10), hair_style="bald")
-        head.build(bm, layers, groups, mats, h)
+        head.build(bm, layers, groups, mats, base_head(gender))
     return build
 
 
@@ -295,9 +300,13 @@ def add_shape_keys(armature, body):
 
 
 def build(gender, name):
+    """The base for `gender` with its sliders and every catalog part (CR4). Returns (armature,
+    body, parts made)."""
+    from . import parts
     armature, body = build_base(gender, name)
     ids = add_shape_keys(armature, body)
+    made = parts.build_parts(armature, body, base_head(gender))
     armature["mftr_build"] = name
     armature["mftr_sliders"] = ",".join(ids)
-    print(f"{name}: {mesh.triangle_count(body)} triangles, {len(ids)} sliders ({2 * len(ids)} shape keys)")
-    return armature, body
+    print(f"{name}: {mesh.triangle_count(body)} triangles, {len(ids)} sliders ({2 * len(ids)} shape keys), {len(made)} parts")
+    return armature, body, made

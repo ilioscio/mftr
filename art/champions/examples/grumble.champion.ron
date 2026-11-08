@@ -13,6 +13,7 @@ Champion(
         shape: (jaw_width: 0.9, chin_reach: 0.6, chin_length: 0.3, nose_width: 0.8, nose_length: 0.5, brow_ridge: 1, ears_size: 0.7, ears_point: 0.6, cheeks_hollow: -0.6, body_bulk: 0.8, body_belly: 0.9, body_muscle: 0.6, neck_thickness: 1),
         proportions: (height: 0.5, legs: -0.4, arms: 0.6, head: 0.2, hands: 0.8),
         skin: 9,
+        outfit: ["shoulders.fur", "waist.skirt", "arms.bracers", "feet.boots", "weapon.maul"],
     ),
     name: "Grumble",
     class: Bruiser,
