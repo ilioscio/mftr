@@ -1,0 +1,60 @@
+// Lumen as a recipe (20 §12): the official kit, looks on the slim humanoid build.
+// A serene light-priestess: a white dress, a gold circlet like a halo, a lantern staff.
+// The kit is a copy of crates/mftr-sim/champions/lumen.ron (a test checks they match); the
+// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// Lumen: Enchanter.
+// Enchanter: heals and shields allies, a slowing poke, and a delayed rooting halo.
+// Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability
+// numbers are rank 1, and `per_rank` adds to them each rank (M2 slice 2). Durations are in
+// milliseconds. The format is in `crates/mftr-sim/src/data.rs`.
+Champion(
+    format: 0,
+    looks: (
+        build: "humanoid_slim",
+        gender: Feminine,
+        shape: (eyes_size: 0.3, face_length: -0.2, cheekbones: 0.2),
+        proportions: (height: 0.1),
+        skin: 0,
+        outfit: ["hair.topknot", "head.circlet", "torso.robe", "arms.bracers", "weapon.staff"],
+        paint: [("torso.robe", 0, 0), ("hair.topknot", 0, 28)],
+        signature: 48,
+        moves: (attack: "lumen.attack", q: "lumen.q", w: "lumen.w", e: "lumen.e", r: "lumen.r"),
+    ),
+    name: "Lumen",
+    class: Enchanter,
+    stats: (max_health: 560, health_regen: 1.3, armor: 22, magic_resist: 30, attack_damage: 48, ability_power: 60, move_speed: 330),
+    growth: (max_health: 88, health_regen: 0.08, armor: 4, magic_resist: 1.3, attack_damage: 2.6),
+    attack: (range: 550, attack_speed: 0.65, windup_fraction: 0.2, bolt_speed: 1500),
+    abilities: [
+        (
+            name: "Mending Light",
+            cooldown_ms: 10000,
+            effect: Support(range: 700, heal: 70, heal_ap: 0.35),
+            reaction: None,
+            per_rank: (damage: 25, cooldown_ms: 800),
+        ),
+        (
+            name: "Aegis",
+            cooldown_ms: 12000,
+            effect: Support(range: 700, shield: 80, shield_ap: 0.4, duration_ms: 2500),
+            reaction: None,
+            per_rank: (damage: 30, cooldown_ms: 800),
+        ),
+        (
+            name: "Lull",
+            cooldown_ms: 8000,
+            effect: Line(windup_ms: 250, speed: 1600, radius: 55, range: 900, damage: (kind: Magic, base: 50, ap_ratio: 0.4), cc: Slow(pct: 40, ms: 2000)),
+            reaction: Poke,
+            per_rank: (damage: 30, cooldown_ms: 500),
+            transforms: [Multishot, Echo, Wide],
+        ),
+        (
+            name: "Binding Halo",
+            cooldown_ms: 70000,
+            effect: Area(windup_ms: 250, range: 800, radius: 200, delay_ms: 1000, damage: (kind: Magic, base: 120, ap_ratio: 0.5), cc: Root(ms: 1250)),
+            reaction: HardCc,
+            per_rank: (damage: 80, cooldown_ms: 10000),
+            transforms: [Echo, Wide],
+        ),
+    ],
+)

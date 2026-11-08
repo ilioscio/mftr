@@ -270,7 +270,7 @@ func _show_step(id: String) -> void:
 					creator.set_part(slot, "" if i == 0 else options[i - 1].id)
 					_changed(true))
 				_panel.add_child(pick)
-			_hint("Paint comes next (CR5); parts wear the catalog's colors until then.")
+			_hint("Paint them in the Paint step: fills, brush and decals.")
 		"paint":
 			var targets: PackedStringArray = creator.paint_targets()
 			if not targets.has(_paint_target):

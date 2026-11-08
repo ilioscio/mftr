@@ -1498,6 +1498,16 @@ replace the shared head anyway.
 - **Next:** the owner's look at the three (art pass on the heavy parts: antlers, ice, a chain);
   then CR5b (brush and decals) and CR9 (free sculpting).
 
+### The official ten as recipes (2026-11-08): ✅ all ten, awaiting the owner
+- Ember, Vesper, Lumen, Shade, Quill, Marrow and Wren join Rook, Bastion and Cairn as
+  `art/champions/<id>/<id>.champion.ron`: their official kits (a test checks each matches the
+  sim's exactly and forges with every clip it needs), looks on the slim humanoid build after
+  their hand-made designs (gender, outfit, paint, signature hue, moves). They are first passes
+  from the catalog's parts: Ember's burning hair is a crest, Lumen's halo a circlet, Wren's
+  crossbow missing (the catalog has none yet).
+- **The track exit** (20 §14) asks that the owner prefer them to the hand-made models before the
+  game shows them; until then the hand-made ones stay.
+
 ### CR slice 10b status (2026-11-08): ✅ the serpentoid, the floating spectre, the rolling machine
 - **Three builds** on `creature` skeletons of their own (`art/creator/<build>/build.py`, sharing
   `mftr_blender.builds`: a build is its bone table, body, sliders, parts and clips; the helper

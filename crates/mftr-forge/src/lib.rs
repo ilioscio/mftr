@@ -644,16 +644,21 @@ mod tests {
     }
 
     #[test]
-    fn rook_bastion_and_cairn_are_recipes_on_the_heavy_build() {
+    fn the_official_ten_are_recipes() {
         let c = catalog();
         let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art");
-        for champ in [mftr_sim::ChampionId::Rook, mftr_sim::ChampionId::Bastion, mftr_sim::ChampionId::Cairn] {
+        for champ in mftr_sim::ChampionId::ALL {
             let id = champ.def().name.to_lowercase();
             let text = std::fs::read_to_string(art.join(format!("champions/{id}/{id}.champion.ron"))).unwrap();
             let r = recipe::Recipe::from_text(&text).unwrap();
             // The kit is the official one, exactly.
             assert_eq!(&r.kit, champ.def(), "{id}");
-            assert_eq!(r.looks.build, "humanoid_heavy");
+            // The brutes on the heavy build (CR8), the rest on the slim one.
+            let heavy = matches!(
+                champ,
+                mftr_sim::ChampionId::Rook | mftr_sim::ChampionId::Bastion | mftr_sim::ChampionId::Cairn
+            );
+            assert_eq!(r.looks.build, if heavy { "humanoid_heavy" } else { "humanoid_slim" }, "{id}");
             let f = c.forge(&r.name, &r.looks).unwrap();
             for clip in ["idle", "run", "attack_1", "q", "w", "e", "r"] {
                 let has = |a: &Animation| a.name == clip || a.name.starts_with(&format!("{clip}_"));

@@ -1,0 +1,60 @@
+// Vesper as a recipe (20 §12): the official kit, looks on the slim humanoid build.
+// A ranger: a great bow, a forest-green cloak, an auburn ponytail.
+// The kit is a copy of crates/mftr-sim/champions/vesper.ron (a test checks they match); the
+// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// Vesper: Marksman.
+// Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability
+// numbers are rank 1, and `per_rank` adds to them each rank (M2 slice 2). Durations are in
+// milliseconds. The format is in `crates/mftr-sim/src/data.rs`.
+Champion(
+    format: 0,
+    looks: (
+        build: "humanoid_slim",
+        gender: Feminine,
+        shape: (cheekbones: 0.4, jaw_width: -0.3, nose_length: -0.2),
+        proportions: (legs: 0.2, height: 0.1),
+        skin: 1,
+        outfit: ["hair.ponytail", "torso.tunic", "back.cape", "arms.bracers", "feet.boots", "offhand.bow"],
+        paint: [("hair.ponytail", 0, 10), ("back.cape", 0, 35), ("torso.tunic", 0, 37)],
+        signature: 175,
+        moves: (attack: "vesper.attack", q: "vesper.q", w: "vesper.w", e: "vesper.e", r: "vesper.r"),
+    ),
+    name: "Vesper",
+    class: Marksman,
+    stats: (max_health: 620, health_regen: 1.4, armor: 28, magic_resist: 30, attack_damage: 61, move_speed: 325),
+    growth: (max_health: 96, health_regen: 0.08, armor: 4.4, magic_resist: 1.3, attack_damage: 3.2),
+    attack: (range: 525, attack_speed: 0.8, windup_fraction: 0.18, bolt_speed: 2200),
+    abilities: [
+        (
+            name: "Longshot",
+            cooldown_ms: 5000,
+            effect: Line(windup_ms: 250, speed: 2000, radius: 30, range: 1150, damage: (kind: Physical, base: 40, ad_ratio: 0.9)),
+            reaction: Poke,
+            per_rank: (damage: 35, cooldown_ms: 400),
+            transforms: [Multishot, Echo, Wide],
+        ),
+        (
+            name: "Shrapnel Charge",
+            cooldown_ms: 10000,
+            effect: Area(windup_ms: 250, range: 850, radius: 200, delay_ms: 1000, damage: (kind: Physical, base: 50, ad_ratio: 0.8)),
+            reaction: Burst,
+            per_rank: (damage: 30, cooldown_ms: 600),
+            transforms: [Echo, Wide],
+        ),
+        (
+            name: "Tumble",
+            cooldown_ms: 9000,
+            effect: Dash(range: 325, speed: 1000),
+            reaction: None,
+            per_rank: (cooldown_ms: 600),
+        ),
+        (
+            name: "Snare Net",
+            cooldown_ms: 20000,
+            effect: Line(windup_ms: 250, speed: 1200, radius: 70, range: 1000, damage: (kind: Physical, base: 60, ad_ratio: 0.5), cc: Root(ms: 1500)),
+            reaction: HardCc,
+            per_rank: (damage: 60, cooldown_ms: 2000),
+            transforms: [Multishot, Echo, Wide],
+        ),
+    ],
+)
