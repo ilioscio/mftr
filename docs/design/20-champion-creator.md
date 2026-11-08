@@ -260,6 +260,41 @@ The move library starts from what exists: the ten champions' attacks and abiliti
 shared library's clips become the first **~50 moves** for the humanoid builds. Their animation
 work carries over (§12).
 
+*Status (2026-11-08), creature builds:* each move plays a clip for its shape, made in the
+build's own way (`moves::own_clip_for`):
+
+| Shape | Clip |
+|---|---|
+| Skillshot | `bolt` |
+| Beam | `beam` |
+| Area around the caster | `nova` |
+| Area at a target | `slam` |
+| Shield | `guard` |
+| Buff or heal | `empower` |
+| Blink | `blink` |
+| Lunge | `pounce` |
+| Dash | the dash set |
+
+A base without the specific clip falls back to `howl` or `slam`. Each build moves in its own
+character:
+
+- **Serpent:** a wave runs down the body through every move. It coils and spits, whips its
+  tail round, curls behind its hood, sways like a charmed cobra, and dives into the ground.
+- **Machine:** servos snap and lock, the turret turns in clicks, the wheel rolls back under
+  recoil, and it hums while it works.
+- **Spectre:** drifts up to gather a spell and sinks into the release, its wisps streaming.
+- **Beast:** loads its legs before it acts, breathes throughout, rears to roar, and howls at
+  the sky.
+
+Each creature build also gained four or five parts in its own theme:
+
+| Build | New parts |
+|---|---|
+| Serpent | tail blade, gold bands, hood jewels, crest |
+| Machine | arm cannon, buzzsaw, pincer claw, searchlight, fuel tanks |
+| Spectre | scythe, grimoire, cowl, tattered wings |
+| Beast | antlers, iron muzzle, leg wraps, war banner, tusk blades |
+
 ### 8.3 Effects and sounds
 
 - **Effects:** each phase of a move (release, projectile, impact, telegraph, land…) takes an

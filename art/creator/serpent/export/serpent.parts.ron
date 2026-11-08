@@ -7,5 +7,9 @@
         (id: "shoulders.collar", slot: "shoulders", name: "Collar", hides: [], accent: true, triangles: 280),
         (id: "back.spines", slot: "back", name: "Dorsal spines", hides: [], accent: false, triangles: 36),
         (id: "torso.plates", slot: "torso", name: "Belly plates", hides: [], accent: false, triangles: 84),
+        (id: "weapon.tail_blade", slot: "weapon", name: "Tail blade", hides: [], accent: false, triangles: 106),
+        (id: "torso.gold_bands", slot: "torso", name: "Gold bands", hides: [], accent: false, triangles: 700),
+        (id: "face.hood_jewels", slot: "face", name: "Hood jewels", hides: [], accent: false, triangles: 24),
+        (id: "head.crest", slot: "head", name: "Crest", hides: [], accent: true, triangles: 18),
     ],
 )

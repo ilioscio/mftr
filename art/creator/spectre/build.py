@@ -20,7 +20,7 @@ from mathutils import Vector  # noqa: E402
 from creature import bone, socket, table  # noqa: E402
 from mftr_blender import builds, creator, mesh  # noqa: E402
 from mftr_blender.clips import merge  # noqa: E402
-from mftr_blender.library import _clip  # noqa: E402
+from mftr_blender.library import _clip, dense  # noqa: E402
 
 NAME = "spectre"
 S = 1.05
@@ -149,6 +149,27 @@ def catalog():
         mesh.box_part("spine", B("spine", 0.9, (0, 0.24, 0.42)), r(0.09, 0.09, 0.12), "emissive", GLOW, bevel=0.3)])
     add("arms.bracers", "arms", "Bracers", [mesh.path_part(f"forearm_{s}", [B(f"forearm_{s}", 0.55), B(f"forearm_{s}", 0.9)], 8,
                                                            [r(0.08, 0.075), r(0.06, 0.055)], "accent", ACCENT) for s in "lr"], accent=True)
+    # A reaper's scythe: the haft upright through the right hand, the blade curling forward over
+    # the top.
+    add("weapon.scythe", "weapon", "Scythe", [
+        mesh.path_part("hand_r", [B("hand_r", 0.5, (0, 0, -0.7)), B("hand_r", 0.5, (-0.04, -0.04, 1.0))], 6, [r(0.024, 0.024), r(0.02, 0.02)],
+                       "cloth", ROBE_D),
+        mesh.path_part("hand_r", [B("hand_r", 0.5, (-0.04, -0.03, 0.98)), B("hand_r", 0.5, (-0.04, -0.28, 1.02)), B("hand_r", 0.5, (-0.04, -0.52, 0.84))],
+                       4, [r(0.08, 0.014), r(0.06, 0.012), (0, 0)], "metal", BONE, ref=(1, 0, 0))])
+    add("offhand.tome", "offhand", "Grimoire", [
+        mesh.box_part("hand_l", B("hand_l", 1.3, (0, -0.06, 0.06)), r(0.16, 0.05, 0.2), "cloth", ROBE_D, rot=(20, 0, 0), bevel=0.2),
+        mesh.box_part("hand_l", B("hand_l", 1.3, (0, -0.06, 0.06)), r(0.14, 0.055, 0.18), "skin", BONE, rot=(20, 0, 0)),
+        mesh.box_part("hand_l", B("hand_l", 1.3, (0, -0.095, 0.07)), r(0.05, 0.01, 0.05), "emissive", GLOW, rot=(20, 0, 45))])
+    add("head.cowl", "head", "Cowl", [
+        mesh.path_part("head", [B("head", -0.15, (0, 0.03, 0)), B("head", 0.6, (0, 0.04, 0)), B("head", 1.2, (0, 0.08, 0))], 8,
+                       [r(0.16, 0.16), r(0.15, 0.15), (0, 0)], "cloth", ROBE_D)])
+    # Each wing a fan of torn membranes hung from one arching spar.
+    wing = [mesh.path_part("chest", [B("chest", 0.8, (0.06, 0.15, 0)), B("chest", 1.3, (0.3, 0.26, 0.24)), B("chest", 1.2, (0.55, 0.3, 0.18))], 4,
+                           [r(0.025, 0.025), r(0.02, 0.02), (0, 0)], "skin", BONE)]
+    wing += [mesh.path_part("chest", [B("chest", 1.25, (0.18 + 0.13 * k, 0.24, 0.2 - 0.02 * k)),
+                                      B("chest", 0.6 - 0.35 * k, (0.2 + 0.15 * k, 0.3, -0.12 - 0.08 * k))], 4,
+                            [r(0.07, 0.008), r(0.05, 0.006)], "cloth", ROBE) for k in range(3)]
+    add("back.wings", "back", "Tattered wings", wing + [mesh.mirror(w) for w in wing])
     return out
 
 
@@ -221,7 +242,79 @@ def clips(arm):
     still = {"upperarm_l": (-20, 0, -40), "upperarm_r": (-20, 0, 40), "forearm_l": (-80, 0, 0), "forearm_r": (-80, 0, 0), "head": (15, 0, 0)}
     made.append(_clip(arm, "recall", 48, [(0, {}, None, "ease"), (20, still, L(0.15), "hold"), (48, still, L(0.15), "hold")],
                       markers={"loop_in": 20, "loop_out": 48}))
+    made += moves(arm)
     return made
+
+
+# --- The move library (20 §8.2): one clip per shape, the spectre's way -------------------------
+# A spectre has no weight to plant: it drifts up and back to gather a spell and sinks into the
+# release, and its wisps never hang still (`drift`): they stream behind every motion and flutter
+# faster as the power builds.
+
+
+def drift(f, rate, amp, bob=0.03):
+    s = math.sin(2 * math.pi * f / rate)
+    pose = {"wisp_1": (-amp * s, 0, amp * 0.6 * math.sin(2 * math.pi * (f / rate - 0.1))),
+            "wisp_2": (-amp * math.sin(2 * math.pi * (f / rate - 0.15)), 0, amp * 0.8 * math.sin(2 * math.pi * (f / rate - 0.25))),
+            "wisp_3": (-amp * math.sin(2 * math.pi * (f / rate - 0.3)), 0, amp * math.sin(2 * math.pi * (f / rate - 0.4))),
+            "forearm_l": (3 * s, 0, 0), "forearm_r": (-3 * s, 0, 0)}
+    return pose, {"pelvis": (0, 0, bob * S * s)}
+
+
+def moves(arm):
+    out = []
+
+    def clip(name, frames, keys, fire, rate, amps):
+        def overlay(f):
+            a = amps[0]
+            for (f0, a0), (f1, a1) in zip(amps, amps[1:]):
+                if f0 <= f <= f1:
+                    a = a0 + (a1 - a0) * (f - f0) / max(1, f1 - f0)
+            return drift(f, rate, a)
+        out.append(_clip(arm, name, frames, dense(keys, frames, overlay), markers={"fire": fire}))
+
+    # Bolt (skillshots): drifts up and back drawing the right hand over its shoulder, then
+    # flings it forward as it sinks into the throw; the wisps whip out behind.
+    draw = {"upperarm_r": (-130, 0, -30), "forearm_r": (-50, 0, 0), "upperarm_l": (-30, 0, 30), "chest": (-10, 0, 18), "head": (-8, 0, -10),
+            "wisp_1": (-20, 0, 0), "wisp_2": (-14, 0, 0)}
+    # (Its arms hang splayed: pitched forward they point out too, so they turn in by rz.)
+    fling = {"upperarm_r": (-72, 0, 34), "forearm_r": (8, 0, 0), "upperarm_l": (10, 0, 20), "chest": (14, 0, -18), "spine": (10, 0, 0),
+             "head": (-4, 0, 8), "wisp_1": (-50, 0, 0), "wisp_2": (-36, 0, 0), "wisp_3": (-24, 0, 0)}
+    clip("bolt", 32, [(0, {}, None, "ease"), (9, draw, L(0.12, 0.06), "whip"), (11, fling, L(-0.02, -0.08), "hold"), (15, fling, L(-0.02, -0.08), "settle"),
+                      (32, {}, None)], 11, 16, [(0, 8), (9, 14), (11, 22), (32, 8)])
+    # Beam: rises, bows its head and holds both hands out together, the wisps streaming hard
+    # behind it the whole time the beam pours.
+    focus = {"upperarm_l": (-82, 0, -32), "upperarm_r": (-82, 0, 32), "forearm_l": (-4, 0, -8), "forearm_r": (-4, 0, 8), "head": (12, 0, 0),
+             "chest": (6, 0, 0), "wisp_1": (-40, 0, 0), "wisp_2": (-30, 0, 0), "wisp_3": (-20, 0, 0)}
+    clip("beam", 64, [(0, {}, None, "ease"), (12, merge(focus, {"head": (-10, 0, 0)}), L(0.16), "whip"), (14, focus, L(0.12, -0.03), "hold"),
+                      (52, focus, L(0.12, -0.03), "settle"), (64, {}, None)], 14, 8, [(0, 8), (14, 16), (52, 16), (64, 8)])
+    # Nova (areas round itself): folds in on itself, arms crossed and head down, sinking; then
+    # bursts open with a wail, arms flung wide, head thrown back, wisps blown out.
+    fold = {"upperarm_l": (-40, 0, -50), "upperarm_r": (-40, 0, 50), "forearm_l": (-90, 0, 0), "forearm_r": (-90, 0, 0), "head": (30, 0, 0),
+            "chest": (20, 0, 0), "spine": (10, 0, 0), "wisp_1": (30, 0, 0), "wisp_2": (20, 0, 0)}
+    wail = {"upperarm_l": (-40, 0, 80), "upperarm_r": (-40, 0, -80), "forearm_l": (-10, 0, 0), "forearm_r": (-10, 0, 0), "head": (-32, 0, 0),
+            "chest": (-16, 0, 0), "spine": (-8, 0, 0), "wisp_1": (-60, 0, 0), "wisp_2": (-40, 0, 0), "wisp_3": (-30, 0, 0)}
+    clip("nova", 42, [(0, {}, None, "ease"), (12, fold, L(-0.12), "whip"), (16, wail, L(0.16), "hold"), (22, wail, L(0.16), "settle"), (42, {}, None)],
+         16, 14, [(0, 8), (12, 4), (16, 26), (42, 8)])
+    # Guard (shields): wraps its arms round itself and draws in, the wisps curling up round it
+    # like a shroud.
+    shroud = {"upperarm_l": (-50, 0, -64), "upperarm_r": (-50, 0, 64), "forearm_l": (-96, 0, 0), "forearm_r": (-96, 0, 0), "head": (24, 0, 0),
+              "chest": (16, 0, 0), "spine": (8, 0, 0), "wisp_1": (40, 0, 0), "wisp_2": (40, 0, 0), "wisp_3": (30, 0, 0)}
+    clip("guard", 38, [(0, {}, None, "ease"), (8, shroud, L(-0.08), "settle"), (10, shroud, L(-0.1), "hold"), (24, shroud, L(-0.1), "ease"),
+                       (38, {}, None)], 10, 24, [(0, 8), (10, 4), (24, 4), (38, 8)])
+    # Empower (buffs, heals): floats up, opens its arms palms up and tips its head back, the
+    # wisps billowing slowly.
+    open_ = {"upperarm_l": (-50, 0, 54), "upperarm_r": (-50, 0, -54), "forearm_l": (-30, 0, 0), "forearm_r": (-30, 0, 0), "head": (-22, 0, 0),
+             "chest": (-10, 0, 0), "wisp_1": (-20, 0, 0)}
+    clip("empower", 44, [(0, {}, None, "ease"), (14, open_, L(0.22), "ease"), (16, open_, L(0.24), "hold"), (28, open_, L(0.24), "ease"),
+                         (44, {}, None)], 16, 28, [(0, 8), (16, 18), (44, 8)])
+    # Blink: collapses into itself and sinks out of sight (gone at `fire`), then rises again
+    # elsewhere, unfurling.
+    sink = {"spine": (30, 0, 0), "chest": (30, 0, 0), "head": (36, 0, 0), "upperarm_l": (30, 0, -20), "upperarm_r": (30, 0, 20),
+            "forearm_l": (-60, 0, 0), "forearm_r": (-60, 0, 0), "wisp_1": (50, 0, 0), "wisp_2": (40, 0, 0)}
+    clip("blink", 34, [(0, {}, None, "ease"), (12, sink, L(-0.5), "hold"), (13, sink, L(-0.45), "settle"), (34, {}, None)], 12, 10,
+         [(0, 8), (12, 20), (13, 20), (34, 8)])
+    return out
 
 
 if __name__ == "__main__":

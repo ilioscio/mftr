@@ -20,7 +20,7 @@ from mathutils import Vector  # noqa: E402
 from creature import bone, socket, table  # noqa: E402
 from mftr_blender import builds, creator, mesh  # noqa: E402
 from mftr_blender.clips import merge  # noqa: E402
-from mftr_blender.library import _clip  # noqa: E402
+from mftr_blender.library import _clip, dense  # noqa: E402
 
 NAME = "serpent"
 S = 1.3
@@ -143,6 +143,20 @@ def catalog():
     plates = [mesh.box_part(bn, B(bn, t, (0, -0.12, 0)), r(0.16, 0.04, 0.12), "metal", IRON, bevel=0.3)
               for bn, t in (("chest", 0.25), ("chest", 0.7), ("spine", 0.5))]
     add("torso.plates", "torso", "Belly plates", plates)
+    # A blade bound to the tail's tip: the serpent's weapon, swung by its whole length.
+    add("weapon.tail_blade", "weapon", "Tail blade", [
+        mesh.path_part("tail_5", [B("tail_5", 0.3), B("tail_5", 1.0, (0, 0, 0.05)), B("tail_5", 1.5, (0, -0.04, 0.18))], 4,
+                       [r(0.055, 0.012), r(0.05, 0.01), (0, 0)], "metal", IRON),
+        mesh.path_part("tail_5", [B("tail_5", 0.2), B("tail_5", 0.45)], 8, [r(0.05, 0.045), r(0.05, 0.045)], "metal", GOLD)])
+    # Gold rings down the body, a temple serpent's jewelry.
+    bands = [mesh.path_part(bn, [B(bn, t - 0.05), B(bn, t + 0.05)], 12, [r(rad, rad * 0.88), r(rad, rad * 0.88)], "metal", GOLD)
+             for bn, t, rad in (("chest", 0.2, 0.15), ("spine", 0.5, 0.165), ("tail_1", 0.5, 0.155), ("tail_2", 0.5, 0.13), ("tail_3", 0.5, 0.11))]
+    add("torso.gold_bands", "torso", "Gold bands", bands)
+    jewel = mesh.box_part("hood_l", B("hood_l", 0.45, (0, -0.03, 0.01)), r(0.035, 0.02, 0.035), "emissive", GLOW, rot=(0, 45, 0))
+    add("face.hood_jewels", "face", "Hood jewels", [jewel, mesh.mirror(jewel)])
+    crest = [mesh.path_part("head", [B("head", t, (0, 0.0, 0.06)), B("head", t - 0.25, (0, 0.06, 0.06 + h))], 4, [r(0.05, 0.01), (0, 0)], "accent", ACCENT)
+             for t, h in ((0.45, 0.1), (0.25, 0.16), (0.05, 0.12))]
+    add("head.crest", "head", "Crest", crest, accent=True)
     return out
 
 
@@ -211,7 +225,90 @@ def clips(arm):
     curled = merge(wave(0.0, 30), {"chest": (40, 0, 30), "neck": (30, 0, 20), "head": (10, 0, 0)})
     made.append(_clip(arm, "recall", 48, [(0, STAND, None, "ease"), (24, curled, L(-0.1), "hold"), (48, curled, L(-0.1), "hold")],
                       markers={"loop_in": 24, "loop_out": 48}))
+    made += moves(arm)
     return made
+
+
+# --- The move library (20 §8.2): one clip per shape, the serpent's way ------------------------
+# A snake never stops moving: every move rides a wave that runs from the chest down to the tail
+# tip (`body_wave`), building as it coils and dying out after it strikes. The head leads, the
+# body follows a beat behind.
+
+HOOD = {"hood_l": (0, -38, 0), "hood_r": (0, 38, 0)}
+
+
+def body_wave(f, period, amp, lag=0.13):
+    out = {}
+    for i, bn in enumerate(["chest", "spine", "pelvis"] + TAIL):
+        k = 0.45 if bn == "chest" else 1.0
+        out[bn] = (0, 0, k * amp * math.sin(2 * math.pi * (f / period - i * lag)))
+    return out
+
+
+def envelope(f, points):
+    """A piecewise-linear amplitude over the clip: [(frame, amp), …]."""
+    for (f0, a0), (f1, a1) in zip(points, points[1:]):
+        if f0 <= f <= f1:
+            return a0 + (a1 - a0) * (f - f0) / max(1, f1 - f0)
+    return points[-1][1]
+
+
+def moves(arm):
+    out = []
+
+    def clip(name, frames, keys, fire, period, amps, extra=None, markers=None):
+        def overlay(f):
+            pose = body_wave(f, period, envelope(f, amps))
+            if extra is not None:
+                for k, v in extra(f).items():
+                    pose[k] = tuple(x + y for x, y in zip(pose.get(k, (0, 0, 0)), v))
+            return pose, {}
+        m = {"fire": fire}
+        m.update(markers or {})
+        out.append(_clip(arm, name, frames, dense(keys, frames, overlay), markers=m))
+
+    # Bolt (skillshots): the neck draws back into an S, the hood flares, and the head snaps
+    # forward to spit; the tail lashes against the recoil.
+    coil_back = merge(HOOD, {"chest": (-16, 0, 0), "neck": (-32, 0, 0), "head": (24, 0, 0)})
+    spit = merge(HOOD, {"chest": (10, 0, 0), "neck": (18, 0, 0), "head": (-14, 0, 0), "jaw": (44, 0, 0)})
+    clip("bolt", 32, [(0, STAND, None, "ease"), (9, coil_back, L(0, 0.08), "snap"), (11, spit, L(0, -0.06), "hold"),
+                      (15, spit, L(0, -0.06), "settle"), (32, STAND, None)], 11, 14, [(0, 4), (9, 12), (13, 18), (32, 3)])
+    # Beam: rears high, jaw wide, and pours it out, the head swaying a little as the stream holds.
+    tall = merge(HOOD, {"chest": (-22, 0, 0), "neck": (-26, 0, 0), "head": (18, 0, 0)})
+    pour = merge(HOOD, {"chest": (-12, 0, 0), "neck": (-6, 0, 0), "head": (2, 0, 0), "jaw": (48, 0, 0)})
+    clip("beam", 64, [(0, STAND, None, "ease"), (11, tall, L(0.1, 0.06), "whip"), (14, pour, L(0.06, -0.02), "hold"),
+                      (50, pour, L(0.06, -0.02), "settle"), (64, STAND, None)], 14, 22, [(0, 4), (12, 8), (50, 6), (64, 3)],
+         extra=lambda f: {"head": (0, 0, 5 * math.sin(2 * math.pi * f / 18)) if 14 <= f <= 50 else (0, 0, 0)})
+    # Nova (areas round itself): winds the whole body into a coil, then whips the tail round in
+    # a full sweep, the head turned the other way.
+    wound = merge(HOOD, {"chest": (10, 0, -26), "neck": (-22, 0, 22), "head": (14, 0, 0), "tail_1": (0, 0, 42), "tail_2": (0, 0, 42),
+                         "tail_3": (0, 0, 36), "tail_4": (0, 0, 30), "tail_5": (0, 0, 24)})
+    sweep = {"chest": (0, 0, 32), "neck": (-10, 0, -18), "head": (6, 0, 0), "jaw": (30, 0, 0), "tail_1": (0, 0, -46), "tail_2": (0, 0, -52),
+             "tail_3": (0, 0, -46), "tail_4": (0, 0, -40), "tail_5": (0, 0, -34)}
+    clip("nova", 42, [(0, STAND, None, "ease"), (11, wound, L(-0.05), "whip"), (18, sweep, L(0.03), "hold"), (22, sweep, L(0.03), "settle"),
+                      (42, STAND, None)], 18, 12, [(0, 3), (11, 6), (18, 22), (42, 2)])
+    # Guard (shields): curls into a tight coil, the head tucked down behind the spread hood,
+    # hissing.
+    curl = merge({"hood_l": (0, -50, 0), "hood_r": (0, 50, 0)},
+                 {"chest": (30, 0, 26), "neck": (22, 0, -22), "head": (22, 0, 0), "jaw": (12, 0, 0), "tail_1": (0, 0, 48), "tail_2": (0, 0, 50),
+                  "tail_3": (0, 0, 46), "tail_4": (0, 0, 40), "tail_5": (0, 0, 36)})
+    clip("guard", 38, [(0, STAND, None, "ease"), (8, curl, L(-0.09), "settle"), (10, curl, L(-0.1), "hold"), (24, curl, L(-0.1), "ease"),
+                       (38, STAND, None)], 10, 10, [(0, 4), (8, 2), (24, 2), (38, 3)],
+         extra=lambda f: {"chest": (2.5 * math.sin(2 * math.pi * f / 6), 0, 0) if 10 <= f <= 24 else (0, 0, 0)})
+    # Empower (buffs, heals): rises tall and sways like a charmed cobra, the neck against the
+    # chest so the head stays on its mark; a hiss at the top.
+    rise = merge(HOOD, {"chest": (-24, 0, 0), "neck": (-18, 0, 0), "head": (14, 0, 0)})
+    hiss = merge(rise, {"jaw": (26, 0, 0), "head": (6, 0, 0)})
+    clip("empower", 44, [(0, STAND, None, "ease"), (12, rise, L(0.12), "ease"), (16, hiss, L(0.14), "hold"), (28, hiss, L(0.14), "ease"),
+                         (44, STAND, None)], 16, 26, [(0, 3), (44, 3)],
+         extra=lambda f: {"chest": (0, 0, 14 * math.sin(2 * math.pi * f / 20)), "neck": (0, 0, -18 * math.sin(2 * math.pi * f / 20))})
+    # Blink: coils low and dives head-first into the ground (gone at `fire`), then rises out of
+    # it somewhere else, shaking the dirt off down the length of its body.
+    dive = {"chest": (46, 0, 0), "neck": (42, 0, 0), "head": (22, 0, 0)}
+    emerge = {"chest": (30, 0, 0), "neck": (-34, 0, 0), "head": (32, 0, 0), "jaw": (20, 0, 0)}
+    clip("blink", 34, [(0, STAND, None, "ease"), (7, merge(dive, {"neck": (10, 0, 0)}), L(-0.04, 0.04), "whip"), (12, dive, L(-0.14, -0.06), "hold"),
+                       (13, emerge, L(-0.16), "settle"), (34, STAND, None)], 12, 10, [(0, 4), (12, 14), (13, 4), (16, 16), (34, 2)])
+    return out
 
 
 if __name__ == "__main__":

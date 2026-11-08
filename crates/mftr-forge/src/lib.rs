@@ -993,6 +993,30 @@ mod tests {
     }
 
     #[test]
+    fn creature_moves_play_their_shape_in_the_builds_own_way() {
+        // A skillshot plays the build's bolt and a beam its beam, not the general howl.
+        let c = catalog();
+        for build in ["beast", "serpent", "spectre", "machine"] {
+            let looks = Looks {
+                build: build.into(),
+                gender: looks::Gender::None,
+                moves: Some(moves::Moves {
+                    ids: ["rook.attack", "ember.q", "rook.w", "shade.e", "quill.r"].map(String::from),
+                }),
+                ..Looks::default()
+            };
+            let f = c.forge("Creature", &looks).unwrap();
+            let base = c.base(build).unwrap();
+            let len = |lib: &mftr_pack::pose::Library, n: &str| lib.clip(n).map(|i| lib.clips[i].length);
+            for (slot, own) in [("q", "bolt"), ("r", "beam")] {
+                assert!(len(&base.library, own).is_some(), "{build} has no `{own}`");
+                assert_eq!(len(&f.library, slot), len(&base.library, own), "{build}: {slot} plays `{own}`");
+                assert_ne!(len(&base.library, own), len(&base.library, "howl"), "{build}: `{own}` is its own clip");
+            }
+        }
+    }
+
+    #[test]
     fn a_beast_forges_with_its_own_clips_for_any_kit() {
         let c = catalog();
         assert!(c.sliders("beast").len() >= 8);

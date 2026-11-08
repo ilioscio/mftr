@@ -43,6 +43,9 @@ pub const BASE_BYTES_BUDGET: usize = 4_000_000;
 /// their moves' shapes (`mftr_forge::moves::own_clip_for`).
 pub const REQUIRED_CREATURE_BASE: &[&str] =
     &["idle", "run", "attack_1", "death", "howl", "slam", "pounce", "dash_start", "dash_travel", "dash_land"];
+/// The move clips a creature base may add, one per shape, each in the build's own way (a
+/// serpent spits its bolt, a machine fires it): without one, the shape plays `howl` or `slam`.
+pub const CREATURE_MOVE_CLIPS: &[&str] = &["bolt", "beam", "nova", "guard", "empower", "blink"];
 pub const MAX_CLIP_FRAMES: u32 = 12 * FPS;
 /// Root motion tolerance (10 §8.4): clips play in place, the sim moves the unit.
 pub const ROOT_XZ_TOLERANCE_M: f32 = 0.01;
@@ -248,6 +251,8 @@ pub fn required_markers(clip: &str, looping: bool) -> Vec<&'static str> {
     let base = clip.split('_').next().unwrap_or(clip);
     let fires = clip.starts_with("attack")
         || clip == "cast_utility"
+        || ["howl", "slam", "pounce", "dash_start"].contains(&clip)
+        || CREATURE_MOVE_CLIPS.contains(&clip)
         || is_slot(clip)
         || (is_slot(base) && (clip.ends_with("_start") || clip[2..].bytes().all(|b| b.is_ascii_digit())));
     if fires {

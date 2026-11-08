@@ -26,7 +26,7 @@ from mathutils import Vector  # noqa: E402
 from creature import bone, socket, table  # noqa: E402
 from mftr_blender import creator, export, mesh, parts, rig  # noqa: E402
 from mftr_blender.clips import merge  # noqa: E402
-from mftr_blender.library import _clip  # noqa: E402
+from mftr_blender.library import _clip, dense  # noqa: E402
 
 NAME = "beast"
 S = 1.5  # a champion's size: the back at about 1.15 m, the head at 1.45 m
@@ -219,6 +219,25 @@ def catalog():
         mesh.box_part("spine", B("spine", 0.4, (0, 0, 0.25)), r(0.24, 0.28, 0.07), "cloth", LEATHER, bevel=0.3),
         mesh.box_part("spine", B("spine", 0.15, (0, 0, 0.31)), r(0.14, 0.05, 0.08), "cloth", LEATHER)], accent=True)
     add("back.cape", "back", "Cape", [mesh.box_part("chest", B("chest", 0.3, (0, 0.1, 0.24)), r(0.5, 0.6, 0.03), "cloth", CLOTH_RED, rot=(-8, 0, 0))])
+    beam = mesh.path_part("head", [B("head", 0.2, (0.06, 0, 0.08)), B("head", 0.05, (0.15, 0.06, 0.24)), B("head", -0.05, (0.2, 0.14, 0.42))], 6,
+                          [r(0.03, 0.03), r(0.022, 0.022), (0, 0)], "cloth", HORN)
+    tine = mesh.path_part("head", [B("head", 0.05, (0.15, 0.06, 0.24)), B("head", 0.22, (0.25, -0.02, 0.34))], 4, [r(0.016, 0.016), (0, 0)], "cloth", HORN)
+    tine2 = mesh.path_part("head", [B("head", 0.0, (0.18, 0.1, 0.34)), B("head", 0.1, (0.3, 0.06, 0.46))], 4, [r(0.014, 0.014), (0, 0)], "cloth", HORN)
+    add("head.antlers", "head", "Antlers", [beam, tine, tine2, mesh.mirror(beam), mesh.mirror(tine), mesh.mirror(tine2)])
+    add("face.muzzle", "face", "Iron muzzle", [
+        mesh.path_part("head", [B("head", 0.6, (0, 0, -0.005)), B("head", 0.65, (0, 0, -0.005))], 8, [r(0.075, 0.068), r(0.075, 0.068)], "metal", IRON),
+        mesh.path_part("head", [B("head", 0.88, (0, 0, -0.012)), B("head", 0.92, (0, 0, -0.012))], 8, [r(0.055, 0.05), r(0.055, 0.05)], "metal", IRON),
+        mesh.path_part("head", [B("head", 0.6, (0, 0, 0.065)), B("head", 0.9, (0, 0, 0.042))], 4, [r(0.014, 0.01), r(0.014, 0.01)], "metal", IRON)])
+    wrap = mesh.path_part("lower_front_l", [B("lower_front_l", 0.3), B("lower_front_l", 0.8)], 8, [r(0.06, 0.06), r(0.052, 0.052)], "cloth", LEATHER)
+    wrap_h = mesh.path_part("shin_l", [B("shin_l", 0.35), B("shin_l", 0.8)], 8, [r(0.06, 0.06), r(0.052, 0.052)], "cloth", LEATHER)
+    add("legs.wraps", "legs", "Leg wraps", [wrap, mesh.mirror(wrap), wrap_h, mesh.mirror(wrap_h)])
+    add("back.banner", "back", "War banner", [
+        mesh.path_part("chest", [B("chest", 0.1, (0, 0.02, 0.2)), B("chest", 0.1, (0, 0.06, 0.95))], 6, [r(0.016, 0.016), r(0.014, 0.014)], "cloth", LEATHER),
+        mesh.box_part("chest", B("chest", 0.1, (0, 0.17, 0.74)), r(0.02, 0.22, 0.3), "accent", ACCENT),
+        mesh.box_part("chest", B("chest", 0.1, (0, 0.06, 0.96)), r(0.04, 0.04, 0.04), "metal", IRON, rot=(45, 0, 45))], accent=True)
+    tusk = mesh.path_part("jaw", [B("jaw", 0.3, (0.05, 0, 0)), B("jaw", 0.7, (0.09, -0.04, 0.06)), B("jaw", 1.0, (0.08, -0.1, 0.15))], 4,
+                          [r(0.025, 0.01), r(0.02, 0.008), (0, 0)], "metal", IRON)
+    add("weapon.tusk_blades", "weapon", "Tusk blades", [tusk, mesh.mirror(tusk)])
     return out
 
 
@@ -345,7 +364,74 @@ def clips(arm):
                 {"neck": (10, 0, 0), "head": (6, 0, 0), "tail_1": (40, 0, 30)})
     made.append(_clip(arm, "recall", 48, [(0, STAND, L(), "ease"), (16, sit, L(-0.14, 0.06), "ease"), (32, lie, L(-0.4), "hold"),
                                           (48, lie, L(-0.4), "hold")], markers={"loop_in": 32, "loop_out": 48}))
+    made += moves(arm)
     return made
+
+
+# --- The move library (20 §8.2): one clip per shape, the beast's way ---------------------------
+# A beast is all weight: it loads its legs before it acts, the head leads and the body follows,
+# and it never quite stops breathing (`breath`: the ribs heave, the tail swings, the ears flick).
+
+
+def breath(f, rate=12, heave=2.0, tail=10.0):
+    s = math.sin(2 * math.pi * f / rate)
+    return ({"chest": (-heave * s, 0, 0), "tail_1": (0, 0, tail * math.sin(2 * math.pi * f / (rate * 2))),
+             "tail_2": (0, 0, tail * 0.8 * math.sin(2 * math.pi * (f / (rate * 2) - 0.15)))}, {"pelvis": (0, 0, 0.004 * S * s)})
+
+
+def moves(arm):
+    out = []
+
+    def clip(name, frames, keys, fire, overlay=None):
+        out.append(_clip(arm, name, frames, dense(keys, frames, overlay or (lambda f: breath(f))), markers={"fire": fire}))
+
+    ears_back = {"ear_l": (40, 0, 20), "ear_r": (40, 0, -20)}
+    ears_up = {"ear_l": (-14, 0, 0), "ear_r": (-14, 0, 0)}
+    # Bolt (skillshots): draws its head down and back between braced forelegs, then thrusts it
+    # forward with the jaw thrown open, the hind legs pushing.
+    gather = merge(legs(-20, -20, -8, -8, {"lower_front_l": 20, "lower_front_r": 20}), ears_back,
+                   {"neck": (24, 0, 0), "head": (-14, 0, 0), "chest": (6, 0, 0), "tail_1": (-14, 0, 0)})
+    spit = merge(legs(-30, -30, 24, 24), ears_back, {"neck": (-4, 0, 0), "head": (-10, 0, 0), "jaw": (44, 0, 0), "chest": (-6, 0, 0),
+                                                     "tail_1": (-26, 0, 0), "tail_2": (-10, 0, 0)})
+    clip("bolt", 34, [(0, STAND, L(), "ease"), (9, gather, L(-0.06, 0.06), "whip"), (11, spit, L(0.0, -0.08), "hold"), (16, spit, L(0.0, -0.07), "settle"),
+                      (34, STAND, L())], 11)
+    # Beam (breath): plants all four legs wide, lowers its head and pours it out of an open jaw,
+    # the ribs heaving and the head shaking with the strain.
+    plant = merge(legs(-18, -18, 12, 12, {"lower_front_l": 16, "lower_front_r": 16, "shin_l": 16, "shin_r": 16}), ears_back,
+                  {"neck": (10, 0, 0), "head": (-16, 0, 0), "jaw": (50, 0, 0), "tail_1": (-20, 0, 0)})
+    clip("beam", 64, [(0, STAND, L(), "ease"), (10, merge(plant, {"jaw": (10, 0, 0), "neck": (-14, 0, 0)}), L(-0.04, 0.05), "whip"),
+                      (14, plant, L(-0.08, -0.02), "hold"), (52, plant, L(-0.08, -0.02), "settle"), (64, STAND, L())], 14,
+         lambda f: (merge(breath(f, rate=6, heave=4.0)[0], {"head": (0, 0, 3 * math.sin(2 * math.pi * f / 5)) if 14 <= f <= 52 else (0, 0, 0)}),
+                    breath(f, rate=6)[1]))
+    # Nova (areas round itself): sinks low, then rears up on its hind legs with a roar that
+    # shakes its whole body.
+    rear = merge(legs(-70, -66, -14, -14, {"lower_front_l": 64, "lower_front_r": 60}), ears_back,
+                 {"pelvis": (-30, 0, 0), "neck": (-30, 0, 0), "head": (-24, 0, 0), "jaw": (46, 0, 0), "tail_1": (30, 0, 0)})
+    clip("nova", 44, [(0, STAND, L(), "ease"), (10, CROUCH, L(-0.14, 0.06), "whip"), (16, rear, L(0.16, 0.12), "hold"), (24, rear, L(0.16, 0.12), "ease"),
+                      (44, STAND, L())], 16,
+         lambda f: (merge(breath(f)[0], {"chest": (0, 0, 4 * math.sin(2 * math.pi * f / 3)) if 16 <= f <= 24 else (0, 0, 0)}), breath(f)[1]))
+    # Guard (shields): hunkers down, head low and tucked, ears flat, hackles up (the back
+    # arched), the tail clamped.
+    hunker = merge(legs(-30, -30, -26, -26, {"lower_front_l": 50, "lower_front_r": 50, "shin_l": 46, "shin_r": 46, "hock_l": -40, "hock_r": -40}),
+                   ears_back, {"spine": (-12, 0, 0), "chest": (6, 0, 0), "neck": (30, 0, 0), "head": (10, 0, 0), "jaw": (14, 0, 0),
+                               "tail_1": (40, 0, 0), "tail_2": (30, 0, 0)})
+    clip("guard", 38, [(0, STAND, L(), "ease"), (8, hunker, L(-0.18), "settle"), (10, hunker, L(-0.2), "hold"), (24, hunker, L(-0.2), "ease"),
+                       (38, STAND, L())], 10, lambda f: breath(f, rate=6, heave=3.0, tail=2.0))
+    # Empower (buffs, heals): sits back on its haunches and howls at the sky, ears up.
+    sit = merge(legs(-6, -6, -30, -30, {"shin_l": 40, "shin_r": 40, "hock_l": -40, "hock_r": -40}), ears_up,
+                {"pelvis": (-22, 0, 0), "neck": (-44, 0, 0), "head": (-34, 0, 0), "tail_1": (40, 0, 0)})
+    howl_ = merge(sit, {"jaw": (36, 0, 0), "head": (-40, 0, 0)})
+    clip("empower", 46, [(0, STAND, L(), "ease"), (12, sit, L(-0.1, 0.06), "ease"), (16, howl_, L(-0.08, 0.06), "hold"), (30, howl_, L(-0.08, 0.06), "ease"),
+                         (46, STAND, L())], 16)
+    # Blink: crouches and springs straight up out of sight (gone at `fire`); drops in somewhere
+    # else, landing in a crouch, and shakes itself off.
+    spring = merge(LEAP, ears_back, {"spine": (-14, 0, 0)})
+    land = merge(CROUCH, ears_back)
+    clip("blink", 36, [(0, STAND, L(), "ease"), (8, CROUCH, L(-0.14, 0.06), "whip"), (12, spring, L(0.5), "hold"), (13, spring, L(0.4), "whip"),
+                       (16, land, L(-0.14), "settle"), (36, STAND, L())], 12,
+         lambda f: (merge(breath(f)[0], {"spine": (0, 0, 6 * math.sin(2 * math.pi * f / 4)), "neck": (0, 0, -8 * math.sin(2 * math.pi * f / 4))}
+                          if 22 <= f <= 30 else breath(f)[0]), breath(f)[1]))
+    return out
 
 
 def main():

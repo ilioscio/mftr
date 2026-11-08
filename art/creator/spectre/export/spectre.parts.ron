@@ -7,5 +7,9 @@
         (id: "shoulders.chains", slot: "shoulders", name: "Chains", hides: [], accent: false, triangles: 40),
         (id: "back.lantern", slot: "back", name: "Soul lantern", hides: [], accent: false, triangles: 40),
         (id: "arms.bracers", slot: "arms", name: "Bracers", hides: [], accent: true, triangles: 232),
+        (id: "weapon.scythe", slot: "weapon", name: "Scythe", hides: [], accent: false, triangles: 100),
+        (id: "offhand.tome", slot: "offhand", name: "Grimoire", hides: [], accent: false, triangles: 52),
+        (id: "head.cowl", slot: "head", name: "Cowl", hides: [], accent: false, triangles: 190),
+        (id: "back.wings", slot: "back", name: "Tattered wings", hides: [], accent: false, triangles: 100),
     ],
 )

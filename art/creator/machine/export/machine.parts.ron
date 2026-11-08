@@ -7,5 +7,10 @@
         (id: "back.stack", slot: "back", name: "Smokestack", hides: [], accent: true, triangles: 412),
         (id: "torso.boiler_plate", slot: "torso", name: "Boiler plate", hides: [], accent: false, triangles: 28),
         (id: "weapon.drill", slot: "weapon", name: "Drill arm", hides: [], accent: false, triangles: 106),
+        (id: "weapon.cannon", slot: "weapon", name: "Arm cannon", hides: [], accent: false, triangles: 440),
+        (id: "weapon.buzzsaw", slot: "weapon", name: "Buzzsaw", hides: [], accent: false, triangles: 618),
+        (id: "offhand.claw", slot: "offhand", name: "Pincer claw", hides: [], accent: false, triangles: 28),
+        (id: "head.lamp", slot: "head", name: "Searchlight", hides: [], accent: false, triangles: 412),
+        (id: "back.fuel_tanks", slot: "back", name: "Fuel tanks", hides: [], accent: false, triangles: 642),
     ],
 )

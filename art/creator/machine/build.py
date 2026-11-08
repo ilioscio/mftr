@@ -19,7 +19,8 @@ from mathutils import Vector  # noqa: E402
 
 from creature import bone, socket, table  # noqa: E402
 from mftr_blender import builds, creator, mesh  # noqa: E402
-from mftr_blender.library import _clip  # noqa: E402
+from mftr_blender.clips import merge  # noqa: E402
+from mftr_blender.library import _clip, dense  # noqa: E402
 
 NAME = "machine"
 S = 1.1
@@ -152,6 +153,26 @@ def catalog():
                                                                        bevel=0.25)])
     drill = mesh.path_part("hand_r", [B("hand_r", 0.8), B("hand_r", 2.6)], 6, [r(0.07, 0.07), (0, 0)], "metal", IRON)
     add("weapon.drill", "weapon", "Drill arm", [drill])
+    add("weapon.cannon", "weapon", "Arm cannon", [
+        mesh.path_part("hand_r", [B("hand_r", 0.2), B("hand_r", 2.2)], 10, [r(0.075, 0.075), r(0.06, 0.06)], "metal", IRON),
+        mesh.path_part("hand_r", [B("hand_r", 2.0), B("hand_r", 2.35)], 10, [r(0.085, 0.085), r(0.085, 0.085)], "metal", BRASS),
+        mesh.box_part("hand_r", B("hand_r", 0.7, (0, 0, 0.08)), r(0.12, 0.14, 0.08), "metal", PLATE_D, bevel=0.3)])
+    add("weapon.buzzsaw", "weapon", "Buzzsaw", [
+        mesh.path_part("hand_r", [B("hand_r", 0.4), B("hand_r", 1.3)], 6, [r(0.04, 0.04), r(0.035, 0.035)], "metal", PLATE_D),
+        mesh.path_part("hand_r", [B("hand_r", 1.7, (-0.015, 0, 0)), B("hand_r", 1.7, (0.015, 0, 0))], 16, [r(0.2, 0.2), r(0.2, 0.2)], "metal", IRON,
+                       ref=(0, 0, 1)),
+        mesh.path_part("hand_r", [B("hand_r", 1.7, (-0.03, 0, 0)), B("hand_r", 1.7, (0.03, 0, 0))], 8, [r(0.05, 0.05), r(0.05, 0.05)], "metal", BRASS,
+                       ref=(0, 0, 1))])
+    prong = [mesh.path_part("hand_l", [B("hand_l", 0.5, (0, 0, 0.04 * k)), B("hand_l", 1.5, (0, 0, 0.1 * k)), B("hand_l", 2.1, (0, -0.02, 0.0))], 4,
+                            [r(0.035, 0.03), r(0.025, 0.02), (0, 0)], "metal", IRON) for k in (1, -1)]
+    add("offhand.claw", "offhand", "Pincer claw", prong)
+    add("head.lamp", "head", "Searchlight", [
+        mesh.path_part("head", [B("head", 0.55, (0, -0.06, 0)), B("head", 0.55, (0, -0.2, 0))], 10, [r(0.07, 0.07), r(0.09, 0.09)], "metal", PLATE_D),
+        mesh.path_part("head", [B("head", 0.55, (0, -0.2, 0)), B("head", 0.55, (0, -0.215, 0))], 10, [r(0.075, 0.075), r(0.075, 0.075)], "emissive", GLOW)])
+    tank = mesh.path_part("chest", [B("chest", 0.1, (0.11, 0.25, 0)), B("chest", 0.85, (0.11, 0.25, 0))], 10, [r(0.08, 0.08), r(0.08, 0.08)], "metal", BRASS)
+    pipe = mesh.path_part("chest", [B("chest", 0.9, (0.11, 0.25, 0)), B("chest", 0.95, (0, 0.16, 0)), B("chest", 0.9, (-0.11, 0.25, 0))], 6,
+                          [r(0.02, 0.02)] * 3, "metal", IRON)
+    add("back.fuel_tanks", "back", "Fuel tanks", [tank, mesh.mirror(tank), pipe])
     return out
 
 
@@ -215,7 +236,89 @@ def clips(arm):
     folded = {"upperarm_l": (-10, 0, -30), "upperarm_r": (-10, 0, 30), "forearm_l": (-100, 0, 0), "forearm_r": (-100, 0, 0), "head": (20, 0, 0)}
     made.append(_clip(arm, "recall", 48, [(0, {}, None, "ease"), (20, folded, L(-0.04), "hold"), (48, folded, L(-0.04), "hold")],
                       markers={"loop_in": 20, "loop_out": 48}))
+    made += moves(arm)
     return made
+
+
+# --- The move library (20 §8.2): one clip per shape, the machine's way -------------------------
+# A machine moves like one: servos snap to a position and lock there (linear moves, holds, no
+# follow-through drift); the head turret turns in clicks; the wheel takes every push (it rolls
+# back under recoil, brakes, spins up); and while it works it hums (a fine shudder, `hum`).
+
+
+def hum(amp, period=2):
+    """A fine mechanical shudder: alternating every `period` frames."""
+    def f(frame):
+        s = amp if (frame // period) % 2 else -amp
+        return {"chest": (s, 0, 0), "head": (-s * 0.6, 0, s * 0.5)}, {}
+    return f
+
+
+def moves(arm):
+    out = []
+
+    def clip(name, frames, keys, fire, overlay=None, markers=None):
+        m = {"fire": fire}
+        m.update(markers or {})
+        out.append(_clip(arm, name, frames, dense(keys, frames, overlay, step=1), markers=m))
+
+    def between(f0, f1, amp, period=2):
+        h = hum(amp, period)
+        return lambda f: h(f) if f0 <= f <= f1 else ({}, {})
+
+    # Bolt (skillshots): the turret clicks onto the target, the arm locks out straight, the
+    # cannon fires: the chest kicks back and the wheel rolls back under it, then the servos
+    # step home.
+    # (The forearm is built bent forward: with the upper arm raised it straightens by +rx.)
+    aim = {"head": (-4, 0, 0), "upperarm_r": (-86, 0, 0), "forearm_r": (74, 0, 0), "upperarm_l": (-20, 0, 10), "forearm_l": (-10, 0, 0)}
+    kick = merge(aim, {"chest": (-10, 0, 0), "upperarm_r": (-95, 0, 0), "forearm_r": (76, 0, 0), "wheel": (34, 0, 0)})
+    half = merge(aim, {"upperarm_r": (-50, 0, 0), "forearm_r": (40, 0, 0), "head": (0, 0, 0)})
+    clip("bolt", 30, [(0, {}, None, "snap"), (4, {"head": (-4, 0, 0)}, None, "hold"), (7, aim, None, "hold"), (10, aim, None, "snap"),
+                      (11, kick, L(0, 0.07), "settle"), (16, kick, L(0, 0.06), "hold"), (20, half, L(0, 0.02), "hold"), (24, half, L(0, 0.02), "snap"),
+                      (30, {}, None)], 11, between(7, 10, 0.8))
+    # Beam: brakes, leans into it, both arms clamped together as one emitter; it shudders the
+    # whole time it pours, then vents and stands down.
+    brace = {"chest": (14, 0, 0), "head": (-12, 0, 0), "upperarm_l": (-84, 0, -14), "upperarm_r": (-84, 0, 14), "forearm_l": (74, 0, -6),
+             "forearm_r": (74, 0, 6), "wheel": (-14, 0, 0)}
+    clip("beam", 64, [(0, {}, None, "snap"), (6, merge(brace, {"chest": (4, 0, 0)}), L(-0.02), "hold"), (12, brace, L(-0.05), "hold"),
+                      (14, merge(brace, {"chest": (8, 0, 0), "wheel": (6, 0, 0)}), L(-0.05, 0.03), "hold"), (52, brace, L(-0.05, 0.02), "snap"),
+                      (56, merge(brace, {"head": (10, 0, 0), "upperarm_l": (-40, 0, -30), "upperarm_r": (-40, 0, 30)}), L(-0.02), "hold"),
+                      (64, {}, None)], 14, between(14, 52, 1.6))
+    # Nova (areas round itself): folds its arms in and sinks on its springs, then flings them
+    # out and spins the chest a full turn on its axle while the wheel counter-spins.
+    tuck = {"upperarm_l": (-10, 0, -40), "upperarm_r": (-10, 0, 40), "forearm_l": (-110, 0, 0), "forearm_r": (-110, 0, 0), "head": (14, 0, 0)}
+    fling = {"upperarm_l": (0, 0, 80), "upperarm_r": (0, 0, -80), "forearm_l": (0, 0, 0), "forearm_r": (0, 0, 0), "head": (-6, 0, 0)}
+    clip("nova", 44, [(0, {}, None, "snap"), (8, tuck, L(-0.08), "hold"), (14, tuck, L(-0.1), "snap"),
+                      (16, merge(fling, {"chest": (0, 0, 90), "wheel": (-60, 0, 0)}), L(0.03), "snap"),
+                      (18, merge(fling, {"chest": (0, 0, 200), "wheel": (-130, 0, 0)}), L(0.04), "snap"),
+                      (22, merge(fling, {"chest": (0, 0, 360), "wheel": (-200, 0, 0)}), L(0.02), "hold"),
+                      (28, merge(fling, {"chest": (0, 0, 360), "wheel": (-200, 0, 0)}), L(0.0), "snap"), (44, {"chest": (0, 0, 360), "wheel": (-200, 0, 0)}, None)],
+         18, between(8, 14, 1.2, period=1))
+    # Guard (shields): the arms swing up and lock across the front like a barricade, the body
+    # drops on its suspension and the wheel brakes with a jolt.
+    wall = {"upperarm_l": (-64, 0, -46), "upperarm_r": (-64, 0, 46), "forearm_l": (34, 0, -20), "forearm_r": (34, 0, 20), "head": (16, 0, 0),
+            "chest": (8, 0, 0)}
+    clip("guard", 38, [(0, {}, None, "snap"), (6, wall, L(-0.06), "hold"), (8, merge(wall, {"wheel": (-10, 0, 0)}), L(-0.09), "settle"),
+                       (10, wall, L(-0.08), "hold"), (26, wall, L(-0.08), "snap"), (32, merge(wall, {"upperarm_l": (-30, 0, -20), "upperarm_r": (-30, 0, 20)}),
+                                                                                     L(-0.03), "hold"), (38, {}, None)], 10, between(10, 26, 0.6, period=3))
+    # Empower (buffs, heals): overclocks. The turret clicks round a full turn in quarter steps,
+    # the chest rises on its springs and both arms pump up and lock; it rattles with the power.
+    pump = {"upperarm_l": (-150, 0, 10), "upperarm_r": (-150, 0, -10), "forearm_l": (-20, 0, 0), "forearm_r": (-20, 0, 0), "chest": (-8, 0, 0)}
+    keys = [(0, {}, None, "snap")]
+    for i, f in enumerate((3, 6, 9, 12)):
+        keys += [(f, {"head": (0, 0, 90.0 * (i + 1) - 90)}, L(0.01 * i), "snap"), (f + 1, {"head": (0, 0, 90.0 * (i + 1))}, L(0.01 * i), "hold")]
+    keys += [(15, merge(pump, {"head": (0, 0, 360)}), L(0.08), "hold"), (28, merge(pump, {"head": (0, 0, 360)}), L(0.08), "snap"),
+             (36, {"head": (0, 0, 360)}, None)]
+    clip("empower", 36, keys, 15, between(15, 28, 1.4, period=1))
+    # Blink (teleports): powers down into a crouch, shakes itself apart, and is gone at `fire`;
+    # it comes back slumped, reboots with a jerk, and the turret finds its bearings in clicks.
+    slump = {"chest": (30, 0, 0), "head": (40, 0, 0), "upperarm_l": (20, 0, 10), "upperarm_r": (20, 0, -10), "forearm_l": (-10, 0, 0),
+             "forearm_r": (-10, 0, 0)}
+    clip("blink", 34, [(0, {}, None, "snap"), (6, {"chest": (16, 0, 0), "head": (10, 0, 0)}, L(-0.08), "hold"), (12, {"chest": (16, 0, 0)}, L(-0.1), "hold"),
+                       (13, slump, L(-0.06), "hold"), (19, slump, L(-0.06), "snap"), (20, {"head": (-8, 0, 0)}, L(0.03), "hold"),
+                       (24, {"head": (-8, 0, 30)}, None, "hold"), (28, {"head": (0, 0, -20)}, None, "hold"), (34, {}, None)],
+         12, between(6, 12, 3.0, period=1))
+    return out
 
 
 if __name__ == "__main__":

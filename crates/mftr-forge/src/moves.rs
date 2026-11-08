@@ -96,16 +96,25 @@ impl Packs {
     }
 }
 
-/// The clip a build with its own move library (CR10: a beast's) plays for an ability, by its
-/// shape: projectiles, beams and buffs a howl, areas a slam, lunges a pounce; dashes the dash set
-/// (`dash_start`, `dash_travel`, `dash_land`).
-pub fn own_clip_for(effect: &mftr_sim::ability::Effect) -> &'static str {
+/// The clips a build with its own move library (CR10: a beast's) plays for an ability, by its
+/// shape, best first: a bolt for skillshots, a beam, a nova for areas round the caster and a slam
+/// for areas thrown out, a guard for shields, an empower for buffs and heals, a blink, a pounce
+/// for lunges; dashes the dash set (`dash_start`, `dash_travel`, `dash_land`). A base without the
+/// specific clip plays the general one (`howl`, `slam`), which every creature base has
+/// (`rules::REQUIRED_CREATURE_BASE`).
+pub fn own_clip_for(effect: &mftr_sim::ability::Effect) -> &'static [&'static str] {
     use mftr_sim::ability::Effect;
     match effect {
-        Effect::Area(_) => "slam",
-        Effect::Lunge(_) => "pounce",
-        Effect::Dash(_) => "dash",
-        _ => "howl",
+        Effect::Area(a) if a.range == 0.0 => &["nova", "slam"],
+        Effect::Area(_) => &["slam"],
+        Effect::Lunge(_) => &["pounce"],
+        Effect::Dash(_) => &["dash"],
+        Effect::Line(_) => &["bolt", "howl"],
+        Effect::Beam(_) => &["beam", "howl"],
+        Effect::Shield(_) => &["guard", "howl"],
+        Effect::Support(_) => &["empower", "howl"],
+        Effect::Blink(_) => &["blink", "howl"],
+        Effect::Claim(_) => &["howl"],
     }
 }
 
@@ -143,13 +152,15 @@ pub fn own_clips(
         let id = moves.get(slot);
         let (c, from) = parse(id).ok_or(format!("`{id}` isn't a move"))?;
         let j = ["q", "w", "e", "r"].iter().position(|s| *s == from).unwrap_or(i);
-        match own_clip_for(&c.def().abilities[j].effect) {
-            "dash" => {
-                for part in ["start", "travel", "land"] {
-                    take(&format!("dash_{part}"), &format!("{slot}_{part}"))?;
-                }
+        let wanted = own_clip_for(&c.def().abilities[j].effect);
+        if wanted == ["dash"] {
+            for part in ["start", "travel", "land"] {
+                take(&format!("dash_{part}"), &format!("{slot}_{part}"))?;
             }
-            clip => take(clip, slot)?,
+        } else {
+            let has = |n: &str| base.model.animations.iter().any(|a| a.name == n);
+            let clip = wanted.iter().find(|n| has(n)).unwrap_or(&wanted[wanted.len() - 1]);
+            take(clip, slot)?;
         }
     }
     Ok((anims, side))
