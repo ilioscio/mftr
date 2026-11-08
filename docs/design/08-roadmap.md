@@ -1473,6 +1473,15 @@ replace the shared head anyway.
   and protection from 0.34 to 0.38 (the official ten still price 80–107). Speed and control
   flipped between runs and were left. **Next:** a league of a few hundred matches (an overnight
   run) before any further refit; bots that use dashes better may move mobility back.
+- **The long league** (2026-11-08: 24 champions with passives and resources, 160 ARAM matches,
+  148 decided, about 62 games each, ±6%): win rates 24–69%, 5 of 24 inside 45–55%. The basic
+  attack was priced too cheap again (r +0.31, as in the first run), so its weight went from 0.19
+  to 0.21 (the ten now price 81–110); speed (+0.43) and protection (−0.12) flipped sign between
+  runs and were left. **The 45–55% target isn't met.** The spread is wider than the noise, so
+  what decides these matches isn't all in the price: likely the bots (they play every kit with
+  one fight model, D62, and don't use costs or passives on purpose), and combinations the price
+  adds up but play multiplies (heals with shields, CC chains). Next: per-move bot hints, and a
+  league per build and per resource to find which parts the price misses.
 
 ### CR slice 8 status (2026-11-07): ✅ built (Rook, Bastion and Cairn as recipes, awaiting the owner)
 - **The heavy humanoid** (`art/creator/humanoid_heavy/`, both genders): the brute's skeleton

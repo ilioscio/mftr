@@ -75,7 +75,7 @@ pub struct Features {
 /// whose beam is hard to price, lowest). Mobility then down and protection up by about a sixth:
 /// the first random leagues (08 CR7) found both signs in each run.
 const W_EHP: f32 = 0.0235;
-const W_DPS: f32 = 0.19;
+const W_DPS: f32 = 0.21;
 const W_SPEED: f32 = 0.22;
 const W_DAMAGE: f32 = 0.22;
 const W_CONTROL: f32 = 100.0;
