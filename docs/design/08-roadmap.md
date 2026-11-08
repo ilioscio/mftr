@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–4 ✅ (champions as data; forged models; the creator screen and Test; clothes) | Slices 5–10 |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–4 and 5a ✅ (champions as data; forged models; the creator screen and Test; clothes; fill paint) | 5b–10 |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1406,6 +1406,22 @@ replace the shared head anyway.
   meter under the preview. Grumble wears a fur collar, a strip skirt, bracers, boots and a maul.
 - **Left for later:** cloth chains on capes and coats (14 §3.5), and weapons held in a grip
   (they hang at the rest pose until the moveset's clips hold them, CR6).
+
+### CR slice 5a status (2026-11-07): ✅ done (fill painting; brush and decals are 5b)
+- **Regions:** the body and every part are made of a few flat colors (a tunic's cloth, its
+  sash); each distinct color outside skin, the team accent and what glows is a paint region,
+  numbered in the order it first appears (`mftr_forge::paint`).
+- **Fills:** `looks.paint` lists `(target, region, color)`: `"body"` or a worn part's id, the
+  region, an index in the shared **64-color palette** (D70: eight families of eight, dark enough
+  for the arena's sun, metals included). The forge fills the region keeping each vertex's
+  occlusion; fills on parts taken off go with them.
+- **The signature hue** (`looks.signature`, 0–359°, 14 §4): what glows takes it, keeping its
+  brightness; effects take it in CR6.
+- **The creator:** the Paint step: pick the body or a worn part, its region swatches, the palette,
+  the signature hue, Clear paint.
+- **CR5b, left:** brush strokes and decals need paint images (D70): UVs on bases and parts through
+  the exporter, the reader and the forge, a paint image per part in the recipe, and the shader
+  sampling it.
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.

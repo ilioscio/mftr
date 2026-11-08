@@ -13,6 +13,7 @@
 //! that the client draws and animates like any other. It is deterministic and has no Godot in it.
 
 pub mod looks;
+pub mod paint;
 pub mod recipe;
 
 use std::path::Path;
@@ -130,6 +131,13 @@ impl Catalog {
         shape(&mut model, looks);
         proportion(&mut model, &looks.proportions);
         skin(&mut model, looks::SKIN_TONES[looks.skin as usize % looks::SKIN_TONES.len()]);
+        for (target, region, color) in &looks.paint {
+            let Some(&from) = paint::regions(&base.model, target).get(*region as usize) else {
+                return Err(format!("`{target}` has no paint region {region}"));
+            };
+            paint::fill(&mut model, target, from, paint::PALETTE[*color as usize % paint::PALETTE.len()]);
+        }
+        paint::glow(&mut model, looks.signature);
         attach_clips(&mut model, &self.library.model, looks.proportions.factor(0) * looks.proportions.factor(1).sqrt());
         let side = sidecar::Sidecar {
             id: name.to_string(),
@@ -559,6 +567,23 @@ mod tests {
             xs.iter().cloned().fold(f32::MIN, f32::max) - xs.iter().cloned().fold(f32::MAX, f32::min)
         };
         assert!(width(&wide.model) > width(&narrow.model) * 1.08);
+    }
+
+    #[test]
+    fn paint_fills_a_region() {
+        let c = catalog();
+        let base = c.base("humanoid_slim_masculine").unwrap();
+        let regions = paint::regions(&base.model, "torso.tunic");
+        assert!(!regions.is_empty());
+        let mut l = Looks { outfit: vec!["torso.tunic".into()], ..Looks::default() };
+        l.paint.push(("torso.tunic".into(), 0, 18));
+        let f = c.forge("Painted", &l).unwrap();
+        let tunic = f.model.nodes.iter().find(|n| n.name == "part.torso.tunic").unwrap().mesh.unwrap();
+        let red = paint::PALETTE[18];
+        assert!(f.model.meshes[tunic].iter().flat_map(|p| &p.colors).any(|c| (c[0] - red[0]).abs() < 1e-4));
+        // A region that isn't there.
+        l.paint = vec![("torso.tunic".into(), 15, 1)];
+        assert!(c.forge("X", &l).err().unwrap().contains("no paint region"));
     }
 
     #[test]

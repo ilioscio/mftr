@@ -22,7 +22,7 @@ const STEPS := [
 	["face", "3  Face", "Shape the head: each slider blends between two sculpted extremes.", true],
 	["body", "4  Body", "Proportions scale the skeleton; shape sliders reshape the body.", true],
 	["clothes", "5  Clothes", "Clothes, armor, accessories and weapons: one part per slot. They follow your sliders.", true],
-	["paint", "6  Paint", "Fill, brush and decals on every part: coming (CR5).", false],
+	["paint", "6  Paint", "Fill each part's colors from the palette; the signature hue lights what glows. Brush and decals: CR5b.", true],
 	["moves", "7  Moveset", "Until the move library arrives (CR6), borrow an official champion's whole kit.", true],
 	["balance", "8  Balance", "The point budget: coming (CR7). Borrowed kits are balanced already.", false],
 	["name", "9  Name", "Name the champion and save it.", true],
@@ -51,6 +51,8 @@ var _zoom := 1.0
 var _dragging := false
 var _rebuild_in := -1.0
 var _step_buttons := {}
+var _paint_target := "body"
+var _paint_region := 0
 var _panel: VBoxContainer
 var _status: Label
 var _title: Label
@@ -252,6 +254,55 @@ func _show_step(id: String) -> void:
 					_changed(true))
 				_panel.add_child(pick)
 			_hint("Paint comes next (CR5); parts wear the catalog's colors until then.")
+		"paint":
+			var targets: PackedStringArray = creator.paint_targets()
+			if not targets.has(_paint_target):
+				_paint_target = "body"
+			var tpick := OptionButton.new()
+			for i in targets.size():
+				tpick.add_item("Body" if targets[i] == "body" else targets[i])
+				if targets[i] == _paint_target:
+					tpick.select(i)
+			tpick.item_selected.connect(func(i):
+				_paint_target = targets[i]
+				_paint_region = 0
+				_show_step("paint"))
+			_panel.add_child(tpick)
+			var regions: PackedColorArray = creator.paint_regions(_paint_target)
+			var row := HBoxContainer.new()
+			for i in regions.size():
+				row.add_child(_swatch(regions[i], i == _paint_region, func():
+					_paint_region = i
+					_show_step("paint")))
+			_panel.add_child(row)
+			var grid := GridContainer.new()
+			grid.columns = 8
+			var palette: PackedColorArray = creator.palette()
+			for k in palette.size():
+				grid.add_child(_swatch(palette[k], false, func():
+					creator.fill(_paint_target, _paint_region, k)
+					_changed(true)
+					_show_step("paint")))
+			_panel.add_child(grid)
+			var sig := Label.new()
+			sig.text = "Signature hue (what glows, and later the effects)"
+			_panel.add_child(sig)
+			var hue := HSlider.new()
+			hue.min_value = 0
+			hue.max_value = 359
+			hue.step = 1
+			hue.value = creator.signature()
+			hue.value_changed.connect(func(v):
+				creator.set_signature(int(v))
+				_changed(true))
+			_panel.add_child(hue)
+			var clear := Button.new()
+			clear.text = "Clear paint"
+			clear.pressed.connect(func():
+				creator.clear_paint()
+				_changed(true)
+				_show_step("paint"))
+			_panel.add_child(clear)
 		"moves":
 			var pick := OptionButton.new()
 			var kits: PackedStringArray = creator.kits()
@@ -330,6 +381,20 @@ func _slider(text: String, value: float, set_value: Callable) -> void:
 		_changed(true))
 	row.add_child(s)
 	_panel.add_child(row)
+
+
+func _swatch(color: Color, selected: bool, act: Callable) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(36, 36)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = color
+	sb.set_border_width_all(3 if selected else 0)
+	sb.border_color = Color.WHITE
+	b.add_theme_stylebox_override("normal", sb)
+	b.add_theme_stylebox_override("hover", sb)
+	b.add_theme_stylebox_override("pressed", sb)
+	b.pressed.connect(act)
+	return b
 
 
 func _skin_picker() -> void:

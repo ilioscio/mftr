@@ -208,6 +208,75 @@ impl MftrCreator {
         if !id.is_empty() {
             self.recipe.looks.outfit.push(id);
         }
+        // Fills on parts no longer worn go with them.
+        let worn = self.recipe.looks.outfit.clone();
+        self.recipe.looks.paint.retain(|(t, _, _)| t == "body" || worn.contains(t));
+    }
+
+    /// What can be painted: "body", then each worn part.
+    #[func]
+    fn paint_targets(&self) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        out.push("body");
+        for p in &self.recipe.looks.outfit {
+            out.push(p.as_str());
+        }
+        out
+    }
+
+    /// `target`'s paint regions as they look now (filled, or as built).
+    #[func]
+    fn paint_regions(&self, target: GString) -> PackedColorArray {
+        let target = target.to_string();
+        let Some(cat) = catalog(&self.art) else { return PackedColorArray::new() };
+        let Some(base) = cat.base(&self.recipe.looks.base_key()) else { return PackedColorArray::new() };
+        mftr_forge::paint::regions(&base.model, &target)
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let filled = self.recipe.looks.paint.iter().find(|(t, r, _)| *t == target && *r as usize == i);
+                let c = filled.map_or(*c, |(_, _, k)| mftr_forge::paint::PALETTE[*k as usize]);
+                Color::from_rgb(c[0], c[1], c[2])
+            })
+            .collect()
+    }
+
+    /// The shared palette.
+    #[func]
+    fn palette(&self) -> PackedColorArray {
+        mftr_forge::paint::PALETTE.iter().map(|c| Color::from_rgb(c[0], c[1], c[2])).collect()
+    }
+
+    /// Fill `target`'s region with palette color `color`.
+    #[func]
+    fn fill(&mut self, target: GString, region: i64, color: i64) {
+        let (target, region, color) = (target.to_string(), region.clamp(0, 15) as u8, color.clamp(0, 63) as u8);
+        let paint = &mut self.recipe.looks.paint;
+        paint.retain(|(t, r, _)| !(*t == target && *r == region));
+        paint.push((target, region, color));
+    }
+
+    /// Every fill undone.
+    #[func]
+    fn clear_paint(&mut self) {
+        self.recipe.looks.paint.clear();
+    }
+
+    #[func]
+    fn signature(&self) -> i64 {
+        self.recipe.looks.signature as i64
+    }
+
+    #[func]
+    fn set_signature(&mut self, hue: i64) {
+        self.recipe.looks.signature = hue.rem_euclid(360) as u16;
+    }
+
+    /// The signature hue as a color.
+    #[func]
+    fn signature_color(&self) -> Color {
+        let c = mftr_forge::paint::signature(self.recipe.looks.signature);
+        Color::from_rgb(c[0], c[1], c[2])
     }
 
     /// Every slider and proportion at random (a seeded roll).

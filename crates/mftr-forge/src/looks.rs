@@ -115,6 +115,10 @@ pub struct Looks {
     pub skin: u8,
     /// Catalog parts worn (CR4, 20 §7): ids like `torso.tunic`, one per slot.
     pub outfit: Vec<String>,
+    /// Fills (CR5a, 20 §9): `"body"` or a worn part's id, its region, a palette index.
+    pub paint: Vec<(String, u8, u8)>,
+    /// The signature hue (14 §4), 0–359 degrees: glowing parts, and the effects (CR6).
+    pub signature: u16,
 }
 
 impl Default for Looks {
@@ -126,6 +130,8 @@ impl Default for Looks {
             proportions: Proportions::default(),
             skin: 2,
             outfit: Vec::new(),
+            paint: Vec::new(),
+            signature: 200,
         }
     }
 }
@@ -227,8 +233,34 @@ pub fn read(v: Value, at: &str) -> Result<Looks, DataError> {
         Some((s, sat)) => data::int(s, &sat, SKIN_TONES.len() as u64 - 1)? as u8,
         None => 2,
     };
+    let mut paint = Vec::new();
+    if let Some((v, pat)) = f.take("paint") {
+        let Value::List(None, items) = v else { return err(&pat, "expected a list of `(\"target\", region, color)`") };
+        if items.len() > 128 {
+            return err(&pat, "too many fills");
+        }
+        for (i, item) in items.into_iter().enumerate() {
+            let iat = format!("{pat}[{i}]");
+            let Value::List(None, mut t) = item else { return err(&iat, "expected `(\"target\", region, color)`") };
+            if t.len() != 3 {
+                return err(&iat, "expected `(\"target\", region, color)`");
+            }
+            let color = data::int(t.pop().unwrap(), &iat, crate::paint::PALETTE.len() as u64 - 1)? as u8;
+            let region = data::int(t.pop().unwrap(), &iat, 15)? as u8;
+            let Value::Str(target) = t.pop().unwrap() else { return err(&iat, "the target is a string") };
+            if target != "body" && !outfit.contains(&target) {
+                return err(&iat, format!("`{target}` isn't worn"));
+            }
+            paint.retain(|(t, r, _): &(String, u8, u8)| !(*t == target && *r == region));
+            paint.push((target, region, color));
+        }
+    }
+    let signature = match f.take("signature") {
+        Some((v, sat)) => data::int(v, &sat, 359)? as u16,
+        None => 200,
+    };
     f.done()?;
-    Ok(Looks { build, gender, shape, proportions, skin, outfit })
+    Ok(Looks { build, gender, shape, proportions, skin, outfit, paint, signature })
 }
 
 /// A champion file's looks, if it has any.
@@ -267,6 +299,11 @@ pub fn write(l: &Looks) -> String {
         let ids: Vec<String> = l.outfit.iter().map(|p| format!("\"{p}\"")).collect();
         out += &format!("        outfit: [{}],\n", ids.join(", "));
     }
+    if !l.paint.is_empty() {
+        let fills: Vec<String> = l.paint.iter().map(|(t, r, c)| format!("(\"{t}\", {r}, {c})")).collect();
+        out += &format!("        paint: [{}],\n", fills.join(", "));
+    }
+    out += &format!("        signature: {},\n", l.signature);
     out += "    ),\n";
     out
 }

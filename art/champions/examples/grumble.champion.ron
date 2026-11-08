@@ -14,6 +14,8 @@ Champion(
         proportions: (height: 0.5, legs: -0.4, arms: 0.6, head: 0.2, hands: 0.8),
         skin: 9,
         outfit: ["shoulders.fur", "waist.skirt", "arms.bracers", "feet.boots", "weapon.maul"],
+        paint: [("body", 0, 13), ("body", 1, 36), ("waist.skirt", 1, 35), ("feet.boots", 0, 14)],
+        signature: 95,
     ),
     name: "Grumble",
     class: Bruiser,
