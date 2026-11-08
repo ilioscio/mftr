@@ -18,6 +18,7 @@ pub mod moves;
 pub mod paint;
 pub mod passives;
 pub mod recipe;
+pub mod sculpt;
 
 use std::path::Path;
 
@@ -33,6 +34,8 @@ pub struct Catalog {
     library: Loaded,
     /// The official champions' packs: the move library's clips, effects and sounds (CR6).
     packs: moves::Packs,
+    /// Each base's welds for sculpting (CR9), worked out when first needed.
+    welds: Vec<std::sync::OnceLock<sculpt::Welds>>,
 }
 
 /// A catalog part (CR4, 20 §7), as `<base>.parts.ron` lists it.
@@ -104,11 +107,18 @@ impl Catalog {
                 packs.push((c, mftr_pack::load_file(&path)?));
             }
         }
-        Ok(Catalog { bases, library, packs: moves::Packs(packs) })
+        let welds = bases.iter().map(|_| std::sync::OnceLock::new()).collect();
+        Ok(Catalog { bases, library, packs: moves::Packs(packs), welds })
     }
 
     pub fn base(&self, key: &str) -> Option<&Loaded> {
         self.bases.iter().find(|(k, _, _)| k == key).map(|(_, b, _)| b)
+    }
+
+    /// A base's welds (CR9, `sculpt`).
+    pub fn welds(&self, key: &str) -> Option<&sculpt::Welds> {
+        let i = self.bases.iter().position(|(k, _, _)| k == key)?;
+        Some(self.welds[i].get_or_init(|| sculpt::Welds::of_model(&self.bases[i].1.model)))
     }
 
     /// The parts a base offers.
@@ -142,6 +152,10 @@ impl Catalog {
         let mut model = base.model.clone();
         dress(&mut model, self.parts(&key), &looks.outfit)?;
         shape(&mut model, looks);
+        if !looks.sculpt.is_empty() {
+            let welds = self.welds(&key).ok_or(format!("no base `{key}`"))?;
+            sculpt::apply(&mut model, &base.model, welds, &looks.sculpt);
+        }
         proportion(&mut model, &looks.proportions);
         skin(&mut model, looks::SKIN_TONES[looks.skin as usize % looks::SKIN_TONES.len()]);
         for (target, region, color) in &looks.paint {
@@ -675,6 +689,129 @@ mod tests {
         let mut img = back.looks.images[0].clone();
         image::stroke(&mut img, &texels, hit, n, 2.0, image::Tool::Brush(None));
         assert!(img.is_empty() && img.colors.is_empty());
+    }
+
+    #[test]
+    fn sculpting_goes_past_the_sliders_and_parts_follow() {
+        let c = catalog();
+        let key = "humanoid_slim_masculine";
+        let welds = c.welds(key).unwrap();
+        assert!(welds.rest.len() > 500);
+        let mut looks = Looks { outfit: vec!["head.wide_hat".into(), "face.beard".into()], ..Looks::default() };
+        looks.set_slider("nose_reach", 1.0);
+        let plain = c.forge("Sculpted", &looks).unwrap().model;
+        let top = |m: &Model, target: &str| {
+            image::meshes_of(m, target)
+                .iter()
+                .flat_map(|&i| &m.meshes[i])
+                .flat_map(|p| p.positions.iter().map(|v| v[1]))
+                .fold(f32::MIN, f32::max)
+        };
+        let (mut offsets, height) = (Vec::new(), looks.proportions.factor(0));
+        // Pull the nose further than the slider's +1: a grab straight out from the face.
+        let head_y = top(&plain, "body") - 0.13;
+        // The face's furthest point forward (glTF +Z), around the head's height.
+        let front = |m: &Model| {
+            image::meshes_of(m, "body")
+                .iter()
+                .flat_map(|&i| &m.meshes[i])
+                .flat_map(|p| p.positions.iter().filter(|v| (v[1] - head_y).abs() < 0.12).map(|v| v[2]))
+                .fold(f32::MIN, f32::max)
+        };
+        let nose = front(&plain);
+        // Aim at the nose's tip.
+        let tip_y = image::meshes_of(&plain, "body")
+            .iter()
+            .flat_map(|&i| &plain.meshes[i])
+            .flat_map(|p| p.positions.iter().filter(|v| (v[1] - head_y).abs() < 0.12))
+            .fold((f32::MIN, 0.0), |b, v| if v[2] > b.0 { (v[2], v[1]) } else { b })
+            .1;
+        for _ in 0..4 {
+            assert!(sculpt::stroke(
+                &mut offsets,
+                welds,
+                &plain,
+                [0.0, tip_y, 3.0],
+                [0.0, 0.0, -1.0],
+                sculpt::Brush::Grab([0.0, 0.0, 0.02]),
+                0.05,
+                0.0,
+                true,
+                height
+            ));
+        }
+        // A bigger skull: the hat must ride up with it.
+        let crown = top(&plain, "body");
+        assert!(sculpt::stroke(
+            &mut offsets,
+            welds,
+            &plain,
+            [0.0, crown + 1.0, -0.01],
+            [0.0, -1.0, 0.0],
+            sculpt::Brush::Inflate,
+            0.22,
+            0.05,
+            true,
+            height
+        ));
+        looks.sculpt = offsets.clone();
+        let carved = c.forge("Sculpted", &looks).unwrap().model;
+        assert!(front(&carved) > nose + 0.03, "{} vs {nose}", front(&carved));
+        // The hat's cone round the skull moves with it, about as far.
+        let rise = top(&carved, "body") - crown;
+        assert!(rise > 0.02, "the crown rises {rise}");
+        let mut lifts = Vec::new();
+        for &mi in &image::meshes_of(&plain, "head.wide_hat") {
+            for (p, q) in plain.meshes[mi].iter().zip(&carved.meshes[mi]) {
+                for (a, b) in p.positions.iter().zip(&q.positions) {
+                    // The hat's cone round the skull (not its brim, out past the head).
+                    if (a[0] * a[0] + a[2] * a[2]).sqrt() < 0.16 && a[1] > crown - 0.06 && a[1] < crown + 0.1 {
+                        lifts.push(((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt());
+                    }
+                }
+            }
+        }
+        assert!(!lifts.is_empty());
+        let lift = lifts.iter().sum::<f32>() / lifts.len() as f32;
+        assert!(lift > rise * 0.4, "the hat's cone moves {lift} with the skull's {rise}");
+        // A heavier jaw: the beard goes with it.
+        assert!(sculpt::stroke(
+            &mut offsets,
+            welds,
+            &plain,
+            [0.0, tip_y - 0.09, 3.0],
+            [0.0, 0.0, -1.0],
+            sculpt::Brush::Inflate,
+            0.08,
+            0.03,
+            true,
+            height
+        ));
+        looks.sculpt = offsets.clone();
+        let jawed = c.forge("Sculpted", &looks).unwrap().model;
+        let moved = |target: &str| {
+            let mut d = Vec::new();
+            for &mi in &image::meshes_of(&plain, target) {
+                for (p, q) in plain.meshes[mi].iter().zip(&jawed.meshes[mi]) {
+                    for (a, b) in p.positions.iter().zip(&q.positions) {
+                        d.push(((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt());
+                    }
+                }
+            }
+            d.iter().sum::<f32>() / d.len().max(1) as f32
+        };
+        assert!(moved("face.beard") > 0.01, "the beard follows the jaw: {}", moved("face.beard"));
+        // Symmetric: every moved weld off the middle line has its mirror moved too.
+        for (w, o) in &offsets {
+            let m = welds.mirror[*w as usize];
+            if m != *w && o[0] != 0 {
+                assert!(offsets.iter().any(|(x, _)| *x == m), "weld {w}'s mirror {m}");
+            }
+        }
+        // Bounded, and through the file and back.
+        assert!(offsets.iter().all(|(_, o)| o.iter().all(|x| x.unsigned_abs() as f32 <= sculpt::MAX_OFFSET * 1000.0)));
+        let r = recipe::Recipe { looks: looks.clone(), ..recipe::Recipe::default() };
+        assert_eq!(recipe::Recipe::from_text(&r.to_text()).unwrap().looks.sculpt, looks.sculpt);
     }
 
     #[test]

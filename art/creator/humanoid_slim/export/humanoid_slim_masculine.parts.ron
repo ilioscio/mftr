@@ -13,6 +13,7 @@
         (id: "head.horns", slot: "head", name: "Horns", hides: [], accent: false, triangles: 44),
         (id: "face.mask", slot: "face", name: "Mask", hides: [], accent: false, triangles: 264),
         (id: "face.goggles", slot: "face", name: "Goggles", hides: [], accent: false, triangles: 84),
+        (id: "face.beard", slot: "face", name: "Beard", hides: [], accent: false, triangles: 22),
         (id: "torso.tunic", slot: "torso", name: "Tunic", hides: ["pelvis", "spine_01", "spine_02", "chest"], accent: true, triangles: 244),
         (id: "torso.robe", slot: "torso", name: "Robe", hides: ["pelvis", "spine_01", "spine_02", "chest", "thigh_l", "thigh_r", "calf_l", "calf_r"], accent: true, triangles: 276),
         (id: "torso.breastplate", slot: "torso", name: "Breastplate", hides: ["spine_01", "spine_02", "chest"], accent: false, triangles: 152),

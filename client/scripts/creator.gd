@@ -46,6 +46,12 @@ var _brush_color := 18
 var _brush_size := 0.1
 var _decal := "star"
 var _painting := false
+# Free sculpting on the Face and Body steps (CR9): the brush ("" when off), its size and
+# strength (m), symmetry.
+var _sculpt_tool := ""
+var _sculpt_size := 0.05
+var _sculpt_strength := 0.004
+var _sculpt_mirror := true
 var _camera: Camera3D
 var _pivot: Node3D
 var _model_node: Node3D = null
@@ -227,10 +233,12 @@ func _show_step(id: String) -> void:
 					_changed(true))
 			_skin_picker()
 		"face":
+			_sculpt_tools()
 			for id2 in creator.sliders():
 				if _is_face(id2):
 					_slider(_label_of(id2), creator.slider(id2), func(v): creator.set_slider(id2, v))
 		"body":
+			_sculpt_tools()
 			for p in creator.proportions():
 				_slider(PROPORTION_NAMES.get(p, p), creator.proportion(p), func(v): creator.set_proportion(p, v))
 			_panel.add_child(HSeparator.new())
@@ -602,9 +610,75 @@ func _process(delta: float) -> void:
 		_animator.drive(_skeleton, {}, 0.0, delta)
 
 
-## Painting on the model (CR5b): it holds still in its rest pose, where the brush aims.
+## Painting or sculpting on the model (CR5b, CR9): it holds still in its rest pose, where the
+## brush aims.
 func _brushing() -> bool:
-	return step == "paint" and _paint_tool != "fill"
+	return (step == "paint" and _paint_tool != "fill") or _sculpting()
+
+
+func _sculpting() -> bool:
+	return (step == "face" or step == "body") and _sculpt_tool != ""
+
+
+## The sculpt brushes (20 §5.3) above the sliders: off, or one of six, with size, strength and
+## symmetry.
+func _sculpt_tools() -> void:
+	var row := HBoxContainer.new()
+	for t in [["", "Sliders"], ["push", "Push"], ["pull", "Pull"], ["grab", "Grab"], ["inflate", "Inflate"], ["smooth", "Smooth"], ["flatten", "Flat"]]:
+		var b := Button.new()
+		b.text = t[1]
+		b.toggle_mode = true
+		b.button_pressed = _sculpt_tool == t[0]
+		b.pressed.connect(func():
+			_sculpt_tool = t[0]
+			_hold_rest()
+			_show_step(step))
+		row.add_child(b)
+	_panel.add_child(row)
+	if _sculpt_tool == "":
+		return
+	_hint("Sculpt past the sliders: left-drag on the model, right-drag turns it. Parts on it follow.")
+	_slider_raw("Size", _sculpt_size, 0.015, 0.25, func(v): _sculpt_size = v)
+	_slider_raw("Strength", _sculpt_strength, 0.001, 0.015, func(v): _sculpt_strength = v)
+	var mirror := CheckBox.new()
+	mirror.text = "Symmetry"
+	mirror.button_pressed = _sculpt_mirror
+	mirror.toggled.connect(func(on): _sculpt_mirror = on)
+	_panel.add_child(mirror)
+	var reset := Button.new()
+	reset.text = "Undo all sculpting"
+	reset.pressed.connect(func():
+		creator.clear_sculpt()
+		_changed(true))
+	_panel.add_child(reset)
+	_panel.add_child(HSeparator.new())
+
+
+func _slider_raw(label: String, value: float, lo: float, hi: float, on_change: Callable) -> void:
+	var l := Label.new()
+	l.text = label
+	_panel.add_child(l)
+	var s := HSlider.new()
+	s.min_value = lo
+	s.max_value = hi
+	s.step = (hi - lo) / 100.0
+	s.value = value
+	s.value_changed.connect(on_change)
+	_panel.add_child(s)
+
+
+## Sculpt where the stage's `pos` looks at the model; `drag` is the mouse's move (for Grab).
+func _sculpt_at(pos: Vector2, drag: Vector2) -> void:
+	if _model_node == null or _camera == null:
+		return
+	var inv := _model_node.global_transform.affine_inverse()
+	var origin := inv * _camera.project_ray_origin(pos)
+	var dir := (inv.basis * _camera.project_ray_normal(pos)).normalized()
+	# A pixel of drag is about this far on the model at the camera's distance.
+	var per_px := 2.0 * _camera.global_position.distance_to(_model_node.global_position) * tan(deg_to_rad(_camera.fov * 0.5)) / float(_viewport.size.y)
+	var pull := inv.basis * (_camera.global_basis.x * drag.x - _camera.global_basis.y * drag.y) * per_px
+	if creator.sculpt(origin, dir, _sculpt_tool, _sculpt_size, _sculpt_strength, pull, _sculpt_mirror):
+		_changed(true)
 
 
 func _hold_rest() -> void:
@@ -613,6 +687,16 @@ func _hold_rest() -> void:
 
 
 ## A stroke with `tool` at a point of the stage given as fractions of its size (`--creator-brush`).
+## A sculpt stroke at a point of the stage given as fractions of its size, repeated `times`
+## (`--creator-sculpt`, for screenshots).
+func sculpt_at_fraction(tool: String, f: Vector2, times := 6) -> void:
+	_sculpt_tool = tool
+	_show_step(step)
+	_hold_rest()
+	for i in times:
+		_sculpt_at(f * Vector2(_viewport.size), Vector2(0, -6) if tool == "grab" else Vector2.ZERO)
+
+
 func paint_at_fraction(tool: String, f: Vector2, color := -1) -> void:
 	_paint_tool = tool
 	if color >= 0:
@@ -682,11 +766,17 @@ func _stage_input(event: InputEvent) -> void:
 		# Left paints (a decal once a click, a brush along the drag); right turns the model.
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 			_painting = event.pressed
-			if event.pressed:
+			if event.pressed and _sculpting():
+				if _sculpt_tool != "grab":
+					_sculpt_at(event.position, Vector2.ZERO)
+			elif event.pressed:
 				_paint_at(event.position)
 			return
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
 			_dragging = event.pressed
+			return
+		if event is InputEventMouseMotion and _painting and _sculpting():
+			_sculpt_at(event.position - event.relative, event.relative if _sculpt_tool == "grab" else Vector2.ZERO)
 			return
 		if event is InputEventMouseMotion and _painting and _paint_tool != "decal":
 			_paint_at(event.position)

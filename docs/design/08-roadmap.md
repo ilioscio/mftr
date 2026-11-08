@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–8 ✅ (champions as data; forged models; the creator and Test; clothes; paint: fills, brush and decals; moves and passives; the budget; the heavy humanoid) | 9, 10; resources; refit prices; swap the official models |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–9 ✅ (champions as data; forged models; the creator and Test; clothes; paint: fills, brush and decals; moves and passives; the budget; the heavy humanoid; free sculpting) | 10 (more builds); resources; refit prices; swap the official models |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1497,6 +1497,30 @@ replace the shared head anyway.
   rigs. A test holds Bastion's idle on a base to his own pose.
 - **Next:** the owner's look at the three (art pass on the heavy parts: antlers, ice, a chain);
   then CR5b (brush and decals) and CR9 (free sculpting).
+
+### CR slice 9 status (2026-11-07): ✅ done (free sculpting)
+- **The sculpt** (`mftr_forge::sculpt`, 20 §5.3): sparse offsets on the base's **welds** (one
+  place on the surface: a vertex's copies split by colors and UVs move together), in whole
+  millimetres, applied after the sliders and before the proportions. In the champion file:
+  `sculpt: [(weld, x, y, z), ...]`, at most 1,000 welds (the parser's lists went to 1,024 items).
+  Bounded: no weld moves more than 12 cm from where the sliders put it.
+- **Brushes:** push, pull, grab (along the mouse's drag), inflate (each weld along its own normal),
+  smooth (toward its neighbours) and flatten (toward the plane where it was touched), with a
+  smooth falloff over the radius, **mirrored by default** (each weld's mirror across X is found
+  when the base is loaded; welds on the middle line stay on it). The brushes touch the body only,
+  as the forged preview shows it.
+- **Parts follow:** each part vertex moves as its three nearest welds at rest do (fully within
+  10 cm of the body, fading to nothing at 25 cm: a hat's brim follows less, a sword's tip not at
+  all). A new catalog part, a beard, to show it.
+- **The creator:** Face and Body steps carry the brush row (Sliders, Push, Pull, Grab, Inflate,
+  Smooth, Flat), size, strength, symmetry and "Undo all sculpting"; the model holds its rest
+  pose while sculpting. `--creator-sculpt BRUSH:X,Y` strokes for screenshots.
+- **The exit** (20 §14: a nose and a jaw past the sliders' range, with a hat and a beard
+  following): a test pulls the nose 3 cm past the nose-reach slider's +1, swells the skull with
+  the hat's cone moving with it, and swells the jaw with the beard following.
+- **Left:** weld ids are tied to a base's export (re-exporting a base with other geometry would
+  move old sculpts: a base's version will have to be part of the recipe once bases change after
+  release); sculpting under clothes (their triangles are hidden) and on the in-match pose.
 
 ### CR slice 5b status (2026-11-07): ✅ done (brush, decals, eraser)
 - **UVs through the pipeline:** the creator bases and their parts are unwrapped in Blender

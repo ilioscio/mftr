@@ -479,6 +479,58 @@ impl MftrCreator {
         if changed { GString::from(target.as_str()) } else { GString::new() }
     }
 
+    /// Sculpt (CR9, 20 §5.3) where the ray `origin + t·dir` (model space, rest pose) meets the
+    /// last preview's body: `brush` is "push", "pull", "grab" (along `pull`, model space),
+    /// "inflate", "smooth" or "flatten"; `radius` and `strength` in meters; mirrored if
+    /// `symmetric`. True if it touched the body.
+    #[func]
+    #[allow(clippy::too_many_arguments)]
+    fn sculpt(
+        &mut self,
+        origin: Vector3,
+        dir: Vector3,
+        brush: GString,
+        radius: f32,
+        strength: f32,
+        pull: Vector3,
+        symmetric: bool,
+    ) -> bool {
+        use mftr_forge::sculpt::{self, Brush};
+        let (Some(cat), Some(last)) = (catalog(&self.art), self.last.clone()) else { return false };
+        let key = self.recipe.looks.base_key();
+        let Some(welds) = cat.welds(&key) else { return false };
+        let brush = brush.to_string();
+        let b = match brush.as_str() {
+            "push" => Brush::Push,
+            "pull" => Brush::Push,
+            "grab" => Brush::Grab([pull.x, pull.y, pull.z]),
+            "inflate" => Brush::Inflate,
+            "smooth" => Brush::Smooth,
+            "flatten" => Brush::Flatten,
+            _ => return false,
+        };
+        let strength = if brush == "pull" { -strength } else { strength };
+        let height = self.recipe.looks.proportions.factor(0);
+        sculpt::stroke(
+            &mut self.recipe.looks.sculpt,
+            welds,
+            &last.model,
+            [origin.x, origin.y, origin.z],
+            [dir.x, dir.y, dir.z],
+            b,
+            radius,
+            strength,
+            symmetric,
+            height,
+        )
+    }
+
+    /// Undo every sculpt stroke.
+    #[func]
+    fn clear_sculpt(&mut self) {
+        self.recipe.looks.sculpt.clear();
+    }
+
     /// Wipe every brush stroke and decal.
     #[func]
     fn clear_images(&mut self) {

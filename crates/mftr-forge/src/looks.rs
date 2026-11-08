@@ -117,6 +117,8 @@ pub struct Looks {
     pub outfit: Vec<String>,
     /// Fills (CR5a, 20 §9): `"body"` or a worn part's id, its region, a palette index.
     pub paint: Vec<(String, u8, u8)>,
+    /// Free sculpting (CR9, 20 §5.3): offsets in millimetres by the base's weld id.
+    pub sculpt: crate::sculpt::Offsets,
     /// Brush strokes and decals (CR5b, D70): one paint image per target at most.
     pub images: Vec<crate::image::Image>,
     /// The signature hue (14 §4), 0–359 degrees: glowing parts, and the effects (CR6).
@@ -136,6 +138,7 @@ impl Default for Looks {
             skin: 2,
             outfit: Vec::new(),
             paint: Vec::new(),
+            sculpt: Vec::new(),
             images: Vec::new(),
             signature: 200,
             moves: None,
@@ -262,6 +265,33 @@ pub fn read(v: Value, at: &str) -> Result<Looks, DataError> {
             paint.push((target, region, color));
         }
     }
+    let mut sculpt: crate::sculpt::Offsets = Vec::new();
+    if let Some((v, sat)) = f.take("sculpt") {
+        let Value::List(None, items) = v else { return err(&sat, "expected a list of `(weld, x, y, z)` in mm") };
+        if items.len() > crate::sculpt::MAX_WELDS {
+            return err(&sat, format!("at most {} welds", crate::sculpt::MAX_WELDS));
+        }
+        let max = (crate::sculpt::MAX_OFFSET * 1000.0).round() as i32;
+        for (i, item) in items.into_iter().enumerate() {
+            let at = format!("{sat}[{i}]");
+            let Value::List(None, t) = item else { return err(&at, "expected `(weld, x, y, z)`") };
+            if t.len() != 4 {
+                return err(&at, "expected `(weld, x, y, z)`");
+            }
+            let mut n = [0i32; 4];
+            for (k, v) in t.into_iter().enumerate() {
+                let Value::Num(s) = v else { return err(&at, "expected whole numbers") };
+                n[k] = s.parse::<i32>().or_else(|_| err(&at, format!("`{s}` isn't a whole number")))?;
+            }
+            if n[0] < 0 || n[1..].iter().any(|x| x.abs() > max) {
+                return err(&at, format!("a weld id ≥ 0 and offsets within ±{max} mm"));
+            }
+            if sculpt.iter().any(|(w, _)| *w == n[0] as u32) {
+                return err(&at, format!("weld {} twice", n[0]));
+            }
+            sculpt.push((n[0] as u32, [n[1] as i16, n[2] as i16, n[3] as i16]));
+        }
+    }
     let mut images: Vec<crate::image::Image> = Vec::new();
     if let Some((v, iat)) = f.take("images") {
         let Value::List(None, items) = v else {
@@ -323,7 +353,7 @@ pub fn read(v: Value, at: &str) -> Result<Looks, DataError> {
         None => None,
     };
     f.done()?;
-    Ok(Looks { build, gender, shape, proportions, skin, outfit, paint, images, signature, moves })
+    Ok(Looks { build, gender, shape, proportions, skin, outfit, paint, sculpt, images, signature, moves })
 }
 
 /// A champion file's looks, if it has any.
@@ -365,6 +395,15 @@ pub fn write(l: &Looks) -> String {
     if !l.paint.is_empty() {
         let fills: Vec<String> = l.paint.iter().map(|(t, r, c)| format!("(\"{t}\", {r}, {c})")).collect();
         out += &format!("        paint: [{}],\n", fills.join(", "));
+    }
+    if !l.sculpt.is_empty() {
+        out += "        sculpt: [\n";
+        for chunk in l.sculpt.chunks(6) {
+            let items: Vec<String> =
+                chunk.iter().map(|(w, o)| format!("({w}, {}, {}, {})", o[0], o[1], o[2])).collect();
+            out += &format!("            {},\n", items.join(", "));
+        }
+        out += "        ],\n";
     }
     let images: Vec<&crate::image::Image> = l.images.iter().filter(|i| !i.is_empty()).collect();
     if !images.is_empty() {

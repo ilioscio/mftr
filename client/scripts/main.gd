@@ -258,6 +258,9 @@ func _ready() -> void:
 			# A brush or decal stroke at a point of the stage (fractions of its size), to check
 			# painting in screenshots (CR5b): `decal:0.5,0.45:0` (a palette color last), `brush:0.5,0.6`.
 			_creator_brush = args[i + 1]
+		elif args[i] == "--creator-sculpt" and i + 1 < args.size():
+			# A few sculpt strokes at a point of the stage (CR9): `inflate:0.5,0.2`.
+			_creator_sculpt = args[i + 1]
 			i += 1
 		elif args[i] == "--champion-file" and i + 1 < args.size():
 			# A champion made in the creator (CR2): registered here, its model forged.
@@ -643,6 +646,7 @@ var _start_creator := false              # `--creator`: open the champion creato
 var _creator_load := ""                  # `--creator-load FILE`: …with this champion file
 var _creator_step := ""                  # `--creator-step NAME`: …on this step (screenshots)
 var _creator_brush := ""                 # `--creator-brush TOOL:X,Y`: …and paint once there (screenshots)
+var _creator_sculpt := ""                # `--creator-sculpt BRUSH:X,Y`: …or sculpt there (screenshots)
 var _editor_map := ""                    # `--editor-map bridge|crossroads|FILE`: …on that map
 var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's reference image
 var _shot_ward := false                  # `--shot-ward`: place a stealth ward ahead at 2.5 s
@@ -6683,6 +6687,11 @@ func _open_creator() -> void:
 		var parts := _creator_brush.split(":")
 		var xy := parts[1].split(",")
 		screen.paint_at_fraction(parts[0], Vector2(float(xy[0]), float(xy[1])), int(parts[2]) if parts.size() > 2 else -1)
+	if _creator_sculpt != "":
+		await get_tree().create_timer(1.0).timeout
+		var sp := _creator_sculpt.split(":")
+		var sxy := sp[1].split(",")
+		screen.sculpt_at_fraction(sp[0], Vector2(float(sxy[0]), float(sxy[1])))
 	screen.saved.connect(func(_path): champion_models.clear())
 	screen.test.connect(_start_practice)
 	screen.closed.connect(func(): _show_menu(""))
