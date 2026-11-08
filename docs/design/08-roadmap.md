@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–4, 5a, 6 and 7 ✅ (champions as data; forged models; the creator and Test; clothes; fill paint; moves; the budget) | 5b, 8–10; refit prices |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–4, 5a, 6, 7 and 8 ✅ (champions as data; forged models; the creator and Test; clothes; fill paint; moves; the budget; the heavy humanoid) | 5b, 9, 10; refit prices; swap the official models |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1473,6 +1473,30 @@ replace the shared head anyway.
   and protection from 0.34 to 0.38 (the official ten still price 80–107). Speed and control
   flipped between runs and were left. **Next:** a league of a few hundred matches (an overnight
   run) before any further refit; bots that use dashes better may move mobility back.
+
+### CR slice 8 status (2026-11-07): ✅ built (Rook, Bastion and Cairn as recipes, awaiting the owner)
+- **The heavy humanoid** (`art/creator/humanoid_heavy/`, both genders): the brute's skeleton
+  (Rook's heights: low hips, short legs, the neck sunk between the shoulders, long arms, huge
+  hands) and a **girth** per build (`mftr_blender.creator.BUILDS`, `mesh.GIRTH`): torso, limbs and
+  neck thicker by 16–40%, and every catalog part on them thickened and pushed out to match, so
+  one part list fits both builds. Same 23 sliders, same 40 parts; the creator offers both builds
+  by name (Slim humanoid, Heavy humanoid).
+- **Heavy gear** in the catalog (every base has it): a great helm (a block with a visor slit
+  glowing in the signature hue), slab pauldrons, stone shoulders, stone fists, plate tassets, a
+  tower shield, a great axe.
+- **Rook, Bastion and Cairn as recipes:** `art/champions/<id>/<id>.champion.ron`, the official
+  kit (a test checks it matches `crates/mftr-sim/champions/<id>.ron` exactly) with looks on the
+  heavy build, its own moves, paint and signature. They forge, animate and pass the pack
+  validator; the hand-made models stay what the game shows until the owner prefers these
+  (20 §14's track exit). Looks are a first pass: Cairn's antlers are the catalog's horns, and
+  Bastion's ice crystals and chain have no parts yet.
+- **Retargeting by rest** (found here): moves copied local rotations raw, but Bastion's rig hangs
+  his neck down from the chest where the bases' stand up (180° apart), so his moves bent any other
+  body's head into its chest. Clips now move between rigs corrected by each bone's rest
+  (`key → C(parent)⁻¹ · key · C(bone)`), which also fixes the 5–7° rest differences of the other
+  rigs. A test holds Bastion's idle on a base to his own pose.
+- **Next:** the owner's look at the three (art pass on the heavy parts: antlers, ice, a chain);
+  then CR5b (brush and decals) and CR9 (free sculpting).
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.

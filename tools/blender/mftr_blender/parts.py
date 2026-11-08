@@ -277,6 +277,44 @@ def catalog(head):
                        [(0.015, 0.015), (0.025, 0.025), (0.03, 0.03), (0.025, 0.025), (0.015, 0.015)], "cloth", WOOD)])
     add("offhand.orb", "offhand", "Orb", [
         mesh.box_part("hand_l", P("prop_l", 0.0, (0, -0.06, 0.08)), (0.10, 0.10, 0.10), "emissive", GLOW, rot=(45, 35, 0))])
+
+    # Heavy gear (CR8, 20 §12: Rook's, Bastion's and Cairn's looks). Every base gets these too.
+    face_y = hc.y - 0.145 * k
+    add("head.great_helm", "head", "Great helm", [
+        # A block that stands up out of the gorget: the slit at the eyes, a crest on top.
+        # (the slit glows in the champion's signature hue, like Bastion's visor)
+        mesh.box_part("head", tuple(hc + Vector((0, -0.015, 0.0))), (0.28 * k, 0.29 * k, 0.34 * k), "metal", IRON, bevel=0.3,
+                      taper=0.92),
+        mesh.box_part("head", (0, face_y - 0.026, head.front(0.62, 0).z - 0.02), (0.20 * k, 0.02, 0.036), "emissive", GLOW),
+        mesh.box_part("head", tuple(hc + Vector((0, -0.015, 0.17 * k))), (0.04, 0.30 * k, 0.05), "accent", ACCENT)],
+        hides=["head"], accent=True)
+    add("shoulders.slabs", "shoulders", "Slab pauldrons", [
+        *mesh.box_pair("upperarm_l", P("clavicle_l", 1.0, (0.05, 0, 0.06)), (0.24, 0.27, 0.11), "metal", IRON, rot=(0, -22, 0),
+                       bevel=0.3),
+        *mesh.box_pair("upperarm_l", P("clavicle_l", 1.0, (0.09, 0, -0.02)), (0.20, 0.24, 0.08), "metal", IRON, rot=(0, -40, 0),
+                       bevel=0.3)])
+    stone, moss = (0.46, 0.44, 0.41), (0.34, 0.44, 0.22)
+    shoulder_rock = mesh.rock_part("upperarm_l", P("clavicle_l", 1.0, (0.04, 0, 0.07)), (0.26, 0.24, 0.19), stone, moss=moss, seed=3)
+    add("shoulders.boulders", "shoulders", "Stone shoulders", [shoulder_rock, mesh.mirror(shoulder_rock)])
+    fist = mesh.rock_part("hand_l", P("hand_l", 0.3), (0.22, 0.2, 0.22), stone, seed=5, cuts=5)
+    add("arms.stone_fists", "arms", "Stone fists", [fist, mesh.mirror(fist)],
+        hides=["hand_l", "hand_r", "fingers_l", "fingers_r", "thumb_l", "thumb_r"])
+    add("waist.tassets", "waist", "Plate tassets", [
+        mesh.box_part("pelvis", P("pelvis", 0.0, (math.sin(a) * 0.2, -math.cos(a) * 0.16, -0.12)), (0.17, 0.03, 0.26), "metal",
+                      IRON, rot=(-10 * math.cos(a), 10 * math.sin(a), -math.degrees(a)))
+        for a in (-1.2, -0.45, 0.45, 1.2)] + [
+        loft("pelvis", P("pelvis", 0.55), P("pelvis", 0.85), 16, [(0, 0.205, 0.155), (1, 0.205, 0.155)], "accent", ACCENT)],
+        accent=True)
+    add("offhand.tower_shield", "offhand", "Tower shield", [
+        mesh.box_part("forearm_l", P("forearm_l", 0.6, (0.08, -0.02, 0)), (0.05, 0.56, 0.86), "metal", IRON, bevel=0.15),
+        mesh.box_part("forearm_l", P("forearm_l", 0.6, (0.11, -0.02, 0)), (0.02, 0.08, 0.70), "accent", ACCENT)],
+        accent=True)
+    add("weapon.great_axe", "weapon", "Great axe", [
+        mesh.path_part("hand_r", [at(-0.30), at(1.22)], 6, [(0.034, 0.034), (0.036, 0.036)], "cloth", WOOD, ref=tuple(across)),
+        mesh.path_part("hand_r", [at(1.06, across * 0.02), at(1.06, across * 0.18), at(1.06, across * 0.34)], 4,
+                       [(0.09, 0.02), (0.16, 0.014), (0.24, 0.008)], "metal", IRON, ref=tuple(axis)),
+        mesh.path_part("hand_r", [at(1.06, across * -0.02), at(1.06, across * -0.12)], 4, [(0.05, 0.03), (0.0, 0.0)], "metal", IRON,
+                       ref=tuple(axis))])
     return out
 
 

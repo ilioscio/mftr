@@ -19,7 +19,7 @@ pub mod recipe;
 
 use std::path::Path;
 
-use mftr_pack::glb::{Model, qmul, rotate};
+use mftr_pack::glb::{Animation, Model, qmul, rotate};
 use mftr_pack::{Loaded, pose, sidecar};
 
 pub use looks::Looks;
@@ -460,26 +460,74 @@ fn skin(model: &mut Model, tone: [f32; 3]) {
 /// Copy the library's clips onto `model`, by bone name. Translation tracks (the pelvis's bob,
 /// the root's slides) scale with the body, so a taller champion's hips bob from its own height.
 fn attach_clips(model: &mut Model, lib: &Model, translation_scale: f32) {
-    model.animations = lib
-        .animations
-        .iter()
-        .map(|a| {
-            let mut a = a.clone();
-            a.channels.retain_mut(|c| {
-                let Some(node) = model.node_by_name(&lib.nodes[c.node].name) else { return false };
-                c.node = node;
-                if c.path == "translation" {
+    let rig = Retarget::new(lib, model);
+    model.animations = lib.animations.iter().map(|a| rig.clip(a, &a.name, translation_scale)).collect();
+}
+
+/// Moving clips from one rig onto another by bone name (the library's, or a move's champion's,
+/// onto a forged model). The rigs share the `biped` bones but not always their rest angles:
+/// Bastion's neck hangs down from his chest where every other rig's stands up (14 §2.2's
+/// hulking shape). A clip's rotation is relative to its own rest, so each key is corrected by
+/// the difference in rest: with `C(b)` the turn from the source's rest frame of bone `b` to the
+/// target's (both in world space), a key `q` becomes `C(parent)⁻¹ · q · C(b)`, and the bone's
+/// world turn is then the source's times `C(b)`: the pose is the same, relative to each rest.
+/// Translations (in the parent's frame) turn by `C(parent)⁻¹` and scale with the body.
+pub(crate) struct Retarget<'a> {
+    from: &'a Model,
+    to: &'a Model,
+    /// Per target node: (C(parent)⁻¹, C(node)), for nodes the source has.
+    fix: Vec<Option<([f32; 4], [f32; 4])>>,
+}
+
+impl<'a> Retarget<'a> {
+    pub(crate) fn new(from: &'a Model, to: &'a Model) -> Retarget<'a> {
+        let (ws, wt) = (world(from), world(to));
+        let turn = |t: usize| -> Option<[f32; 4]> {
+            let s = from.node_by_name(&to.nodes[t].name)?;
+            Some(qmul(inv(ws[s].1), wt[t].1))
+        };
+        let fix = (0..to.nodes.len())
+            .map(|t| {
+                let own = turn(t)?;
+                let parent = to.nodes[t].parent.and_then(turn).unwrap_or([0.0, 0.0, 0.0, 1.0]);
+                Some((inv(parent), own))
+            })
+            .collect();
+        Retarget { from, to, fix }
+    }
+
+    /// `a` on the target rig, named `name`: channels for bones the target lacks are dropped.
+    pub(crate) fn clip(&self, a: &Animation, name: &str, translation_scale: f32) -> Animation {
+        let mut a = a.clone();
+        a.name = name.to_string();
+        a.channels.retain_mut(|c| {
+            let Some(node) = self.to.node_by_name(&self.from.nodes[c.node].name) else { return false };
+            c.node = node;
+            let (pre, post) = self.fix[node].unwrap_or(([0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]));
+            match c.path.as_str() {
+                "rotation" => {
                     for v in &mut c.values {
-                        for x in v.iter_mut() {
-                            *x *= translation_scale;
+                        if v.len() == 4 {
+                            let q = qmul(qmul(pre, [v[0], v[1], v[2], v[3]]), post);
+                            let n = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt().max(1e-9);
+                            *v = q.iter().map(|x| x / n).collect();
                         }
                     }
                 }
-                true
-            });
-            a
-        })
-        .collect();
+                "translation" => {
+                    for v in &mut c.values {
+                        if v.len() == 3 {
+                            let t = rotate(pre, [v[0], v[1], v[2]]);
+                            *v = t.iter().map(|x| x * translation_scale).collect();
+                        }
+                    }
+                }
+                _ => {}
+            }
+            true
+        });
+        a
+    }
 }
 
 #[cfg(test)]
@@ -501,6 +549,81 @@ mod tests {
             let s = c.sliders(key);
             assert!(s.len() >= 20, "{key}: {s:?}");
             assert!(s.contains(&"nose_reach".to_string()));
+        }
+    }
+
+    #[test]
+    fn the_heavy_bases_are_broader_with_the_same_sliders_and_parts() {
+        let c = catalog();
+        let width = |key: &str| {
+            let b = c.base(key).unwrap();
+            b.model.meshes[0].iter().flat_map(|p| p.positions.iter().map(|v| v[0].abs())).fold(0.0, f32::max)
+        };
+        for g in ["masculine", "feminine"] {
+            let (slim, heavy) = (format!("humanoid_slim_{g}"), format!("humanoid_heavy_{g}"));
+            assert_eq!(c.sliders(&heavy), c.sliders(&slim));
+            let ids = |k: &str| c.parts(k).iter().map(|p| p.id.clone()).collect::<Vec<_>>();
+            assert_eq!(ids(&heavy), ids(&slim));
+            assert!(ids(&heavy).contains(&"head.great_helm".to_string()));
+            assert!(width(&heavy) > width(&slim) * 1.1, "{g}: {} vs {}", width(&heavy), width(&slim));
+        }
+    }
+
+    /// World transforms with each channel's first key applied.
+    fn posed(m: &Model, a: &Animation) -> Vec<([f32; 3], [f32; 4])> {
+        let mut m = m.clone();
+        for c in &a.channels {
+            let v = &c.values[0];
+            match c.path.as_str() {
+                "rotation" => m.nodes[c.node].rotation = [v[0], v[1], v[2], v[3]],
+                "translation" => m.nodes[c.node].translation = [v[0], v[1], v[2]],
+                _ => {}
+            }
+        }
+        world(&m)
+    }
+
+    #[test]
+    fn moves_from_a_rig_with_other_rest_angles_keep_their_pose() {
+        // Bastion's neck hangs down from his chest; the bases' stand up. His idle on a base
+        // must still hold the head above the chest, and turn each bone as his own rig does.
+        let c = catalog();
+        let looks = Looks { moves: Some(moves::Moves::of(mftr_sim::ChampionId::Bastion)), ..Looks::default() };
+        let f = c.forge("Hunch", &looks).unwrap();
+        let idle = f.model.animations.iter().find(|a| a.name == "idle").unwrap();
+        let w = posed(&f.model, idle);
+        let (head, chest) = (f.model.node_by_name("head").unwrap(), f.model.node_by_name("chest").unwrap());
+        assert!(w[head].0[1] > w[chest].0[1] + 0.1, "head {:?} chest {:?}", w[head].0, w[chest].0);
+        // The same pose relative to rest: the head's world turn from its rest matches Bastion's.
+        let src = &c.packs.get(mftr_sim::ChampionId::Bastion).unwrap().model;
+        let ws = posed(src, src.animations.iter().find(|a| a.name == "idle").unwrap());
+        let (rs, rt) = (world(src), world(&f.model));
+        let sh = src.node_by_name("head").unwrap();
+        let delta = |w: [f32; 4], r: [f32; 4]| qmul(w, inv(r));
+        let (a, b) = (delta(ws[sh].1, rs[sh].1), delta(w[head].1, rt[head].1));
+        let dot = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]).abs();
+        assert!(dot > 0.999, "{a:?} vs {b:?}");
+    }
+
+    #[test]
+    fn rook_bastion_and_cairn_are_recipes_on_the_heavy_build() {
+        let c = catalog();
+        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art");
+        for champ in [mftr_sim::ChampionId::Rook, mftr_sim::ChampionId::Bastion, mftr_sim::ChampionId::Cairn] {
+            let id = champ.def().name.to_lowercase();
+            let text = std::fs::read_to_string(art.join(format!("champions/{id}/{id}.champion.ron"))).unwrap();
+            let r = recipe::Recipe::from_text(&text).unwrap();
+            // The kit is the official one, exactly.
+            assert_eq!(&r.kit, champ.def(), "{id}");
+            assert_eq!(r.looks.build, "humanoid_heavy");
+            let f = c.forge(&r.name, &r.looks).unwrap();
+            for clip in ["idle", "run", "attack_1", "q", "w", "e", "r"] {
+                let has = |a: &Animation| a.name == clip || a.name.starts_with(&format!("{clip}_"));
+                assert!(f.model.animations.iter().any(has), "{id}: no `{clip}`");
+            }
+            // The pack validator takes it as a champion file (an official name only warns).
+            let report = mftr_pack::champion::validate_text(&text);
+            assert_eq!(report.errors(), 0, "{id}: {:?}", report.findings);
         }
     }
 

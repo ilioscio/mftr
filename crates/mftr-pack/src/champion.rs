@@ -108,9 +108,11 @@ mod tests {
 
     #[test]
     fn a_bad_file_says_why() {
+        // Too fast for the bounds (and so, over the budget too).
         let report = validate_text(&rookish("Pack Test Speedy", 900.0));
-        assert_eq!(report.errors(), 1);
+        assert_eq!(report.errors(), 2, "{:?}", report.findings);
         assert!(report.findings[0].msg.contains("stats.move_speed"), "{:?}", report.findings);
+        assert!(report.findings[1].msg.contains("budget"), "{:?}", report.findings);
         let report = validate_text("Champion(format: 0)");
         assert!(report.findings[0].msg.contains("`name` is missing"), "{:?}", report.findings);
         assert!(load_text(&rookish("Pack Test Speedy", 900.0)).is_err());

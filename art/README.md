@@ -10,8 +10,9 @@ art/
 │  ├─ sounds.ron                   # the shared sound recipes (footsteps, death, the hard-CC accent…)
 │  └─ export/biped_library.glb (+ .anims.ron, .vfx.ron, .sfx.ron, sfx/*.ogg)
 ├─ champions/<id>/                 # one folder per champion (see champions/README.md)
+│  ├─ <id>.champion.ron             # Rook, Bastion, Cairn: the champion as a creator recipe (CR8, 20 §12)
 │  └─ examples/*.champion.ron       # champions made as files (the creator's recipes, 20 §11.1)
-├─ creator/<build>/                 # the champion creator's catalog (20 §11.4): bases with their sliders
+├─ creator/<build>/                 # the champion creator's catalog (20 §11.4): humanoid_slim, humanoid_heavy
 │  ├─ build.py                     # one base per gender, sliders as shape keys (mftr_blender.creator)
 │  └─ export/<build>_<gender>.glb   # kind `base`: the sliders as morph targets, read by mftr-forge
 ├─ minions/<kind>/<kind>.blend      # lane minions: melee, caster, siege, super (build.py generates all four)

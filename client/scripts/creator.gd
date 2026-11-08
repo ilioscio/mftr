@@ -33,6 +33,7 @@ const PROPORTION_NAMES := {"height": "Height", "legs": "Leg length", "arms": "Ar
 var creator := MftrCreator.create()
 var art_root := ""
 var step := "build"
+const BUILD_NAMES := {"humanoid_slim": "Slim humanoid", "humanoid_heavy": "Heavy humanoid"}
 var file_path := ""
 var dirty := false
 var seed_n := 1
@@ -206,12 +207,12 @@ func _show_step(id: String) -> void:
 	match id:
 		"build":
 			for b in creator.builds():
-				_choice(String(b[0]).capitalize(), creator.build() == b[0], func():
+				_choice(BUILD_NAMES.get(String(b[0]), String(b[0]).capitalize()), creator.build() == b[0], func():
 					creator.set_build(b[0])
 					if not b[1]:
 						creator.set_gender("")
 					_changed(true))
-			_hint("More builds (heavy humanoid, beast, serpentoid, spectre, machine) arrive as their own slices (CR8, CR10).")
+			_hint("Both humanoids share the moves and parts; the heavy one is the brute (Rook, Bastion, Cairn). More builds (beast, serpentoid, spectre, machine) arrive as their own slices (CR10).")
 		"gender":
 			for g in [["masculine", "Masculine"], ["feminine", "Feminine"]]:
 				_choice(g[1], creator.gender() == g[0], func():

@@ -100,25 +100,6 @@ fn is_ability_clip(name: &str) -> bool {
     ["q", "w", "e", "r"].iter().any(|s| name == *s || name.starts_with(&format!("{s}_")))
 }
 
-/// A clip of `from`, its nodes remapped onto `model` by bone name, renamed `to`.
-fn retarget(a: &Animation, from: &Model, model: &Model, to: &str, translation_scale: f32) -> Animation {
-    let mut a = a.clone();
-    a.name = to.to_string();
-    a.channels.retain_mut(|c| {
-        let Some(node) = model.node_by_name(&from.nodes[c.node].name) else { return false };
-        c.node = node;
-        if c.path == "translation" {
-            for v in &mut c.values {
-                for x in v.iter_mut() {
-                    *x *= translation_scale;
-                }
-            }
-        }
-        true
-    });
-    a
-}
-
 /// The clip names (and their sidecar entries) that `moves` gives the model: the stance from the
 /// attack's champion, each ability slot from its move's champion. Returns the animations and the
 /// sidecar clips, renamed.
@@ -132,7 +113,7 @@ pub fn clips(
     let mut side = Vec::new();
     let mut take = |pack: &Loaded, from_name: &str, to_name: &str| {
         if let Some(a) = pack.model.animations.iter().find(|a| a.name == from_name) {
-            anims.push(retarget(a, &pack.model, model, to_name, translation_scale));
+            anims.push(crate::Retarget::new(&pack.model, model).clip(a, to_name, translation_scale));
             if let Some(c) = pack.library.clip(from_name).map(|i| &pack.library.clips[i]) {
                 side.push(sidecar_clip(c, to_name));
             }

@@ -27,7 +27,7 @@ def main():
     genders = [argv[argv.index("--gender") + 1]] if "--gender" in argv else ["feminine", "masculine"]
     for gender in genders:
         name = f"{BUILD}_{gender}"
-        _, _, made = creator.build(gender, name)
+        _, _, made = creator.build(gender, name, BUILD)
         bpy.ops.wm.save_as_mainfile(filepath=os.path.join(HERE, f"{name}.blend"), compress=True)
         if "--export" in argv:
             print(export.export(os.path.join(HERE, "export"), name, "base"))

@@ -35,5 +35,12 @@
         (id: "offhand.shield", slot: "offhand", name: "Shield", hides: [], accent: true, triangles: 40),
         (id: "offhand.bow", slot: "offhand", name: "Bow", hides: [], accent: false, triangles: 56),
         (id: "offhand.orb", slot: "offhand", name: "Orb", hides: [], accent: false, triangles: 12),
+        (id: "head.great_helm", slot: "head", name: "Great helm", hides: ["head"], accent: true, triangles: 52),
+        (id: "shoulders.slabs", slot: "shoulders", name: "Slab pauldrons", hides: [], accent: false, triangles: 112),
+        (id: "shoulders.boulders", slot: "shoulders", name: "Stone shoulders", hides: [], accent: false, triangles: 160),
+        (id: "arms.stone_fists", slot: "arms", name: "Stone fists", hides: ["hand_l", "hand_r", "fingers_l", "fingers_r", "thumb_l", "thumb_r"], accent: false, triangles: 160),
+        (id: "waist.tassets", slot: "waist", name: "Plate tassets", hides: [], accent: true, triangles: 108),
+        (id: "offhand.tower_shield", slot: "offhand", name: "Tower shield", hides: [], accent: true, triangles: 40),
+        (id: "weapon.great_axe", slot: "weapon", name: "Great axe", hides: [], accent: false, triangles: 46),
     ],
 )

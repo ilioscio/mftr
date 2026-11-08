@@ -31,6 +31,20 @@ ACCENT = (0.18, 0.52, 0.95)
 EYES = (0.08, 0.08, 0.10)
 
 
+# Girth (CR8): how much thicker than authored each bone's lofts, blocks and paths are, and how
+# far their offsets from the bone reach, as (across, front-back). A creator build sets it for
+# its whole build (`creator.BUILDS`), so the body and every catalog part thicken together;
+# `None` (the default, and every hand-made champion) leaves parts as authored.
+GIRTH = None
+
+
+def girth(bone):
+    """(across, front-back) for `bone` under the current `GIRTH`."""
+    if GIRTH is None:
+        return (1.0, 1.0)
+    return GIRTH(bone)
+
+
 def _lerp(a, b, t):
     return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
 
@@ -125,7 +139,10 @@ def _resolve(pt):
     moved by an offset in armature axes."""
     if isinstance(pt[0], str):
         base = Vector(_bone_point(pt[0], pt[1]))
-        return base + Vector(pt[2]) if len(pt) > 2 else base
+        if len(pt) <= 2:
+            return base
+        kx, ky = girth(pt[0])
+        return base + Vector((pt[2][0] * kx, pt[2][1] * ky, pt[2][2]))
     return Vector(pt)
 
 
@@ -236,8 +253,10 @@ def path_part(bone, points, sides, radii, slot, color, roll=0.0, ref=None, color
     """A part lofted along a polyline (14 §2.3): `points` are coordinates or (bone, t) pairs,
     `radii` one (ru, rv) per point. Returns a builder for `build_mannequin`'s part list."""
     def build(bm, layers, groups, mats):
-        _loft_path(bm, [_resolve(p) for p in points], radii, sides, mats[slot], color, groups[bone], layers,
-                   roll, ref, colors)
+        kx, ky = girth(bone)
+        k = (kx + ky) / 2
+        _loft_path(bm, [_resolve(p) for p in points], [(a * k, b * k) for a, b in radii], sides, mats[slot], color,
+                   groups[bone], layers, roll, ref, colors)
     build.mftr_path = (bone, points, sides, radii, slot, color, roll, ref, colors)
     return build
 
@@ -273,7 +292,8 @@ def box_part(bone, center, size, slot, color, rot=(0.0, 0.0, 0.0), taper=1.0, be
         from mathutils import Euler
         deform, col = layers
         c = _resolve(center)
-        sx, sy, sz = size[0] / 2, size[1] / 2, size[2] / 2
+        kx, ky = girth(bone)
+        sx, sy, sz = size[0] * kx / 2, size[1] * ky / 2, size[2] / 2
         b = bevel * min(sx, sy) * 2
         if b > 0:
             ring = [(sx - b, -sy), (sx, -sy + b), (sx, sy - b), (sx - b, sy), (-sx + b, sy), (-sx, sy - b), (-sx, -sy + b), (-sx + b, -sy)]
@@ -391,6 +411,9 @@ def build_mannequin(armature, name="biped_v1_mannequin", collection=None, part_l
             part(bm, layers, groups, mats)  # a custom builder (heads)
             continue
         bone, a, b, sides, prof, slot, color = part
+        kx, ky = girth(bone)
+        if (kx, ky) != (1.0, 1.0):
+            prof = [(t, ru * kx, rv * ky) for t, ru, rv in prof]
         _loft(bm, _resolve(a), _resolve(b), sides, prof, MATERIAL_SLOTS.index(slot), color, groups[bone], layers)
     bm.to_mesh(me)
     bm.free()
