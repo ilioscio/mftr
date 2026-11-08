@@ -105,7 +105,8 @@ pub fn validate_model(model: &Model, glb_len: usize, side: &Sidecar) -> Report {
 }
 
 /// Morph targets (CR2): only a champion creator base has them, as slider pairs `<id>+` and
-/// `<id>-`, ids made of `a–z`, `0–9` and `_`.
+/// `<id>-`, or one signed target `<id>~` for a slider whose ends mirror each other; ids made of
+/// `a–z`, `0–9` and `_`.
 fn check_targets(r: &mut Report, m: &Model, kind: &str) {
     let names: Vec<&String> = m.target_names.iter().flatten().collect();
     if kind != "base" {
@@ -122,8 +123,8 @@ fn check_targets(r: &mut Report, m: &Model, kind: &str) {
         r.err("a creator base needs its sliders as morph targets");
     }
     for n in &names {
-        let Some(id) = n.strip_suffix('+').or_else(|| n.strip_suffix('-')) else {
-            r.err(format!("morph target `{n}`: a slider's `+` or `-`"));
+        let Some(id) = n.strip_suffix('+').or_else(|| n.strip_suffix('-')).or_else(|| n.strip_suffix('~')) else {
+            r.err(format!("morph target `{n}`: a slider's `+`, `-` or `~`"));
             continue;
         };
         if id.is_empty()
@@ -132,12 +133,18 @@ fn check_targets(r: &mut Report, m: &Model, kind: &str) {
         {
             r.err(format!("morph target `{n}`: slider ids are a–z, 0–9 and _"));
         }
+        if n.ends_with('~') {
+            if names.iter().any(|x| **x == format!("{id}+") || **x == format!("{id}-")) {
+                r.err(format!("slider `{id}` is both signed (`~`) and a pair"));
+            }
+            continue;
+        }
         let other = if n.ends_with('+') { format!("{id}-") } else { format!("{id}+") };
         if !names.iter().any(|x| **x == other) {
             r.err(format!("slider `{id}` has no `{other}`"));
         }
     }
-    let mut ids: Vec<&str> = names.iter().map(|n| n.trim_end_matches(['+', '-'])).collect();
+    let mut ids: Vec<&str> = names.iter().map(|n| n.trim_end_matches(['+', '-', '~'])).collect();
     ids.sort_unstable();
     ids.dedup();
     let parts = m.nodes.iter().filter(|n| is_part_node(&n.name) && n.mesh.is_some()).count();
@@ -585,5 +592,25 @@ fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
         if !names.contains(&c.name.as_str()) {
             r.err(format!("sidecar lists clip `{}`, which the model lacks", c.name));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn targets(names: &[&str]) -> Vec<String> {
+        let m = Model { target_names: vec![names.iter().map(|s| s.to_string()).collect()], ..Default::default() };
+        let mut r = Report::default();
+        check_targets(&mut r, &m, "base");
+        r.findings.into_iter().map(|f| f.msg).collect()
+    }
+
+    #[test]
+    fn sliders_are_pairs_or_one_signed_target() {
+        assert!(targets(&["jaw_width+", "jaw_width-", "eyes_tilt~"]).is_empty());
+        assert!(targets(&["jaw_width+"]).iter().any(|m| m.contains("has no `jaw_width-`")));
+        assert!(targets(&["eyes_tilt~", "eyes_tilt+", "eyes_tilt-"]).iter().any(|m| m.contains("both signed")));
+        assert!(targets(&["eyes_tilt"]).iter().any(|m| m.contains("`+`, `-` or `~`")));
     }
 }

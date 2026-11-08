@@ -124,6 +124,13 @@ About **70 sliders at first** *(start)*, grouped by region. Every group has a "r
 
 Ranges go past natural faces on purpose. A Pinocchio nose is a slider at +1, not a hack.
 
+*Status (2026-11-08):* the humanoid bases have 28 face sliders in the Face step. They're
+grouped like the table (Head, Brow, Eyes, Nose, Cheeks, Mouth, Jaw and chin, Ears), and each
+slider's two ends are named under it. The strokes are aimed at landmarks set on the face's
+surface. Earlier landmarks floated in front of the nose's tip, which left the eye and mouth
+sliders nearly dead. A slider whose two ends mirror each other ships one signed morph target
+(`<id>~`) instead of a `+`/`-` pair, which halves its share of the base's bytes.
+
 Features that aren't shape are picked here too: **eye color**, **skin tone**, **hair** (a catalog
 of styles fitted to the head, §7.1, with color), **brows** and **facial hair** (catalog parts with
 color), **resting expression** (sliders that set brows, lids and mouth together: scowl, smirk,

@@ -210,26 +210,33 @@ def _join(*parts):
 
 # --- The sliders ------------------------------------------------------------------------------
 # How far the block-out strokes go at ±1: past natural faces and bodies on purpose (20 §5.2).
-GAIN = {"face": 2.8, "body": 1.6}
+GAIN = {"face": 1.5, "body": 1.6}
 # Each is (id, description, plus(regions) -> deltas, minus(regions) -> deltas or None for the
 # mirror of plus). Ids are `region_feature` identifiers; recipes name them (`looks.shape`); the game reads them from the
 # shape keys, so adding one here adds it to the creator.
 
 def _face(r):
-    """Landmarks on the face: the head region's bounds give its proportions."""
+    """Landmarks on the face: heights from the head region's bounds, each set on the face's
+    surface (the frontmost vertex near it), so a stroke at the eyes reaches the eyes and not the
+    air in front of them now that the nose stands out (20 §5.2)."""
     lo, hi, s = r.lo, r.hi, r.size
-    cx, front = 0.0, lo.y
     z = lambda t: lo.z + s.z * t  # noqa: E731
+
+    def on(x, t, depth=0.0):
+        pz = z(t)
+        near = [r.cos[i].y for i in r.idx if abs(r.cos[i].x - x) < 0.012 and abs(r.cos[i].z - pz) < 0.012]
+        return Vector((x, (min(near) if near else lo.y) + depth, pz))
+
     return {
-        "chin": Vector((cx, front + 0.02, z(0.05))),
-        "jaw": Vector((s.x * 0.33, front + 0.05, z(0.2))),
-        "cheek": Vector((s.x * 0.30, front + 0.03, z(0.47))),
-        "nose": Vector((cx, front - 0.01, z(0.43))),
-        "brow": Vector((cx, front + 0.01, z(0.66))),
-        "mouth": Vector((cx, front + 0.005, z(0.27))),
-        "eye": Vector((0.034 * s.x / 0.2, front + 0.01, z(0.58))),
+        "chin": on(0.0, 0.05),
+        "jaw": on(s.x * 0.33, 0.2),
+        "cheek": on(s.x * 0.30, 0.47),
+        "nose": on(0.0, 0.43),
+        "brow": on(0.0, 0.66),
+        "mouth": on(0.0, 0.27),
+        "eye": on(0.034 * s.x / 0.2, 0.58),
         "ear": Vector((hi.x, (lo.y + hi.y) / 2, z(0.5))),
-        "center": Vector((cx, (lo.y + hi.y) / 2, z(0.5))),
+        "center": Vector((0.0, (lo.y + hi.y) / 2, z(0.5))),
     }
 
 
@@ -252,9 +259,9 @@ def _sliders():
     face("jaw_width", "A wide, square jaw or a narrow one",
          lambda r, f: scale(r, f["center"], (1.35, 1.0, 1.0), lambda p: _smooth(abs(r.t(p) - 0.2) / 0.2) * _front(r, p)))
     face("chin_length", "A long chin or a short one",
-         lambda r, f: grab(r, f["chin"], 0.06, Vector((0, 0, -0.017)), mirror=False))
+         lambda r, f: grab(r, f["chin"], 0.09, Vector((0, 0, -0.016)), mirror=False))
     face("chin_reach", "A jutting chin or a receding one",
-         lambda r, f: grab(r, f["chin"], 0.05, Vector((0, -0.025, 0)), mirror=False))
+         lambda r, f: grab(r, f["chin"], 0.07, Vector((0, -0.022, 0)), mirror=False))
     face("cheekbones", "High, sharp cheekbones or flat ones",
          lambda r, f: grab(r, f["cheek"], 0.045, Vector((0.012, -0.008, 0.004))))
     face("cheeks_hollow", "Gaunt, hollow cheeks or full ones",
@@ -262,9 +269,9 @@ def _sliders():
     face("brow_ridge", "A heavy brow ridge or a smooth forehead",
          lambda r, f: grab(r, f["brow"], 0.08, Vector((0, -0.015, -0.004)), mirror=False))
     face("nose_length", "A long nose or a short one",
-         lambda r, f: grab(r, f["nose"], 0.035, Vector((0, -0.01, -0.03)), mirror=False))
+         lambda r, f: grab(r, f["nose"], 0.045, Vector((0, -0.006, -0.02)), mirror=False))
     face("nose_reach", "A nose that stands far out, or a flat one",
-         lambda r, f: grab(r, f["nose"], 0.03, Vector((0, -0.045, 0)), mirror=False))
+         lambda r, f: grab(r, f["nose"], 0.04, Vector((0, -0.035, 0)), mirror=False))
     face("nose_width", "A broad nose or a thin one",
          lambda r, f: scale(r, f["nose"], (1.7, 1.0, 1.0), lambda p: _smooth((p - f["nose"]).length / 0.04)))
     face("nose_hook", "A hooked bridge or a scooped one",
@@ -282,6 +289,35 @@ def _sliders():
     face("ears_point", "Pointed ears",
          lambda r, f: _join(grab(r, f["ear"] + Vector((0, 0.01, 0.03)), 0.03, Vector((0.01, 0.02, 0.05)))),
          lambda r, f: {})
+    # The features a face reads by (20 §5.2): where the eyes sit and how they slant, the brow's
+    # height and set, the lips and the mouth's corners, the forehead and crown, the jaw's corners.
+    face("eyes_spacing", "Wide-set eyes or close-set ones",
+         lambda r, f: grab(r, f["eye"], 0.032, Vector((0.008, 0, 0))))
+    face("eyes_height", "Eyes set high in the face or low",
+         lambda r, f: grab(r, f["eye"], 0.04, Vector((0, 0, 0.01))))
+    face("eyes_tilt", "Eyes slanting up at the corners, or down",
+         lambda r, f: _join(grab(r, f["eye"] + Vector((0.018, 0, 0)), 0.02, Vector((0, 0, 0.007))),
+                            grab(r, f["eye"] - Vector((0.014, 0, 0)), 0.016, Vector((0, 0, -0.004)))))
+    face("brow_height", "A brow set high or low over the eyes",
+         lambda r, f: grab(r, f["brow"], 0.07, Vector((0, 0, 0.01)), mirror=False))
+    face("brow_angle", "A scowling brow or a worried one",
+         lambda r, f: _join(grab(r, f["brow"] + Vector((0.016, 0, -0.006)), 0.024, Vector((0, -0.004, -0.009))),
+                            grab(r, f["brow"] + Vector((0.055, 0.004, -0.004)), 0.024, Vector((0, 0, 0.005)))))
+    face("mouth_lips", "Full lips or thin ones",
+         lambda r, f: _join(scale(r, f["mouth"], (1.03, 1.0, 1.4), lambda p: _smooth((p - f["mouth"]).length / 0.03)),
+                            grab(r, f["mouth"], 0.03, Vector((0, -0.005, 0)), mirror=False)))
+    face("mouth_height", "A mouth set high, near the nose, or low",
+         lambda r, f: grab(r, f["mouth"], 0.035, Vector((0, 0, 0.009)), mirror=False))
+    face("mouth_corners", "A smile or a frown",
+         lambda r, f: grab(r, f["mouth"] + Vector((0.026, 0, 0)), 0.018, Vector((0, 0.002, 0.006))))
+    face("head_forehead", "A tall, upright forehead or a sloping one",
+         lambda r, f: grab(r, f["brow"] + Vector((0, 0.02, 0.07)), 0.08, Vector((0, -0.012, 0.01)), mirror=False))
+    face("head_crown", "A tall crown or a flat one",
+         lambda r, f: grab(r, Vector((0, (r.lo.y + r.hi.y) / 2, r.hi.z)), 0.12, Vector((0, 0.003, 0.011)), mirror=False))
+    face("jaw_corners", "Heavy, dropped jaw corners or a tapered jaw",
+         lambda r, f: grab(r, f["jaw"] + Vector((0.01, 0.02, -0.01)), 0.05, Vector((0.007, 0, -0.012))))
+    face("nose_tip", "An upturned nose or a drooping one",
+         lambda r, f: grab(r, f["nose"], 0.018, Vector((0, -0.003, 0.008)), mirror=False))
 
     def body(sid, desc, groups, plus, minus=None):
         out.append((sid, desc, groups, plus, minus))
@@ -334,7 +370,9 @@ def sliders():
 
 
 def add_shape_keys(armature, body):
-    """Add `Basis` and every slider's `+` and `-` keys to `body`. Returns the slider ids."""
+    """Add `Basis` and every slider's keys to `body`: `+` and `-`, or one signed `~` where the
+    minus end mirrors the plus (half the morph data, which bases are capped by). Returns the
+    slider ids."""
     body.shape_key_add(name="Basis", from_mix=False)
     ids = []
     for sid, _desc, groups, plus, minus in sliders():
@@ -343,8 +381,8 @@ def add_shape_keys(armature, body):
         f = _face(r) if groups == ("head",) else {}
         gain = GAIN["face" if groups == ("head",) else "body"]
         up = {i: v * gain for i, v in plus(r, f).items()}
-        down = {i: v * gain for i, v in minus(r, f).items()} if minus is not None else {i: -v for i, v in up.items()}
-        for suffix, deltas in (("+", up), ("-", down)):
+        keys = (("+", up), ("-", {i: v * gain for i, v in minus(r, f).items()})) if minus is not None else (("~", up),)
+        for suffix, deltas in keys:
             key = body.shape_key_add(name=sid + suffix, from_mix=False)
             for i, d in deltas.items():
                 key.data[i].co = r.cos[i] + d
@@ -425,5 +463,6 @@ def build(gender, name, build="humanoid_slim"):
         unwrap(obj)
     armature["mftr_build"] = name
     armature["mftr_sliders"] = ",".join(ids)
-    print(f"{name}: {mesh.triangle_count(body)} triangles, {len(ids)} sliders ({2 * len(ids)} shape keys), {len(made)} parts")
+    keys = len(body.data.shape_keys.key_blocks) - 1
+    print(f"{name}: {mesh.triangle_count(body)} triangles, {len(ids)} sliders ({keys} shape keys), {len(made)} parts")
     return armature, body, made

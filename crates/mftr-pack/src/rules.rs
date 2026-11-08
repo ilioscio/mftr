@@ -35,8 +35,9 @@ pub const MODEL_BYTES_BUDGET: usize = 1000 * 1024;
 /// A champion creator base (CR2): its mesh and every slider's two morph targets, shared by every
 /// champion of its build and gender (20 §11.4). Raised from 2 MB for the paint UVs (CR5b), whose
 /// seams split vertices and with them every morph target's deltas; then to 4 MB for the sculpted
-/// creator heads (their faces in the skull, 36 sides). Bases ship with the game and
-/// never cross the network (customs send recipes, 20 §11.2).
+/// creator heads (their faces in the skull, 36 sides). A slider whose ends mirror each other
+/// ships one signed target (`<id>~`), which keeps the face editor's 28 sliders inside it. Bases
+/// ship with the game and never cross the network (customs send recipes, 20 §11.2).
 pub const BASE_BYTES_BUDGET: usize = 4_000_000;
 /// The clips a creature base brings (CR10): its stance and the clips Q W E R are taken from by
 /// their moves' shapes (`mftr_forge::moves::own_clip_for`).

@@ -327,7 +327,8 @@ SLOTS = ["hair", "head", "face", "torso", "shoulders", "arms", "waist", "legs", 
 
 def transfer_shape_keys(body, part):
     """Give `part` the body's shape keys: each part vertex moves as the nearest body vertices do
-    (inverse-distance weights of the three nearest). Only keys that move the part are made."""
+    (inverse-distance weights of the three nearest). Only keys that move the part visibly (a
+    millimeter somewhere) are made."""
     keys = body.data.shape_keys.key_blocks
     basis = [v.co.copy() for v in keys["Basis"].data]
     tree = KDTree(len(basis))
@@ -350,22 +351,23 @@ def transfer_shape_keys(body, part):
             d = Vector()
             for i, w in nv:
                 d += (kb.data[i].co - basis[i]) * w
-            any_move |= d.length > 1e-5
+            any_move |= d.length > 1e-3
             deltas.append(d)
         if any_move:
             moved[kb.name] = deltas
     if not moved:
         return 0
-    # Keep slider pairs whole: a part that moves with `x+` also gets `x-`.
-    ids = {n[:-1] for n in moved}
+    # Keep slider pairs whole: a part that moves with `x+` also gets `x-` (a signed `x~` is
+    # one key).
+    names = set()
+    for n in moved:
+        names |= {n} if n.endswith("~") else {n[:-1] + "+", n[:-1] + "-"}
     part.shape_key_add(name="Basis", from_mix=False)
-    for sid in sorted(ids):
-        for suffix in "+-":
-            name = sid + suffix
-            k = part.shape_key_add(name=name, from_mix=False)
-            for v, d in zip(part.data.vertices, moved.get(name, [Vector()] * len(part.data.vertices))):
-                k.data[v.index].co = v.co + d
-    return len(ids)
+    for name in sorted(names):
+        k = part.shape_key_add(name=name, from_mix=False)
+        for v, d in zip(part.data.vertices, moved.get(name, [Vector()] * len(part.data.vertices))):
+            k.data[v.index].co = v.co + d
+    return len({n[:-1] for n in names})
 
 
 def build_parts(armature, body, head):

@@ -28,6 +28,25 @@ const STEPS := [
 	["name", "9  Name", "Name the champion and save it.", true],
 ]
 const FACE_PREFIXES := ["head", "face", "jaw", "chin", "cheek", "brow", "nose", "mouth", "eyes", "ears"]
+## The Face step, feature by feature (20 §5.2): each slider as [id, name, its -1 end, its +1 end].
+## A slider the base has that isn't listed lands under "More".
+const FACE_GROUPS := [
+	["Head", [["head_width", "Width", "narrow", "broad"], ["head_crown", "Crown", "flat", "tall"],
+		["head_forehead", "Forehead", "sloping", "tall, upright"], ["face_length", "Lower face", "short", "long"]]],
+	["Brow", [["brow_ridge", "Ridge", "smooth", "heavy"], ["brow_height", "Height", "low", "high"],
+		["brow_angle", "Set", "worried", "scowling"]]],
+	["Eyes", [["eyes_size", "Size", "small", "big"], ["eyes_spacing", "Spacing", "close-set", "wide-set"],
+		["eyes_height", "Height", "low", "high"], ["eyes_tilt", "Slant", "down at the corners", "up at the corners"]]],
+	["Nose", [["nose_length", "Length", "short", "long"], ["nose_reach", "Projection", "flat", "prominent"],
+		["nose_width", "Width", "thin", "broad"], ["nose_hook", "Bridge", "scooped", "hooked"],
+		["nose_tip", "Tip", "drooping", "upturned"]]],
+	["Cheeks", [["cheekbones", "Cheekbones", "flat", "high, sharp"], ["cheeks_hollow", "Fullness", "full", "gaunt"]]],
+	["Mouth", [["mouth_width", "Width", "small", "wide"], ["mouth_lips", "Lips", "thin", "full"],
+		["mouth_height", "Height", "low", "high"], ["mouth_corners", "Corners", "frown", "smile"]]],
+	["Jaw and chin", [["jaw_width", "Jaw width", "narrow", "wide, square"], ["jaw_corners", "Jaw corners", "tapered", "heavy"],
+		["chin_length", "Chin length", "short", "long"], ["chin_reach", "Chin", "receding", "jutting"]]],
+	["Ears", [["ears_size", "Size", "small", "big"], ["ears_point", "Points", "", "pointed"]]],
+]
 const PROPORTION_NAMES := {"height": "Height", "legs": "Leg length", "arms": "Arm length", "torso": "Torso length", "head": "Head size", "hands": "Hand size"}
 
 var creator := MftrCreator.create()
@@ -235,8 +254,21 @@ func _show_step(id: String) -> void:
 			_skin_picker()
 		"face":
 			_sculpt_tools()
-			for id2 in creator.sliders():
-				if _is_face(id2):
+			var have: Array = Array(creator.sliders())
+			var listed := {}
+			for group in FACE_GROUPS:
+				var rows: Array = group[1].filter(func(r): return have.has(r[0]))
+				if rows.is_empty():
+					continue
+				_section(group[0])
+				for r in rows:
+					listed[r[0]] = true
+					var id2: String = r[0]
+					_slider(r[1], creator.slider(id2), func(v): creator.set_slider(id2, v), r[2], r[3])
+			var more: Array = have.filter(func(id2): return _is_face(id2) and not listed.has(id2))
+			if not more.is_empty():
+				_section("More")
+				for id2 in more:
 					_slider(_label_of(id2), creator.slider(id2), func(v): creator.set_slider(id2, v))
 		"body":
 			_sculpt_tools()
@@ -532,8 +564,18 @@ func _choice(text: String, on: bool, act: Callable) -> void:
 	_panel.add_child(b)
 
 
-func _slider(text: String, value: float, set_value: Callable) -> void:
+## A heading over a group of sliders.
+func _section(text: String) -> void:
+	var l := Label.new()
+	l.text = text
+	l.theme_type_variation = "HeaderLabel"
+	_panel.add_child(l)
+
+
+## A -1..1 slider; `low` and `high` name its two ends (under it, small).
+func _slider(text: String, value: float, set_value: Callable, low := "", high := "") -> void:
 	var row := VBoxContainer.new()
+	row.add_theme_constant_override("separation", 0)
 	var l := Label.new()
 	l.text = text
 	row.add_child(l)
@@ -547,6 +589,16 @@ func _slider(text: String, value: float, set_value: Callable) -> void:
 		set_value.call(v)
 		_changed(true))
 	row.add_child(s)
+	if low != "" or high != "":
+		var ends := HBoxContainer.new()
+		for t in [low, high]:
+			var e := Label.new()
+			e.text = t
+			e.theme_type_variation = "HintLabel"
+			e.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			e.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT if t == low else HORIZONTAL_ALIGNMENT_RIGHT
+			ends.add_child(e)
+		row.add_child(ends)
 	_panel.add_child(row)
 
 

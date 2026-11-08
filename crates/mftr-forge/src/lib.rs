@@ -126,12 +126,13 @@ impl Catalog {
         self.bases.iter().find(|(k, _, _)| k == key).map_or(&[], |(_, _, p)| p.as_slice())
     }
 
-    /// The sliders a base offers, in its order (each target pair `<id>+`, `<id>-`).
+    /// The sliders a base offers, in its order (each a target pair `<id>+`, `<id>-`, or one
+    /// signed target `<id>~`).
     pub fn sliders(&self, key: &str) -> Vec<String> {
         let Some(b) = self.base(key) else { return Vec::new() };
         let mut out: Vec<String> = Vec::new();
         for n in b.model.target_names.iter().flatten() {
-            let id = n.trim_end_matches(['+', '-']).to_string();
+            let id = n.trim_end_matches(['+', '-', '~']).to_string();
             if !out.contains(&id) {
                 out.push(id);
             }
@@ -295,15 +296,22 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
     Ok(())
 }
 
-/// Blend the morph targets: each slider's `+` by its value above 0, its `-` below.
+/// Blend the morph targets: each slider's `+` by its value above 0, its `-` below, a signed
+/// `~` by the value itself (a slider whose two ends mirror each other ships one target).
 fn shape(model: &mut Model, looks: &Looks) {
     for (mi, prims) in model.meshes.iter_mut().enumerate() {
         let names = &model.target_names[mi];
         for p in prims.iter_mut() {
             for (ti, name) in names.iter().enumerate() {
-                let id = name.trim_end_matches(['+', '-']);
+                let id = name.trim_end_matches(['+', '-', '~']);
                 let v = looks.slider(id);
-                let w = if name.ends_with('+') { v.max(0.0) } else { (-v).max(0.0) };
+                let w = if name.ends_with('+') {
+                    v.max(0.0)
+                } else if name.ends_with('-') {
+                    (-v).max(0.0)
+                } else {
+                    v
+                };
                 if w == 0.0 {
                     continue;
                 }

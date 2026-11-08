@@ -103,8 +103,8 @@ class Head:
         fwd = (
             0.016 * f["brow"] * g(t - 0.665, 0.05) * g(phi, 0.7)
             - 0.005 * f["sockets"] * g(t - 0.59, 0.05) * pair(0.36, 0.22)
-            + 0.010 * f["nose"] * g(t - 0.56, 0.08) * g(phi, 0.16)
-            + 0.032 * f["nose"] * g(t - 0.45, 0.05) * g(phi, 0.17)
+            + 0.012 * f["nose"] * g(t - 0.56, 0.08) * g(phi, 0.16)
+            + 0.037 * f["nose"] * g(t - 0.45, 0.05) * g(phi, 0.17)
             + 0.006 * f["nose"] * g(t - 0.42, 0.035) * pair(0.2, 0.1)
             + 0.005 * f["lips"] * g(t - 0.31, 0.035) * g(phi, 0.35)
             + 0.007 * f["lips"] * g(t - 0.255, 0.03) * g(phi, 0.32)
@@ -119,12 +119,30 @@ class Head:
         )
         return fwd, out
 
-    def lips_at(self, t, a):
-        """How much a point of the skull is lip (0–1), for its color."""
+    def tint(self, t, a):
+        """The face's painted depth at height `t`, angle `a` (`features`): an RGB multiplier on the
+        skin. Low-poly faces read by it as much as by their shape: the eye sockets and the
+        shadow under the brow, under the nose and the lower lip and the jaw, warmer cheeks and
+        nose."""
         if not self.features:
-            return 0.0
+            return (1.0, 1.0, 1.0)
         phi = (a + math.pi / 2 + math.pi) % (2 * math.pi) - math.pi
-        return math.exp(-((t - 0.262) / 0.02) ** 2) * math.exp(-(phi / 0.24) ** 2)
+
+        def g(d, w):
+            return math.exp(-(d / w) ** 2)
+
+        def pair(c, w):
+            return g(phi - c, w) + g(phi + c, w)
+
+        dark = (0.24 * g(t - 0.6, 0.04) * pair(0.36, 0.2)
+                + 0.12 * g(t - 0.637, 0.022) * g(phi, 0.75)
+                + 0.26 * g(t - 0.405, 0.022) * g(phi, 0.22)
+                + 0.12 * g(t - 0.49, 0.06) * pair(0.2, 0.09)
+                + 0.18 * g(t - 0.218, 0.022) * g(phi, 0.3)
+                + 0.14 * g(t - 0.03, 0.05) * g(phi, 1.2))
+        warm = 0.7 * g(t - 0.38, 0.06) * pair(0.62, 0.2) + 0.5 * g(t - 0.445, 0.03) * g(phi, 0.12)
+        k = max(0.6, 1.0 - dark)
+        return (k * (1.0 + 0.05 * warm), k * (1.0 - 0.03 * warm), k * (1.0 - 0.05 * warm))
 
     def _radii(self, t):
         for (t0, w0, f0, b0), (t1, w1, f1, b1) in zip(SKULL, SKULL[1:]):
@@ -215,9 +233,17 @@ def build(bm, layers, groups, mats, head: Head):
     bm.faces.new(list(reversed(rings[0])))
     _paint(bm, [v for r in rings for v in r] + [crown], skin, head.skin, g, layers)
     if head.features:
-        # The lips: a crisp piece on the sculpted mouth (vertex color would smear into a blush).
+        col = layers[1]
+        for t, ring in zip(head.rows([r[0] for r in SKULL]), rings):
+            for a, v in zip(angles, ring):
+                m = head.tint(t, a)
+                v[col] = (*(min(1.0, c * k) for c, k in zip(head.skin, m)), 1.0)
+        # The lips: a crisp piece on the sculpted mouth (vertex color would smear into a blush),
+        # and the dark line where they meet.
         mouth = _box(bm, head.front(0.262, 0) + Vector((0, 0.001, 0)), Vector((0.038, 0.008, 0.0075)) * head.scale)
         _paint(bm, mouth, skin, head.lips, g, layers)
+        line = _box(bm, head.front(0.262, 0) + Vector((0, -0.0035 * head.scale, 0)), Vector((0.034, 0.002, 0.0016)) * head.scale)
+        _paint(bm, line, skin, tuple(c * 0.45 for c in head.lips), g, layers)
 
     # Face: eyes (whites and pupils), brows, nose, mouth.
     e = head.eye

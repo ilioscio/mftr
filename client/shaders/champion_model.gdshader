@@ -54,5 +54,11 @@ void light() {
 	// Three bands: lit, half-lit, shadowed. Faces a few degrees apart land in different bands.
 	float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
 	float band = ndl > 0.7 ? 1.0 : (ndl > 0.35 ? 0.68 : 0.38);
+	if (slot == 0) {
+		// Skin: the same range, continuous. A sculpted face's facets are small and a few
+		// degrees apart, and hard bands scattered them into a mosaic; this keeps the facets
+		// and lets the light follow the brow, cheekbones and jaw.
+		band = 0.38 + 0.62 * smoothstep(0.08, 0.85, ndl);
+	}
 	DIFFUSE_LIGHT += band * ATTENUATION * LIGHT_COLOR / PI * (LIGHT_IS_DIRECTIONAL ? cloud_sun : 1.0);
 }
