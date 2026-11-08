@@ -80,6 +80,7 @@ fn draw_champion(i: usize, d: &mut Dice) -> ChampionId {
     r.tune_stats([1.0 + d.signed() * 0.18, 1.0 + d.signed() * 0.18, 1.0 + d.signed() * 0.18, 1.0 + d.signed() * 0.05]);
     // Everyone spends the same budget: what wins is then what the price misses.
     r.kit = balance::fit_to(&r.kit, balance::BUDGET);
+    r.kit.class = balance::infer_class(&r.kit);
     let def = mftr_sim::champion::ChampionDef { name: Box::leak(r.name.clone().into_boxed_str()), ..r.kit };
     ChampionId::register(def).expect("room in the registry")
 }

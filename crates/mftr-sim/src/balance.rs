@@ -481,3 +481,63 @@ mod tests {
         }
     }
 }
+
+/// The class a kit plays as (20 §8.1): bots read it to know where to stand and when to commit
+/// (D62), so it should follow the whole kit, not only where its basic attack came from (08 CR7:
+/// a tank's kit on a marksman's attack played from the back line). From the price's parts and
+/// the attack's reach: protecting kits support (from range an enchanter, close a warden); melee
+/// kits hold the front (control and toughness a tank, mobility an assassin or skirmisher, else a
+/// bruiser); ranged ones carry from behind (the attack a marksman, long reach artillery, control
+/// a battlemage, else a mage).
+pub fn infer_class(def: &ChampionDef) -> crate::champion::Class {
+    use crate::champion::Class;
+    let p = price(def);
+    let skills = (p.damage + p.control + p.mobility + p.protection).max(1.0);
+    let ranged = def.attack.range > 300.0;
+    let reach = def
+        .abilities
+        .iter()
+        .map(|a| match a.effect {
+            Effect::Line(s) => s.range,
+            Effect::Area(s) => s.range,
+            Effect::Beam(s) => s.range,
+            _ => 0.0,
+        })
+        .fold(0.0, f32::max);
+    // Heals or shields that reach allies make a support.
+    let for_allies = def.abilities.iter().any(|a| matches!(a.effect, Effect::Support(s) if s.range > 0.0));
+    if for_allies && p.protection / skills > 0.2 {
+        return if ranged { Class::Enchanter } else { Class::Warden };
+    }
+    if !ranged {
+        if p.control / skills > 0.22 && p.durability > p.damage + p.attack {
+            return Class::Tank;
+        }
+        if p.mobility / skills > 0.2 {
+            return if p.damage > p.attack { Class::Assassin } else { Class::Skirmisher };
+        }
+        return Class::Bruiser;
+    }
+    if reach >= 1300.0 {
+        return Class::Artillery;
+    }
+    if p.control / skills > 0.18 {
+        return Class::Battlemage;
+    }
+    if p.attack * 1.5 > p.damage {
+        return Class::Marksman;
+    }
+    if p.mobility / skills > 0.07 { Class::Skirmisher } else { Class::Mage }
+}
+
+#[cfg(test)]
+mod class_tests {
+    use super::*;
+
+    #[test]
+    fn the_official_ten_are_classed_as_they_are() {
+        for c in ChampionId::ALL {
+            assert_eq!(infer_class(c.def()), c.def().class, "{c:?}");
+        }
+    }
+}

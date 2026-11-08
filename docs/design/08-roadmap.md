@@ -1537,6 +1537,13 @@ replace the shared head anyway.
   commits). The exit as written (every generated champion 45–55% in bot leagues) is a target
   for the bots as much as for the price; the owner may want to restate it (a spread to stay
   under, or a playtest with people) rather than chase it through bot AI.
+- **The class follows the kit** (2026-11-08): bots read a champion's class to know where to
+  stand and when to commit, and a creator kit took it from its attack's champion (a tank's kit
+  on a marksman's attack played from the back). `balance::infer_class` reads it from the whole
+  kit instead (the attack's reach, where its points go, heals for allies), matching all ten
+  official classes; recipes and the league use it. **The spread didn't narrow** (14.6 points,
+  6 of 24 inside, against 13.1 and 7 of 24 for the same roster and matches): not the cause
+  either.
 
 ### CR slice 8 status (2026-11-07): ✅ built (Rook, Bastion and Cairn as recipes, awaiting the owner)
 - **The heavy humanoid** (`art/creator/humanoid_heavy/`, both genders): the brute's skeleton

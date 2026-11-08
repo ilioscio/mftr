@@ -73,7 +73,7 @@ impl Recipe {
 
     /// Put move `id` on `slot` (CR6): its animation, effects and sounds, and its numbers in the
     /// kit (the attack's spec, or the ability), which the balance step then tunes (CR7). The
-    /// attack's move also sets the class the bots play it as. False if it doesn't fit.
+    /// class the bots play it as follows the whole kit (`balance::infer_class`). False if it doesn't fit.
     pub fn set_move(&mut self, slot: &str, id: &str) -> bool {
         let Some((c, from)) = crate::moves::parse(id) else { return false };
         if !crate::moves::fits(id, slot) {
@@ -97,6 +97,8 @@ impl Recipe {
                 self.kit.abilities[i] = src.abilities[j];
             }
         }
+        // The class the bots play it as follows the whole kit, not the attack alone (08 CR7).
+        self.kit.class = mftr_sim::balance::infer_class(&self.kit);
         true
     }
 
@@ -332,7 +334,8 @@ mod tests {
         assert!(r.set_move("q", "ember.q"));
         assert!(!r.set_move("q", "ember.r"));
         assert_eq!(r.kit.attack, ChampionId::Vesper.def().attack);
-        assert_eq!(r.kit.class, ChampionId::Vesper.def().class);
+        // The class follows the whole kit (a marksman's attack under a mage's Q reads as what it is).
+        assert_eq!(r.kit.class, mftr_sim::balance::infer_class(&r.kit));
         assert_eq!(r.kit.abilities[0], ChampionId::Ember.def().abilities[0]);
         // A patchwork of three kits costs more than one: fit it to the budget.
         r.auto_fit();
