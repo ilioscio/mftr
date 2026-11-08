@@ -50,7 +50,8 @@ def _shifted(bone_table, dz):
             for n, p, h, t, d, a in bone_table]
 
 
-def run(here, name, bone_table, body, sliders, catalog, clips, ao_height, argv):
+def run(here, name, bone_table, body, sliders, catalog, clips, ao_height, argv, detail=3):
+    mesh.PATH_DETAIL = detail
     # Stand on the ground (the validator's rule): shift everything but the root down or up.
     dz = _lowest(name, bone_table, body)
     if abs(dz) > 0.002:
@@ -80,3 +81,4 @@ def run(here, name, bone_table, body, sliders, catalog, clips, ao_height, argv):
         print(export.export(os.path.join(here, "export"), name, "base"))
         parts.write_catalog(os.path.join(here, "export", f"{name}.parts.ron"), name, made)
     rig.use_table(None)
+    mesh.PATH_DETAIL = 1

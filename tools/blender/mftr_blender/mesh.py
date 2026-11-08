@@ -249,14 +249,52 @@ def _loft_path(bm, centers, radii, sides, mat, color, group, layers, roll=0.0, r
             vert[col] = (*c, ao)
 
 
+# Detail for path lofts (CR10's art pass): above 1, each segment of a round path (6+ sides) is
+# split into this many, through a Catmull-Rom curve of its points and radii, and gets half again
+# as many sides: the silhouette rounds out rather than only splitting faces. 1 (the default, and
+# every hand-made champion) builds paths as authored.
+PATH_DETAIL = 1
+
+
+def _cr(p0, p1, p2, p3, t):
+    t2, t3 = t * t, t * t * t
+    return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
+
+
+def _densify(centers, radii, colors, k):
+    n = len(centers)
+    cs, rs, cols = [], [], []
+    for i in range(n - 1):
+        i0, i3 = max(i - 1, 0), min(i + 2, n - 1)
+        for j in range(k):
+            t = j / k
+            cs.append(_cr(centers[i0], centers[i], centers[i + 1], centers[i3], t))
+            if j == 0 or radii[i + 1] == (0, 0) or radii[i] == (0, 0):
+                # Toward an apex (or a cap) the radius narrows straight.
+                r = tuple(radii[i][m] + (radii[i + 1][m] - radii[i][m]) * t for m in range(2))
+            else:
+                r = tuple(max(0.0, _cr(radii[i0][m], radii[i][m], radii[i + 1][m], radii[i3][m], t)) for m in range(2))
+            rs.append(r if any(r) or (j == 0 and radii[i] == (0, 0)) else (1e-4, 1e-4))
+            cols.append(colors[i] if colors else None)
+    cs.append(centers[-1])
+    rs.append(radii[-1])
+    cols.append(colors[-1] if colors else None)
+    return cs, rs, (cols if colors else None)
+
+
 def path_part(bone, points, sides, radii, slot, color, roll=0.0, ref=None, colors=None):
     """A part lofted along a polyline (14 §2.3): `points` are coordinates or (bone, t) pairs,
     `radii` one (ru, rv) per point. Returns a builder for `build_mannequin`'s part list."""
     def build(bm, layers, groups, mats):
         kx, ky = girth(bone)
         k = (kx + ky) / 2
-        _loft_path(bm, [_resolve(p) for p in points], [(a * k, b * k) for a, b in radii], sides, mats[slot], color,
-                   groups[bone], layers, roll, ref, colors)
+        centers = [_resolve(p) for p in points]
+        rs = [(a * k, b * k) for a, b in radii]
+        n_sides, cols = sides, colors
+        if PATH_DETAIL > 1 and sides >= 6:
+            centers, rs, cols = _densify(centers, rs, colors, PATH_DETAIL)
+            n_sides = int(sides * 1.5)
+        _loft_path(bm, centers, rs, n_sides, mats[slot], color, groups[bone], layers, roll, ref, cols)
     build.mftr_path = (bone, points, sides, radii, slot, color, roll, ref, colors)
     return build
 

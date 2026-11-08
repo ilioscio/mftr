@@ -2,9 +2,9 @@
 (
     base: "serpent",
     parts: [
-        (id: "head.horns", slot: "head", name: "Horns", hides: [], accent: false, triangles: 44),
-        (id: "head.crown", slot: "head", name: "Crown", hides: [], accent: false, triangles: 48),
-        (id: "shoulders.collar", slot: "shoulders", name: "Collar", hides: [], accent: true, triangles: 88),
+        (id: "head.horns", slot: "head", name: "Horns", hides: [], accent: false, triangles: 212),
+        (id: "head.crown", slot: "head", name: "Crown", hides: [], accent: false, triangles: 128),
+        (id: "shoulders.collar", slot: "shoulders", name: "Collar", hides: [], accent: true, triangles: 280),
         (id: "back.spines", slot: "back", name: "Dorsal spines", hides: [], accent: false, triangles: 36),
         (id: "torso.plates", slot: "torso", name: "Belly plates", hides: [], accent: false, triangles: 84),
     ],

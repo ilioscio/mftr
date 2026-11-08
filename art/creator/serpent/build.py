@@ -94,6 +94,14 @@ def body():
         mesh.path_part("hood_l", [B("hood_l", -0.1), B("hood_l", 0.6, (0, 0.02, 0.04)), B("hood_l", 1.0)], 6,
                        [r(0.1, 0.02), r(0.09, 0.02), (0, 0)], "cloth", SCALE_D),
     ]
+    # The art pass: rows of raised scales down the back, a keel of them on each flank.
+    for bn in ["chest", "spine", "pelvis", "tail_1", "tail_2", "tail_3", "tail_4"]:
+        a, _ = radii[bn]
+        for t in (0.2, 0.55, 0.9):
+            p.append(mesh.path_part(bn, [B(bn, t, (0, 0.0, 0.0)), B(bn, t, (0, a * 0.95, 0.0)), B(bn, t + 0.12, (0, a * 1.12, 0.0))], 6,
+                                    [r(0.03, 0.018), r(0.022, 0.012), (0, 0)], "cloth", SCALE_D))
+            left.append(mesh.path_part(bn, [B(bn, t + 0.06, (a * 0.7, a * 0.55, 0.0)), B(bn, t + 0.14, (a * 0.85, a * 0.7, 0.0))], 6,
+                                       [r(0.02, 0.012), (0, 0)], "cloth", SCALE_D))
     return p + left + [mesh.mirror(b) for b in left]
 
 
@@ -208,4 +216,4 @@ def clips(arm):
 
 if __name__ == "__main__":
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
-    builds.run(HERE, NAME, table(CENTER, LEFT, SOCKETS, scale=S), body, sliders, catalog, clips, 1.2 * S, argv)
+    builds.run(HERE, NAME, table(CENTER, LEFT, SOCKETS, scale=S), body, sliders, catalog, clips, 1.2 * S, argv, detail=3)

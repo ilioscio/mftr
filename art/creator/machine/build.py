@@ -93,6 +93,28 @@ def body():
         mesh.path_part("hand_l", [B("hand_l", 0.0, (0.03, 0, 0)), B("hand_l", 1.3, (0.04, 0, 0))], 4, [r(0.04, 0.02), (0, 0)], "metal", IRON),
         mesh.path_part("hand_l", [B("hand_l", 0.0, (-0.03, 0, 0)), B("hand_l", 1.3, (-0.04, 0, 0))], 4, [r(0.04, 0.02), (0, 0)], "metal", IRON),
     ]
+    # The art pass: treads round the tyre, rivets round the chest, pipes from the boiler, tanks on
+    # the back, pistons on the arms.
+    for k in range(20):
+        a = 2 * math.pi * k / 20
+        p.append(mesh.box_part("wheel", B("wheel", 0.0, (0, 0.2 + w * 1.02 * math.cos(a), w * 1.02 * math.sin(a))), r(0.2, 0.06, 0.05), "cloth",
+                               RUBBER, rot=(math.degrees(a), 0, 0)))
+    for k in range(12):
+        a = 2 * math.pi * (k + 0.5) / 12
+        for t in (0.25, 0.9):
+            p.append(mesh.box_part("chest", B("chest", t, (0.3 * math.cos(a) * (1.0 if t > 0.5 else 0.88), 0.27 * math.sin(a), 0)),
+                                   r(0.025, 0.025, 0.025), "metal", BRASS, rot=(0, 0, math.degrees(a))))
+    for side in (1, -1):
+        p.append(mesh.path_part("chest", [B("chest", 0.2, (0.2 * side, -0.18, 0)), B("chest", 0.05, (0.3 * side, -0.12, -0.05)),
+                                          B("pelvis", 0.6, (0.28 * side, 0.0, 0)), B("pelvis", 0.3, (0.2 * side, 0.12, 0))], 8,
+                                [r(0.025, 0.025)] * 4, "metal", BRASS))
+        p.append(mesh.path_part("chest", [B("chest", 0.3, (0.12 * side, 0.26, 0)), B("chest", 0.95, (0.12 * side, 0.26, 0))], 10,
+                                [r(0.07, 0.07), r(0.07, 0.07)], "metal", IRON))
+        p.append(mesh.path_part("chest", [B("chest", 0.95, (0.12 * side, 0.26, 0)), B("chest", 1.0, (0.12 * side, 0.26, 0.03))], 10,
+                                [r(0.05, 0.05), (0, 0)], "metal", BRASS))
+    left.append(mesh.path_part("upperarm_l", [B("upperarm_l", 0.2, (0, 0.06, 0)), B("forearm_l", 0.6, (0, 0.06, 0.02))], 8,
+                               [r(0.022, 0.022), r(0.018, 0.018)], "metal", BRASS))
+    left.append(mesh.path_part("forearm_l", [B("forearm_l", 0.1), B("forearm_l", 0.9)], 10, [r(0.085, 0.085), r(0.095, 0.095)], "metal", PLATE_D))
     return p + left + [mesh.mirror(b) for b in left]
 
 
@@ -198,4 +220,4 @@ def clips(arm):
 
 if __name__ == "__main__":
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
-    builds.run(HERE, NAME, table(CENTER, LEFT, SOCKETS, scale=S), body, sliders, catalog, clips, 1.8 * S, argv)
+    builds.run(HERE, NAME, table(CENTER, LEFT, SOCKETS, scale=S), body, sliders, catalog, clips, 1.8 * S, argv, detail=6)

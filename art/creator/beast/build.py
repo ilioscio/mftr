@@ -116,6 +116,25 @@ def body():
         mesh.path_part("paw_hind_l", [B("paw_hind_l", 0.9, (0, 0, 0.01)), B("paw_hind_l", 1.25, (0, 0, -0.005))], 4, [r(0.03, 0.012), (0, 0)], "metal", NOSE),
         mesh.path_part("jaw", [B("jaw", 0.7, (0.03, 0, 0.03)), B("jaw", 0.72, (0.03, 0, 0.07))], 3, [r(0.012, 0.009), (0, 0)], "metal", TOOTH),
     ]
+    # The art pass: a mane of fur swept back from the neck, tufts down the flanks and over the
+    # haunches, claws on every paw.
+    for k, (t, out, up, back) in enumerate(((0.15, 0.13, -0.08, 0.18), (0.35, 0.15, 0.0, 0.22), (0.55, 0.13, 0.08, 0.24),
+                                            (0.75, 0.1, 0.14, 0.24), (0.95, 0.05, 0.18, 0.2))):
+        left.append(mesh.path_part("neck", [B("neck", t, (out * 0.5, 0.0, up * 0.6)), B("neck", t, (out + 0.04, back * 0.6, up + 0.03)),
+                                            B("neck", t, (out + 0.07, back, up + 0.05))], 6, [r(0.06, 0.03), r(0.05, 0.025), (0, 0)], "cloth",
+                                   FUR_D if k % 2 else FUR))
+    for bn, t, z in (("chest", 0.3, 0.05), ("chest", 0.8, 0.0), ("spine", 0.3, 0.06), ("spine", 0.8, 0.04), ("pelvis", 0.4, 0.06),
+                     ("thigh_l", 0.3, 0.0)):
+        x = 0.2 if bn not in ("pelvis", "thigh_l") else 0.17
+        left.append(mesh.path_part(bn, [B(bn, t, (x, 0, z)), B(bn, t, (x * 1.12, 0.08, z + 0.01)), B(bn, t, (x * 1.18, 0.15, z + 0.02))], 6,
+                                   [r(0.05, 0.022), r(0.035, 0.016), (0, 0)], "cloth", FUR_D))
+    for paw in ("paw_front_l", "paw_hind_l"):
+        for k in (-1, 0, 1):
+            left.append(mesh.path_part(paw, [B(paw, 0.95, (0.025 * k, 0, 0.0)), B(paw, 1.35, (0.03 * k, 0, -0.012))], 6,
+                                       [r(0.014, 0.012), (0, 0)], "metal", NOSE))
+    for k in range(4):
+        p.append(mesh.path_part("chest", [B("chest", 0.9 - 0.25 * k, (0, 0.0, 0.2)), B("chest", 0.9 - 0.25 * k, (0, 0.12, 0.28))], 6,
+                                [r(0.05, 0.02), (0, 0)], "cloth", FUR_D))
     return p + left + [mesh.mirror(b) for b in left]
 
 
@@ -335,6 +354,7 @@ def main():
     bpy.context.scene.render.fps = 30
     rig.use_table(table(CENTER, LEFT, SOCKETS, scale=S))
     mesh.AO_HEIGHT = 1.0 * S
+    mesh.PATH_DETAIL = 3  # the art pass: rounder lofts (mesh.PATH_DETAIL)
     arm = rig.build_armature(name=NAME)
     made_clips = clips(arm)
     body_obj = mesh.build_mannequin(arm, name=NAME, part_list=body())
@@ -351,6 +371,7 @@ def main():
         print(export.export(os.path.join(HERE, "export"), NAME, "base"))
         parts.write_catalog(os.path.join(HERE, "export", f"{NAME}.parts.ron"), NAME, made)
     rig.use_table(None)
+    mesh.PATH_DETAIL = 1
 
 
 if __name__ == "__main__":

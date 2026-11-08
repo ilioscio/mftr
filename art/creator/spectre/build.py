@@ -95,6 +95,19 @@ def body():
     for k in range(3):
         left.append(mesh.path_part("hand_l", [B("hand_l", 0.5, (0.02 * (k - 1), 0, 0)), B("hand_l", 1.6, (0.04 * (k - 1), -0.04, 0))], 4,
                                    [r(0.014, 0.012), (0, 0)], "skin", BONE))
+    # The art pass: folds hanging down the robe, tatters at the hem, ribs showing at the chest.
+    import math as _m
+    for k in range(10):
+        a = 2 * _m.pi * (k + 0.5) / 10
+        cx, cy = _m.cos(a), _m.sin(a)
+        p.append(mesh.path_part("spine", [B("spine", 0.9, (0.2 * cx, 0.16 * cy, 0)), B("pelvis", 0.5, (0.21 * cx, 0.18 * cy, 0)),
+                                          B("wisp_1", 0.6, (0.19 * cx, 0.16 * cy, 0))], 6, [r(0.03, 0.025), r(0.035, 0.03), r(0.02, 0.02)],
+                                "cloth", ROBE_D if k % 2 else ROBE))
+        p.append(mesh.path_part("wisp_1", [B("wisp_1", 0.3, (0.2 * cx, 0.17 * cy, 0)), B("wisp_1", 0.8, (0.26 * cx, 0.22 * cy, -0.04)),
+                                           B("wisp_2", 0.3, (0.24 * cx, 0.2 * cy, -0.02))], 6, [r(0.05, 0.012), r(0.04, 0.01), (0, 0)], "cloth", ROBE_D))
+    for k in range(4):
+        p.append(mesh.path_part("chest", [B("chest", 0.25 + 0.15 * k, (-0.12, -0.15, 0)), B("chest", 0.3 + 0.15 * k, (0, -0.19, 0)),
+                                          B("chest", 0.25 + 0.15 * k, (0.12, -0.15, 0))], 6, [r(0.014, 0.014)] * 3, "skin", BONE))
     return p + left + [mesh.mirror(b) for b in left]
 
 
@@ -213,4 +226,4 @@ def clips(arm):
 
 if __name__ == "__main__":
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
-    builds.run(HERE, NAME, table(CENTER, LEFT, SOCKETS, scale=S), body, sliders, catalog, clips, 2.0 * S, argv)
+    builds.run(HERE, NAME, table(CENTER, LEFT, SOCKETS, scale=S), body, sliders, catalog, clips, 2.0 * S, argv, detail=4)

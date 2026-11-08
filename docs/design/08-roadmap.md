@@ -1536,9 +1536,15 @@ replace the shared head anyway.
 - **The exit** (a champion of each plays a match): Venomcoil (serpentoid, mana), Hollow Warden
   (spectre, mana) and Gearback (machine, energy) in `art/champions/examples/`, each through the
   practice match: moving, fighting, casting.
-- **Left (art):** all three are block-outs of 600–900 triangles against the 5–8k target, the
-  serpent's hood is a flat flap, and the creator's camera frames them as it frames a humanoid.
-  An artist's pass is the next step for every non-humanoid build (D49).
+- **The art pass** (2026-11-08): the path lofts of these builds get **detail**
+  (`mesh.PATH_DETAIL`: each segment split through a Catmull-Rom curve of its points and radii,
+  half again as many sides, so silhouettes round out; hand-made champions build as before), and
+  each build got real detail: the beast a mane, flank tufts and claws; the serpent rows of
+  dorsal scales and flank keels; the spectre robe folds, a tattered hem and ribs; the machine
+  treads, rivets, pipes, tanks and pistons. All four bodies are now inside the 5–8k target
+  (beast 7.3k, serpent 7.5k, spectre 6.7k, machine 5.6k) with no validator warnings.
+- **Left:** the serpent's hood is still a flat flap; the creator's camera frames every build as
+  it frames a humanoid; a polish pass by hand in Blender (D49) will always beat a generator.
 
 ### CR slice 10a status (2026-11-08): ✅ the four-legged beast
 - **The build** (`art/creator/beast/`, no genders yet): a champion-sized beast on the jungle
@@ -1558,9 +1564,8 @@ replace the shared head anyway.
 - **The exit** (20 §14, a champion of it plays a full match): Thornmaw
   (`art/champions/examples/thornmaw.champion.ron`, rage, a sunder passive, Wren's ricochet and
   pounce, Rook's heal, Bastion's upheaval) plays the practice match: moves, fights and casts.
-- **Left:** the base is 1,400 triangles against the 5–8k target (an art pass: the hound's
-  monster-light lofts); a feminine/masculine variant; the creator's camera framing for a long
-  body; bots play it as any kit.
+- **Left:** a feminine/masculine variant; the creator's camera framing for a long body; bots
+  play it as any kit. (Its triangle count was brought into the target by CR10b's art pass.)
 
 ### CR slice 9 status (2026-11-07): ✅ done (free sculpting)
 - **The sculpt** (`mftr_forge::sculpt`, 20 §5.3): sparse offsets on the base's **welds** (one
