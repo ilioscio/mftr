@@ -1526,6 +1526,17 @@ replace the shared head anyway.
   play every combination well (veils, blinks, heals on allies, ultimates' timing), measured
   again with these tools: `mftr-tools league --log P --calibrate N --match-seed S`,
   `tools/league_fit.py`, `tools/league_moves.py`. That is bot work for the M4 track.
+- **A first pass at that bot work** (2026-11-08): the league now prints how much of its cooldown
+  each move is used. Bots used long-range moves at 40–80% of what their cooldowns allow but
+  close-range and mobility ones barely (Flicker 6%, Tumble 7%, Cleave and Siphon 14%, Lunge and
+  Pounce 19%). Bots now dash or blink into reach and step into a ready nova's radius in fights,
+  and ask `Unit::can_cast` everywhere: Flicker rose to 19%, Tumble out of the bottom, novas
+  barely (14% → 17%). **The spread didn't move** (13.1 points, 7 of 24 inside 45–55%, against
+  12.2 for the same roster before). Which kits win under the bots is deeper than which moves
+  they press: how a kit's parts serve one fight model (where it stands, whom it picks, when it
+  commits). The exit as written (every generated champion 45–55% in bot leagues) is a target
+  for the bots as much as for the price; the owner may want to restate it (a spread to stay
+  under, or a playtest with people) rather than chase it through bot AI.
 
 ### CR slice 8 status (2026-11-07): ✅ built (Rook, Bastion and Cairn as recipes, awaiting the owner)
 - **The heavy humanoid** (`art/creator/humanoid_heavy/`, both genders): the brute's skeleton
