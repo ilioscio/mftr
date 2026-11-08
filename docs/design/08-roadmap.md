@@ -18,7 +18,7 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
-| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–9 ✅ (champions as data; forged models; the creator and Test; clothes; paint: fills, brush and decals; moves and passives; the budget; the heavy humanoid; free sculpting) | 10 (more builds); refit prices; swap the official models |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–9 ✅ (champions as data; forged models; the creator and Test; clothes; paint: fills, brush and decals; moves and passives; the budget; the heavy humanoid; free sculpting) | 10: serpentoid, spectre, machine; refit prices; swap the official models |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
@@ -1497,6 +1497,28 @@ replace the shared head anyway.
   rigs. A test holds Bastion's idle on a base to his own pose.
 - **Next:** the owner's look at the three (art pass on the heavy parts: antlers, ice, a chain);
   then CR5b (brush and decals) and CR9 (free sculpting).
+
+### CR slice 10a status (2026-11-08): ✅ the four-legged beast
+- **The build** (`art/creator/beast/`, no genders yet): a champion-sized beast on the jungle
+  hounds' `creature` skeleton (16 §3), with the sockets champions' effects need at the mouth;
+  9 sliders of its own (head size, snout, brow, jaw, ears; bulk, chest, legs, tail), 5 parts
+  (horns, a spiked collar, barding, a saddle, a cape), UVs for paint, the team accent as a band
+  round the chest and eyes in the signature hue.
+- **Its own move library:** a base may carry clips (kind `base`, archetype `creature`, which the
+  validator now allows for bases): idle, a fidget, walk, run, two attacks, recall, death,
+  flinch, a stun loop, and the clips abilities take **by their shape**
+  (`moves::own_clip_for`): projectiles, beams and buffs a howl, areas a slam, lunges a pounce,
+  dashes the dash set. So any kit's moves animate on a beast: the numbers from the move, the
+  motion from the build. Effects and sounds come from the moves as for anyone.
+- **The forge:** a base with its own clips skips the biped library and retargeting; proportions
+  know a beast's legs (hind legs are legs, forelegs arms). Sculpting, paint and parts work as
+  on the humanoids.
+- **The exit** (20 §14, a champion of it plays a full match): Thornmaw
+  (`art/champions/examples/thornmaw.champion.ron`, rage, a sunder passive, Wren's ricochet and
+  pounce, Rook's heal, Bastion's upheaval) plays the practice match: moves, fights and casts.
+- **Left:** the base is 1,400 triangles against the 5–8k target (an art pass: the hound's
+  monster-light lofts); a feminine/masculine variant; the creator's camera framing for a long
+  body; bots play it as any kit.
 
 ### CR slice 9 status (2026-11-07): ✅ done (free sculpting)
 - **The sculpt** (`mftr_forge::sculpt`, 20 §5.3): sparse offsets on the base's **welds** (one

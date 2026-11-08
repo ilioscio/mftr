@@ -77,7 +77,8 @@ def export(out_dir, pack_id, kind):
         export_influence_nb=4,
         export_leaf_bone=False,
         export_rest_position_armature=True,
-        export_animations=kind not in ("rig", "base"),
+        # A base carries clips when its build has its own move library (CR10: a beast's).
+        export_animations=kind != "rig" and (kind != "base" or bool(stashed_actions(arm))),
         export_animation_mode="ACTIONS",
         export_force_sampling=True,
         export_frame_step=1,
@@ -109,7 +110,7 @@ def sidecar_text(arm, pack_id, kind):
         f"    fps: {clips.FPS},",
         "    clips: [",
     ]
-    for act in (stashed_actions(arm) if kind not in ("rig", "base") else []):
+    for act in (stashed_actions(arm) if kind != "rig" else []):
         start, end = act.frame_range
         frames = int(round(end - start))
         stride = act.get("mftr_stride_speed")

@@ -96,6 +96,65 @@ impl Packs {
     }
 }
 
+/// The clip a build with its own move library (CR10: a beast's) plays for an ability, by its
+/// shape: projectiles, beams and buffs a howl, areas a slam, lunges a pounce; dashes the dash set
+/// (`dash_start`, `dash_travel`, `dash_land`).
+pub fn own_clip_for(effect: &mftr_sim::ability::Effect) -> &'static str {
+    use mftr_sim::ability::Effect;
+    match effect {
+        Effect::Area(_) => "slam",
+        Effect::Lunge(_) => "pounce",
+        Effect::Dash(_) => "dash",
+        _ => "howl",
+    }
+}
+
+/// The clips of a base with its own (CR10): the stance as authored, and Q W E R from the
+/// clips their moves' shapes call for, renamed for the slot. Translations scale with the body.
+pub fn own_clips(
+    moves: &Moves,
+    base: &Loaded,
+    translation_scale: f32,
+) -> Result<(Vec<Animation>, Vec<mftr_pack::sidecar::Clip>), String> {
+    let scaled = |a: &Animation, name: &str| {
+        let mut a = a.clone();
+        a.name = name.to_string();
+        for c in a.channels.iter_mut().filter(|c| c.path == "translation") {
+            for v in &mut c.values {
+                for x in v.iter_mut() {
+                    *x *= translation_scale;
+                }
+            }
+        }
+        a
+    };
+    let mut anims: Vec<Animation> = base.model.animations.iter().map(|a| scaled(a, &a.name)).collect();
+    let mut side: Vec<mftr_pack::sidecar::Clip> = base.library.clips.iter().map(|c| sidecar_clip(c, &c.name)).collect();
+    let mut take = |from: &str, to: &str| -> Result<(), String> {
+        let a =
+            base.model.animations.iter().find(|a| a.name == from).ok_or(format!("the base has no `{from}` clip"))?;
+        anims.push(scaled(a, to));
+        if let Some(c) = base.library.clip(from).map(|i| &base.library.clips[i]) {
+            side.push(sidecar_clip(c, to));
+        }
+        Ok(())
+    };
+    for (i, slot) in ["q", "w", "e", "r"].iter().enumerate() {
+        let id = moves.get(slot);
+        let (c, from) = parse(id).ok_or(format!("`{id}` isn't a move"))?;
+        let j = ["q", "w", "e", "r"].iter().position(|s| *s == from).unwrap_or(i);
+        match own_clip_for(&c.def().abilities[j].effect) {
+            "dash" => {
+                for part in ["start", "travel", "land"] {
+                    take(&format!("dash_{part}"), &format!("{slot}_{part}"))?;
+                }
+            }
+            clip => take(clip, slot)?,
+        }
+    }
+    Ok((anims, side))
+}
+
 fn is_ability_clip(name: &str) -> bool {
     ["q", "w", "e", "r"].iter().any(|s| name == *s || name.starts_with(&format!("{s}_")))
 }

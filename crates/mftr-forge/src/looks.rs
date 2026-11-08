@@ -18,7 +18,7 @@
 use mftr_sim::data::{self, DataError, Fields, Value};
 
 /// The builds the catalog has, and whether each has genders (20 §3–4).
-pub const BUILDS: [(&str, bool); 2] = [("humanoid_slim", true), ("humanoid_heavy", true)];
+pub const BUILDS: [(&str, bool); 3] = [("humanoid_slim", true), ("humanoid_heavy", true), ("beast", false)];
 
 /// The skin tones (20 §5.2), natural and otherwise: an index in a recipe.
 pub const SKIN_TONES: [[f32; 3]; 16] = [

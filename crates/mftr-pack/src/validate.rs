@@ -198,10 +198,13 @@ fn check_header(r: &mut Report, side: &Sidecar) {
         let keys: Vec<&str> = mftr_sim::jungle::MonsterKind::ALL.iter().map(|m| m.key()).collect();
         r.err(format!("monster `{}` must be one of {}", side.id, keys.join(", ")));
     }
-    // `creature` (16 §3): monsters only, so far.
-    let creature_ok = side.archetype == "creature" && side.kind == "monster";
+    // `creature` (16 §3): monsters, and the creator's beast build (CR10).
+    let creature_ok = side.archetype == "creature" && (side.kind == "monster" || side.kind == "base");
     if side.archetype != "biped" && !creature_ok {
-        r.err(format!("archetype `{}`: `biped`, or `creature` for a monster (10 §7.1, 16 §3)", side.archetype));
+        r.err(format!(
+            "archetype `{}`: `biped`, or `creature` for a monster or a creator base (10 §7.1, 16 §3)",
+            side.archetype
+        ));
     }
     if side.rig_version != 1 {
         r.err(format!("{} rig version {} is unknown (expected 1)", side.archetype, side.rig_version));
@@ -375,7 +378,8 @@ fn check_skeleton(r: &mut Report, m: &Model) -> Vec<usize> {
 /// A `creature` skeleton (16 §3): free names (lowercase snake case), `root`, a `head` and the
 /// chest and overhead sockets; facing +Z (the head ahead of the root) and left on +X.
 fn check_creature_skeleton(r: &mut Report, m: &Model) -> Vec<usize> {
-    let skinned = m.nodes.iter().filter(|n| n.skin.is_some() && n.mesh.is_some()).count();
+    // A creator base's catalog parts are skinned meshes of their own on the same skin.
+    let skinned = m.nodes.iter().filter(|n| n.skin.is_some() && n.mesh.is_some() && !is_part_node(&n.name)).count();
     if m.skins.len() != 1 || skinned != 1 {
         r.err(format!("expected one skinned mesh and one skin, found {skinned} and {}", m.skins.len()));
         return Vec::new();
@@ -438,6 +442,10 @@ fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
                     r.warn(format!("`{}` is not a champion in mftr-sim: kit clips and fire times not checked", side.id))
                 }
             }
+        }
+        // A build with its own move library (CR10: a beast) carries its clips on its base.
+        "base" if side.archetype == "creature" => {
+            required.extend(rules::REQUIRED_CREATURE_BASE.iter().map(|s| s.to_string()))
         }
         _ => {
             if !names.is_empty() {

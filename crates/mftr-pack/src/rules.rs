@@ -37,6 +37,10 @@ pub const MODEL_BYTES_BUDGET: usize = 1000 * 1024;
 /// seams split vertices and with them every morph target's deltas. Bases ship with the game and
 /// never cross the network (customs send recipes, 20 §11.2).
 pub const BASE_BYTES_BUDGET: usize = 3_500_000;
+/// The clips a creature base brings (CR10): its stance and the clips Q W E R are taken from by
+/// their moves' shapes (`mftr_forge::moves::own_clip_for`).
+pub const REQUIRED_CREATURE_BASE: &[&str] =
+    &["idle", "run", "attack_1", "death", "howl", "slam", "pounce", "dash_start", "dash_travel", "dash_land"];
 pub const MAX_CLIP_FRAMES: u32 = 12 * FPS;
 /// Root motion tolerance (10 §8.4): clips play in place, the sim moves the unit.
 pub const ROOT_XZ_TOLERANCE_M: f32 = 0.01;

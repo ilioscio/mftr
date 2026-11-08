@@ -169,27 +169,43 @@ impl Catalog {
             looks.images.iter().filter(|i| i.target == "body" || looks.outfit.contains(&i.target)).cloned().collect();
         image::apply(&mut model, &worn);
         let scale = looks.proportions.factor(0) * looks.proportions.factor(1).sqrt();
-        attach_clips(&mut model, &self.library.model, scale);
-        let mut clips = library_clips(&self.library);
-        let (mut vfx, mut sounds) = (self.library.vfx.clone(), self.library.sounds.clone());
-        if let Some(m) = &looks.moves {
-            // The moves' clips first; the library's fill in the rest (CC poses, utility casts).
-            let (anims, side) = moves::clips(m, &self.packs, &model, scale)?;
-            let names: Vec<String> = anims.iter().map(|a| a.name.clone()).collect();
-            model.animations.retain(|a| !names.contains(&a.name));
-            clips.retain(|c| !names.contains(&c.name));
-            model.animations.extend(anims);
-            clips.extend(side);
-            vfx = Some(moves::effects(m, &self.packs, looks.signature));
-            let own = moves::sounds(m, &self.packs);
+        let (clips, vfx, sounds) = if base.library.clips.is_empty() {
+            // A humanoid: the shared biped library, then the moves' clips from their champions.
+            attach_clips(&mut model, &self.library.model, scale);
+            let mut clips = library_clips(&self.library);
+            let (mut vfx, mut sounds) = (self.library.vfx.clone(), self.library.sounds.clone());
+            if let Some(m) = &looks.moves {
+                // The moves' clips first; the library's fill in the rest (CC poses, utility casts).
+                let (anims, side) = moves::clips(m, &self.packs, &model, scale)?;
+                let names: Vec<String> = anims.iter().map(|a| a.name.clone()).collect();
+                model.animations.retain(|a| !names.contains(&a.name));
+                clips.retain(|c| !names.contains(&c.name));
+                model.animations.extend(anims);
+                clips.extend(side);
+                vfx = Some(moves::effects(m, &self.packs, looks.signature));
+                let own = moves::sounds(m, &self.packs);
+                let covered: Vec<String> = own.iter().flat_map(|s| s.spec.events.clone()).collect();
+                sounds.retain(|s| !s.spec.events.iter().any(|e| covered.contains(e)));
+                sounds.extend(own);
+            }
+            (clips, vfx, sounds)
+        } else {
+            // A build with its own move library (CR10): its clips, Q W E R by the moves' shapes;
+            // the moves' effects and sounds as for anyone.
+            let m = looks.moves.clone().unwrap_or_else(|| moves::Moves::of(mftr_sim::ChampionId::Rook));
+            let (anims, side) = moves::own_clips(&m, base, scale)?;
+            model.animations = anims;
+            let mut sounds = self.library.sounds.clone();
+            let own = moves::sounds(&m, &self.packs);
             let covered: Vec<String> = own.iter().flat_map(|s| s.spec.events.clone()).collect();
             sounds.retain(|s| !s.spec.events.iter().any(|e| covered.contains(e)));
             sounds.extend(own);
-        }
+            (side, Some(moves::effects(&m, &self.packs, looks.signature)), sounds)
+        };
         let side = sidecar::Sidecar {
             id: name.to_string(),
             kind: "champion".to_string(),
-            archetype: "biped".to_string(),
+            archetype: if base.library.clips.is_empty() { "biped" } else { "creature" }.to_string(),
             rig_version: 1,
             fps: 30,
             clips,
@@ -311,9 +327,10 @@ fn shape(model: &mut Model, looks: &Looks) {
 fn proportion_of(bone: &str) -> Option<(usize, bool)> {
     let base = bone.trim_end_matches("_l").trim_end_matches("_r");
     match base {
-        "thigh" | "calf" => Some((1, true)),
-        "upperarm" | "forearm" => Some((2, true)),
-        "spine_01" | "spine_02" | "chest" => Some((3, true)),
+        // A beast's (CR10): its hind legs are legs, its forelegs arms.
+        "thigh" | "calf" | "shin" | "hock" => Some((1, true)),
+        "upperarm" | "forearm" | "upper_front" | "lower_front" => Some((2, true)),
+        "spine_01" | "spine_02" | "chest" | "spine" => Some((3, true)),
         "head" => Some((4, false)),
         "hand" => Some((5, false)),
         _ => None,
@@ -412,7 +429,9 @@ fn proportion(model: &mut Model, p: &looks::Proportions) {
     }
     // The legs hang from the pelvis: longer legs would push the feet into the ground, so lift
     // the pelvis until the feet stand where they stood (scaled by height).
-    if let (Some(pelvis), Some(foot)) = (model.node_by_name("pelvis"), model.node_by_name("foot_l")) {
+    if let (Some(pelvis), Some(foot)) =
+        (model.node_by_name("pelvis"), model.node_by_name("foot_l").or_else(|| model.node_by_name("paw_hind_l")))
+    {
         let sunk = old[foot].0[1] * height - world(model)[foot].0[1];
         let frame = model.nodes[pelvis].parent.map_or([0.0, 0.0, 0.0, 1.0], |q| world(model)[q].1);
         let up = rotate(inv(frame), [0.0, sunk, 0.0]);
@@ -814,6 +833,40 @@ mod tests {
         assert_eq!(recipe::Recipe::from_text(&r.to_text()).unwrap().looks.sculpt, looks.sculpt);
     }
 
+    /// Made Thornmaw, the beast example (`art/champions/examples/thornmaw.champion.ron`).
+    #[test]
+    #[ignore]
+    fn print_thornmaw() {
+        let mut r = recipe::Recipe { name: "Thornmaw".into(), ..recipe::Recipe::default() };
+        r.looks.build = "beast".into();
+        r.looks.gender = looks::Gender::None;
+        for (slot, id) in
+            [("attack", "rook.attack"), ("q", "wren.q"), ("w", "rook.w"), ("e", "wren.e"), ("r", "bastion.r")]
+        {
+            assert!(r.set_move(slot, id), "{slot} {id}");
+        }
+        assert!(r.set_passive("sunder"));
+        assert!(r.set_resource("rage"));
+        for (k, v) in [
+            ("head_snout", 0.6),
+            ("jaw_heavy", 0.8),
+            ("ears_size", -0.4),
+            ("body_bulk", 0.5),
+            ("body_chest", 0.6),
+            ("body_tail", -0.3),
+        ] {
+            r.looks.set_slider(k, v);
+        }
+        r.looks.outfit = vec!["shoulders.collar".into(), "head.horns".into()];
+        r.looks.paint = vec![("body".into(), 0, 5), ("body".into(), 1, 6)];
+        r.looks.signature = 30;
+        r.auto_fit();
+        assert!(r.problems().is_empty(), "{:?}", r.problems());
+        let c = catalog();
+        c.forge("Thornmaw", &r.looks).unwrap();
+        println!("{}", r.to_text());
+    }
+
     #[test]
     #[ignore]
     fn print_grumbles_war_paint() {
@@ -836,6 +889,36 @@ mod tests {
         }
         r.looks.images = vec![img];
         println!("{}", looks::write(&r.looks));
+    }
+
+    #[test]
+    fn a_beast_forges_with_its_own_clips_for_any_kit() {
+        let c = catalog();
+        assert!(c.sliders("beast").len() >= 8);
+        assert!(c.parts("beast").iter().any(|p| p.id == "back.saddle"));
+        let looks = Looks {
+            build: "beast".into(),
+            gender: looks::Gender::None,
+            outfit: vec!["shoulders.collar".into(), "head.horns".into()],
+            // A projectile, a self heal, a dash and a delayed area: a howl, a howl, the dash set, a slam.
+            moves: Some(moves::Moves {
+                ids: ["rook.attack", "ember.q", "rook.w", "shade.e", "quill.r"].map(String::from),
+            }),
+            ..Looks::default()
+        };
+        let f = c.forge("Beastie", &looks).unwrap();
+        let has = |n: &str| f.model.animations.iter().any(|a| a.name == n);
+        for clip in
+            ["idle", "run", "walk", "attack_1", "death", "q", "w", "e_start", "e_travel", "e_land", "r", "recall"]
+        {
+            assert!(has(clip), "no `{clip}`");
+        }
+        assert!(f.library.clip("q").is_some_and(|i| f.library.clips[i].fire() > 0.0), "q fires on its marker");
+        assert!(f.vfx.is_some());
+        let mut l2 = looks.clone();
+        l2.set_slider("head_snout", 1.0);
+        l2.proportions.set(0, 0.5);
+        assert!(c.forge("Beastie", &l2).is_ok());
     }
 
     #[test]
