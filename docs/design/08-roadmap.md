@@ -1466,6 +1466,13 @@ replace the shared head anyway.
   lineups; each one's price and win rate (decided matches only), and how each part of the price
   correlates with winning (positive: priced too cheap). The first runs are too small to refit
   the weights from; the refit is the next step.
+- **The first league** (20 random champions, 40 ARAM matches of up to 40 min, all decided):
+  win rates spread 23–82% on 13–25 games each, which is mostly noise at that size (±11%), and 6
+  of 20 inside 45–55%. Two signs held across both runs: mobility priced too dear (r −0.31,
+  −0.40) and protection too cheap (+0.34, +0.24), so mobility went from 0.062 to 0.052 points
+  and protection from 0.34 to 0.38 (the official ten still price 80–107). Speed and control
+  flipped between runs and were left. **Next:** a league of a few hundred matches (an overnight
+  run) before any further refit; bots that use dashes better may move mobility back.
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.

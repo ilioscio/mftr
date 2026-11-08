@@ -512,6 +512,7 @@ dependencies = [
  "getrandom 0.3.4",
  "mftr-bots",
  "mftr-client",
+ "mftr-forge",
  "mftr-net",
  "mftr-pack",
  "mftr-server",
