@@ -1,0 +1,119 @@
+// The champion creator's own moves (20 §8.2): moves no champion carries, for any humanoid build.
+// Each is an ability as champion files write it (its default numbers, which the balance step
+// tunes), the library clip it plays (`clip`, from art/library/biped: a dash plays
+// `<clip>_start`, `_travel` and `_land`), its effects by phase (the VFX kit, 05 §5.1, painted in
+// the champion's signature hue like every move's), and the move whose sounds it borrows.
+// `ultimate: true` keeps a move on R.
+//
+// Read by mftr-forge (`libmoves`), compiled in. Ids are `lib.<id>` in a recipe's moves.
+[
+    (
+        id: "whirlwind",
+        about: "Spins twice with the weapon held out, cutting everything round them.",
+        clip: "move_whirlwind",
+        sounds_like: "rook.q",
+        ability: (name: "Whirlwind", cooldown_ms: 8000,
+                  effect: Area(windup_ms: 300, radius: 260, damage: (kind: Physical, base: 55, ad_ratio: 0.9)),
+                  reaction: None, per_rank: (damage: 25, cooldown_ms: 500)),
+        effects: [
+            (phase: "detonate", kit: "slash", ramp: [(1.0, 1.0, 0.9), (0.9, 0.85, 0.7), (0.6, 0.55, 0.5)], count: 28, size: 1.4, arc: 360, tilt: 0, lifetime: 0.18),
+            (phase: "detonate", kit: "dust", ramp: [(0.62, 0.56, 0.46), (0.5, 0.46, 0.4), (0.38, 0.36, 0.33)], count: 16, speed: 3.0),
+        ],
+    ),
+    (
+        id: "shoulder_charge",
+        about: "Drops a shoulder and drives into the target, slowing it.",
+        clip: "move_shoulder_charge",
+        sounds_like: "rook.e",
+        ability: (name: "Shoulder Charge", cooldown_ms: 11000,
+                  effect: Lunge(range: 450, speed: 1300, damage: (kind: Physical, base: 50, ad_ratio: 0.5), cc: Slow(pct: 40, ms: 1500)),
+                  reaction: None, per_rank: (damage: 25, cooldown_ms: 800)),
+        effects: [
+            (phase: "fire", kit: "dust", ramp: [(0.62, 0.56, 0.46), (0.5, 0.46, 0.4), (0.38, 0.36, 0.33)], count: 12, speed: 2.0),
+            (phase: "impact", kit: "flash", ramp: [(1.0, 1.0, 0.92), (1.0, 0.8, 0.5), (0.8, 0.5, 0.3)], count: 6, size: 1.1),
+            (phase: "impact", kit: "shock", ramp: [(1.0, 0.95, 0.8), (0.9, 0.7, 0.45), (0.5, 0.4, 0.35)]),
+        ],
+    ),
+    (
+        id: "chain_hook",
+        about: "Whirls a hooked chain overhead and hurls it, dragging the first enemy hit back to them.",
+        clip: "move_hook_throw",
+        sounds_like: "bastion.q",
+        ability: (name: "Chain Hook", cooldown_ms: 15000,
+                  effect: Line(windup_ms: 400, speed: 1500, radius: 60, range: 850, damage: (kind: Physical, base: 70, ad_ratio: 0.6), cc: Pull(to: 150)),
+                  reaction: HardCc, per_rank: (damage: 35, cooldown_ms: 1000)),
+        effects: [
+            (phase: "release", kit: "slash", ramp: [(0.9, 0.9, 0.95), (0.6, 0.62, 0.7), (0.35, 0.36, 0.4)], count: 12, arc: 300, tilt: 10, lifetime: 0.12),
+            (phase: "projectile", kit: "grab", ramp: [(0.85, 0.86, 0.9), (0.45, 0.46, 0.5)]),
+            (phase: "impact", kit: "burst", ramp: [(1.0, 0.95, 0.8), (0.9, 0.6, 0.35), (0.4, 0.3, 0.25)], count: 14, speed: 3.0),
+        ],
+    ),
+    (
+        id: "battle_cry",
+        about: "Plants their feet and roars, hardening against what comes next.",
+        clip: "move_battle_cry",
+        sounds_like: "bastion.w",
+        ability: (name: "Battle Cry", cooldown_ms: 13000,
+                  effect: Support(shield: 120, duration_ms: 3000),
+                  reaction: None, per_rank: (damage: 30, cooldown_ms: 1000)),
+        effects: [
+            (phase: "fire", kit: "ring", ramp: [(1.0, 0.95, 0.75), (0.9, 0.6, 0.3), (0.45, 0.35, 0.3)], speed: 2.4),
+            (phase: "fire", kit: "flare", ramp: [(1.0, 1.0, 0.9), (1.0, 0.8, 0.45), (0.7, 0.45, 0.25)], count: 14, speed: 2.0),
+        ],
+    ),
+    (
+        id: "shadow_step",
+        about: "Sweeps a cloak across themself and is gone, stepping out of the dark further on.",
+        clip: "move_vanish",
+        sounds_like: "shade.e",
+        ability: (name: "Shadow Step", cooldown_ms: 14000, effect: Blink(range: 450), reaction: None, per_rank: (cooldown_ms: 1000)),
+        effects: [
+            (phase: "fire", kit: "burst", ramp: [(0.35, 0.3, 0.45), (0.18, 0.15, 0.25), (0.06, 0.05, 0.08)], count: 22, speed: 2.2, size: 1.3),
+            (phase: "fire", kit: "dust", ramp: [(0.2, 0.18, 0.26), (0.12, 0.1, 0.16), (0.05, 0.05, 0.07)], count: 12, speed: 1.0, size: 1.6),
+        ],
+    ),
+    (
+        id: "leap_strike",
+        about: "Crouches and leaps high, coming down weapon first.",
+        clip: "move_leap",
+        sounds_like: "quill.e",
+        ability: (name: "Leap Strike", cooldown_ms: 11000, effect: Dash(range: 550, speed: 1100), reaction: None, per_rank: (cooldown_ms: 800)),
+        effects: [
+            (phase: "start", kit: "dust", ramp: [(0.62, 0.56, 0.46), (0.5, 0.46, 0.4), (0.38, 0.36, 0.33)], count: 14, speed: 2.4),
+            (phase: "land", kit: "crack", ramp: [(0.5, 0.45, 0.38), (0.35, 0.32, 0.28), (0.22, 0.2, 0.18)]),
+            (phase: "land", kit: "rocks", ramp: [(0.55, 0.5, 0.42), (0.4, 0.37, 0.32), (0.28, 0.26, 0.24)], count: 10, speed: 3.0),
+        ],
+    ),
+    (
+        id: "meteor_call",
+        about: "Raises both arms to the sky and drags a falling star down onto the ground before them.",
+        clip: "move_meteor_call",
+        sounds_like: "bastion.r",
+        ultimate: true,
+        ability: (name: "Meteor Call", cooldown_ms: 90000,
+                  effect: Area(windup_ms: 600, range: 900, radius: 280, delay_ms: 900, damage: (kind: Magic, base: 170, ap_ratio: 0.7), cc: Knockup(ms: 750)),
+                  reaction: HardCc, per_rank: (damage: 100, cooldown_ms: 15000)),
+        effects: [
+            (phase: "release", kit: "pillar", ramp: [(1.0, 0.95, 0.75), (1.0, 0.6, 0.25), (0.6, 0.25, 0.1)], count: 24, speed: 4.0, lifetime: 0.4),
+            (phase: "telegraph", kit: "stars", ramp: [(1.0, 0.85, 0.5), (0.8, 0.35, 0.1)]),
+            (phase: "detonate", kit: "rain", ramp: [(1.0, 0.95, 0.75), (1.0, 0.6, 0.2), (0.7, 0.25, 0.08)], count: 30, speed: 9.0),
+            (phase: "detonate", kit: "shock", ramp: [(1.0, 0.9, 0.6), (1.0, 0.5, 0.15), (0.6, 0.2, 0.06)]),
+            (phase: "detonate", kit: "rocks", ramp: [(0.55, 0.45, 0.38), (0.4, 0.3, 0.25), (0.25, 0.2, 0.18)], count: 16, speed: 5.0),
+        ],
+    ),
+    (
+        id: "lance_of_light",
+        about: "Braces and pours a lance of light from both palms, holding it against the recoil.",
+        clip: "move_channel",
+        sounds_like: "quill.r",
+        ultimate: true,
+        ability: (name: "Lance of Light", cooldown_ms: 80000,
+                  effect: Beam(windup_ms: 850, range: 1100, radius: 70, duration_ms: 2000, every_ms: 250, damage: (kind: Magic, base: 240, ap_ratio: 1.0)),
+                  reaction: Burst, per_rank: (damage: 120, cooldown_ms: 15000)),
+        effects: [
+            (phase: "release", kit: "flash", ramp: [(1.0, 1.0, 1.0), (1.0, 0.95, 0.7), (0.9, 0.7, 0.3)], count: 8, size: 1.4),
+            (phase: "projectile", kit: "beam", ramp: [(1.0, 1.0, 0.95), (1.0, 0.85, 0.45)]),
+            (phase: "impact", kit: "burst", ramp: [(1.0, 1.0, 0.9), (1.0, 0.8, 0.4), (0.7, 0.4, 0.15)], count: 8, speed: 2.5),
+        ],
+    ),
+]

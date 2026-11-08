@@ -260,6 +260,21 @@ The move library starts from what exists: the ten champions' attacks and abiliti
 shared library's clips become the first **~50 moves** for the humanoid builds. Their animation
 work carries over (§12).
 
+*Status (2026-11-08), the library's own moves:* moves no champion carries, written as data in
+`art/library/biped/moves.ron` (`mftr_forge::libmoves`, compiled in; `lib.<id>` in a recipe).
+Each one has:
+
+- an ability (its default numbers, checked against the kit limits);
+- a clip on the shared biped library (`move_<name>`, authored in `mftr_blender.moveset` and
+  added to the library file with `run.py -- moves`);
+- its own effects by phase;
+- the sounds of an official move.
+
+On a creature build it plays that build's clip for its shape. The first eight are Whirlwind,
+Shoulder Charge, Chain Hook, Battle Cry, Shadow Step, Leap Strike (a dash set), Meteor Call (R)
+and Lance of Light (R, a beam). `art/champions/examples/stormwarden.champion.ron` is made from
+them. A new move is a new entry in the file and its clip; it needs no new code.
+
 *Status (2026-11-08), creature builds:* each move plays a clip for its shape, made in the
 build's own way (`moves::own_clip_for`):
 

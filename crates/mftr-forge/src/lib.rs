@@ -13,6 +13,7 @@
 //! that the client draws and animates like any other. It is deterministic and has no Godot in it.
 
 pub mod image;
+pub mod libmoves;
 pub mod looks;
 pub mod moves;
 pub mod paint;
@@ -177,7 +178,7 @@ impl Catalog {
             let (mut vfx, mut sounds) = (self.library.vfx.clone(), self.library.sounds.clone());
             if let Some(m) = &looks.moves {
                 // The moves' clips first; the library's fill in the rest (CC poses, utility casts).
-                let (anims, side) = moves::clips(m, &self.packs, &model, scale)?;
+                let (anims, side) = moves::clips(m, &self.packs, &self.library, &model, scale)?;
                 let names: Vec<String> = anims.iter().map(|a| a.name.clone()).collect();
                 model.animations.retain(|a| !names.contains(&a.name));
                 clips.retain(|c| !names.contains(&c.name));
@@ -880,6 +881,39 @@ mod tests {
         println!("{}", r.to_text());
     }
 
+    /// Wrote `art/champions/examples/stormwarden.champion.ron`: a heavy humanoid made of the
+    /// library's own moves (`libmoves`).
+    #[test]
+    #[ignore]
+    fn write_stormwarden() {
+        let mut r = recipe::Recipe { name: "Stormwarden".into(), ..recipe::Recipe::default() };
+        r.looks.build = "humanoid_heavy".into();
+        for (slot, id) in [
+            ("attack", "rook.attack"),
+            ("q", "lib.chain_hook"),
+            ("w", "lib.battle_cry"),
+            ("e", "lib.leap_strike"),
+            ("r", "lib.meteor_call"),
+        ] {
+            assert!(r.set_move(slot, id), "{slot} {id}");
+        }
+        assert!(r.set_passive("cleave"));
+        assert!(r.set_resource("rage"));
+        for (k, v) in
+            [("jaw_width", 0.7), ("brow_ridge", 0.8), ("brow_angle", 0.6), ("nose_width", 0.4), ("head_crown", -0.3)]
+        {
+            r.looks.set_slider(k, v);
+        }
+        r.looks.outfit =
+            vec!["weapon.maul".into(), "shoulders.pauldrons".into(), "torso.tunic".into(), "feet.boots".into()];
+        r.looks.signature = 205;
+        r.auto_fit();
+        assert!(r.problems().is_empty(), "{:?}", r.problems());
+        catalog().forge("Stormwarden", &r.looks).unwrap();
+        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/examples/stormwarden.champion.ron");
+        std::fs::write(&art, r.to_text()).unwrap();
+    }
+
     /// Wrote the examples of the serpentoid, spectre and machine builds
     /// (`art/champions/examples/<name>.champion.ron`).
     #[test]
@@ -990,6 +1024,44 @@ mod tests {
         }
         r.looks.images = vec![img];
         println!("{}", looks::write(&r.looks));
+    }
+
+    #[test]
+    fn library_moves_bring_their_clips_effects_sounds_and_numbers() {
+        let c = catalog();
+        let ids = ["rook.attack", "lib.whirlwind", "lib.battle_cry", "lib.leap_strike", "lib.meteor_call"];
+        let looks = Looks { moves: Some(moves::Moves { ids: ids.map(String::from) }), ..Looks::default() };
+        let f = c.forge("Librarian", &looks).unwrap();
+        let has = |n: &str| f.library.clip(n).is_some();
+        for clip in ["q", "w", "e_start", "e_travel", "e_land", "r", "idle", "attack_1"] {
+            assert!(has(clip), "no `{clip}`");
+        }
+        let len = |lib: &mftr_pack::pose::Library, n: &str| lib.clip(n).map(|i| lib.clips[i].length);
+        assert_eq!(len(&f.library, "r"), len(&c.library.library, "move_meteor_call"));
+        let vfx = f.vfx.as_ref().unwrap();
+        for event in ["q.detonate", "r.telegraph", "r.detonate", "e.land"] {
+            assert!(vfx.effects.iter().any(|e| e.event == event), "no `{event}` effect");
+        }
+        assert!(f.sounds.iter().any(|s| s.spec.events.iter().any(|e| e.starts_with("r."))), "R borrows its sounds");
+        // The recipe takes the move's numbers.
+        let mut r =
+            recipe::Recipe::from_text(&mftr_sim::data::write_champion(mftr_sim::ChampionId::Rook.def(), "")).unwrap();
+        assert!(r.set_move("q", "lib.chain_hook"));
+        assert_eq!(r.kit.abilities[0].name, "Chain Hook");
+        assert!(!r.set_move("q", "lib.meteor_call"), "an ultimate only goes on R");
+        // A creature plays a library move by its shape: the hook is a skillshot, a bolt.
+        let beast = Looks {
+            build: "beast".into(),
+            gender: looks::Gender::None,
+            moves: Some(moves::Moves {
+                ids: ["rook.attack", "lib.chain_hook", "rook.w", "rook.e", "lib.lance_of_light"].map(String::from),
+            }),
+            ..Looks::default()
+        };
+        let b = c.forge("Hookbeast", &beast).unwrap();
+        let base = c.base("beast").unwrap();
+        assert_eq!(len(&b.library, "q"), len(&base.library, "bolt"));
+        assert_eq!(len(&b.library, "r"), len(&base.library, "beam"));
     }
 
     #[test]

@@ -75,10 +75,19 @@ impl Recipe {
     /// kit (the attack's spec, or the ability), which the balance step then tunes (CR7). The
     /// class the bots play it as follows the whole kit (`balance::infer_class`). False if it doesn't fit.
     pub fn set_move(&mut self, slot: &str, id: &str) -> bool {
-        let Some((c, from)) = crate::moves::parse(id) else { return false };
         if !crate::moves::fits(id, slot) {
             return false;
         }
+        if let Some(m) = crate::libmoves::get(id) {
+            let mut moves = self.moves();
+            moves.set(slot, id);
+            self.looks.moves = Some(moves);
+            let i = ["q", "w", "e", "r"].iter().position(|s| *s == slot).unwrap_or(0);
+            self.kit.abilities[i] = m.ability;
+            self.kit.class = mftr_sim::balance::infer_class(&self.kit);
+            return true;
+        }
+        let Some((c, from)) = crate::moves::parse(id) else { return false };
         let mut moves = self.moves();
         moves.set(slot, id);
         self.looks.moves = Some(moves);
@@ -154,9 +163,7 @@ impl Recipe {
     }
 
     fn source_ability(&self, slot: &str) -> Option<mftr_sim::ability::Ability> {
-        let (c, from) = self.source(slot)?;
-        let j = ["q", "w", "e", "r"].iter().position(|s| *s == from)?;
-        Some(c.def().abilities[j])
+        crate::moves::ability_of(self.moves().get(slot))
     }
 
     /// A slot's power (its damage, healing and shields, × its move's) and cooldown (× its move's).

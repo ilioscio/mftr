@@ -643,6 +643,12 @@ fn ability(v: Value, at: &str) -> Result<Ability, DataError> {
     Ok(Ability { name, cooldown, effect, reaction, per_rank, transforms })
 }
 
+/// One ability as a champion file writes it (`(name: …, cooldown_ms: …, effect: …, reaction:
+/// …)`): the champion creator's own moves, which no champion carries, are read with it (20 §8.2).
+pub fn read_ability(v: Value, at: &str) -> Result<Ability, DataError> {
+    ability(v, at)
+}
+
 /// Read a champion file (`Champion(format: 0, ...)`).
 pub fn read_champion(text: &str) -> Result<ChampionDef, DataError> {
     read_champion_and_looks(text).map(|(def, _)| def)

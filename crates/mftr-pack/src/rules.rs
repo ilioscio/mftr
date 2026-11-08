@@ -253,6 +253,7 @@ pub fn required_markers(clip: &str, looping: bool) -> Vec<&'static str> {
         || clip == "cast_utility"
         || ["howl", "slam", "pounce", "dash_start"].contains(&clip)
         || CREATURE_MOVE_CLIPS.contains(&clip)
+        || (clip.starts_with("move_") && !clip.ends_with("_travel") && !clip.ends_with("_land"))
         || is_slot(clip)
         || (is_slot(base) && (clip.ends_with("_start") || clip[2..].bytes().all(|b| b.is_ascii_digit())));
     if fires {

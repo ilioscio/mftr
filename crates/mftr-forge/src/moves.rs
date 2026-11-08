@@ -47,9 +47,23 @@ pub fn parse(id: &str) -> Option<(ChampionId, &'static str)> {
     Some((c, slot))
 }
 
+/// The ability a move id brings: an official champion's (by its slot) or a library move's.
+pub fn ability_of(id: &str) -> Option<mftr_sim::ability::Ability> {
+    if let Some(m) = crate::libmoves::get(id) {
+        return Some(m.ability);
+    }
+    let (c, from) = parse(id)?;
+    let j = ["q", "w", "e", "r"].iter().position(|s| *s == from)?;
+    Some(c.def().abilities[j])
+}
+
 /// Whether a move may go in `slot`: the attack's moves are attacks; abilities go in any of
 /// Q W E R, but ultimates only in R and R only takes ultimates (their numbers are an ultimate's).
+/// Library moves (`lib.*`, `libmoves`) are abilities, ultimates or not.
 pub fn fits(id: &str, slot: &str) -> bool {
+    if let Some(m) = crate::libmoves::get(id) {
+        return slot != "attack" && SLOTS.contains(&slot) && m.ultimate == (slot == "r");
+    }
     let Some((_, from)) = parse(id) else { return false };
     match (from, slot) {
         ("attack", "attack") => true,
@@ -70,6 +84,9 @@ pub fn library() -> Vec<(String, String)> {
         for (i, s) in ["q", "w", "e", "r"].iter().enumerate() {
             out.push((format!("{n}.{s}"), format!("{}: {}", d.name, d.abilities[i].name)));
         }
+    }
+    for m in crate::libmoves::all() {
+        out.push((m.id.clone(), format!("Library: {}", m.ability.name)));
     }
     out
 }
@@ -148,11 +165,10 @@ pub fn own_clips(
         }
         Ok(())
     };
-    for (i, slot) in ["q", "w", "e", "r"].iter().enumerate() {
+    for slot in ["q", "w", "e", "r"] {
         let id = moves.get(slot);
-        let (c, from) = parse(id).ok_or(format!("`{id}` isn't a move"))?;
-        let j = ["q", "w", "e", "r"].iter().position(|s| *s == from).unwrap_or(i);
-        let wanted = own_clip_for(&c.def().abilities[j].effect);
+        let ability = ability_of(id).ok_or(format!("`{id}` isn't a move"))?;
+        let wanted = own_clip_for(&ability.effect);
         if wanted == ["dash"] {
             for part in ["start", "travel", "land"] {
                 take(&format!("dash_{part}"), &format!("{slot}_{part}"))?;
@@ -176,6 +192,7 @@ fn is_ability_clip(name: &str) -> bool {
 pub fn clips(
     moves: &Moves,
     packs: &Packs,
+    library: &Loaded,
     model: &Model,
     translation_scale: f32,
 ) -> Result<(Vec<Animation>, Vec<mftr_pack::sidecar::Clip>), String> {
@@ -198,10 +215,25 @@ pub fn clips(
     }
     for slot in ["q", "w", "e", "r"] {
         let id = moves.get(slot);
-        let (c, from) = parse(id).ok_or(format!("`{id}` isn't a move"))?;
         if !fits(id, slot) {
             return Err(format!("`{id}` can't go on {}", slot.to_uppercase()));
         }
+        if let Some(m) = crate::libmoves::get(id) {
+            let parts: &[&str] = if matches!(m.ability.effect, mftr_sim::ability::Effect::Dash(_)) {
+                &["_start", "_travel", "_land"]
+            } else {
+                &[""]
+            };
+            for part in parts {
+                let from = format!("{}{part}", m.clip);
+                if !library.model.animations.iter().any(|a| a.name == from) {
+                    return Err(format!("the library has no `{from}` clip for `{id}`"));
+                }
+                take(library, &from, &format!("{slot}{part}"));
+            }
+            continue;
+        }
+        let (c, from) = parse(id).ok_or(format!("`{id}` isn't a move"))?;
         let pack = packs.get(c).ok_or(format!("{}'s pack isn't in the catalog", c.def().name))?;
         for a in &pack.model.animations {
             let suffix =
@@ -262,6 +294,15 @@ fn rehue(c: (f32, f32, f32), hue: u16) -> (f32, f32, f32) {
 pub fn effects(moves: &Moves, packs: &Packs, hue: u16) -> vfx::VfxFile {
     let mut out = Vec::new();
     for slot in SLOTS {
+        if let Some(m) = crate::libmoves::get(moves.get(slot)) {
+            for e in &m.effects {
+                let mut e = e.clone();
+                e.event = format!("{slot}.{}", e.event);
+                e.ramp = e.ramp.iter().map(|c| rehue(*c, hue)).collect();
+                out.push(e);
+            }
+            continue;
+        }
         let Some((c, from)) = parse(moves.get(slot)) else { continue };
         let Some(file) = packs.get(c).and_then(|p| p.vfx.as_ref()) else { continue };
         for e in &file.effects {
@@ -286,7 +327,9 @@ pub fn effects(moves: &Moves, packs: &Packs, hue: u16) -> vfx::VfxFile {
 pub fn sounds(moves: &Moves, packs: &Packs) -> Vec<sfx::Sound> {
     let mut out = Vec::new();
     for slot in SLOTS {
-        let Some((c, from)) = parse(moves.get(slot)) else { continue };
+        // A library move sounds like the official move it names.
+        let id = crate::libmoves::get(moves.get(slot)).map_or(moves.get(slot), |m| m.sounds_like.as_str());
+        let Some((c, from)) = parse(id) else { continue };
         let Some(pack) = packs.get(c) else { continue };
         for s in &pack.sounds {
             let mut events: Vec<String> = s.spec.events.iter().filter_map(|e| rename(e, from, slot)).collect();
@@ -316,7 +359,9 @@ mod tests {
         assert!(!fits("ember.q", "r"));
         assert!(fits("rook.r", "r"));
         assert!(!fits("rook.attack", "q"));
-        assert_eq!(library().len(), 50);
+        assert_eq!(library().len(), 50 + crate::libmoves::all().len());
+        assert!(fits("lib.whirlwind", "q") && !fits("lib.whirlwind", "r") && !fits("lib.whirlwind", "attack"));
+        assert!(fits("lib.meteor_call", "r") && !fits("lib.meteor_call", "w"));
         assert_eq!(rename("q.release", "q", "w").as_deref(), Some("w.release"));
         assert_eq!(rename("w.release", "q", "w"), None);
         let red = rehue((0.2, 0.9, 0.8), 0);
