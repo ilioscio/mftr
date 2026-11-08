@@ -110,7 +110,8 @@ const MODEL_LIFT := -0.85                # bodies sit at y 0.85 (the placeholder
 var vfx: Node3D
 var _vfx_tables := {}                    # champion name -> { event: [effect] }
 var _vfx_recent := {}                    # dedupe key -> time (a prediction and its confirmation)
-const PARTICLE_KITS := ["flare", "burst", "ring", "dust", "slash", "flash", "crack", "pillar", "shock", "rocks", "rain"]
+const PARTICLE_KITS := ["flare", "burst", "ring", "dust", "slash", "flash", "crack", "pillar", "shock", "rocks", "rain",
+		"vortex", "embers", "shards", "smoke", "motes"]
 # A4c: the SFX player and each champion's sounds by event, from its pack's `<id>.sfx.ron`,
 # falling back to the shared library's (as the VFX do).
 var sfx: Node3D

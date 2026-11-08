@@ -69,7 +69,7 @@
         ability: (name: "Shadow Step", cooldown_ms: 14000, effect: Blink(range: 450), reaction: None, per_rank: (cooldown_ms: 1000)),
         effects: [
             (phase: "fire", kit: "burst", ramp: [(0.35, 0.3, 0.45), (0.18, 0.15, 0.25), (0.06, 0.05, 0.08)], count: 22, speed: 2.2, size: 1.3),
-            (phase: "fire", kit: "dust", ramp: [(0.2, 0.18, 0.26), (0.12, 0.1, 0.16), (0.05, 0.05, 0.07)], count: 12, speed: 1.0, size: 1.6),
+            (phase: "fire", kit: "smoke", ramp: [(0.2, 0.18, 0.26), (0.12, 0.1, 0.16), (0.05, 0.05, 0.07)], count: 10, lifetime: 0.9),
         ],
     ),
     (
@@ -95,6 +95,7 @@
                   reaction: HardCc, per_rank: (damage: 100, cooldown_ms: 15000)),
         effects: [
             (phase: "release", kit: "pillar", ramp: [(1.0, 0.95, 0.75), (1.0, 0.6, 0.25), (0.6, 0.25, 0.1)], count: 24, speed: 4.0, lifetime: 0.4),
+            (phase: "detonate", kit: "embers", ramp: [(1.0, 0.9, 0.6), (1.0, 0.55, 0.15), (0.6, 0.2, 0.05), (0.25, 0.15, 0.12)], count: 24, lifetime: 1.4),
             (phase: "telegraph", kit: "stars", ramp: [(1.0, 0.85, 0.5), (0.8, 0.35, 0.1)]),
             (phase: "detonate", kit: "rain", ramp: [(1.0, 0.95, 0.75), (1.0, 0.6, 0.2), (0.7, 0.25, 0.08)], count: 30, speed: 9.0),
             (phase: "detonate", kit: "shock", ramp: [(1.0, 0.9, 0.6), (1.0, 0.5, 0.15), (0.6, 0.2, 0.06)]),
@@ -112,6 +113,7 @@
                   reaction: Burst, per_rank: (damage: 120, cooldown_ms: 15000)),
         effects: [
             (phase: "release", kit: "flash", ramp: [(1.0, 1.0, 1.0), (1.0, 0.95, 0.7), (0.9, 0.7, 0.3)], count: 8, size: 1.4),
+            (phase: "release", kit: "vortex", ramp: [(1.0, 1.0, 0.95), (1.0, 0.9, 0.6), (0.8, 0.6, 0.25)], count: 30, speed: 2.6),
             (phase: "projectile", kit: "beam", ramp: [(1.0, 1.0, 0.95), (1.0, 0.85, 0.45)]),
             (phase: "impact", kit: "burst", ramp: [(1.0, 1.0, 0.9), (1.0, 0.8, 0.4), (0.7, 0.4, 0.15)], count: 8, speed: 2.5),
         ],
@@ -125,6 +127,7 @@
                   effect: Line(windup_ms: 300, speed: 1600, radius: 50, range: 950, damage: (kind: Magic, base: 80, ap_ratio: 0.7)),
                   reaction: Poke, per_rank: (damage: 40, cooldown_ms: 500)),
         effects: [
+            (phase: "release", kit: "vortex", ramp: [(0.95, 0.85, 1.0), (0.7, 0.45, 1.0), (0.35, 0.15, 0.6)], count: 20, speed: 2.0, lifetime: 0.3),
             (phase: "release", kit: "flare", ramp: [(0.95, 0.85, 1.0), (0.7, 0.45, 1.0), (0.35, 0.15, 0.6)], count: 14, speed: 3.0),
             (phase: "projectile", kit: "orb", ramp: [(0.95, 0.9, 1.0), (0.65, 0.4, 1.0), (0.3, 0.1, 0.55)]),
             (phase: "impact", kit: "burst", ramp: [(0.95, 0.9, 1.0), (0.7, 0.45, 1.0), (0.35, 0.15, 0.6), (0.18, 0.1, 0.25)], count: 16, speed: 3.4),
@@ -141,7 +144,7 @@
         effects: [
             (phase: "detonate", kit: "ring", ramp: [(0.92, 0.98, 1.0), (0.55, 0.8, 1.0), (0.3, 0.5, 0.8)], speed: 2.0),
             (phase: "detonate", kit: "crack", ramp: [(0.85, 0.95, 1.0), (0.5, 0.75, 0.95), (0.3, 0.45, 0.7)]),
-            (phase: "detonate", kit: "burst", ramp: [(0.95, 1.0, 1.0), (0.6, 0.85, 1.0), (0.35, 0.55, 0.85)], count: 26, speed: 4.0, size: 0.8),
+            (phase: "detonate", kit: "shards", ramp: [(0.95, 1.0, 1.0), (0.6, 0.85, 1.0), (0.35, 0.55, 0.85)], count: 22, speed: 5.0),
         ],
     ),
     (
@@ -153,7 +156,7 @@
                   per_rank: (damage: 40, cooldown_ms: 1000)),
         effects: [
             (phase: "fire", kit: "rain", ramp: [(1.0, 1.0, 0.85), (0.9, 1.0, 0.6), (0.5, 0.8, 0.35)], count: 18, speed: 3.0),
-            (phase: "fire", kit: "flare", ramp: [(1.0, 1.0, 0.9), (0.95, 0.95, 0.55), (0.6, 0.75, 0.3)], count: 12, speed: 1.6),
+            (phase: "fire", kit: "motes", ramp: [(1.0, 1.0, 0.9), (0.95, 0.95, 0.55), (0.6, 0.75, 0.3)], count: 18),
         ],
     ),
     (
@@ -164,7 +167,8 @@
         ability: (name: "Smoke Bomb", cooldown_ms: 16000, effect: Dash(range: 350, speed: 1200, veil: (radius: 300, duration_ms: 3000)),
                   reaction: None, per_rank: (cooldown_ms: 1000)),
         effects: [
-            (phase: "start", kit: "burst", ramp: [(0.75, 0.74, 0.72), (0.55, 0.54, 0.52), (0.35, 0.34, 0.33)], count: 30, speed: 2.6, size: 2.0, lifetime: 1.2),
+            (phase: "start", kit: "smoke", ramp: [(0.75, 0.74, 0.72), (0.55, 0.54, 0.52), (0.35, 0.34, 0.33)], count: 16, lifetime: 1.5),
+            (phase: "start", kit: "flash", ramp: [(1.0, 1.0, 0.9), (0.8, 0.8, 0.75), (0.5, 0.5, 0.5)], count: 4, size: 0.8),
             (phase: "travel", kit: "dust", ramp: [(0.6, 0.58, 0.56), (0.45, 0.44, 0.42), (0.3, 0.3, 0.3)], count: 4, size: 1.4),
             (phase: "land", kit: "dust", ramp: [(0.6, 0.58, 0.56), (0.45, 0.44, 0.42), (0.3, 0.3, 0.3)], count: 10, speed: 1.6),
         ],
