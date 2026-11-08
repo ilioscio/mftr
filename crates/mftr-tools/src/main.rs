@@ -150,6 +150,9 @@ fn main() {
                 minutes: num("--minutes", 25.0),
                 seed: num("--seed", 1.0) as u64,
                 log: get("--log"),
+                match_seed: get("--match-seed").and_then(|s| s.parse().ok()),
+                calibrate: num("--calibrate", 0.0) as usize,
+                calibrate_matches: num("--calibrate-matches", 100.0) as usize,
             };
             mftr_tools::league::run(&cfg);
         }

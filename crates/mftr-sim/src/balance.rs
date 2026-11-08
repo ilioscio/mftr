@@ -325,6 +325,12 @@ pub fn fit_to(def: &ChampionDef, target: f32) -> ChampionDef {
     best
 }
 
+/// `def` with its power scaled by `k` (damage, healing and shields; cooldowns by `1/√k`; the body
+/// a little), as Auto-fit scales it: calibration by simulation's step (20 §9.3).
+pub fn rescale(def: &ChampionDef, k: f32) -> ChampionDef {
+    scaled(def, k)
+}
+
 fn scaled(def: &ChampionDef, k: f32) -> ChampionDef {
     let mut out = *def;
     let dmg = |d: &mut crate::ability::Damage| {

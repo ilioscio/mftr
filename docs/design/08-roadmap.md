@@ -1505,6 +1505,27 @@ replace the shared head anyway.
   bots that use veils, blinks and costs as a player would. Weights now: durability 0.0185,
   attack 0.161, speed 0.358, damage 0.292, control 122, mobility 0.0595, protection 0.406; the
   official ten price 79–110, mean 100.
+- **Why no price meets the target in bot leagues** (2026-11-08, four more experiments):
+  1. **Per-move pricing doesn't generalize:** a per-move model fitted on two leagues predicts
+     the third *worse* than a coin flip (held-out log-loss 0.80 against 0.693) at every
+     strength of regularization but the one that zeroes it (`tools/league_moves.py` now runs
+     this check first and refuses to suggest a table that fails it).
+  2. **Yet champions' strength is real:** the same 24 champions replayed in fresh matches
+     (`--match-seed`) repeat their win rates, r = 0.85; 12.5 points of the spread repeat.
+  3. **A bug found and fixed:** some kits can't reach the budget inside the limits, and
+     `fit_to` left them off it (one at 114.6 points won 87%); the league now draws such kits
+     again, so every champion prices 98–100.
+  4. **Calibration by simulation (`--calibrate N`) doesn't converge:** tuning each champion's
+     power to its measured win rate (up to −25%/+30% a round, three rounds) left the spread at
+     12–13 points (6 of 24 inside 45–55%): champions scaled *up* to 116–122 points still lost
+     (24%, 30%), ones scaled *down* to 64–77 still won (61–69%).
+
+  So in bot leagues a champion's strength lives in **how the bots play its combination of
+  moves**, not in its numbers: neither a price nor its power moves it much. **The CR7 exit
+  (45–55%) can't be met from the creator's side**; it needs the bots (D62's one fight model) to
+  play every combination well (veils, blinks, heals on allies, ultimates' timing), measured
+  again with these tools: `mftr-tools league --log P --calibrate N --match-seed S`,
+  `tools/league_fit.py`, `tools/league_moves.py`. That is bot work for the M4 track.
 
 ### CR slice 8 status (2026-11-07): ✅ built (Rook, Bastion and Cairn as recipes, awaiting the owner)
 - **The heavy humanoid** (`art/creator/humanoid_heavy/`, both genders): the brute's skeleton
