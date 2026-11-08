@@ -1,0 +1,46 @@
+// Old Grumble, the Bridge Troll: an example champion file (CR1b, 20 §11.1), the kind the
+// champion creator makes. Not an official champion: `mftr-tools botmatch --champion-file
+// art/champions/examples/grumble.champion.ron --team Grumble` puts him in a bot match.
+// A heavy brute: a slowing ground slam, a roar that heals him, a boulder he lobs to knock a
+// group up, and a charge that runs a target down.
+// Numbers are *(start)* values; durations are in milliseconds. The format is in
+// `crates/mftr-sim/src/data.rs`, the limits every kit must respect in `crates/mftr-sim/src/limits.rs`.
+Champion(
+    format: 0,
+    name: "Grumble",
+    stats: (max_health: 670, health_regen: 1.8, armor: 34, magic_resist: 32, attack_damage: 66, move_speed: 335),
+    growth: (max_health: 106, health_regen: 0.08, armor: 4.6, magic_resist: 1.7, attack_damage: 3.6),
+    attack: (range: 175, attack_speed: 0.65, windup_fraction: 0.3),
+    abilities: [
+        (
+            name: "Ground Slam",
+            cooldown_ms: 7000,
+            effect: Area(windup_ms: 250, radius: 300, damage: (kind: Physical, base: 55, ad_ratio: 0.7), cc: Slow(pct: 35, ms: 1500)),
+            reaction: None,
+            per_rank: (damage: 30, cooldown_ms: 500),
+            transforms: [Echo, Wide],
+        ),
+        (
+            name: "Bellow",
+            cooldown_ms: 14000,
+            effect: Support(heal: 50, heal_missing: 0.1),
+            reaction: None,
+            per_rank: (damage: 20, cooldown_ms: 1000),
+        ),
+        (
+            name: "Boulder Toss",
+            cooldown_ms: 16000,
+            effect: Area(windup_ms: 300, range: 800, radius: 200, delay_ms: 1000, damage: (kind: Physical, base: 80, ad_ratio: 0.6), cc: Knockup(ms: 750)),
+            reaction: HardCc,
+            per_rank: (damage: 35, cooldown_ms: 1000),
+            transforms: [Echo, Wide],
+        ),
+        (
+            name: "Trample",
+            cooldown_ms: 70000,
+            effect: Lunge(range: 650, speed: 1400, damage: (kind: Physical, base: 160, ad_ratio: 0.9), cc: Slow(pct: 50, ms: 2000)),
+            reaction: None,
+            per_rank: (damage: 100, cooldown_ms: 12000),
+        ),
+    ],
+)

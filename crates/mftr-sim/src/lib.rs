@@ -17,6 +17,7 @@ pub mod horde;
 pub mod items;
 pub mod jungle;
 pub mod lane;
+pub mod limits;
 pub mod map;
 pub mod mapspec;
 pub mod math;

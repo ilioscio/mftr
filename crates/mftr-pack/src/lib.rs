@@ -6,6 +6,7 @@
 //! and the timing markers (10 §8.4). The container, signatures and push come later (11 §8).
 
 pub mod animator;
+pub mod champion;
 pub mod glb;
 pub mod json;
 pub mod pose;

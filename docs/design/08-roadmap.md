@@ -1298,6 +1298,19 @@ replace the shared head anyway.
 - **Checks:** golden hashes unchanged; registry tests (a registered champion spawns and plays);
   reader strictness tests.
 
+### CR slice 1b status (2026-11-07): ✅ done
+- **Champion files** (`<id>.champion.ron`, `mftr_pack::champion`): read by the strict reader,
+  then checked against `mftr_sim::limits` (20 §9.4): D10's reaction budget, D36 (hard CC only on
+  dodgeable shapes, and hard-CC skillshots classed `HardCc`), D44 (transformers only on lines and
+  areas), unique ability names, and *(start)* bounds on every number (stats and growth, attack,
+  cooldowns and rank steps, windups, speeds, sizes, damage and ratios, CC, heals, shields,
+  veils, pulses, beams). The official ten pass; the old per-kit tests became this check.
+- **Tools:** `mftr-tools pack validate` takes champion files (and finds them in folders);
+  `mftr-tools botmatch --champion-file FILE,... --team NAME,...` registers them first.
+- **Example:** `art/champions/examples/grumble.champion.ron` (a troll brute: slam, roar, boulder,
+  trample). In a 12-minute ARAM bot match he went 13/10/21 on a bruiser build borrowed from Rook,
+  and the replay re-simulated with all 72 hashes matching.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

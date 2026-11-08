@@ -338,45 +338,6 @@ pub fn max_rank(slot: u8, level: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ability::ReactionClass;
-
-    /// D10 (03a §8): every dodge-intended ability gives a centered target enough time to react
-    /// and walk out at its class distance (linear) or before detonation (areas).
-    #[test]
-    fn every_kit_passes_the_reaction_budget() {
-        for c in ChampionId::ALL {
-            for a in c.def().abilities {
-                let Some(frac) = a.reaction.range_fraction() else { continue };
-                let (have, need) = match a.effect {
-                    Effect::Line(s) => (s.reaction_time(frac * s.range), s.reaction_needed()),
-                    Effect::Area(s) => (s.reaction_time(), s.reaction_needed()),
-                    Effect::Beam(s) => (s.reaction_time(), s.reaction_needed()),
-                    _ => panic!("{}: only skillshots and areas are dodge-intended", a.name),
-                };
-                assert!(have >= need, "{} {}: {have:.3} s < {need:.3} s", c.def().name, a.name);
-            }
-        }
-    }
-
-    #[test]
-    fn hard_cc_abilities_are_classed_hard_cc() {
-        for c in ChampionId::ALL {
-            for a in c.def().abilities {
-                let cc = match a.effect {
-                    Effect::Line(s) => s.cc,
-                    // Self-centered novas are melee-range tools, not skillshots.
-                    Effect::Area(s) if s.range > 0.0 => s.cc,
-                    Effect::Beam(s) => s.cc,
-                    Effect::Lunge(l) => {
-                        assert!(!l.cc.is_hard(), "{}: point-and-click hard CC isn't dodgeable", a.name);
-                        continue;
-                    }
-                    _ => continue,
-                };
-                assert_eq!(cc.is_hard(), a.reaction == ReactionClass::HardCc, "{}", a.name);
-            }
-        }
-    }
 
     /// Ten archetypes (M2's six, M3's four), each with a distinct kit.
     #[test]
