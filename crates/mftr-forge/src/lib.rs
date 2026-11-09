@@ -133,6 +133,10 @@ impl Catalog {
     pub fn sliders(&self, key: &str) -> Vec<String> {
         let Some(b) = self.base(key) else { return Vec::new() };
         let mut out: Vec<String> = Vec::new();
+        // On a base with a face rig, the face sliders are presets on its bones (21 §2.7).
+        if b.model.node_by_name("face_forehead").is_some() {
+            out.extend(face::presets().iter().map(|p| p.id.clone()));
+        }
         for n in b.model.target_names.iter().flatten() {
             let id = n.trim_end_matches(['+', '-', '~']).to_string();
             if !out.contains(&id) {
@@ -205,9 +209,12 @@ impl Catalog {
             sounds.extend(own);
             (side, Some(moves::effects(&m, &self.packs, looks.signature)), sounds)
         };
-        // The face last (21 §2.3): clips were retargeted from the bones' unsculpted rest.
-        if let Some(face) = &looks.face {
-            face::bake(&mut model, face);
+        // The face last (21 §2.3): clips were retargeted from the bones' unsculpted rest. The
+        // face sliders add their presets to the recipe's own face (21 §2.7).
+        if model.node_by_name("face_forehead").is_some()
+            && let Some(face) = face::compose(looks.face.as_ref(), &looks.shape)
+        {
+            face::bake(&mut model, &face);
         }
         let side = sidecar::Sidecar {
             id: name.to_string(),
@@ -303,13 +310,18 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
 }
 
 /// Blend the morph targets: each slider's `+` by its value above 0, its `-` below, a signed
-/// `~` by the value itself (a slider whose two ends mirror each other ships one target).
+/// `~` by the value itself (a slider whose two ends mirror each other ships one target). Face
+/// sliders on a base with a face rig move bones instead (`face::compose`).
 fn shape(model: &mut Model, looks: &Looks) {
+    let rigged = model.node_by_name("face_forehead").is_some();
     for (mi, prims) in model.meshes.iter_mut().enumerate() {
         let names = &model.target_names[mi];
         for p in prims.iter_mut() {
             for (ti, name) in names.iter().enumerate() {
                 let id = name.trim_end_matches(['+', '-', '~']);
+                if rigged && face::preset(id).is_some() {
+                    continue;
+                }
                 let v = looks.slider(id);
                 let w = if name.ends_with('+') {
                     v.max(0.0)
@@ -1251,11 +1263,11 @@ mod tests {
         let mut long_nose = Looks::default();
         long_nose.set_slider("nose_reach", 1.0);
         let nosed = c.forge("Nosed", &long_nose).unwrap();
-        // Faces −Z in Blender, +Z in glTF: the nose tip reaches further toward +Z.
-        let front = |m: &Model| {
-            m.meshes.iter().flatten().flat_map(|p| p.positions.iter().map(|v| v[2])).fold(f32::MIN, f32::max)
-        };
-        assert!(front(&nosed.model) > front(&plain.model) + 0.02);
+        // Faces −Z in Blender, +Z in glTF: the nose tip reaches further toward +Z. On a rigged
+        // face the slider moves the nose's bones (FR3), so where the skin puts the vertices.
+        let front = |m: &Model| face::skinned(m).iter().flatten().flatten().map(|v| v[2]).fold(f32::MIN, f32::max);
+        let reach = front(&nosed.model) - front(&plain.model);
+        assert!(reach > 0.01, "{reach}");
         let mut tall = Looks::default();
         tall.proportions.set(0, 1.0);
         tall.proportions.set(1, 1.0);
@@ -1265,6 +1277,23 @@ mod tests {
         // The skeleton moved with it.
         let hb = |m: &Model| world(m)[m.node_by_name("head").unwrap()].0[1];
         assert!(hb(&t.model) / hb(&plain.model) > 1.2);
+    }
+
+    #[test]
+    fn a_recipe_from_before_the_face_rig_gets_its_face_from_the_bones() {
+        // FR3: Cairn-neo's recipe was written for the face morphs (`brow_ridge: 1`, `nose_length:
+        // 0.5`…). It loads unchanged, and its face sliders now move the face bones' rest.
+        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/neo");
+        let r =
+            recipe::Recipe::from_text(&std::fs::read_to_string(art.join("cairn-neo.champion.ron")).unwrap()).unwrap();
+        assert!(r.looks.face.is_none());
+        let m = catalog().forge(&r.name, &r.looks).unwrap().model;
+        let moved = |name: &str| {
+            let i = m.node_by_name(name).unwrap();
+            m.bind.get(i).copied().flatten().is_some_and(|b| b.0 != m.nodes[i].translation)
+        };
+        assert!(moved("face_brow_l") && moved("face_brow_r") && moved("face_nose_tip"));
+        assert!(!moved("face_eye_l"), "no eye slider in the recipe");
     }
 
     #[test]
@@ -1307,13 +1336,15 @@ mod tests {
         let narrow = c.forge("A", &l).unwrap();
         l.set_slider("head_width", 1.0);
         let wide = c.forge("B", &l).unwrap();
+        // The helmet is weighted to the face bones under it (FR2), so it widens with them; a
+        // little, as the face widens more than the skull it covers.
         let width = |m: &Model| {
             let node = m.nodes.iter().find(|n| n.name == "part.head.helmet").unwrap();
-            let xs: Vec<f32> =
-                m.meshes[node.mesh.unwrap()].iter().flat_map(|p| p.positions.iter().map(|v| v[0])).collect();
+            let xs: Vec<f32> = face::skinned(m)[node.mesh.unwrap()].iter().flatten().map(|v| v[0]).collect();
             xs.iter().cloned().fold(f32::MIN, f32::max) - xs.iter().cloned().fold(f32::MAX, f32::min)
         };
-        assert!(width(&wide.model) > width(&narrow.model) * 1.08);
+        let gain = width(&wide.model) / width(&narrow.model);
+        assert!(gain > 1.008, "{gain}");
     }
 
     #[test]

@@ -204,6 +204,127 @@ pub fn bake(model: &mut Model, face: &FaceSculpt) {
     }
 }
 
+// --- The face sliders as presets on the bones (21 §2.7, FR3) ----------------------------------
+
+const PRESETS_SOURCE: &str = include_str!("../../../art/creator/heads/presets.txt");
+
+/// A face slider: the bone moves of its +1 end (its -1 end the opposite, unless one-sided).
+#[derive(Clone, Debug)]
+pub struct Preset {
+    pub id: String,
+    pub about: String,
+    pub one_sided: bool,
+    pub face: FaceSculpt,
+}
+
+/// Every face slider, in the file's order (`art/creator/heads/presets.txt`).
+pub fn presets() -> &'static [Preset] {
+    static ALL: std::sync::OnceLock<Vec<Preset>> = std::sync::OnceLock::new();
+    ALL.get_or_init(|| read_presets(PRESETS_SOURCE).unwrap_or_else(|e| panic!("art/creator/heads/presets.txt: {e}")))
+}
+
+pub fn preset(id: &str) -> Option<&'static Preset> {
+    presets().iter().find(|p| p.id == id)
+}
+
+fn read_presets(text: &str) -> Result<Vec<Preset>, String> {
+    let mut out: Vec<Preset> = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let at = format!("line {}", n + 1);
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix('[') {
+            let (head, about) = rest.split_once(']').ok_or(format!("{at}: `[id] description`"))?;
+            let (id, one_sided) = match head.strip_suffix('+') {
+                Some(id) => (id, true),
+                None => (head, false),
+            };
+            if out.iter().any(|p| p.id == id) {
+                return Err(format!("{at}: `{id}` twice"));
+            }
+            out.push(Preset { id: id.into(), about: about.trim().into(), one_sided, face: FaceSculpt::default() });
+            continue;
+        }
+        let p = out.last_mut().ok_or(format!("{at}: a bone before any `[id]`"))?;
+        let words: Vec<&str> = line.split_whitespace().collect();
+        if !(5..=6).contains(&words.len()) || (words.len() == 6 && words[5] != "mirror") {
+            return Err(format!("{at}: `bone t|r|s x y z [mirror]`"));
+        }
+        let i = FACE_RIG
+            .iter()
+            .position(|(b, _)| *b == words[0])
+            .ok_or(format!("{at}: `{}` isn't a face bone", words[0]))?;
+        let v: [i16; 3] = [2, 3, 4].map(|k| words[k].parse::<i16>().unwrap_or(i16::MIN));
+        if v.contains(&i16::MIN) {
+            return Err(format!("{at}: x y z are whole numbers"));
+        }
+        let mut set = |i: usize, d: BoneDelta| -> Result<(), String> {
+            let b = &mut p.face.bones[i];
+            let slot = match words[1] {
+                "t" => (&mut b.t, d.t),
+                "r" => (&mut b.r, d.r),
+                "s" => (&mut b.s, d.s),
+                k => return Err(format!("{at}: kind `{k}` (t, r or s)")),
+            };
+            if *slot.0 != [0; 3] {
+                return Err(format!("{at}: `{}` {} twice", FACE_RIG[i].0, words[1]));
+            }
+            *slot.0 = slot.1;
+            if b.clamped(&LIMITS[i]) != *b {
+                return Err(format!("{at}: outside `{}`'s limits or degrees of freedom", FACE_RIG[i].0));
+            }
+            Ok(())
+        };
+        let d = BoneDelta { t: v, r: v, s: v };
+        set(i, d)?;
+        if words.len() == 6 {
+            let name = words[0].strip_suffix("_l").ok_or(format!("{at}: `mirror` goes on a `_l` bone"))?;
+            let j =
+                FACE_RIG.iter().position(|(b, _)| *b == format!("{name}_r")).ok_or(format!("{at}: no `{name}_r`"))?;
+            set(j, d.mirrored())?;
+        }
+    }
+    Ok(out)
+}
+
+/// The face a recipe gets: its own `face` plus each face slider in `shape` times its preset,
+/// summed and clamped. None when neither moves anything.
+pub fn compose(face: Option<&FaceSculpt>, shape: &[(String, f32)]) -> Option<FaceSculpt> {
+    let mut acc = [[0f32; 9]; BONES];
+    if let Some(f) = face {
+        for (a, d) in acc.iter_mut().zip(&f.bones) {
+            for (k, v) in d.t.iter().chain(&d.r).chain(&d.s).enumerate() {
+                a[k] += *v as f32;
+            }
+        }
+    }
+    let mut any = face.is_some_and(|f| !f.is_neutral());
+    for (id, value) in shape {
+        let Some(p) = preset(id) else { continue };
+        let v = if p.one_sided { value.max(0.0) } else { *value };
+        if v == 0.0 {
+            continue;
+        }
+        any = true;
+        for (a, d) in acc.iter_mut().zip(&p.face.bones) {
+            for (k, x) in d.t.iter().chain(&d.r).chain(&d.s).enumerate() {
+                a[k] += *x as f32 * v;
+            }
+        }
+    }
+    if !any {
+        return None;
+    }
+    let mut out = FaceSculpt::default();
+    for (d, a) in out.bones.iter_mut().zip(&acc) {
+        let q = |k: usize| a[k].round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+        *d = BoneDelta { t: [q(0), q(1), q(2)], r: [q(3), q(4), q(5)], s: [q(6), q(7), q(8)] };
+    }
+    Some(out.clamped())
+}
+
 // --- Skinning on the CPU (tests now; the editor's hover raycast in FR4, 21 §4) ----------------
 
 /// A node's global affine transform: a 3×3 linear part (columns) and a translation.
@@ -481,6 +602,90 @@ mod tests {
         assert!(from_bytes(&bytes[..bytes.len() - 1]).is_err());
         let m = f.bones[2].mirrored();
         assert_eq!(m.mirrored(), f.bones[2]);
+    }
+
+    #[test]
+    fn the_presets_are_symmetric_and_within_limits() {
+        let all = presets();
+        assert_eq!(all.len(), 28);
+        for p in all {
+            assert!(!p.face.is_neutral(), "{}", p.id);
+            assert!(!p.about.is_empty(), "{}", p.id);
+            assert_eq!(p.face.clamped(), p.face, "{}", p.id);
+            // Every face slider moves both sides alike.
+            for (i, (name, _)) in FACE_RIG.iter().enumerate() {
+                if let Some(side) = name.strip_suffix("_l") {
+                    let j = FACE_RIG.iter().position(|(b, _)| *b == format!("{side}_r")).unwrap();
+                    assert_eq!(p.face.bones[i].mirrored(), p.face.bones[j], "{}: {name}", p.id);
+                }
+            }
+        }
+        assert_eq!(all.iter().filter(|p| p.one_sided).map(|p| p.id.as_str()).collect::<Vec<_>>(), ["ears_point"]);
+    }
+
+    #[test]
+    fn the_presets_reader_is_strict() {
+        let bad = |t: &str| read_presets(t).is_err();
+        assert!(!bad("[a] A
+face_chin t 0 100 0
+[b+] B
+face_ear_l s 0 0 100 mirror"));
+        assert!(bad("face_chin t 0 100 0"), "a bone before any preset");
+        assert!(
+            bad("[a] A
+face_nose t 0 100 0"),
+            "no such bone"
+        );
+        assert!(
+            bad("[a] A
+face_chin t 0 9999 0"),
+            "past the limits"
+        );
+        assert!(
+            bad("[a] A
+face_cheek_l r 0 100 0"),
+            "cheeks don't turn"
+        );
+        assert!(
+            bad("[a] A
+face_chin t 0 100 0 mirror"),
+            "mirror on a middle bone"
+        );
+        assert!(bad("[a] A
+face_chin q 0 100 0"));
+        assert!(
+            bad("[a] A
+face_chin t 0 100 0
+face_chin t 0 50 0"),
+            "the same move twice"
+        );
+        assert!(bad("[a] A
+[a] B"));
+    }
+
+    #[test]
+    fn sliders_compose_into_the_face() {
+        let tip = FACE_RIG.iter().position(|(b, _)| *b == "face_nose_tip").unwrap();
+        let chin = FACE_RIG.iter().position(|(b, _)| *b == "face_chin").unwrap();
+        let reach = preset("nose_reach").unwrap().face.bones[tip].t;
+        let s = |v: &[(&str, f32)]| v.iter().map(|(k, x)| (k.to_string(), *x)).collect::<Vec<_>>();
+        assert_eq!(compose(None, &[]), None);
+        // Body sliders aren't the face's.
+        assert_eq!(compose(None, &s(&[("body_bulk", 1.0)])), None);
+        assert_eq!(compose(None, &s(&[("nose_reach", 0.5)])).unwrap().bones[tip].t, reach.map(|x| x / 2));
+        assert_eq!(compose(None, &s(&[("nose_reach", -1.0)])).unwrap().bones[tip].t, reach.map(|x| -x));
+        // One-sided: below zero does nothing.
+        assert_eq!(compose(None, &s(&[("ears_point", -1.0)])), None);
+        // Summed with the recipe's own sculpt, then clamped to the bone's limits.
+        let f = sample();
+        let both = compose(Some(&f), &s(&[("nose_reach", 1.0)])).unwrap();
+        assert_eq!(both.bones[tip].t, [0, f.bones[tip].t[1] + reach[1], f.bones[tip].t[2]]);
+        assert_eq!(both.bones[2], f.bones[2]);
+        let far = compose(None, &s(&[("chin_reach", 3.0)])).unwrap();
+        assert_eq!(far.bones[chin].t[1], LIMITS[chin].t);
+        // What the sliders make saves and loads like any face.
+        assert_eq!(read(data::parse(&write(&both)).unwrap(), "face").unwrap(), both);
+        assert_eq!(from_bytes(&to_bytes(&both)).unwrap(), both);
     }
 
     #[test]

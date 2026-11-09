@@ -1046,9 +1046,47 @@ Hair, hoods, helmets, circlet, crown, horns, goggles, eyepatch and beard sit wel
 
 **Not yet:**
 
-- **The old face sliders** (morph targets) still run on the new head, and look rough on it (Rook-neo's jaw). They become bone presets in FR5.
+- **The old face sliders** (morph targets) still ran on the new head, and looked rough on it (Rook-neo's jaw). FR3 made them bone presets.
 - **Smooth shading for the face** is still the owner's call (§5).
 - **Defect #7**, the slim feminine chest that rises to the chin, is a body fix (§8).
+
+### FR3 status (2026-11-09): done
+
+**The face sliders are presets on the bones.** `art/creator/heads/presets.txt` holds the 28 face sliders, each a set of bone moves at +1, mirrored where the slider is two-sided (`ears_point` is one-sided). The forge reads it through `mftr_forge::face::presets`, which rejects:
+
+- an unknown bone;
+- a move past a bone's limits or degrees of freedom;
+- the same move given twice.
+
+**How a recipe's sliders reach the face.** `face::compose` sums the recipe's own `face` and each face slider times its preset, rounds and clamps the result, and the forge bakes it. The sliders stay in `shape:` as written. **This departs from §2.7**, which folded them into `face` on load. Keeping them means:
+
+- old recipes load and save byte-identical;
+- a slider stays a slider in the creator;
+- a retuned preset reaches every recipe that uses it.
+
+**The bases.** The four bases dropped their face morph targets. They keep the seven body sliders as shape keys, and are now ~1.5 MB each.
+
+**Weights, redone.** Previewing every preset at −1 and +1 showed that FR1's falloff had starved the small bones: the chin carried at most 0.05 of its vertices, the lips 0.14, the mouth corners 0.16. `face_rig.weight` now works like this:
+
+- Each bone's falloff is a smoothstep over a tighter reach (2.5–7.5 cm).
+- Overlapping bones split a vertex as falloff³, so the nearest feature wins.
+- The jaw is a frame bone along the jawline, from each jaw angle to the chin, at 0.6 strength.
+- Each eye takes its lids whole (a 2.2 cm core), so the eyes move inside their lids.
+- The fade toward the neck counts rings from the seam, as the validator does, rather than height. The old height cut also starved the chin.
+
+The feature bones now peak at 0.35–0.6, the eyes at 1.0. At +1 a preset moves the skin 6–15 mm, except `brow_angle` (3 mm, a turn of the brows). The steepest edge is 0.30. Pack validation is clean.
+
+**Checks:**
+
+- Contact sheets of every preset at −1, 0 and +1, front and ¾.
+- Cairn-, Marrow- and Rook-neo's full slider mixes, composed on their own bases.
+- Tests: the presets are symmetric and within limits; the presets reader is strict; sliders compose and clamp; composed faces round-trip through text and bytes; Cairn-neo's pre-rig recipe forges with its face on the bones.
+
+**Not yet:**
+
+- **The jaw's frame.** The jaw leans along its bone toward the chin, so a jaw move in a preset or the editor isn't "up" in the face frame; `presets.txt` says how to convert. The editor (FR4) drags in the bone's own frame, so it needs no change.
+- **`head_width` widens the face, not the skull.** No bone covers the cranium's sides, so the skull widens ~2 mm and the helmet 1.3%, with 15 mm or more of clearance kept.
+- **Head `sculpt:` offsets** still apply by weld id. §2.7's drop on load waits for FR4's editor, which replaces head sculpting.
 
 ## 8. Reported defects in the creator (2026-11-09)
 

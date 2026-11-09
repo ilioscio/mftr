@@ -99,13 +99,24 @@ def add_bones(armature, head, piv=None):
     return piv
 
 
-# Placeholder reach per bone (m, before head scale): where its weight fades to zero. Wide on
-# purpose: the block-out head's edges are ~2.5 cm, and a narrower falloff would pinch.
+# Reach per bone (m, before head scale): where its weight fades to zero. Tight enough that each
+# feature's own bone owns it (the lips, the chin and the mouth corners are 2–4 cm apart).
 REACH = {
-    "face_forehead": 0.11, "face_brow_mid": 0.08, "face_brow": 0.08, "face_eye": 0.08, "face_cheekbone": 0.09,
-    "face_cheek": 0.09, "face_nose_bridge": 0.08, "face_nose_tip": 0.08, "face_nostril": 0.07, "face_lip_upper": 0.07,
-    "jaw": 0.14, "face_lip_lower": 0.07, "face_mouth": 0.07, "face_chin": 0.09, "face_jaw_angle": 0.09, "face_ear": 0.07,
+    "face_forehead": 0.075, "face_brow_mid": 0.035, "face_brow": 0.04, "face_eye": 0.035, "face_cheekbone": 0.045,
+    "face_cheek": 0.045, "face_nose_bridge": 0.035, "face_nose_tip": 0.035, "face_nostril": 0.025,
+    "face_lip_upper": 0.03, "jaw": 0.05, "face_lip_lower": 0.03, "face_mouth": 0.028, "face_chin": 0.045,
+    "face_jaw_angle": 0.05, "face_ear": 0.04,
 }
+# The jaw is a frame bone: it takes the jawline (from each jaw angle to the chin) at this strength,
+# so the chin, lip and jaw-angle bones, at full strength, own their own features over it.
+JAW_STRENGTH = 0.6
+# Bones whose weight is full within this distance of the pivot (m, before head scale), the
+# falloff starting there: the eyes, so the lids move with the eyeballs (bound to them whole).
+CORE = {"face_eye": 0.022}
+# Shares between overlapping bones go as falloff ** SHARPEN: the nearest feature wins.
+SHARPEN = 3.0
+SEAM_RINGS = 2
+FADE_RINGS = 4
 # A bone never takes all of a vertex: the head keeps some, so neighbouring bones blend.
 PEAK = 0.85
 
@@ -115,7 +126,7 @@ PEAK = 0.85
 MAX_STEP = 0.32
 
 
-def _final(raw):
+def _final(raw, cap=None):
     """A vertex's face weights as at most three bones, at most PEAK in all: the fourth-
     strongest weight is taken off the top three, so a bone fades to nothing exactly where it
     drops out of the three (a plain cut would jump there and pinch)."""
@@ -123,8 +134,9 @@ def _final(raw):
     cut = ws[3][0] if len(ws) > 3 else 0.0
     ws = [(w - cut, i) for w, i in ws[:3] if w > cut]
     total = sum(w for w, _ in ws)
-    if total > PEAK:
-        ws = [(w * PEAK / total, i) for w, i in ws]
+    cap = PEAK if cap is None else cap
+    if total > cap:
+        ws = [(w * cap / total, i) for w, i in ws]
     return ws
 
 
@@ -139,9 +151,9 @@ def weight(armature, body, head, piv):
         if name not in groups:
             groups[name] = body.vertex_groups.new(name=name)
     g_head = groups["head"]
-    floor = head.base.z + head.height * 0.04  # the bottom of the head: seam side
     names = [n for n, _ in FACE_RIG]
     reach = [REACH.get(n, REACH.get(n[:-2], 0.08)) * k for n in names]
+    core = [CORE.get(n, CORE.get(n[:-2], 0.0)) * k for n in names]
     me = body.data
     head_v = [v.index for v in me.vertices
               if next((g.weight for g in v.groups if g.group == g_head.index), 0.0) >= 0.99]
@@ -163,13 +175,50 @@ def weight(armature, body, head, piv):
             for b in vs:
                 if a != b:
                     nbrs[a].add(b)
-    # The falloff, letting go toward the seam (a cut would pinch the chin).
-    raw = []
+    # Rings from the neck seam (21 §1.5): ring 1 touches a vertex the neck weighs on. Face bones
+    # may weigh from ring SEAM_RINGS + 1 (mftr_pack::face::SEAM_RINGS) and fade in over FADE_RINGS.
+    ring = [0] * n
+    front = set()
+    for poly in me.polygons:
+        if any(v not in ids for v in poly.vertices):
+            front.update(ids[v] for v in poly.vertices if v in ids)
+    r = 1
+    while front:
+        for a in front:
+            ring[a] = r
+        r += 1
+        front = {b for a in front for b in nbrs[a] if ring[b] == 0}
+    # The falloff (smooth), letting go toward the seam (a cut would pinch the chin); the jaw's
+    # along the jawline. Then the shares: the nearest feature wins, and the strongest falloff
+    # sets how much of the vertex the face takes.
+    def to_segment(p, a, b):
+        ab = b - a
+        t = max(0.0, min(1.0, (p - a).dot(ab) / max(ab.length_squared, 1e-12)))
+        return (p - (a + ab * t)).length
+
+    jaw_i = names.index("jaw")
+    line = [piv["face_jaw_angle_l"], piv["face_chin"], piv["face_jaw_angle_r"]]
+    raw, cap = [], []
     for w in range(n):
         p = pos[w]
-        fade = max(0.0, min(1.0, (p.z - floor) / (0.07 * k)))
-        raw.append([max(0.0, 1.0 - (p - piv[nm]).length / reach[i]) * PEAK * fade for i, nm in enumerate(names)])
-    seam = [pos[w].z <= floor for w in range(n)]
+        fade = max(0.0, min(1.0, (ring[w] - SEAM_RINGS) / FADE_RINGS)) if ring[w] else 1.0
+        f = []
+        for i, nm in enumerate(names):
+            if i == jaw_i:
+                d = min(to_segment(p, line[0], line[1]), to_segment(p, line[1], line[2]))
+            else:
+                d = max(0.0, (p - piv[nm]).length - core[i])
+            u = max(0.0, 1.0 - d / reach[i])
+            f.append(u * u * (3.0 - 2.0 * u) * (JAW_STRENGTH if i == jaw_i else 1.0))
+        top = max(f)
+        sharp = [x ** SHARPEN for x in f]
+        total = sum(sharp)
+        # Inside a core the bone takes the whole vertex, letting the head have its share back
+        # over the falloff.
+        c = PEAK + (1.0 - PEAK) * max((f[i] ** 4 for i in range(len(names)) if core[i] > 0), default=0.0)
+        cap.append(c)
+        raw.append([(x / total) * top * c * fade if total > 0 else 0.0 for x in sharp])
+    seam = [0 < ring[w] <= SEAM_RINGS for w in range(n)]
 
     def steepest(final):
         worst = 0.0
@@ -181,7 +230,7 @@ def weight(armature, body, head, piv):
                     worst = max(worst, abs(fa.get(i, 0.0) - fb.get(i, 0.0)))
         return worst
 
-    final = [_final(r) for r in raw]
+    final = [_final(r, c) for r, c in zip(raw, cap)]
     for _ in range(40):
         if steepest(final) <= MAX_STEP:
             break
@@ -194,7 +243,7 @@ def weight(armature, body, head, piv):
             mean = [sum(raw[b][i] for b in nbrs[a]) / len(nbrs[a]) for i in range(len(names))]
             smoothed.append([0.5 * raw[a][i] + 0.5 * mean[i] for i in range(len(names))])
         raw = smoothed
-        final = [_final(r) for r in raw]
+        final = [_final(r, c) for r, c in zip(raw, cap)]
     for vi, w in ids.items():
         total = 0.0
         for x, i in final[w]:
