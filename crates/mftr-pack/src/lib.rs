@@ -7,6 +7,7 @@
 
 pub mod animator;
 pub mod champion;
+pub mod face;
 pub mod glb;
 pub mod json;
 pub mod pose;

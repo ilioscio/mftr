@@ -126,6 +126,8 @@ pub struct Looks {
     pub paint: Vec<(String, u8, u8)>,
     /// Free sculpting (CR9, 20 §5.3): offsets in millimetres by the base's weld id.
     pub sculpt: crate::sculpt::Offsets,
+    /// The bone-driven face (21, D76), on a base with a face rig.
+    pub face: Option<crate::face::FaceSculpt>,
     /// Brush strokes and decals (CR5b, D70): one paint image per target at most.
     pub images: Vec<crate::image::Image>,
     /// The signature hue (14 §4), 0–359 degrees: glowing parts, and the effects (CR6).
@@ -146,6 +148,7 @@ impl Default for Looks {
             outfit: Vec::new(),
             paint: Vec::new(),
             sculpt: Vec::new(),
+            face: None,
             images: Vec::new(),
             signature: 200,
             moves: None,
@@ -272,6 +275,10 @@ pub fn read(v: Value, at: &str) -> Result<Looks, DataError> {
             paint.push((target, region, color));
         }
     }
+    let face = match f.take("face") {
+        Some((v, fat)) => Some(crate::face::read(v, &fat)?),
+        None => None,
+    };
     let mut sculpt: crate::sculpt::Offsets = Vec::new();
     if let Some((v, sat)) = f.take("sculpt") {
         let Value::List(None, items) = v else { return err(&sat, "expected a list of `(weld, x, y, z)` in mm") };
@@ -360,7 +367,7 @@ pub fn read(v: Value, at: &str) -> Result<Looks, DataError> {
         None => None,
     };
     f.done()?;
-    Ok(Looks { build, gender, shape, proportions, skin, outfit, paint, sculpt, images, signature, moves })
+    Ok(Looks { build, gender, shape, proportions, skin, outfit, paint, sculpt, face, images, signature, moves })
 }
 
 /// A champion file's looks, if it has any.
@@ -402,6 +409,9 @@ pub fn write(l: &Looks) -> String {
     if !l.paint.is_empty() {
         let fills: Vec<String> = l.paint.iter().map(|(t, r, c)| format!("(\"{t}\", {r}, {c})")).collect();
         out += &format!("        paint: [{}],\n", fills.join(", "));
+    }
+    if let Some(face) = l.face.as_ref().filter(|f| !f.is_neutral()) {
+        out += &format!("        face: {},\n", crate::face::write(face));
     }
     if !l.sculpt.is_empty() {
         out += "        sculpt: [\n";

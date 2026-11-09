@@ -141,6 +141,9 @@ def build_base(gender, name, build="humanoid_slim"):
         body = mesh.build_mannequin(armature, name=name, part_list=parts + [_head_part(gender, build)])
     finally:
         head.DEFAULT_DETAIL = 1
+    # The face rig (21, D76): faces are sculpted by its bones.
+    from . import face_rig
+    face_rig.rig(armature, body, base_head(gender, build))
     return armature, body
 
 

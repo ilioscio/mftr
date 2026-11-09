@@ -25,6 +25,9 @@ pub struct Rig {
     pub names: Vec<String>,
     pub parents: Vec<Option<usize>>,
     pub rest: Pose,
+    /// The local transforms the mesh is bound in (the skin's inverse bind matrices come from
+    /// these): the rest, except where a sculpted face moved a face bone's rest (21 §2.3).
+    pub bind: Pose,
 }
 
 impl Rig {
@@ -127,12 +130,18 @@ impl Library {
             joint_to_bone[joint] = bone;
         }
         let node_to_bone = |node: usize| joints.iter().position(|&n| n == node).map(|j| joint_to_bone[j]);
-        let mut rig = Rig { names: Vec::new(), parents: Vec::new(), rest: Vec::new() };
+        let mut rig = Rig { names: Vec::new(), parents: Vec::new(), rest: Vec::new(), bind: Vec::new() };
         for &j in &order {
-            let n = &model.nodes[joints[j]];
+            let node = joints[j];
+            let n = &model.nodes[node];
             rig.names.push(n.name.clone());
             rig.parents.push(n.parent.and_then(node_to_bone));
-            rig.rest.push(Trs { t: n.translation, r: n.rotation, s: n.scale });
+            let rest = Trs { t: n.translation, r: n.rotation, s: n.scale };
+            rig.rest.push(rest);
+            rig.bind.push(match model.bind.get(node).copied().flatten() {
+                Some((t, r, s)) => Trs { t, r, s },
+                None => rest,
+            });
         }
         let fps = side.fps.max(1) as f32;
         let mut clips = Vec::new();

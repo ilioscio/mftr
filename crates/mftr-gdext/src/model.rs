@@ -11,7 +11,9 @@ use std::sync::Arc;
 use godot::classes::audio_stream_wav::Format;
 use godot::classes::image::Format as ImageFormat;
 use godot::classes::mesh::{ArrayType, PrimitiveType};
-use godot::classes::{ArrayMesh, AudioStreamWav, Image, ImageTexture, MeshInstance3D, Node3D, RefCounted, Skeleton3D};
+use godot::classes::{
+    ArrayMesh, AudioStreamWav, Image, ImageTexture, MeshInstance3D, Node3D, RefCounted, Skeleton3D, Skin,
+};
 use godot::prelude::*;
 use mftr_pack::animator::{Action, ActionKind, AnimEvent, Animator, Drive, Phase};
 use mftr_pack::pose::Trs;
@@ -148,7 +150,23 @@ impl MftrModel {
             }
         }
         skeleton.reset_bone_poses();
-        let skin = skeleton.create_skin_from_rest_transforms();
+        // The skin binds each bone where the mesh was built around it: its rest, except a face
+        // bone whose rest carries a sculpted face (21 §2.3), which binds where it was before.
+        // So the face shows at rest and in every pose, with no mesh rebuilt.
+        let mut global: Vec<Transform3D> = Vec::with_capacity(lib.rig.bind.len());
+        for (i, b) in lib.rig.bind.iter().enumerate() {
+            let local = transform(b);
+            let g = match lib.rig.parents[i] {
+                Some(p) => global[p] * local,
+                None => local,
+            };
+            global.push(g);
+        }
+        let mut skin = Skin::new_gd();
+        for (i, g) in global.iter().enumerate() {
+            skin.add_bind(i as i32, g.affine_inverse());
+        }
+        let skin = Some(skin);
 
         let mesh = self.build_mesh(true);
         let mut mesh_node = MeshInstance3D::new_alloc();

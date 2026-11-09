@@ -12,6 +12,7 @@
 //! attaches the library's clips. The result is an ordinary validated pack (`mftr_pack::Loaded`)
 //! that the client draws and animates like any other. It is deterministic and has no Godot in it.
 
+pub mod face;
 pub mod image;
 pub mod libmoves;
 pub mod looks;
@@ -204,6 +205,10 @@ impl Catalog {
             sounds.extend(own);
             (side, Some(moves::effects(&m, &self.packs, looks.signature)), sounds)
         };
+        // The face last (21 §2.3): clips were retargeted from the bones' unsculpted rest.
+        if let Some(face) = &looks.face {
+            face::bake(&mut model, face);
+        }
         let side = sidecar::Sidecar {
             id: name.to_string(),
             kind: "champion".to_string(),
@@ -1024,6 +1029,52 @@ mod tests {
         }
         r.looks.images = vec![img];
         println!("{}", looks::write(&r.looks));
+    }
+
+    #[test]
+    fn a_baked_face_moves_the_face_and_nothing_else() {
+        // FR1 (21 §7): a face bone's rest change deforms the skinned head, by the bone's
+        // weights alone. The nose tip out 2 cm, the brows up 1 cm.
+        let c = catalog();
+        let plain = c.forge("Plain", &Looks::default()).unwrap().model;
+        let mut face = face::FaceSculpt::default();
+        face.bones[11].t = [0, 0, 200];
+        face.bones[2].t = [0, 0, 100];
+        face.bones[3].t = [0, 0, 100];
+        let looks = Looks { face: Some(face), ..Looks::default() };
+        let sculpted = c.forge("Sculpted", &looks).unwrap().model;
+        // The mesh itself isn't touched: only the face bones' rest and where they bind.
+        assert_eq!(plain.meshes[0][0].positions, sculpted.meshes[0][0].positions);
+        let (a, b) = (face::skinned(&plain), face::skinned(&sculpted));
+        let tip = sculpted.node_by_name("face_nose_tip").unwrap();
+        let bind_tip = sculpted.bind[tip].unwrap().0;
+        assert_ne!(sculpted.nodes[tip].translation, bind_tip, "the tip's rest moved");
+        let (mut moved, mut most, mut still_low) = (0usize, 0.0f32, true);
+        for (mi, prims) in a.iter().enumerate() {
+            for (pi, verts) in prims.iter().enumerate() {
+                for (vi, p) in verts.iter().enumerate() {
+                    let q = b[mi][pi][vi];
+                    let d = ((q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2) + (q[2] - p[2]).powi(2)).sqrt();
+                    if d > 1e-4 {
+                        moved += 1;
+                        most = most.max(d);
+                        // Nothing below the chin moves: the neck and the seam stay put.
+                        if p[1] < 1.45 {
+                            still_low = false;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(moved > 50, "{moved} vertices moved");
+        // A clear move, never more than the bone's own 2 cm. (The block-out head's weights are
+        // smoothed to its long edges, so they peak low: FR2's authored head carries more.)
+        assert!(most > 0.005 && most < 0.021, "the most a vertex moved: {most}");
+        assert!(still_low, "something below the face moved");
+        // A neutral face changes nothing at all.
+        let neutral = Looks { face: Some(face::FaceSculpt::default()), ..Looks::default() };
+        let n = c.forge("Neutral", &neutral).unwrap().model;
+        assert!(n.bind.iter().all(Option::is_none));
     }
 
     #[test]

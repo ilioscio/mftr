@@ -91,6 +91,10 @@ pub fn validate_model(model: &Model, glb_len: usize, side: &Sidecar) -> Report {
     check_header(&mut r, side);
     check_mesh(&mut r, model, glb_len, &side.kind);
     check_targets(&mut r, model, &side.kind);
+    // The face rig (21 §6), on a creator base that has one.
+    for p in crate::face::problems(model) {
+        r.err(p);
+    }
     if side.kind == "prop" {
         check_prop(&mut r, model);
         return r;
@@ -284,6 +288,11 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
     }
 
     let mut over_target = 0usize;
+    // A face vertex may blend its head with up to three face bones (21 §1.4): not counted.
+    let face_joint: Vec<bool> = m
+        .skins
+        .first()
+        .map_or(Vec::new(), |j| j.iter().map(|&n| crate::face::is_face_bone(&m.nodes[n].name)).collect());
     for (mi, prims) in m.meshes.iter().enumerate() {
         for p in prims {
             if !p.has_color {
@@ -292,9 +301,12 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
             if p.material.is_none() {
                 r.err(format!("mesh {mi}: a primitive has no material slot"));
             }
-            for w in &p.weights {
+            for (vi, w) in p.weights.iter().enumerate() {
                 let used = w.iter().filter(|&&x| x > 1e-3).count();
-                if used > rules::INFLUENCES_TARGET {
+                let face = p.joints.get(vi).is_some_and(|j| {
+                    (0..4).any(|k| w[k] > 1e-3 && face_joint.get(j[k] as usize).copied().unwrap_or(false))
+                });
+                if used > rules::INFLUENCES_TARGET && !face {
                     over_target += 1;
                 }
                 let sum: f32 = w.iter().sum();

@@ -56,7 +56,7 @@ Loops must be **continuous and flow along the muscles**: what deforms together s
 
 ### 1.3 The bone grid: 24 face bones
 
-Every face bone is a child of `head` (or of `jaw` or `nose_bridge` where noted). Every one carries a rest transform at its pivot, oriented so its +Y points out of the face along the surface normal at the pivot. The `_l` bones are on +X, and `_r` mirrors them (10 §2).
+Every face bone is a child of `head` (or of `jaw` or `nose_bridge` where noted). Every one carries a rest transform at its pivot, oriented so its +Y points out of the face along the surface normal at the pivot and its +Z points up (Blender roll 0). A delta's `t: (x, y, z)` therefore means sideways, out of the face and up, in the bone's own frame. The `_l` bones are on +X, and `_r` mirrors them (10 §2).
 
 | # | Bone | Parent | Pivot | What it moves | DOFs (T / R / S) |
 |---|---|---|---|---|---|
@@ -970,7 +970,7 @@ Recipes: `face.rig` known, only known bones, every value within its limits.
 
 | Slice | What | Exit |
 |---|---|---|
-| **FR1** Rig standard | `FACE_BONES`, limits, validation (§6); the exporter writes face bones, IBMs, regions and `CUSTOM0`; `MftrModel` skins from IBMs | A test base with a placeholder head and face bones validates; a rest change on a face bone moves the skinned mesh in Godot with no mesh rebuild |
+| **FR1** Rig standard | `FACE_BONES`, limits, validation (§6); the bases carry the face bones; the skin binds where the mesh was built (`Model::bind`) | A test base with a placeholder head and face bones validates; a rest change on a face bone moves the skinned mesh in Godot with no mesh rebuild |
 | **FR2** The head | The authored head (§1.1–1.5) in four shapes; weights by cores and falloff; parts' weights transferred; budgets raised | Owner signs off front, ¾ and profile captures of wireframe and shaded head on all four bases |
 | **FR3** Faces in recipes | `face.rs`: deltas, RON, binary, bake; migration from sliders (§2.7) | Round-trip tests; old recipes load; a face survives save, load and the wire byte-identical |
 | **FR4** The editor | `CharacterSculptController`, hover highlight, drag modes, symmetry, undo; the brushes on the new head | The owner sculpts a face by dragging features with no slider, and finds the highlight tells them what they will move |
@@ -978,6 +978,44 @@ Recipes: `face.rig` known, only known bones, every value within its limits.
 | **FR6** The body | §9 | Per §9 |
 
 ---
+
+### FR1 status (2026-11-09): ✅ done
+
+**The rig standard.** `mftr_pack::face` defines `FACE_RIG`, the 24 bones and their parents, and checks a base's face rig (§6):
+
+- every bone present with the right parent;
+- no clip keys a face bone (`jaw` excepted);
+- no face weight within two rings of the neck seam;
+- no bone's weight changing by more than 0.35 along an edge (split vertices welded, triangulation's diagonals included).
+
+Face vertices may use four influences without the influence warning.
+
+**The bases.** `mftr_blender.face_rig` adds the 24 bones to the four humanoid bases (58 bones now) and weights the **block-out head**:
+
+- a linear falloff from each bone's pivot, letting go toward the seam;
+- smoothed across the mesh until no edge passes the limit;
+- at most three bones a vertex, with a continuous cut so a bone fades out rather than dropping.
+
+These are **placeholder weights**. The block-out head's edges are ~2.5 cm, so the smoothing keeps weight peaks low: a 2 cm bone move shows as ~7 mm on the head. FR2's authored head carries the real weights (§1.4).
+
+**The bake and the skin.** `mftr_forge::face`:
+
+- `FaceSculpt` with its limits;
+- the recipe's `face:` (strict reader, writer) and the compact byte form;
+- `bake`, which puts the deltas into the face bones' rest after the clips are attached, divides a scaled parent's scale out of its face-bone children, and records where each moved bone is bound in `Model::bind`;
+- `skinned`, CPU skinning, which FR4's hover raycast will use.
+
+`Rig::bind` carries the bind pose to the client, and `MftrModel::instantiate` builds the `Skin` from it rather than from the rest. **This departs from §2.3, which planned the glTF inverse bind matrices:** the forge records the bind itself, which needs no extra parsing and has the same effect.
+
+**Checked:**
+
+- Tests: rig validation, text and byte round-trips, the strict reader, the bake's scale compensation, and a forged champion whose baked face moves the face, leaves the mesh buffer untouched and moves nothing below the chin.
+- In Godot: a recipe with a sculpted face shows it in the creator (chin forward, brows up, ears larger), and Rook-neo (no face) renders and animates as before.
+
+**Not yet:**
+
+- Regions and `CUSTOM0` move to FR4, where they are used.
+- Parts (hair, hats) are still bound to `head` alone. FR2 transfers the head's weights to them.
 
 ## 8. Reported defects in the creator (2026-11-09)
 

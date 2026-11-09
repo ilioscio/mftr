@@ -35,7 +35,7 @@ pub struct Node {
     pub skin: Option<usize>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Primitive {
     pub material: Option<usize>,
     pub triangles: usize,
@@ -84,9 +84,17 @@ pub struct Animation {
     pub channels: Vec<Channel>,
 }
 
+/// A bind transform: translation, rotation (xyzw), scale.
+pub type BindTrs = ([f32; 3], [f32; 4], [f32; 3]);
+
 #[derive(Clone, Debug, Default)]
 pub struct Model {
     pub nodes: Vec<Node>,
+    /// Per node, the local transform the mesh is bound in where it differs from the node's
+    /// rest (translation, rotation, scale): a sculpted face is baked into the face bones' rest
+    /// while the skin keeps binding them where they were (21 §2.3). Empty, or `None`, means
+    /// bound at rest. Never read from a file: only `mftr-forge` sets it.
+    pub bind: Vec<Option<BindTrs>>,
     /// Joint node indices of each skin.
     pub skins: Vec<Vec<usize>>,
     pub meshes: Vec<Vec<Primitive>>,
