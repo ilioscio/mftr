@@ -1683,6 +1683,24 @@ replace the shared head anyway.
 - **Left:** the texel density is PS1-coarse on parts (about 2 cm a texel on a tunic); an artist's
   UV layout would spend it better. Painting on the in-match model's pose, and symmetry, later.
 
+### Face rig (FR) and creator fixes (2026-11-09): planned
+
+The owner tested the creator (2026-11-09) and found it glitchy, with expected features broken or missing. Eleven reports are listed in [21 §8](21-face-rig.md#8-reported-defects-in-the-creator-2026-11-09):
+
+- a missing `machine_masculine` base;
+- skin tone and paint not working on creature builds;
+- no way back from Test, and Test not showing the creator's model;
+- head sizes that ignore the build;
+- a feminine slim chest at the neck;
+- boots and greaves that don't follow leg sizes;
+- coloring and painting that break;
+- a save that won't load;
+- an amateur look overall.
+
+They come first, as their own slice, checked in the running game with captures.
+
+The face moves to bones ([21](21-face-rig.md), D76), with an authored head and drag-to-sculpt features with highlighting. Free sculpting stays. Its slices are FR1–FR6 (21 §7); the body follows the same way (21 §9).
+
 ### CR6 follow-up (2026-11-07): passives ✅; resources not yet
 - **Passives** (D74): a champion file's `passive:` is one of nine of the items' unique passives
   with its own numbers (`mftr_sim::data`, bounded in `limits`, priced in `balance`: 2–5 points at

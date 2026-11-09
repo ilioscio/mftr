@@ -27,6 +27,7 @@ This is a living document. Each file covers one area. Record decisions in [DECIS
 | 18 | [Items](18-items.md) | The shop: tiers, new stats (crit, penetration, anti-heal, omnivamp, tenacity), passives and actives, the catalog, the support quest, hatchlings, item models and icons |
 | 19 | [Shopkeepers](19-shopkeepers.md) | A clickable shop in each base: four shopkeeper characters, their stalls, seasons, reactions and placement |
 | 20 | [Champion Creator](20-champion-creator.md) | Players (and we) make champions: builds, sculpted face and body sliders, clothes, paint, movesets, a priced balance budget, recipes built at load by `mftr-forge` |
+| 21 | [Face Rig](21-face-rig.md) | Bone-driven face sculpting: an authored ~1,100-vertex head on 24 face bones, drag-to-sculpt with region highlighting, faces baked into rest at load; the same for the body next |
 | — | [Decisions & Open Questions](DECISIONS.md) | Decision log and unresolved questions |
 
 ### Reference analyses
