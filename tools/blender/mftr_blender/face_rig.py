@@ -22,6 +22,7 @@ FACE_RIG = [
     ("face_lip_lower", "jaw"), ("face_mouth_l", "head"), ("face_mouth_r", "head"), ("face_chin", "jaw"),
     ("face_jaw_angle_l", "jaw"), ("face_jaw_angle_r", "jaw"), ("face_ear_l", "head"), ("face_ear_r", "head"),
 ]
+NAMES = {n for n, _ in FACE_RIG}
 # Into the head from the surface, so a turned feature pivots inside it (m, before head scale).
 INSET = 0.012
 
@@ -62,10 +63,22 @@ def pivots(head):
     return out
 
 
-def add_bones(armature, head):
+def mirrored(left):
+    """The left side's pivots with the right side's mirrored in."""
+    out = {}
+    for name, _ in FACE_RIG:
+        if name.endswith("_r"):
+            p = left[name[:-2] + "_l"]
+            out[name] = Vector((-p.x, p.y, p.z))
+        else:
+            out[name] = left[name]
+    return out
+
+
+def add_bones(armature, head, piv=None):
     """Add the face bones to `armature` (edit mode), pointing out of the face (-Y), 2 cm long
-    (the jaw toward the chin). Returns the pivots."""
-    piv = pivots(head)
+    (the jaw toward the chin), at `piv` (or the block-out head's). Returns the pivots."""
+    piv = piv or pivots(head)
     prev = bpy.context.view_layer.objects.active
     bpy.context.view_layer.objects.active = armature
     bpy.ops.object.mode_set(mode="EDIT")
@@ -191,9 +204,77 @@ def weight(armature, body, head, piv):
     print(f"face rig: {n} head places weighted, steepest edge {steepest(final):.2f}")
 
 
-def rig(armature, body, head):
+def limit_steps(obj, max_step=MAX_STEP, rounds=60):
+    """Smooth `obj`'s face-bone weights over its own mesh until no edge (diagonals included,
+    split vertices welded) changes a face bone's weight by more than `max_step` (21 §1.4). Each
+    vertex keeps its head-plus-face share (the head takes back what the face bones give up),
+    and its other bones as they were. For parts, whose faces are far bigger than the skin's."""
+    face_idx = {g.index: g.name for g in obj.vertex_groups if g.name in NAMES}
+    head = obj.vertex_groups.get("head")
+    if not face_idx or head is None:
+        return 0.0
+    me = obj.data
+    weld, ids = {}, []
+    for v in me.vertices:
+        ids.append(weld.setdefault(tuple(round(c, 4) for c in v.co), len(weld)))
+    n = len(weld)
+    names = sorted(face_idx.values())
+    col = {nm: i for i, nm in enumerate(names)}
+    w = [[0.0] * len(names) for _ in range(n)]
+    share = [0.0] * n
+    for v in me.vertices:
+        for x in v.groups:
+            if x.group in face_idx:
+                w[ids[v.index]][col[face_idx[x.group]]] = x.weight
+            if x.group in face_idx or x.group == head.index:
+                share[ids[v.index]] = max(share[ids[v.index]], 0.0)
+        share[ids[v.index]] = sum(x.weight for x in v.groups if x.group in face_idx or x.group == head.index)
+    nbrs = [set() for _ in range(n)]
+    for poly in me.polygons:
+        vs = [ids[i] for i in poly.vertices]
+        for a in vs:
+            nbrs[a].update(b for b in vs if b != a)
+
+    def steepest():
+        return max((abs(w[a][k] - w[b][k]) for a in range(n) for b in nbrs[a] for k in range(len(names))), default=0.0)
+
+    for _ in range(rounds):
+        if steepest() <= max_step:
+            break
+        nw = []
+        for a in range(n):
+            if not nbrs[a] or share[a] <= 0.0:
+                nw.append(w[a])
+                continue
+            mean = [sum(w[b][k] for b in nbrs[a]) / len(nbrs[a]) for k in range(len(names))]
+            row = [0.5 * w[a][k] + 0.5 * mean[k] for k in range(len(names))]
+            total = sum(row)
+            if total > share[a] * PEAK:
+                row = [x * share[a] * PEAK / total for x in row]
+            nw.append(row)
+        w = nw
+    for v in me.vertices:
+        a = ids[v.index]
+        if share[a] <= 0.0:
+            continue
+        others = [(obj.vertex_groups[x.group].name, x.weight) for x in v.groups
+                  if x.group not in face_idx and x.group != head.index]
+        faces = sorted(((w[a][k], names[k]) for k in range(len(names)) if w[a][k] > 1e-4), reverse=True)
+        room = 3 - min(len(others), 2)
+        cut = faces[room][0] if len(faces) > room else 0.0
+        faces = [(x - cut, nm) for x, nm in faces[:room] if x > cut]
+        hw = max(0.0, share[a] - sum(x for x, _ in faces))
+        for x in list(v.groups):
+            obj.vertex_groups[x.group].remove([v.index])
+        for nm, x in others[:2] + [("head", hw)] + [(nm, x) for x, nm in faces]:
+            if x > 0.0:
+                obj.vertex_groups[nm].add([v.index], x, "REPLACE")
+    return steepest()
+
+
+def rig(armature, body, head, piv=None):
     """Both: bones, then the head's weights. Returns the pivots."""
-    piv = add_bones(armature, head)
+    piv = add_bones(armature, head, piv)
     weight(armature, body, head, piv)
     return piv
 

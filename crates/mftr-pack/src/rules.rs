@@ -9,13 +9,14 @@ use mftr_sim::jungle::MonsterKind;
 pub const FPS: u32 = 30;
 
 // Caps (10 §2, §7.2, §9).
-/// Doubled by D59 (14): room for silhouette detail, sculpted hands and heads.
-pub const TRIANGLES_TARGET: (usize, usize) = (5000, 8000);
+/// Doubled by D59 (14): room for silhouette detail, sculpted hands and heads. The top raised by
+/// D76 (21 §5): the authored head (~2,500 triangles) for the face rig.
+pub const TRIANGLES_TARGET: (usize, usize) = (5000, 10_000);
 /// Lane minions (A5): many on screen at once, so lighter. ×1.5 by D60 (15 §2).
 pub const MINION_TRIANGLES_TARGET: (usize, usize) = (900, 3900);
 /// Jungle monsters (16): a camp's few on screen at once; the buff monsters at the top.
 pub const MONSTER_TRIANGLES_TARGET: (usize, usize) = (1200, 7000);
-pub const TRIANGLES_MAX: usize = 12_000;
+pub const TRIANGLES_MAX: usize = 14_000;
 /// Map props (structures, trees, rocks): static, one `root` bone, no clips. A structure is the
 /// most detailed thing on screen, so its cap is higher; scenery is drawn many times over. ×1.5
 /// by D60 (15 §2).

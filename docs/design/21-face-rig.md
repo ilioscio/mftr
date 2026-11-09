@@ -1017,6 +1017,39 @@ These are **placeholder weights**. The block-out head's edges are ~2.5 cm, so th
 - Regions and `CUSTOM0` move to FR4, where they are used.
 - Parts (hair, hats) are still bound to `head` alone. FR2 transfers the head's weights to them.
 
+### FR2 status (2026-11-09): built, awaiting the owner's sign-off
+
+**The head.** It comes from Blender Studio's CC0 **Human Base Meshes** "Generic Topology" head (`art/creator/heads/`; credit in its README). It's artist-made: all quads, closed, concentric eye and mouth loops, a modelled nose, ears. Variants come as shape keys.
+
+`mftr_blender.authored_head` builds each base's head:
+
+- Mixes the owner's choice: Real_MALE or Real_FEMALE, with Ork at 0.45 / 0.25 on the heavy builds.
+- Subdivides once: 1,266 vertices, 1,264 quads.
+- Fits it so a point at the base of the skull sits on the rig's head joint.
+- Opens the lids onto low eyeballs bound to the eye bones.
+- Paints the brows and lips crisp, their vertices split from the skin.
+
+The face bones' pivots are on the head's own landmarks.
+
+**The neck.** The creator's neck now runs up inside the skull, so no build shows a stump under the jaw. Neck girth is thicker on every build. **This departs from §1.5's welded seam:** the head and the neck still meet as two closed shapes, one inside the other.
+
+**The parts.** The catalog's head parts were shaped on the block-out head, and each is conformed to the new one:
+
+- **Warped:** a thin-plate spline through matching landmarks on both heads (face bones, crown, back).
+- **Pushed out:** at least 6 mm off the skin, testing face middles and edge midpoints as well as corners.
+- **Settled:** headwear rests on the skull.
+- **Weighted:** each part takes the skin's head and face weights in proportion to its head share, averaged over 5 cm and smoothed over its own mesh until no edge passes the 0.35 limit.
+
+Hair, hoods, helmets, circlet, crown, horns, goggles, eyepatch and beard sit well. The great helm and the mask are boxier than the head. The wide hat perches on the crown (its crown ring is narrower than the head is long).
+
+**Budget.** A plain champion is 7,060 triangles; `TRIANGLES_TARGET` is now 5,000–10,000 and the cap 14,000. Bases are ~3.4 MB.
+
+**Not yet:**
+
+- **The old face sliders** (morph targets) still run on the new head, and look rough on it (Rook-neo's jaw). They become bone presets in FR5.
+- **Smooth shading for the face** is still the owner's call (§5).
+- **Defect #7**, the slim feminine chest that rises to the chin, is a body fix (§8).
+
 ## 8. Reported defects in the creator (2026-11-09)
 
 The owner's test found the creator glitchy. These are logged here so the face work doesn't bury them. Most are independent of the face rig and should be fixed first, as their own slice (CR-fix):

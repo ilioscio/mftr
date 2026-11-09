@@ -884,7 +884,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func _update_status() -> void:
 	var problems: PackedStringArray = creator.problems()
-	var budget := "" if _model == null else "%d triangles (target 5,000–8,000, cap 12,000)\n" % _model.triangles()
+	var budget := "" if _model == null else "%d triangles (target 5,000–10,000, cap 14,000)\n" % _model.triangles()
 	_status.text = budget + ("" if problems.is_empty() else "Can't save yet: " + "; ".join(problems))
 
 

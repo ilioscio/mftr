@@ -139,11 +139,11 @@ def catalog(head):
     add("hair.ponytail", "hair", "Ponytail", [_hair(head, "ponytail", HAIR)])
     add("hair.topknot", "hair", "Topknot", [
         _head_shell(head, _line(0.82, 0.55, 0.40), 1.05, HAIR, "cloth"),
-        mesh.path_part("head", [tuple(hc + Vector((0, 0.03, 0.14 * k))), tuple(hc + Vector((0, 0.04, 0.24 * k)))], 6,
+        mesh.path_part("head", [tuple(hc + Vector((0, 0.03, 0.09 * k))), tuple(hc + Vector((0, 0.04, 0.19 * k)))], 6,
                        [(0.05, 0.05), (0.02, 0.02)], "cloth", HAIR)])
     add("hair.mohawk", "hair", "Crest", [
-        mesh.path_part("head", [tuple(hc + Vector((0, -0.09 * k, 0.11 * k))), tuple(hc + Vector((0, 0.0, 0.16 * k))),
-                                tuple(hc + Vector((0, 0.10 * k, 0.10 * k)))], 4, [(0.014, 0.05), (0.016, 0.07), (0.012, 0.04)],
+        mesh.path_part("head", [tuple(hc + Vector((0, -0.09 * k, 0.075 * k))), tuple(hc + Vector((0, 0.0, 0.12 * k))),
+                                tuple(hc + Vector((0, 0.10 * k, 0.065 * k)))], 4, [(0.014, 0.05), (0.016, 0.07), (0.012, 0.04)],
                        "cloth", HAIR)])
     # Head.
     add("head.hood", "head", "Hood", [
@@ -175,7 +175,7 @@ def catalog(head):
         loft("head", tuple(hc + Vector((0, 0, 0.0))), tuple(hc + Vector((0, 0, 0.015))), 16,
              [(0, 0.11 * k, 0.115 * k), (1, 0.11 * k, 0.115 * k)], "cloth", LEATHER_DARK)])
     add("face.beard", "face", "Beard", [
-        mesh.path_part("head", [tuple(head.front(0.30, 0) + Vector((0, 0.004, 0))), tuple(head.front(0.13, 0) + Vector((0, -0.012, 0))),
+        mesh.path_part("head", [tuple(head.front(0.21, 0) + Vector((0, 0.004, 0))), tuple(head.front(0.10, 0) + Vector((0, -0.012, 0))),
                                 tuple(head.front(0.0, 0) + Vector((0, -0.02, -0.06)))], 6,
                        [(0.075 * k, 0.03), (0.065 * k, 0.04), (0.0, 0.0)], "cloth", HAIR, ref=(1, 0, 0))])
     # Torso.
@@ -287,7 +287,7 @@ def catalog(head):
     add("head.great_helm", "head", "Great helm", [
         # A block that stands up out of the gorget: the slit at the eyes, a crest on top.
         # (the slit glows in the champion's signature hue, like Bastion's visor)
-        mesh.box_part("head", tuple(hc + Vector((0, -0.015, 0.0))), (0.28 * k, 0.29 * k, 0.34 * k), "metal", IRON, bevel=0.3,
+        mesh.box_part("head", tuple(hc + Vector((0, -0.015, 0.0))), (0.25 * k, 0.27 * k, 0.32 * k), "metal", IRON, bevel=0.3,
                       taper=0.92),
         mesh.box_part("head", (0, face_y - 0.026, head.front(0.62, 0).z - 0.02), (0.20 * k, 0.02, 0.036), "emissive", GLOW),
         mesh.box_part("head", tuple(hc + Vector((0, -0.015, 0.17 * k))), (0.04, 0.30 * k, 0.05), "accent", ACCENT)],
@@ -433,11 +433,14 @@ def transfer_shape_keys(body, part):
     return len({n[:-1] for n in names})
 
 
-def build_parts(armature, body, head):
-    """Every catalog part as its own mesh under `armature`, following `body`'s sliders."""
+def build_parts(armature, body, head, conform=None):
+    """Every catalog part as its own mesh under `armature`, following `body`'s sliders.
+    `conform(obj)` fits a part to the body's head first (the authored head, 21 §1.1)."""
     made = []
     for pid, slot, name, hides, accent, items in catalog(head):
         obj = mesh.build_mannequin(armature, name=f"part.{pid}", part_list=items)
+        if conform is not None:
+            conform(obj)
         n = transfer_shape_keys(body, obj)
         made.append((pid, slot, name, hides, accent, mesh.triangle_count(obj), n))
     return made

@@ -39,20 +39,20 @@ BUILDS = {
     "humanoid_slim": {
         "masculine": {"shape": {"heights": [(0.0, 0.0), (2.15, 2.15)], "x": 1.04, "y": 1.0, "scale": 0.98, "shoulder": 0.03,
                                 "hand": 1.3},
-                      "girth": None, "head": 1.36, "hands": 1.0},
+                      "girth": {"torso": (1.0, 1.0), "limb": (1.0, 1.0), "neck": (1.45, 1.4)}, "head": 1.36, "hands": 1.0},
         "feminine": {"shape": {"heights": [(0.0, 0.0), (2.15, 2.15)], "x": 0.96, "y": 0.98, "scale": 0.95, "shoulder": 0.0,
                                "hand": 1.2},
-                     "girth": None, "head": 1.3, "hands": 1.0},
+                     "girth": {"torso": (1.0, 1.0), "limb": (1.0, 1.0), "neck": (1.3, 1.25)}, "head": 1.3, "hands": 1.0},
     },
     "humanoid_heavy": {
         "masculine": {"shape": {"heights": [(0.0, 0.0), (0.03, 0.03), (0.09, 0.09), (0.54, 0.46), (1.00, 0.89), (1.12, 1.01),
                                             (1.26, 1.16), (1.40, 1.31), (1.56, 1.48), (1.64, 1.53), (1.88, 1.78), (2.15, 2.05)],
                                 "x": 1.24, "y": 1.2, "scale": 1.1, "shoulder": 0.08, "arm": 1.06, "hand": 1.55},
-                      "girth": {"torso": (1.3, 1.28), "limb": (1.22, 1.22), "neck": (1.12, 1.1)}, "head": 1.38, "hands": 1.2},
+                      "girth": {"torso": (1.3, 1.28), "limb": (1.22, 1.22), "neck": (1.55, 1.5)}, "head": 1.38, "hands": 1.2},
         "feminine": {"shape": {"heights": [(0.0, 0.0), (0.03, 0.03), (0.09, 0.09), (0.54, 0.48), (1.00, 0.91), (1.12, 1.03),
                                            (1.26, 1.18), (1.40, 1.33), (1.56, 1.50), (1.64, 1.55), (1.88, 1.80), (2.15, 2.07)],
                                "x": 1.16, "y": 1.12, "scale": 1.06, "shoulder": 0.06, "arm": 1.04, "hand": 1.4},
-                     "girth": {"torso": (1.2, 1.18), "limb": (1.16, 1.16), "neck": (1.08, 1.06)}, "head": 1.32, "hands": 1.1},
+                     "girth": {"torso": (1.2, 1.18), "limb": (1.16, 1.16), "neck": (1.4, 1.35)}, "head": 1.32, "hands": 1.1},
     },
 }
 
@@ -96,6 +96,10 @@ def _body_parts(gender):
             prof = [(t, r * 0.88, d * 0.95) for t, r, d in prof]
         if gender == "feminine" and bone == "pelvis" and slot == "cloth":
             prof = [(t, r * 1.08, d * 1.05) for t, r, d in prof]
+        if bone == "neck":
+            # The neck runs up inside the skull (the authored head sits over it, 21 §1.5): its
+            # top never shows as a stump under the jaw, whatever the build.
+            b = (0, 0.005, 1.76)
         out.append((bone, a, b, sides, prof, slot, color))
     return out
 
@@ -133,17 +137,26 @@ def build_base(gender, name, build="humanoid_slim"):
     bpy.context.scene.render.fps = 30
     use_build(gender, build)
     armature = rig.build_armature(name=name)
+    # The authored head (21 §1.1, FR2) and the face rig on its landmarks (21 §1.3): the bones
+    # first, so the eyeballs can be bound to the eye bones as the mesh is built.
+    from . import authored_head, face_rig
+    h = base_head(gender, build)
+    mix = authored_head.MIX[(build, gender)]
+    fit = authored_head.prepare(h, armature.data.bones["head"].head_local)
+    piv = face_rig.add_bones(armature, h, face_rig.mirrored(authored_head.landmarks(fit)))
     head.DEFAULT_DETAIL = 3
     hands = BUILDS[build][gender]["hands"]
+
+    def head_part(bm, layers, groups, mats):
+        authored_head.build(bm, layers, groups, mats, h, mix, fit)
+
     try:
         parts = (champion.detailed(_body_parts(gender)) + champion.hand_parts("l", SKIN, scale=hands)
                  + champion.hand_parts("r", SKIN, scale=hands))
-        body = mesh.build_mannequin(armature, name=name, part_list=parts + [_head_part(gender, build)])
+        body = mesh.build_mannequin(armature, name=name, part_list=parts + [head_part])
     finally:
         head.DEFAULT_DETAIL = 1
-    # The face rig (21, D76): faces are sculpted by its bones.
-    from . import face_rig
-    face_rig.rig(armature, body, base_head(gender, build))
+    face_rig.weight(armature, body, h, piv)
     return armature, body
 
 
@@ -455,7 +468,11 @@ def build(gender, name, build="humanoid_slim"):
     from . import parts
     armature, body = build_base(gender, name, build)
     ids = add_shape_keys(armature, body)
-    made = parts.build_parts(armature, body, base_head(gender, build))
+    # The catalog's head parts were shaped on the block-out head: conformed to the authored one.
+    from . import authored_head
+    h = base_head(gender, build)
+    fit = authored_head.prepare(h, armature.data.bones["head"].head_local)
+    made = parts.build_parts(armature, body, h, conform=authored_head.make_conform(h, fit, body))
     # Weapons ride the prop bones, as the official champions' do, so the moves' clips (whose
     # wrists stay human, 14 §3.3) hold them where their champions held theirs.
     from . import wrists

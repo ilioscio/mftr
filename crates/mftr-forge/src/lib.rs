@@ -1292,7 +1292,7 @@ mod tests {
         let hidden = plain.model.triangles() + part_tris as usize - dressed.model.triangles();
         assert!(hidden > 100, "the breastplate hides the undersuit beneath it: {hidden}");
         // Undressed, the catalog's other parts are gone.
-        assert!(plain.model.triangles() < 6000);
+        assert!(plain.model.triangles() < 8000);
         // One part per slot; a part from nowhere; the accent rule.
         l.outfit.push("torso.tunic".into());
         assert!(c.forge("X", &l).err().unwrap().contains("both go on"));
