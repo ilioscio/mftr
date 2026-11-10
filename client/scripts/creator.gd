@@ -177,6 +177,12 @@ func _build_stage() -> Control:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-45, -30, 0)
 	sun.light_energy = 1.1
+	# The stage is one figure: shadows over a few meters, so the shadow map is fine enough for
+	# a chin's or a bust's (the default 100 m drew them as jagged blocks).
+	sun.shadow_enabled = true
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	sun.directional_shadow_max_distance = 6.0
+	sun.shadow_blur = 1.5
 	_viewport.add_child(sun)
 	var floor := MeshInstance3D.new()
 	var disc := CylinderMesh.new()
@@ -242,16 +248,25 @@ func _show_step(id: String) -> void:
 			for b in creator.builds():
 				_choice(BUILD_NAMES.get(String(b[0]), String(b[0]).capitalize()), creator.build() == b[0], func():
 					creator.set_build(b[0])
-					if not b[1]:
-						creator.set_gender("")
-					_changed(true))
+					_changed(true)
+					_show_step("build"))
 			_hint("Both humanoids share the moves and parts; the heavy one is the brute (Rook, Bastion, Cairn). The beast has its own moves' animations (any kit, animated by its shapes) and parts. The serpentoid, spectre and machine likewise.")
 		"gender":
-			for g in [["masculine", "Masculine"], ["feminine", "Feminine"]]:
-				_choice(g[1], creator.gender() == g[0], func():
-					creator.set_gender(g[0])
-					_changed(true))
-			_skin_picker()
+			if creator.gender() == "":
+				_title.text = "Body colors"
+				_hint("This body has no genders.")
+			else:
+				for g in [["masculine", "Masculine"], ["feminine", "Feminine"]]:
+					_choice(g[1], creator.gender() == g[0], func():
+						creator.set_gender(g[0])
+						_changed(true)
+						_show_step("gender"))
+			if creator.has_skin():
+				_skin_picker()
+			else:
+				# No skin to tone (the beast's hide, the machine's hull): its own colors instead.
+				_fill_picker("body")
+				_hint("More colors, the brush and decals are in the Paint step.")
 		"face":
 			_sculpt_tools()
 			var have: Array = Array(creator.sliders())
@@ -640,6 +655,32 @@ func _tune_slider(text: String, value: float, lo: float, hi: float, set_value: C
 	_panel.add_child(row)
 
 
+## `target`'s colors (its paint regions) and the palette: pick a region, then a color fills it.
+func _fill_picker(target: String) -> void:
+	var regions: PackedColorArray = creator.paint_regions(target)
+	if _paint_target != target or _paint_region >= regions.size():
+		_paint_target = target
+		_paint_region = 0
+	var l := Label.new()
+	l.text = "Its colors: pick one, then a color for it"
+	_panel.add_child(l)
+	var row := HBoxContainer.new()
+	for i in regions.size():
+		row.add_child(_swatch(regions[i], i == _paint_region, func():
+			_paint_region = i
+			_show_step(step)))
+	_panel.add_child(row)
+	var grid := GridContainer.new()
+	grid.columns = 8
+	var palette: PackedColorArray = creator.palette()
+	for k in palette.size():
+		grid.add_child(_swatch(palette[k], false, func():
+			creator.fill(target, _paint_region, k)
+			_changed(true)
+			_show_step(step)))
+	_panel.add_child(grid)
+
+
 func _skin_picker() -> void:
 	var l := Label.new()
 	l.text = "Skin"
@@ -790,11 +831,15 @@ func _paint_at(pos: Vector2) -> void:
 	var decal := _decal if _paint_tool == "decal" else ""
 	if creator.brush(origin, dir, _brush_size, color, decal) != "":
 		_changed(true)
+	else:
+		_update_status()  # a full image says so
 
 
 func _rebuild() -> void:
 	var m: MftrModel = creator.preview()
 	if m == null:
+		# The old model stays up; the status says why this one can't be made.
+		_update_status()
 		return
 	if _model_node != null:
 		_model_node.queue_free()
@@ -828,7 +873,8 @@ func _rebuild() -> void:
 func _place_camera() -> void:
 	if _camera == null:
 		return
-	var face := step == "face" or step == "gender"
+	# The gender step frames the face; on a creature it's the colors step, so the whole body.
+	var face := step == "face" or (step == "gender" and creator.gender() != "")
 	var target := Vector3(0, _head_y, 0) if face else Vector3(0, _top_y * 0.52, 0)
 	var dist := (1.5 if face else _top_y * 2.3) / _zoom
 	_camera.look_at_from_position(target + Vector3(0, 0.12 if face else 0.4, dist), target)
@@ -885,7 +931,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func _update_status() -> void:
 	var problems: PackedStringArray = creator.problems()
 	var budget := "" if _model == null else "%d triangles (target 5,000–10,000, cap 14,000)\n" % _model.triangles()
-	_status.text = budget + ("" if problems.is_empty() else "Can't save yet: " + "; ".join(problems))
+	var note: String = creator.note()
+	_status.remove_theme_color_override("font_color")
+	if note.begins_with("Can't show"):
+		_status.add_theme_color_override("font_color", Color(1.0, 0.6, 0.5))
+	_status.text = budget + ("" if note == "" else note + "\n") + ("" if problems.is_empty() else "Can't save yet: " + "; ".join(problems))
 
 
 func _randomize() -> void:

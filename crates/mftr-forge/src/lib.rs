@@ -146,6 +146,51 @@ impl Catalog {
         out
     }
 
+    /// Make `looks` fit its base after the build or gender changed (from the base `was`): the
+    /// gender fits the build, and what the new base doesn't have comes off (sliders, parts, fills
+    /// on missing regions). Sculpting and body brushwork go when the base changes: they're tied
+    /// to the old base's vertices and UVs. Returns what was dropped, for the screen to say.
+    pub fn fit(&self, looks: &mut Looks, was: &str) -> Vec<String> {
+        looks.fit_gender();
+        let key = looks.base_key();
+        let Some(base) = self.base(&key) else { return Vec::new() };
+        let mut dropped = Vec::new();
+        let sliders = self.sliders(&key);
+        let n = looks.shape.len();
+        looks.shape.retain(|(id, _)| sliders.contains(id));
+        if looks.shape.len() < n {
+            dropped.push(format!("{} sliders this body doesn't have", n - looks.shape.len()));
+        }
+        let parts = self.parts(&key);
+        let mut slots: Vec<&str> = Vec::new();
+        let before: Vec<String> = looks.outfit.clone();
+        looks.outfit.retain(|id| match parts.iter().find(|p| p.id == *id) {
+            Some(p) if !slots.contains(&p.slot.as_str()) => {
+                slots.push(p.slot.as_str());
+                true
+            }
+            _ => false,
+        });
+        for id in before.iter().filter(|id| !looks.outfit.contains(id)) {
+            dropped.push(format!("`{id}`, which this body has no fitting for"));
+        }
+        let worn = looks.outfit.clone();
+        let n = looks.paint.len();
+        looks.paint.retain(|(target, region, _)| {
+            (target == "body" || worn.contains(target))
+                && (*region as usize) < paint::regions(&base.model, target).len()
+        });
+        if looks.paint.len() < n {
+            dropped.push("fills on colors this body doesn't have".into());
+        }
+        looks.images.retain(|i| worn.contains(&i.target) || (i.target == "body" && key == was));
+        if key != was && !looks.sculpt.is_empty() {
+            looks.sculpt.clear();
+            dropped.push("the sculpting (it was shaped on the other body)".into());
+        }
+        dropped
+    }
+
     /// Build the champion `name` as `looks` describes it.
     pub fn forge(&self, name: &str, looks: &Looks) -> Result<Loaded, String> {
         let key = looks.base_key();
@@ -565,7 +610,8 @@ impl<'a> Retarget<'a> {
         let mut a = a.clone();
         a.name = name.to_string();
         a.channels.retain_mut(|c| {
-            let Some(node) = self.to.node_by_name(&self.from.nodes[c.node].name) else { return false };
+            let source = c.node;
+            let Some(node) = self.to.node_by_name(&self.from.nodes[source].name) else { return false };
             c.node = node;
             let (pre, post) = self.fix[node].unwrap_or(([0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]));
             match c.path.as_str() {
@@ -579,10 +625,16 @@ impl<'a> Retarget<'a> {
                     }
                 }
                 "translation" => {
+                    // A key is the source's rest plus a motion (the pelvis's bob): the target
+                    // keeps its own rest and the motion scales with the body. Scaling the whole
+                    // key put long legs' hips below their lifted rest, feet through the floor
+                    // (21 §8 #8).
+                    let src = rotate(pre, self.from.nodes[source].translation);
+                    let rest = self.to.nodes[node].translation;
                     for v in &mut c.values {
                         if v.len() == 3 {
                             let t = rotate(pre, [v[0], v[1], v[2]]);
-                            *v = t.iter().map(|x| x * translation_scale).collect();
+                            *v = (0..3).map(|k| rest[k] + (t[k] - src[k]) * translation_scale).collect();
                         }
                     }
                 }
@@ -1294,6 +1346,53 @@ mod tests {
         };
         assert!(moved("face_brow_l") && moved("face_brow_r") && moved("face_nose_tip"));
         assert!(!moved("face_eye_l"), "no eye slider in the recipe");
+    }
+
+    #[test]
+    fn a_new_body_takes_off_what_it_has_no_place_for() {
+        // 21 §8 #1, #9: switching build kept the old body's parts, sliders, fills and sculpt;
+        // the forge refused them and the preview stopped changing.
+        let c = catalog();
+        let mut l = Looks {
+            outfit: vec!["torso.tunic".into(), "head.helmet".into()],
+            paint: vec![("body".into(), 3, 18), ("torso.tunic".into(), 0, 5)],
+            sculpt: vec![(10, [5, 0, 0])],
+            ..Looks::default()
+        };
+        l.set_slider("nose_reach", 0.5);
+        l.set_slider("body_bulk", 0.5);
+        let was = l.base_key();
+        l.build = "machine".into();
+        let dropped = c.fit(&mut l, &was);
+        assert_eq!(l.gender, looks::Gender::None);
+        assert!(l.outfit.is_empty() && l.sculpt.is_empty(), "{l:?}");
+        assert!(l.shape.iter().all(|(id, _)| c.sliders("machine").contains(id)));
+        assert!(l.paint.iter().all(|(t, _, _)| t == "body"));
+        assert!(!dropped.is_empty());
+        c.forge("Cog", &l).unwrap();
+        // The same body keeps everything.
+        let mut same = Looks { outfit: vec!["torso.tunic".into()], sculpt: vec![(10, [5, 0, 0])], ..Looks::default() };
+        let key = same.base_key();
+        assert!(c.fit(&mut same, &key).is_empty());
+        assert_eq!(same.sculpt.len(), 1);
+    }
+
+    #[test]
+    fn long_legs_keep_the_feet_on_the_floor_in_the_clips() {
+        // 21 §8 #8: the clips' pelvis keys were the library's scaled by √legs, below the
+        // lifted rest: long legs stood the feet in the floor once the idle played.
+        let c = catalog();
+        for legs in [-1.0, 1.0] {
+            let mut l = Looks::default();
+            l.proportions.set(1, legs);
+            let f = c.forge("Legs", &l).unwrap();
+            let pelvis = f.model.node_by_name("pelvis").unwrap();
+            let idle = f.model.animations.iter().find(|a| a.name == "idle").unwrap();
+            let ch = idle.channels.iter().find(|ch| ch.node == pelvis && ch.path == "translation").unwrap();
+            let rest = f.model.nodes[pelvis].translation[1];
+            let first = ch.values[0][1];
+            assert!((first - rest).abs() < 0.03, "legs {legs}: idle pelvis {first} vs rest {rest}");
+        }
     }
 
     #[test]

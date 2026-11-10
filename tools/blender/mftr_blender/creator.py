@@ -34,7 +34,8 @@ ACCENT = (0.18, 0.52, 0.95)
 # The builds (20 §3): per gender, the skeleton's placement (14 §2.2's heroic proportions), the
 # girth of the body and of every part on it (`mesh.GIRTH`: torso, limbs, neck), the head and the
 # hands. The heavy humanoid is the brute (Rook, Bastion, Cairn): low hips and short legs, the
-# neck sunk between the shoulders, broad and deep, long arms, huge hands, a small head for its size.
+# neck sunk between the shoulders, broad and deep, long arms, huge hands, a head ~8% bigger than
+# the slim build's (smaller than its body's lead, but visibly bigger: 21 §8 #6).
 BUILDS = {
     "humanoid_slim": {
         "masculine": {"shape": {"heights": [(0.0, 0.0), (2.15, 2.15)], "x": 1.04, "y": 1.0, "scale": 0.98, "shoulder": 0.03,
@@ -48,11 +49,11 @@ BUILDS = {
         "masculine": {"shape": {"heights": [(0.0, 0.0), (0.03, 0.03), (0.09, 0.09), (0.54, 0.46), (1.00, 0.89), (1.12, 1.01),
                                             (1.26, 1.16), (1.40, 1.31), (1.56, 1.48), (1.64, 1.53), (1.88, 1.78), (2.15, 2.05)],
                                 "x": 1.24, "y": 1.2, "scale": 1.1, "shoulder": 0.08, "arm": 1.06, "hand": 1.55},
-                      "girth": {"torso": (1.3, 1.28), "limb": (1.22, 1.22), "neck": (1.55, 1.5)}, "head": 1.38, "hands": 1.2},
+                      "girth": {"torso": (1.3, 1.28), "limb": (1.22, 1.22), "neck": (1.55, 1.5)}, "head": 1.47, "hands": 1.2},
         "feminine": {"shape": {"heights": [(0.0, 0.0), (0.03, 0.03), (0.09, 0.09), (0.54, 0.48), (1.00, 0.91), (1.12, 1.03),
                                            (1.26, 1.18), (1.40, 1.33), (1.56, 1.50), (1.64, 1.55), (1.88, 1.80), (2.15, 2.07)],
                                "x": 1.16, "y": 1.12, "scale": 1.06, "shoulder": 0.06, "arm": 1.04, "hand": 1.4},
-                     "girth": {"torso": (1.2, 1.18), "limb": (1.16, 1.16), "neck": (1.4, 1.35)}, "head": 1.32, "hands": 1.1},
+                     "girth": {"torso": (1.2, 1.18), "limb": (1.16, 1.16), "neck": (1.4, 1.35)}, "head": 1.4, "hands": 1.1},
     },
 }
 
@@ -74,6 +75,13 @@ def _girth(table):
             return table["limb"]
         return (1.0, 1.0)
     return of
+
+
+def _shaped(pt):
+    """A template point placed for the build's shape, as the bones are: the template's torso
+    is in biped space, and left there it rose to the slim feminine's chin (21 §8 #7). A (bone, t)
+    point already follows its bone."""
+    return pt if isinstance(pt[0], str) else rig.shaped(pt)
 
 
 def _body_parts(gender):
@@ -100,7 +108,15 @@ def _body_parts(gender):
             # The neck runs up inside the skull (the authored head sits over it, 21 §1.5): its
             # top never shows as a stump under the jaw, whatever the build.
             b = (0, 0.005, 1.76)
-        out.append((bone, a, b, sides, prof, slot, color))
+        out.append((bone, _shaped(a), _shaped(b), sides, prof, slot, color))
+    if gender == "feminine":
+        # A modest bust on the chest, below the collarbones (21 §8 #7): the undersuit reads as
+        # a woman's at the gameplay camera. Torso clothes hide the chest, and it with them.
+        for sx in (1, -1):
+            # A dome sunk in the chest, about 4 cm proud of it: round, not a cone.
+            out.append(("chest", _shaped((0.066 * sx, -0.05, 1.44)), _shaped((0.07 * sx, -0.166, 1.425)), 12,
+                        [(0, .074, .068), (.55, .074, .068), (.72, .066, .061), (.84, .052, .048),
+                         (.93, .034, .031), (.98, .016, .015), (1, 0, 0)], "cloth", SUIT))
     return out
 
 

@@ -170,13 +170,30 @@ impl Looks {
         }
     }
 
-    /// The base's file stem: `humanoid_slim_masculine`.
+    /// The base's file stem: `humanoid_slim_masculine`. The gender counts only on a build that
+    /// has genders (a gendered build with none set is masculine).
     pub fn base_key(&self) -> String {
-        match self.gender.key() {
-            Some(g) => format!("{}_{g}", self.build),
-            None => self.build.clone(),
+        if gendered(&self.build) {
+            format!("{}_{}", self.build, self.gender.key().unwrap_or("masculine"))
+        } else {
+            self.build.clone()
         }
     }
+
+    /// Make the gender fit the build: none on a build without genders, masculine on a gendered
+    /// build that had none (coming back from a creature).
+    pub fn fit_gender(&mut self) {
+        match (gendered(&self.build), self.gender) {
+            (false, _) => self.gender = Gender::None,
+            (true, Gender::None) => self.gender = Gender::Masculine,
+            _ => {}
+        }
+    }
+}
+
+/// Whether `build` has genders (an unknown build doesn't).
+pub fn gendered(build: &str) -> bool {
+    BUILDS.iter().any(|(b, g)| *b == build && *g)
 }
 
 fn err<T>(at: &str, msg: impl Into<String>) -> Result<T, DataError> {
@@ -203,10 +220,14 @@ pub fn read(v: Value, at: &str) -> Result<Looks, DataError> {
         return err(&bat, format!("`{build}`: expected one of {}", all.join(", ")));
     };
     let gender = match f.take("gender") {
-        Some((g, gat)) => match data::unit(g, &gat)?.as_str() {
-            "Masculine" if gendered => Gender::Masculine,
-            "Feminine" if gendered => Gender::Feminine,
-            other => return err(&gat, format!("`{other}`: this build takes Masculine or Feminine")),
+        Some((g, gat)) => match (data::unit(g, &gat)?.as_str(), gendered) {
+            ("Masculine", true) => Gender::Masculine,
+            ("Feminine", true) => Gender::Feminine,
+            // The creator once saved a creature with the gender it had before (2026-11-09): a
+            // build without genders ignores one.
+            ("Masculine" | "Feminine", false) => Gender::None,
+            (other, true) => return err(&gat, format!("`{other}`: this build takes Masculine or Feminine")),
+            (other, false) => return err(&gat, format!("`{other}`: this build has no genders")),
         },
         None if gendered => Gender::Masculine,
         None => Gender::None,
@@ -383,9 +404,9 @@ pub fn write(l: &Looks) -> String {
     let mut out = String::from("    looks: (\n");
     out += &format!("        build: \"{}\",\n", l.build);
     match l.gender {
-        Gender::Masculine => out += "        gender: Masculine,\n",
+        _ if !gendered(&l.build) => {}
         Gender::Feminine => out += "        gender: Feminine,\n",
-        Gender::None => {}
+        Gender::Masculine | Gender::None => out += "        gender: Masculine,\n",
     }
     let shape: Vec<String> =
         l.shape.iter().filter(|(_, v)| *v != 0.0).map(|(k, v)| format!("{k}: {}", round(*v))).collect();
@@ -470,6 +491,27 @@ mod tests {
         assert_eq!(of_champion_file(&text).unwrap(), Some(l));
         // The kit still reads, looks or not.
         assert_eq!(mftr_sim::data::read_champion(&text).unwrap(), *mftr_sim::ChampionId::Rook.def());
+    }
+
+    #[test]
+    fn a_creature_has_no_gender() {
+        // 21 §8 #1, #10: a machine kept the gender it had as a humanoid, looked for the base
+        // `machine_masculine`, and saved a gender its own reader refused.
+        let mut l = Looks { build: "machine".into(), gender: Gender::Masculine, ..Looks::default() };
+        assert_eq!(l.base_key(), "machine");
+        let text = mftr_sim::data::write_champion_as(mftr_sim::ChampionId::Rook.def(), "Cog", "", &write(&l));
+        assert!(!text.contains("gender"), "{text}");
+        l.fit_gender();
+        assert_eq!(l.gender, Gender::None);
+        // Files saved before the fix load: the gender is dropped.
+        let old = of_champion_file(&looks_text("build: \"machine\", gender: Masculine")).unwrap().unwrap();
+        assert_eq!((old.gender, old.base_key().as_str()), (Gender::None, "machine"));
+        assert!(of_champion_file(&looks_text("build: \"machine\", gender: Other")).is_err());
+        // Back to a humanoid: masculine until chosen.
+        l.build = "humanoid_heavy".into();
+        assert_eq!(l.base_key(), "humanoid_heavy_masculine");
+        l.fit_gender();
+        assert_eq!(l.gender, Gender::Masculine);
     }
 
     #[test]

@@ -1108,6 +1108,24 @@ The owner's test found the creator glitchy. These are logged here so the face wo
 
 The verdict that matters most: features the owner reasonably expected, such as coloring every build's assets and not only the humanoids', are missing or broken. The fixes should be checked in the running game, step by step, with captures.
 
+### CR-fix status (2026-11-09)
+
+Each fix was checked in the running game with captures, using `--creator-load`, `--creator-step`, `--creator-brush`, the new `--creator-yaw` and `--practice` with the new `--practice-leave`.
+
+| # | What it was | Fix |
+|---|---|---|
+| 1, 10 | The Gender step offered Masculine and Feminine on every build. Picked on a creature, it made the base `machine_masculine`; the file then saved that gender, and the reader refused it. | `Looks::base_key` counts the gender only on gendered builds. The writer leaves it out on creatures, and the reader drops it from files saved before the fix. `set_build` and `set_gender` fit the gender to the build. |
+| 2 | The skin tone recolors the `skin` slot, which the beast, serpent and machine don't have. | On those builds the Gender step becomes **Body colors**: its regions and the palette, as fills. |
+| 3, 9 | The forge paints every creature (fill, brush, raycast). In the creator, defect 1 broke every preview of a creature, and **any forge error was silent**: the old model stayed up and nothing seemed to change. Switching build or gender also kept the old body's parts, sliders, fills and sculpt, which the forge then refused. | `Catalog::fit` takes off what the new body has no place for and says so. Preview errors show in the status line. The brush says when an image is full: 15 colors, or 8 parts with brushwork. The brush and the sculpt aim at the skinned face, where FR3's face bones put it. |
+| 4 | Leaving a match reloads the scene, which dropped the practice server, so the menu showed instead of the creator. | The practice server and its file are static and survive the reload. Leaving Test reopens the creator on the champion. |
+| 5 | Test showed the default slim model: the champion's looks failed to forge (defect 1), and the game falls back to the template. | Fixed with 1. A machine now plays as itself. |
+| 6 | The heavy head was 1.5% bigger than the slim one, on a body 12% bigger. | Heavy heads are 1.47 and 1.40, 8% over the slim ones: still the brute's small head, but visibly bigger. |
+| 7 | The template torso's plain coordinates were never placed for the build's shape (`rig.shaped`), though its bones were. On the slim feminine (×0.95) the chest dome rose past the chin, and the slim masculine wore a turtleneck. | `creator._shaped` places the torso for the build. The slim builds show a neck. The feminine undersuit has a modest bust (torso clothes hide it with the chest). |
+| 8 | Clips' translation keys were the library's scaled by `height × √legs`, while the forge lifts the pelvis exactly. With long legs the idle put the feet through the floor, and the boots read as stumps. | `Retarget` keeps each rig's own rest and scales only the motion. Feet stand on the floor at any leg length. |
+| 11 | The UI and visual polish pass | **Not done.** Feedback improved (status notes, body colors), and the stage's shadows are finer. The layout, type and previews pass is its own task. |
+
+The creator stage's sun now casts shadows over 6 m, not 100 m, so a staff's or a chin's shadow is crisp.
+
 ---
 
 ## 9. Extending to the body

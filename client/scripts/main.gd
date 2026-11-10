@@ -247,6 +247,10 @@ func _ready() -> void:
 			# The creator's Test without the creator (screenshots): a practice duel for this file.
 			_practice_start = args[i + 1]
 			i += 1
+		elif args[i] == "--practice-leave" and i + 1 < args.size():
+			# …and leave it after this many seconds, as Esc → Leave would (the creator reopens).
+			_practice_leave = float(args[i + 1])
+			i += 1
 		elif args[i] == "--creator":
 			_start_creator = true
 		elif args[i] == "--creator-load" and i + 1 < args.size():
@@ -255,6 +259,10 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--creator-step" and i + 1 < args.size():
 			_creator_step = args[i + 1]
+		elif args[i] == "--creator-yaw" and i + 1 < args.size():
+			# …turned this far (radians; screenshots from the side).
+			_creator_yaw = float(args[i + 1])
+			i += 1
 		elif args[i] == "--creator-brush" and i + 1 < args.size():
 			# A brush or decal stroke at a point of the stage (fractions of its size), to check
 			# painting in screenshots (CR5b): `decal:0.5,0.45:0` (a palette color last), `brush:0.5,0.6`.
@@ -395,7 +403,9 @@ func _ready() -> void:
 		_open_map_editor.call_deferred()
 	elif _start_creator:
 		_open_creator.call_deferred()
-	elif _practice_start != "":
+	elif _practice_start != "" and not _practice_started:
+		# Once: leaving the match reloads the scene, and the creator takes over from there.
+		_practice_started = true
 		_start_practice.call_deferred(_practice_start, MftrModel.load_champion_file(_practice_start))
 	elif address == "" or _back_to_menu:
 		_back_to_menu = false
@@ -640,11 +650,16 @@ var _shot_claim := false                 # `--shot-claim`: take Claim in F at th
 var _start_editor := false               # `--map-editor`: open the map editor at start
 var _editor_actual := false              # `--editor-actual`: …in its Actual view (captures)
 var _editor_angle := false               # `--editor-angle`: …from the game's camera angle
-var practice: MftrPractice = null        # the creator's Test: a practice server in this process
-var _practice_file := ""                 # …for this champion file (the creator reopens on it)
+# The creator's Test: a practice server in this process, for this champion file. Static: leaving
+# the match reloads the scene, and the menu then reopens the creator on the file.
+static var practice: MftrPractice = null
+static var _practice_file := ""
 var _practice_start := ""               # `--practice FILE`: start a practice duel for it
+static var _practice_started := false    # …started already (it survives the leave's reload)
+var _practice_leave := -1.0             # `--practice-leave S`: …and leave it after S seconds
 var _start_creator := false              # `--creator`: open the champion creator (20) at start
 var _creator_load := ""                  # `--creator-load FILE`: …with this champion file
+var _creator_yaw := INF                 # `--creator-yaw R`: …turned this far (screenshots)
 var _creator_step := ""                  # `--creator-step NAME`: …on this step (screenshots)
 var _creator_brush := ""                 # `--creator-brush TOOL:X,Y`: …and paint once there (screenshots)
 var _creator_sculpt := ""                # `--creator-sculpt BRUSH:X,Y`: …or sculpt there (screenshots)
@@ -6684,6 +6699,8 @@ func _open_creator() -> void:
 		menu_panel = null
 	var screen: Control = preload("res://scripts/creator.gd").new()
 	screen.setup(_art_root())
+	if _creator_yaw != INF:
+		screen._yaw = _creator_yaw
 	overlay.get_parent().add_child(screen)
 	if _creator_load != "":
 		screen.call_deferred("load_file", _creator_load)
@@ -6723,6 +6740,8 @@ func _start_practice(path: String, champion: String) -> void:
 	client.set_spectate(false)
 	client.set_champion(champion)
 	_connect(address)
+	if _practice_leave > 0.0:
+		get_tree().create_timer(_practice_leave).timeout.connect(_leave)
 
 
 ## The map editor (12), over everything; closing it brings the menu back.

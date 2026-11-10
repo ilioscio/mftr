@@ -20,6 +20,12 @@ pub struct MftrCreator {
     art: String,
     /// The last preview forged: what the brush paints on (CR5b).
     last: Option<Arc<mftr_pack::Loaded>>,
+    /// The last preview where the skin puts it (its face bones moved, FR3): what the brush and
+    /// the sculpt aim at. None when nothing is moved (the preview's own model, then).
+    aim: Option<Arc<mftr_pack::glb::Model>>,
+    /// Why the last preview couldn't be forged, or what a change of body dropped: for the
+    /// screen's status line ("" when nothing).
+    note: String,
 }
 
 #[godot_api]
@@ -27,7 +33,14 @@ impl MftrCreator {
     /// A new champion: the defaults (a slim masculine base, Rook's kit).
     #[func]
     fn create() -> Gd<MftrCreator> {
-        Gd::from_init_fn(|base| MftrCreator { base, recipe: Recipe::default(), art: String::new(), last: None })
+        Gd::from_init_fn(|base| MftrCreator {
+            base,
+            recipe: Recipe::default(),
+            art: String::new(),
+            last: None,
+            aim: None,
+            note: String::new(),
+        })
     }
 
     /// Where the catalog is (`art/`): the bases and the clip library.
@@ -54,9 +67,30 @@ impl MftrCreator {
         GString::from(self.recipe.looks.build.as_str())
     }
 
+    /// Change the build: the gender fits it, and what the new body has no place for comes off
+    /// (see `note`).
     #[func]
     fn set_build(&mut self, build: GString) {
+        let was = self.recipe.looks.base_key();
         self.recipe.looks.build = build.to_string();
+        self.refit(&was);
+    }
+
+    /// After the body changed: fit the looks to it and say what came off.
+    fn refit(&mut self, was: &str) {
+        let Some(cat) = catalog(&self.art) else {
+            self.recipe.looks.fit_gender();
+            return;
+        };
+        let dropped = cat.fit(&mut self.recipe.looks, was);
+        self.note = if dropped.is_empty() { String::new() } else { format!("Taken off: {}.", dropped.join("; ")) };
+    }
+
+    /// What the screen should know: why the preview couldn't be made, or what a change of body
+    /// took off ("" when nothing).
+    #[func]
+    fn note(&self) -> GString {
+        GString::from(self.note.as_str())
     }
 
     /// "masculine", "feminine" or "" (a build without genders).
@@ -65,13 +99,16 @@ impl MftrCreator {
         GString::from(self.recipe.looks.gender.key().unwrap_or(""))
     }
 
+    /// Ignored on a build without genders.
     #[func]
     fn set_gender(&mut self, gender: GString) {
+        let was = self.recipe.looks.base_key();
         self.recipe.looks.gender = match gender.to_string().as_str() {
             "feminine" => Gender::Feminine,
             "masculine" => Gender::Masculine,
             _ => Gender::None,
         };
+        self.refit(&was);
     }
 
     /// The sliders the current base offers, in order.
@@ -110,6 +147,14 @@ impl MftrCreator {
         if let Some(i) = Proportions::NAMES.iter().position(|n| *n == name) {
             self.recipe.looks.proportions.set(i, value);
         }
+    }
+
+    /// Whether the body has skin to tone (the beast, serpent and machine don't: their colors
+    /// are fills).
+    #[func]
+    fn has_skin(&self) -> bool {
+        let Some(cat) = catalog(&self.art) else { return false };
+        cat.base(&self.recipe.looks.base_key()).is_some_and(|b| b.model.materials.iter().any(|m| m == "skin"))
     }
 
     /// The skin tones, as colors.
@@ -448,10 +493,15 @@ impl MftrCreator {
             Ok(pack) => {
                 let pack = Arc::new(pack);
                 self.last = Some(pack.clone());
+                self.aim = aimed(&pack.model);
+                if self.note.starts_with("Can't show") {
+                    self.note.clear();
+                }
                 Some(MftrModel::from_pack(pack))
             }
             Err(e) => {
                 godot_error!("MFTR creator preview: {e}");
+                self.note = format!("Can't show this: {e}");
                 None
             }
         }
@@ -478,7 +528,8 @@ impl MftrCreator {
     fn brush(&mut self, origin: Vector3, dir: Vector3, radius: f32, color: i64, decal: GString) -> GString {
         use mftr_forge::image::{self, Image, Texels, Tool};
         let Some(last) = self.last.clone() else { return GString::new() };
-        let model = &last.model;
+        let aim = self.aim.clone();
+        let model = aim.as_deref().unwrap_or(&last.model);
         let Some((mi, hit, normal)) = image::raycast(model, [origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z])
         else {
             return GString::new();
@@ -486,10 +537,32 @@ impl MftrCreator {
         let Some(target) = image::target_of(model, mi) else { return GString::new() };
         let looks = &mut self.recipe.looks;
         if !looks.images.iter().any(|i| i.target == target) {
-            if looks.images.len() >= image::MAX_IMAGES || color < 0 {
+            if color < 0 {
+                return GString::new();
+            }
+            if looks.images.len() >= image::MAX_IMAGES {
+                // Say why nothing happened (painting "stopped working", 21 §8 #9).
+                self.note = format!(
+                    "Brushwork goes on {} parts at most: clear the paint on one to paint this one.",
+                    image::MAX_IMAGES
+                );
                 return GString::new();
             }
             looks.images.push(Image::new(&target));
+        }
+        if color >= 0
+            && let Some(img) = looks.images.iter().find(|i| i.target == target)
+            && img.colors.len() >= image::MAX_COLORS
+            && !img.colors.contains(&(color.clamp(0, 63) as u8))
+        {
+            self.note = format!(
+                "This already has {} brush colors: paint with one of them, or erase some first.",
+                image::MAX_COLORS
+            );
+            return GString::new();
+        }
+        if self.note.starts_with("Brushwork") || self.note.starts_with("This already") {
+            self.note.clear();
         }
         let decal = decal.to_string();
         let tool = match (color, decal.is_empty()) {
@@ -522,6 +595,7 @@ impl MftrCreator {
     ) -> bool {
         use mftr_forge::sculpt::{self, Brush};
         let (Some(cat), Some(last)) = (catalog(&self.art), self.last.clone()) else { return false };
+        let aim = self.aim.clone();
         let key = self.recipe.looks.base_key();
         let Some(welds) = cat.welds(&key) else { return false };
         let brush = brush.to_string();
@@ -539,7 +613,7 @@ impl MftrCreator {
         sculpt::stroke(
             &mut self.recipe.looks.sculpt,
             welds,
-            &last.model,
+            aim.as_deref().unwrap_or(&last.model),
             [origin.x, origin.y, origin.z],
             [dir.x, dir.y, dir.z],
             b,
@@ -598,9 +672,28 @@ impl MftrCreator {
         match std::fs::read_to_string(path.to_string()).map_err(|e| e.to_string()).and_then(|t| Recipe::from_text(&t)) {
             Ok(r) => {
                 self.recipe = r;
+                let key = self.recipe.looks.base_key();
+                self.refit(&key);
                 GString::new()
             }
             Err(e) => GString::from(e.as_str()),
         }
     }
+}
+
+/// `model` with its vertices where the skin puts them, when its face bones were moved (their
+/// rest differs from where the mesh is bound): the brush and the sculpt then land where the face
+/// shows, not where it was built.
+fn aimed(model: &mftr_pack::glb::Model) -> Option<Arc<mftr_pack::glb::Model>> {
+    if !model.bind.iter().any(Option::is_some) {
+        return None;
+    }
+    let skinned = mftr_forge::face::skinned(model);
+    let mut m = model.clone();
+    for (prims, s) in m.meshes.iter_mut().zip(skinned) {
+        for (p, pos) in prims.iter_mut().zip(s) {
+            p.positions = pos;
+        }
+    }
+    Some(Arc::new(m))
 }
