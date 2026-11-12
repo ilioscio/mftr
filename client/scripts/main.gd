@@ -260,6 +260,10 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--creator-step" and i + 1 < args.size():
 			_creator_step = args[i + 1]
+		elif args[i] == "--creator-zoom" and i + 1 < args.size():
+			# …and zoomed this much (past the wheel's 3, for close-ups of the eyes).
+			_creator_zoom = float(args[i + 1])
+			i += 1
 		elif args[i] == "--creator-yaw" and i + 1 < args.size():
 			# …turned this far (radians; screenshots from the side).
 			_creator_yaw = float(args[i + 1])
@@ -679,6 +683,7 @@ var _practice_leave := -1.0             # `--practice-leave S`: …and leave it 
 var _start_creator := false              # `--creator`: open the champion creator (20) at start
 var _creator_load := ""                  # `--creator-load FILE`: …with this champion file
 var _creator_yaw := INF                 # `--creator-yaw R`: …turned this far (screenshots)
+var _creator_zoom := 0.0                # `--creator-zoom Z`: …zoomed this much (screenshots)
 var _creator_step := ""                  # `--creator-step NAME`: …on this step (screenshots)
 var _creator_brush := ""                 # `--creator-brush TOOL:X,Y`: …and paint once there (screenshots)
 var _creator_sculpt := ""                # `--creator-sculpt BRUSH:X,Y`: …or sculpt there (screenshots)
@@ -6733,6 +6738,8 @@ func _open_creator() -> void:
 	screen.setup(_art_root())
 	if _creator_yaw != INF:
 		screen._yaw = _creator_yaw
+	if _creator_zoom > 0.0:
+		screen._zoom = _creator_zoom
 	overlay.get_parent().add_child(screen)
 	if _creator_load != "":
 		screen.call_deferred("load_file", _creator_load)

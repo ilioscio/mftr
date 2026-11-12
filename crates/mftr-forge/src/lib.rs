@@ -1577,6 +1577,41 @@ mod tests {
     }
 
     #[test]
+    fn the_lid_shapes_move_only_the_eyes_surroundings() {
+        // 22 §2.3: every humanoid base has the lid sliders, as morph targets round the eyes.
+        let c = catalog();
+        for key in
+            ["humanoid_slim_masculine", "humanoid_slim_feminine", "humanoid_heavy_masculine", "humanoid_heavy_feminine"]
+        {
+            let sliders = c.sliders(key);
+            for id in ["lids_open", "lids_inner", "lids_fold", "lids_crease", "lids_hood", "eyes_depth"] {
+                assert!(sliders.iter().any(|s| s == id), "{key} lacks {id}");
+            }
+        }
+        let plain = c.forge("Plain", &Looks::default()).unwrap();
+        let eye = world(&plain.model)[plain.model.node_by_name("face_eye_l").unwrap()].0;
+        for (id, v) in
+            [("lids_open", -1.0), ("lids_fold", 1.0), ("lids_crease", 1.0), ("lids_crease", -1.0), ("lids_hood", 1.0)]
+        {
+            let mut l = Looks::default();
+            l.set_slider(id, v);
+            let shaped = c.forge("Lids", &l).unwrap();
+            let (a, b) = (face::skinned(&plain.model), face::skinned(&shaped.model));
+            let mut moved = 0;
+            for (p, q) in a.iter().flatten().flatten().zip(b.iter().flatten().flatten()) {
+                let d = ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt();
+                if d > 1e-5 {
+                    moved += 1;
+                    // Within a few centimetres of one eye or the other.
+                    let near = ((p[0].abs() - eye[0].abs()).powi(2) + (p[1] - eye[1]).powi(2)).sqrt();
+                    assert!(near < 0.04 && d < 0.006, "{id} {v}: a vertex {d} m off, {near} m from the eye");
+                }
+            }
+            assert!(moved > 20, "{id} {v} moved {moved} vertices");
+        }
+    }
+
+    #[test]
     fn a_recipe_from_before_the_face_rig_gets_its_face_from_the_bones() {
         // FR3: Cairn-neo's recipe was written for the face morphs (`brow_ridge: 1`, `nose_length:
         // 0.5`…). It loads unchanged, and its face sliders now move the face bones' rest.

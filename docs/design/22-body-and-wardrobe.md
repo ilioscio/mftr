@@ -349,6 +349,14 @@ them, and they break the deterministic, data-only recipe.
 
 Shapes made by code alone remain out.
 
+**The owner's call (2026-11-12):**
+
+- **M1 goes ahead**, with the wardrobe pipeline (BW5).
+- **M5 is likely.** It depends on how the slider extremes treat the wardrobe in the QA harness
+  (§4.8).
+- **The LLM tie-ins are for later:** M2, M3, M4 and M6, and an MCP server that lets a model
+  make assets and characters from text.
+
 ---
 
 ## 6. Order (track BW, after FR6's mechanism)
@@ -437,14 +445,77 @@ forge test's bound is 9,000 until the new body resets the budget (§1.2).
 
 **Not yet:**
 
-- **Lid shapes** (§2.3): openness, tilt, inner corner, and the fold, monolid, hooded and
-  deep-set shapes.
 - **The owner's look.**
 - **Clips may key the lids** (§2.4), but no clip does yet.
+
+### Lid shapes status (2026-11-12): built
+
+**The opening, redone.** The lids used to open by an ellipse cut across the source's eye loops,
+so the rim zigzagged between two loops: notched lids with flaps of white at the corners. Now:
+
+- The opening follows the source's own topology: the faces within one edge of the seam where the
+  closed lids meet go, so the rim is the first eye loop, whole.
+- Each rim vertex is set on one almond contour (`authored_head.RIM`), with:
+  - the upper lid highest a little toward the nose, the lower lowest toward the temple;
+  - the outer corner 1.2 mm above the inner.
+- The rim stays at least 12 mm in front of the eyeball's centre, clear of the lid shells.
+- The lid shells' margins follow the same contour (`rim_z`).
+- The rim is darkened through the occlusion alpha: a lash line on the upper lid, a waterline on
+  the lower.
+- A new loop between the rim and the next ring gives the crease, fold and hood their geometry:
+  +88 triangles a head.
+
+**The sliders** (the Face step's **Lids** group):
+
+| Slider | What | How |
+|---|---|---|
+| Openness | narrow ↔ wide | morph `lids_open+` / `-`: the rim and the skin round it slide over the ball; the shells turn with it |
+| Crease | none (monolid) ↔ deep | morph `lids_crease-` / `+`: the new loop sinks into a fold line, or the skin above comes down full to the lash line |
+| Inner fold | one-sided: epicanthic | morph `lids_fold+`: the upper lid's skin comes down and across the inner corner, a soft ridge into it |
+| Hood | one-sided: hooded | morph `lids_hood+`: the skin under the brow hangs over the crease, more at the outer corner |
+| Inner corners | low ↔ high | morph `lids_inner~` |
+| Depth (Eyes group) | prominent ↔ deep-set | a preset on `face_eye_*` (`eyes_depth`): the whole eye moves back under the brow |
+
+The tilt was already `eyes_tilt`, a turn of the eye bones.
+
+**How the shapes are made.** Each morph is a field over the skin round the opening, in
+millimetres against the opening's ellipse, like a modeler's proportional edit (`LID_SHAPES`):
+
+- The skin slides over the eyeball as it moves, so it never cuts into it.
+- The shells turn about the ball by the rim's move over their columns.
+- The eyeballs stay put.
+
+**Changes elsewhere:**
+
+- **Pack rules:** a lone `<id>+` morph is now allowed, a one-sided slider. A `-` still needs its
+  `+`.
+- **The creator:** a one-sided slider runs from none to full, not −1 to 1.
+- **Captures:** `--creator-zoom Z` takes close-ups.
+
+**Checked:**
+
+- Captures of the slim masculine base, every slider at its ends, front and three-quarter.
+- An East Asian combination (inner fold 0.8, crease −0.8, openness −0.35) on the slim masculine
+  and feminine bases.
+- A hooded, deep-set heavy masculine base, and a monolid heavy feminine one.
+- Half and full blinks, with and without the shapes.
+- A test: all four bases have the six sliders, and each lid morph moves only vertices within
+  4 cm of an eye, by at most 6 mm.
+
+**Left:**
+
+- The thin light sliver at the inner brow (the painted brow's split seam) goes with BW2's brow
+  strips.
+- The ancestry presets (§3.3) will set these sliders. The face shapes' reader then has to accept
+  morph sliders too.
 
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?
 2. **Underwear as regions of the body** (§1.5), always on: agreed?
-3. **D77** (§5): which moonshots to start, and the license stance for M4?
+3. ~~**D77** (§5): which moonshots to start?~~ Answered: M1 now, M5 likely, the rest later.
+   M4's license stance waits for M4.
 4. **Ancestry presets** (§3.3): the list, and who reviews them for respect and accuracy?
+5. **Hair** is the big missing piece. The owner will answer its design questions after the
+   lids, brows, lips and the new body. It will lean on BW6's spring chains, the brows' strand
+   shading (§3.1) and the wardrobe's fitting (§4.2).

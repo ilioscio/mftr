@@ -1123,7 +1123,7 @@ mod tests {
     #[test]
     fn the_presets_are_symmetric_and_within_limits() {
         let all = presets();
-        assert_eq!(all.len(), 28);
+        assert_eq!(all.len(), 29);
         for p in all {
             assert!(!p.sculpt.is_neutral(), "{}", p.id);
             assert!(!p.about.is_empty(), "{}", p.id);

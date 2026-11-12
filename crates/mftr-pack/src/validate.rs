@@ -113,8 +113,9 @@ pub fn validate_model(model: &Model, glb_len: usize, side: &Sidecar) -> Report {
 }
 
 /// Morph targets (CR2): only a champion creator base has them, as slider pairs `<id>+` and
-/// `<id>-`, or one signed target `<id>~` for a slider whose ends mirror each other; ids made of
-/// `a–z`, `0–9` and `_`.
+/// `<id>-`, one signed target `<id>~` for a slider whose ends mirror each other, or a lone
+/// `<id>+` for a one-sided slider (an epicanthic fold: below 0 does nothing); ids made of `a–z`,
+/// `0–9` and `_`.
 fn check_targets(r: &mut Report, m: &Model, kind: &str) {
     let names: Vec<&String> = m.target_names.iter().flatten().collect();
     if kind != "base" {
@@ -147,9 +148,9 @@ fn check_targets(r: &mut Report, m: &Model, kind: &str) {
             }
             continue;
         }
-        let other = if n.ends_with('+') { format!("{id}-") } else { format!("{id}+") };
-        if !names.iter().any(|x| **x == other) {
-            r.err(format!("slider `{id}` has no `{other}`"));
+        // A `-` needs its `+`; a lone `+` is one-sided.
+        if n.ends_with('-') && !names.iter().any(|x| **x == format!("{id}+")) {
+            r.err(format!("slider `{id}` has no `{id}+`"));
         }
     }
     let mut ids: Vec<&str> = names.iter().map(|n| n.trim_end_matches(['+', '-', '~'])).collect();
@@ -624,9 +625,9 @@ mod tests {
     }
 
     #[test]
-    fn sliders_are_pairs_or_one_signed_target() {
-        assert!(targets(&["jaw_width+", "jaw_width-", "eyes_tilt~"]).is_empty());
-        assert!(targets(&["jaw_width+"]).iter().any(|m| m.contains("has no `jaw_width-`")));
+    fn sliders_are_pairs_one_signed_target_or_one_sided() {
+        assert!(targets(&["jaw_width+", "jaw_width-", "eyes_tilt~", "lids_fold+"]).is_empty());
+        assert!(targets(&["jaw_width-"]).iter().any(|m| m.contains("has no `jaw_width+`")));
         assert!(targets(&["eyes_tilt~", "eyes_tilt+", "eyes_tilt-"]).iter().any(|m| m.contains("both signed")));
         assert!(targets(&["eyes_tilt"]).iter().any(|m| m.contains("`+`, `-` or `~`")));
     }

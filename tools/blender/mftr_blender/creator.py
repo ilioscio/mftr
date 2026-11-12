@@ -411,10 +411,10 @@ def sliders():
     return SLIDERS
 
 
-def add_shape_keys(armature, body):
+def add_shape_keys(armature, body, fit=None):
     """Add `Basis` and every slider's keys to `body`: `+` and `-`, or one signed `~` where the
-    minus end mirrors the plus (half the morph data, which bases are capped by). Returns the
-    slider ids."""
+    minus end mirrors the plus (half the morph data, which bases are capped by). With the
+    authored head's `fit`, the lid shapes too (22 §2.3). Returns the slider ids."""
     body.shape_key_add(name="Basis", from_mix=False)
     ids = []
     # The face sliders are presets on the face bones now (21 §2.7, art/creator/heads/presets.txt):
@@ -434,6 +434,16 @@ def add_shape_keys(armature, body):
             for i, d in deltas.items():
                 key.data[i].co = r.cos[i] + d
         ids.append(sid)
+    if rigged and fit is not None:
+        from . import authored_head
+        cos = [v.co.copy() for v in body.data.vertices]
+        for name, deltas in authored_head.lid_keys(armature, body, fit).items():
+            key = body.shape_key_add(name=name, from_mix=False)
+            for i, d in deltas.items():
+                key.data[i].co = cos[i] + d
+            sid = name[:-1]
+            if sid not in ids:
+                ids.append(sid)
     return ids
 
 
@@ -498,11 +508,11 @@ def build(gender, name, build="humanoid_slim"):
     (armature, body, parts made)."""
     from . import parts
     armature, body = build_base(gender, name, build)
-    ids = add_shape_keys(armature, body)
-    # The catalog's head parts were shaped on the block-out head: conformed to the authored one.
     from . import authored_head
     h = base_head(gender, build)
     fit = authored_head.prepare(h, armature.data.bones["head"].head_local)
+    ids = add_shape_keys(armature, body, fit)
+    # The catalog's head parts were shaped on the block-out head: conformed to the authored one.
     made = parts.build_parts(armature, body, h, conform=authored_head.make_conform(h, fit, body))
     # Parts grow with the body under them: its helper weights, from the nearest surface (21 §9.2).
     from . import body_rig

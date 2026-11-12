@@ -85,6 +85,9 @@ face_eye_l t 0 0 144 mirror
 [eyes_tilt] Eyes slanting up at the corners, or down
 face_eye_l r 0 -1800 0 mirror
 
+[eyes_depth] Deep-set eyes or prominent ones
+face_eye_l t 0 -45 0 mirror
+
 [brow_height] A brow set high or low over the eyes
 face_brow_l t 0 0 225 mirror
 face_brow_mid t 0 0 208

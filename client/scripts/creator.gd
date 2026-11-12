@@ -29,7 +29,7 @@ const STEPS := [
 	["balance", "8  Balance", "Every number has a price; every champion spends the same budget. Turn power and cooldowns, then fit.", true],
 	["name", "9  Name", "Name the champion and save it.", true],
 ]
-const FACE_PREFIXES := ["head", "face", "jaw", "chin", "cheek", "brow", "nose", "mouth", "eyes", "ears"]
+const FACE_PREFIXES := ["head", "face", "jaw", "chin", "cheek", "brow", "nose", "mouth", "eyes", "lids", "ears"]
 ## The Face step, feature by feature (20 §5.2): each slider as [id, name, its -1 end, its +1 end].
 ## A slider the base has that isn't listed lands under "More".
 const FACE_GROUPS := [
@@ -38,7 +38,11 @@ const FACE_GROUPS := [
 	["Brow", [["brow_ridge", "Ridge", "smooth", "heavy"], ["brow_height", "Height", "low", "high"],
 		["brow_angle", "Set", "worried", "scowling"]]],
 	["Eyes", [["eyes_size", "Size", "small", "big"], ["eyes_spacing", "Spacing", "close-set", "wide-set"],
-		["eyes_height", "Height", "low", "high"], ["eyes_tilt", "Slant", "down at the corners", "up at the corners"]]],
+		["eyes_height", "Height", "low", "high"], ["eyes_tilt", "Slant", "down at the corners", "up at the corners"],
+		["eyes_depth", "Depth", "prominent", "deep-set"]]],
+	["Lids", [["lids_open", "Openness", "narrow", "wide"], ["lids_crease", "Crease", "none (monolid)", "deep"],
+		["lids_fold", "Inner fold", "", "epicanthic"], ["lids_hood", "Hood", "", "hooded"],
+		["lids_inner", "Inner corners", "low", "high"]]],
 	["Nose", [["nose_length", "Length", "short", "long"], ["nose_reach", "Projection", "flat", "prominent"],
 		["nose_width", "Width", "thin", "broad"], ["nose_hook", "Bridge", "scooped", "hooked"],
 		["nose_tip", "Tip", "drooping", "upturned"]]],
@@ -982,16 +986,19 @@ func _slider(text: String, value: float, set_value: Callable, low := "", high :=
 	top.add_child(val)
 	box.add_child(top)
 	var s := HSlider.new()
-	s.min_value = -1.0
+	# A one-sided slider (no low end: a fold, pointed ears) runs from none to full.
+	s.min_value = 0.0 if low == "" and high != "" else -1.0
 	s.max_value = 1.0
 	s.step = 0.01
 	s.value = value
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if s.min_value == 0.0:
+		val.tooltip_text = "Back to none"
 	# Both ends are a choice: no fill from the left, the knob says where it is.
 	s.add_theme_stylebox_override("grabber_area", StyleBoxEmpty.new())
 	s.add_theme_stylebox_override("grabber_area_highlight", StyleBoxEmpty.new())
 	if low != "" or high != "":
-		s.tooltip_text = "%s  ←  →  %s" % [low if low != "" else "less", high]
+		s.tooltip_text = "%s  ←  →  %s" % [low if low != "" else "none", high]
 	var show := func(v: float):
 		var off := absf(v) > 0.005
 		var side: String = (high if v > 0.0 else low) if off else ""

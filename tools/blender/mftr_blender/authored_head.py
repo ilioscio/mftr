@@ -36,17 +36,24 @@ MIX = {
 # move with the variant, so they are found on each mix by these positions' nearest vertices).
 CHIN_Z, CROWN_Z = -0.0892, 0.1359
 EYE = Vector((0.030, -0.0431, 0.020))
-# The lid opening round each eye centre (source metres): an ellipse, x and z half-axes.
+# The lid opening round each eye centre (source metres): an ellipse, x and z half-axes. The lid
+# shapes' fields (`LID_SHAPES`) measure the skin against it.
 LID = (0.0105, 0.0048)
+# The opening's rim (22 §2.3), relative to the eye landmark, x toward the outer corner: the
+# corners, and the upper and lower lids' heights over the line between them, each lid highest
+# (lowest) a little way along it, as an eye's are: the upper lid's peak toward the nose, the
+# lower's toward the temple. The skin's rim is set on it and the lid shells' margins follow it.
+RIM = {"inner": -0.0100, "outer": 0.0105, "inner_z": -0.0003, "outer_z": 0.0009,
+       "up": 0.0050, "down": 0.0040, "up_peak": 0.42, "down_peak": 0.6}
+# How far in front of the eyeball's centre the rim stays at least: in front of the lid shells.
+RIM_CLEAR = 0.0120
 # The eyeball (22 §2.1), its centre this far behind the eye landmark (source metres): its front
 # sits just behind the lids' rim (10.6–14.5 mm from the centre).
 EYEBALL_R = 0.0108
 EYEBALL_BACK = 0.0085
 # The lid shells (22 §2.3): spherical bands round the eyeball, the upper inside the lower so a
-# closed upper lid tucks behind the lower. The opening they close (measured on the rim): x and z
-# half-axes. A lid turns about the eyeball's centre on its bone.
+# closed upper lid tucks behind the lower. A lid turns about the eyeball's centre on its bone.
 LID_R = {"upper": 0.0113, "lower": 0.0116}
-OPENING = (0.0108, 0.0064)
 # How far the upper lid rests below the rim at the eye's middle (radians): over the iris's top.
 REST_DROP = math.radians(14)
 # The default iris (brown) and pupil size (0–1), until the forge writes the recipe's.
@@ -119,19 +126,25 @@ def build(bm, layers, groups, mats, head, mix, fit):
         dz = (p.z - EYE.z) / LID[1]
         return dx * dx + dz * dz < 1.0 and p.y < EYE.y + 0.01
 
+    opened = False
+
     def region(f):
         c = f.calc_center_median()
         if any(in_lid(c, s) for s in (1, -1)):
-            return "lid"
+            # Once the lids are open, what's left round them (the crease loop's faces) is skin.
+            return "skin" if opened else "lid"
         if BROW["z"][0] < c.z < BROW["z"][1] and BROW["x"][0] < abs(c.x) < BROW["x"][1] and c.y < EYE.y + 0.01:
             return "brow"
         if LIPS["z"][0] < c.z < LIPS["z"][1] and abs(c.x) < LIPS["x"] and c.y < -0.045:
             return "lips"
         return "skin"
 
-    # The lids open: their faces go.
-    lids = [f for f in src.faces if region(f) == "lid"]
-    bmesh.ops.delete(src, geom=lids, context="FACES")
+    # The lids open along the source's own eye loop (its faces round the closed lids' seam go),
+    # and the rim is set on `RIM`.
+    bmesh.ops.delete(src, geom=_lid_faces(src), context="FACES")
+    opened = True
+    _shape_rims(src)
+    _crease_loops(src)
     # Brows and lips own their vertices (split from the skin), so their color stays crisp.
     painted = [f for f in src.faces if region(f) in ("brow", "lips")]
     edges = {e for f in painted for e in f.edges if any(region(o) not in ("brow", "lips") for o in e.link_faces)}
@@ -150,6 +163,13 @@ def build(bm, layers, groups, mats, head, mix, fit):
         nf.smooth = False
         for v in f.verts:
             out_v[v][col] = (*colors[r], 1.0)
+    # The lids' edges a little darker (the occlusion alpha): the upper's lash line, the lower's
+    # waterline.
+    for side in (1, -1):
+        c = Vector((side * EYE.x, EYE.y, EYE.z))
+        for v in src.verts:
+            if (v.co - c).length < 0.02 and any(e.is_boundary for e in v.link_edges):
+                out_v[v][col] = (*head.skin, 0.4 if v.co.z > c.z + RIM["up"] * 0.2 else 0.7)
     # The mouth line a little darker (the lips' meeting).
     for v in src.verts:
         if abs(v.co.z - MOUTH_Z) < 0.0018 and abs(v.co.x) < LIPS["x"] * 0.9 and v.co.y < -0.05:
@@ -172,6 +192,100 @@ def build(bm, layers, groups, mats, head, mix, fit):
         for which in ("upper", "lower"):
             _lid(bm, deform, col, mats, fit, c, groups.get(f"lid_{which}_{sfx}", eye_g), which, head.skin)
     return fit
+
+
+def rim_z(x_out, upper):
+    """The rim's height over the eye landmark at `x_out` (source metres, toward the outer
+    corner), on the upper or the lower lid."""
+    t = max(0.0, min(1.0, (x_out - RIM["inner"]) / (RIM["outer"] - RIM["inner"])))
+    zc = RIM["inner_z"] + (RIM["outer_z"] - RIM["inner_z"]) * t
+    peak = RIM["up_peak"] if upper else RIM["down_peak"]
+    s = t ** (math.log(0.5) / math.log(peak))
+    h = math.sin(math.pi * s) ** 0.8
+    return zc + (RIM["up"] if upper else -RIM["down"]) * h
+
+
+def _rim_points(n=120):
+    """The rim, closed: (x_out, z) round it, upper lid inner to outer, then the lower back."""
+    xs = [RIM["inner"] + (RIM["outer"] - RIM["inner"]) * i / n for i in range(n + 1)]
+    return [(x, rim_z(x, True)) for x in xs] + [(x, rim_z(x, False)) for x in reversed(xs[1:-1])]
+
+
+def _walk(e0, v0):
+    """The edges of the edge loop through `e0`, walking away from its vertex `v0` until a pole."""
+    out = []
+    e, v = e0, e0.other_vert(v0)
+    for _ in range(64):
+        if len(v.link_edges) != 4:
+            break
+        faces = set(e.link_faces)
+        nxt = [x for x in v.link_edges if x is not e and not (set(x.link_faces) & faces)]
+        if len(nxt) != 1 or nxt[0] is e0:
+            break
+        e = nxt[0]
+        out.append(e)
+        v = e.other_vert(v)
+    return out
+
+
+def _lid_faces(src):
+    """The closed lids' faces round each eye: those within one edge of the seam where the lids
+    meet (the edge loop across the eye's middle), so the opening's rim is the source's first eye
+    loop, whole."""
+    out = []
+    for side in (1, -1):
+        c = Vector((side * EYE.x, EYE.y, EYE.z))
+        near = [e for e in src.edges
+                if all((v.co - c).length < 0.02 and v.co.y < EYE.y + 0.01 for v in e.verts)]
+
+        def across(e):
+            d = e.verts[1].co - e.verts[0].co
+            return abs(d.x) > 2 * abs(d.z)
+
+        e0 = min((e for e in near if across(e)), key=lambda e: ((e.verts[0].co + e.verts[1].co) / 2 - c).length)
+        seam = set(e0.verts)
+        for v0 in e0.verts:
+            for e in _walk(e0, v0):
+                seam |= set(e.verts)
+        within = seam | {e.other_vert(v) for v in seam for e in v.link_edges}
+        out += [f for f in src.faces if all(v in within for v in f.verts)]
+    return out
+
+
+def _shape_rims(src):
+    """Each opening's rim set on `RIM`: every rim vertex moves along its direction from the
+    opening's middle onto the rim, and forward if it would sit inside `RIM_CLEAR` of the
+    eyeball's centre."""
+    pts = _rim_points()
+    mx = (RIM["inner"] + RIM["outer"]) / 2
+    mz = (RIM["inner_z"] + RIM["outer_z"]) / 2
+    half = ((RIM["outer"] - RIM["inner"]) / 2, (RIM["up"] + RIM["down"]) / 2)
+
+    def angle(x, z):
+        return math.atan2((z - mz) / half[1], (x - mx) / half[0])
+
+    marks = [(angle(x, z), x, z) for x, z in pts]
+    for side in (1, -1):
+        c = Vector((side * EYE.x, EYE.y, EYE.z))
+        ball = Vector((side * EYE.x, EYE.y + EYEBALL_BACK, EYE.z))
+        rim = [v for v in src.verts if (v.co - c).length < 0.02 and any(e.is_boundary for e in v.link_edges)]
+        for v in rim:
+            a = angle(side * (v.co.x - c.x), v.co.z - c.z)
+            _, x, z = min(marks, key=lambda m: abs(math.remainder(m[0] - a, math.tau)))
+            v.co.x, v.co.z = c.x + side * x, c.z + z
+            d2 = (v.co.x - ball.x) ** 2 + (v.co.z - ball.z) ** 2
+            v.co.y = min(v.co.y, ball.y - math.sqrt(max(0.0, RIM_CLEAR ** 2 - d2)))
+
+
+def _crease_loops(src):
+    """A loop round each lid opening, between its rim and the next ring out (22 §2.3): the source
+    has one ring between the lid's edge and the brow, too few for a crease, a fold or a hood."""
+    for side in (1, -1):
+        c = Vector((side * EYE.x, EYE.y, EYE.z))
+        rim = {v for v in src.verts if (v.co - c).length < 0.02 and any(e.is_boundary for e in v.link_edges)}
+        spokes = {e for v in rim for e in v.link_edges if not e.is_boundary and e.other_vert(v) not in rim}
+        if spokes:
+            bmesh.ops.subdivide_edges(src, edges=list(spokes), cuts=1, use_grid_fill=True)
 
 
 def _socket_wall(src, bm, out_v, deform, col, mats, fit, c, group, skin):
@@ -231,24 +345,32 @@ def _lid(bm, deform, col, mats, fit, c, group, which, skin):
     across the eye's width. At rest it hides behind the skin round the opening; turned about
     the centre it closes over the eyeball."""
     rad = LID_R[which]
-    sign = 1.0 if which == "upper" else -1.0
+    upper = which == "upper"
+    sign = 1.0 if upper else -1.0
+    side = 1 if c.x > 0 else -1
     cols, rows = 10, 5
     # Far enough that a closed upper lid still reaches behind the rim's top.
-    reach = math.radians(80 if which == "upper" else 50)
-    edge = math.asin(min(0.98, (OPENING[0] + 0.0025) / rad))
+    reach = math.radians(80 if upper else 50)
+    ends = [math.asin(max(-0.98, min(0.98, side * x / rad))) for x in (RIM["inner"] - 0.0025, RIM["outer"] + 0.0025)]
+    lo, hi = min(ends), max(ends)
 
     def margin(az):
-        # The rim's height over the eye at this azimuth: the opening's ellipse. The upper lid
-        # rests over the top of the iris, as an eye at ease does (`REST_DROP`); the lower lid
+        # The rim's height at this azimuth (`rim_z`). The upper lid rests over the top of the
+        # iris, as an eye at ease does (`REST_DROP`, by the lid's height there); the lower lid
         # just inside its rim.
-        x = rad * math.sin(az)
-        z = OPENING[1] * math.sqrt(max(0.0, 1.0 - (x / OPENING[0]) ** 2))
-        el = math.asin(min(0.95, z / rad))
-        return el - (REST_DROP * (z / OPENING[1]) if which == "upper" else math.radians(-1))
+        x_out = side * rad * math.sin(az)
+        z = rim_z(x_out, upper)
+        el = math.asin(max(-0.95, min(0.95, z / rad)))
+        if upper:
+            t =max(0.0, min(1.0, (x_out - RIM["inner"]) / (RIM["outer"] - RIM["inner"])))
+            zc = RIM["inner_z"] + (RIM["outer_z"] - RIM["inner_z"]) * t
+            return el - REST_DROP * max(0.0, z - zc) / RIM["up"]
+        # The lower lid's margin as an angle below the middle (the rows go down from it).
+        return -el + math.radians(1)
 
     grid = []
     for i in range(cols + 1):
-        az = -edge + 2 * edge * i / cols
+        az = lo + (hi - lo) * i / cols
         m = margin(az)
         row = []
         for j in range(rows + 1):
@@ -308,6 +430,161 @@ def eye_uvs(armature, body):
             if vi in place:
                 uv.data[li].uv = place[vi]
     return len(place)
+
+
+# --- Lid shapes (22 §2.3) ---------------------------------------------------------------------
+# Each is a field over the skin round an eye opening, in the source's millimetres: what moves a
+# point at (u, w), its place against the opening's ellipse (`LID`; u toward the outer corner, w
+# up, 1 on the rim), returned as (out, forward-back, up). The skin slides over the eyeball as it
+# moves, and the lid shells turn about the ball to keep their margin under the rim. A slider's
+# `+` and `-` are two fields, or one (`~`) whose other end is its mirror.
+
+def _sm(t):
+    t = max(0.0, min(1.0, t))
+    return t * t * (3 - 2 * t)
+
+
+def _bump(x, at, width):
+    """1 at `at`, 0 from `width` away."""
+    return 1.0 - _sm(abs(x - at) / width)
+
+
+def _rim_h(u):
+    """The opening's half-height at u (1 in the middle, 0 at the corners)."""
+    return math.sqrt(max(0.0, 1.0 - u * u))
+
+
+def _fall(rho, out):
+    """Outside the opening, a rim's move fading to nothing by `out`."""
+    return 1.0 - _sm((rho - 1.0) / (out - 1.0))
+
+
+def _opening(up, down):
+    """The opening's height: its upper half-height changes by `up` mm and its lower by `down`.
+    Inside the opening (the socket's wall) a point moves with its share of the rim's move."""
+    def field(u, w, rho):
+        a, out = (up, 2.4) if w >= 0 else (down, 2.2)
+        dz = a * w if rho <= 1 else a * math.copysign(_rim_h(u), w) * _fall(rho, out)
+        return (0.0, 0.0, dz)
+    return field
+
+
+def _inner(u, w, rho):
+    """The inner corner raised."""
+    d = math.hypot((u + 1.0) * LID[0] * 1000, w * LID[1] * 1000)
+    return (0.0, 0.0, 1.6 * (1.0 - _sm(d / 7.0)))
+
+
+def _fold(u, w, rho):
+    """An epicanthic fold: the upper lid's skin comes down and across the inner corner, a soft
+    ridge running from the lid down into it."""
+    s = _sm((-u - 0.15) / 0.85)
+    if s == 0:
+        return (0.0, 0.0, 0.0)
+    if w >= 0:
+        f = rho if rho <= 1 else _fall(rho, 2.2)
+        return (3.0 * s * f, -1.0 * s * _bump(rho, 1.35, 0.6), -1.2 * s * f)
+    f = rho if rho <= 1 else _fall(rho, 1.8)
+    return (1.8 * s * f, 0.0, -1.0 * s * f * (1.0 - _sm(-w / 0.5)))
+
+
+def _across(u, edge):
+    return 1.0 - _sm((abs(u) - edge) / 0.6)
+
+
+def _crease_deep(u, w, rho):
+    """A deep double crease: the loop over the lid sinks into a fold line."""
+    if w <= 0:
+        return (0.0, 0.0, 0.0)
+    k = _bump(rho, 1.55, 0.45) * _across(u, 0.55)
+    return (0.0, 1.7 * k, 0.4 * k)
+
+
+def _monolid(u, w, rho):
+    """A monolid: no crease; the skin above comes down full and smooth to the lash line."""
+    if w <= 0:
+        return (0.0, 0.0, 0.0)
+    a = _across(u, 0.55)
+    dy = -1.3 * _bump(rho, 1.5, 0.55) - 0.4 * _bump(rho, 1.0, 0.4)
+    return (0.0, dy * a, -1.0 * _bump(rho, 1.9, 0.7) * a)
+
+
+def _hood(u, w, rho):
+    """Hooded: the skin under the brow hangs over the crease, more toward the outer corner."""
+    if w <= 0:
+        return (0.0, 0.0, 0.0)
+    o = (0.4 + 0.6 * _sm((u + 0.3) / 1.1)) * _across(u, 0.9)
+    return (0.0, -1.1 * _bump(rho, 1.8, 0.7) * o, -2.8 * _bump(rho, 2.0, 0.9) * o)
+
+
+# (slider, description, [(suffix, field)]): the creator's Lids sliders.
+LID_SHAPES = [
+    ("lids_open", "Wide-open eyes or narrow ones", [("+", _opening(1.8, 0.8)), ("-", _opening(-2.6, -1.0))]),
+    ("lids_inner", "The inner corners high or low", [("~", _inner)]),
+    ("lids_fold", "An epicanthic fold over the inner corner", [("+", _fold)]),
+    ("lids_crease", "A deep crease over the lid, or none (a monolid)", [("+", _crease_deep), ("-", _monolid)]),
+    ("lids_hood", "Hooded lids: the brow's skin over the crease", [("+", _hood)]),
+]
+
+
+def lid_keys(armature, body, fit):
+    """The lid shapes (`LID_SHAPES`) on the built `body`, as {slider + suffix: {vertex: delta}}
+    in armature space. The skin round each opening moves by its field and slides over the
+    eyeball; the lid shells (on the `lid_*` bones) turn about it so their margins follow the
+    rim; the eyeballs stay."""
+    me = body.data
+    names = {g.index: g.name for g in body.vertex_groups}
+
+    def source(co):
+        return JOINT + (Vector(co) - fit.joint) / fit.s
+
+    skin, shells = [], []
+    for v in me.vertices:
+        top = max(((g.weight, names[g.group]) for g in v.groups), default=(0.0, ""))[1]
+        if top.startswith("eye_look_"):
+            continue
+        p = source(v.co)
+        side = 1 if p.x > 0 else -1
+        if top.startswith("lid_"):
+            shells.append((v.index, p, side, top.startswith("lid_upper_")))
+            continue
+        dx, dz = side * (p.x - side * EYE.x), p.z - EYE.z
+        if abs(dx) < 0.03 and abs(dz) < 0.03 and EYE.y - 0.03 < p.y < EYE.y + 0.015:
+            skin.append((v.index, p, side, dx / LID[0], dz / LID[1]))
+    out = {}
+    for sid, _desc, ends in LID_SHAPES:
+        for suffix, field in ends:
+            deltas = {}
+            for i, p, side, u, w in skin:
+                rho = math.hypot(u, w)
+                if rho > 3.2:
+                    continue
+                d_out, d_y, d_z = (x / 1000.0 for x in field(u, w, rho))
+                if d_out == 0 and d_y == 0 and d_z == 0:
+                    continue
+                c = Vector((side * EYE.x, EYE.y + EYEBALL_BACK, EYE.z))
+                moved = p + Vector((side * d_out, 0.0, d_z))
+                # Sliding over the eyeball: as far from its centre as before, near the opening.
+                slid = c + (moved - c) * ((p - c).length / max(1e-9, (moved - c).length))
+                q = moved.lerp(slid, 1.0 - _sm((rho - 1.2) / 1.0)) + Vector((0.0, d_y, 0.0))
+                deltas[i] = (q - p) * fit.s
+            for i, p, side, upper in shells:
+                c = Vector((side * EYE.x, EYE.y + EYEBALL_BACK, EYE.z))
+                rel = p - c
+                rad = rel.length
+                az = math.atan2(rel.x, -rel.y)
+                el = math.asin(max(-1.0, min(1.0, rel.z / rad)))
+                # The rim's move over this column of the shell.
+                u = max(-1.0, min(1.0, side * rad * math.sin(az) / LID[0]))
+                w = _rim_h(u) if upper else -_rim_h(u)
+                d_out, _d_y, d_z = (x / 1000.0 for x in field(u, w, 1.0))
+                if d_out == 0 and d_z == 0:
+                    continue
+                az2, el2 = az + side * d_out / rad, el + d_z / rad
+                q = c + Vector((math.sin(az2) * math.cos(el2), -math.cos(az2) * math.cos(el2), math.sin(el2))) * rad
+                deltas[i] = (q - p) * fit.s
+            out[sid + suffix] = deltas
+    return out
 
 
 def _crown_back(fit):
