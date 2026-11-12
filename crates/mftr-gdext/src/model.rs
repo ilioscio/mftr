@@ -23,6 +23,9 @@ use mftr_pack::pose::Trs;
 pub struct MftrModel {
     base: Base<RefCounted>,
     pack: Arc<mftr_pack::Loaded>,
+    /// The creator's preview: each vertex carries its face region in UV2 (21 §3.2), which the
+    /// shader lights under the cursor. Game models don't.
+    regions: bool,
 }
 
 /// The champion creator's catalog (CR2), loaded once from the art folder.
@@ -45,7 +48,7 @@ pub(crate) fn catalog(art: &str) -> Option<Arc<mftr_forge::Catalog>> {
 impl MftrModel {
     /// A model of a pack built here (the creator's preview, CR3).
     pub(crate) fn from_pack(pack: Arc<mftr_pack::Loaded>) -> Gd<MftrModel> {
-        Gd::from_init_fn(|base| MftrModel { base, pack })
+        Gd::from_init_fn(|base| MftrModel { base, pack, regions: true })
     }
 }
 
@@ -83,7 +86,7 @@ impl MftrModel {
         };
         let cat = catalog(&art.to_string())?;
         match cat.forge(&champion.to_string(), &looks) {
-            Ok(pack) => Some(Gd::from_init_fn(|base| MftrModel { base, pack: Arc::new(pack) })),
+            Ok(pack) => Some(Gd::from_init_fn(|base| MftrModel { base, pack: Arc::new(pack), regions: false })),
             Err(e) => {
                 godot_error!("MFTR {champion} couldn't be forged: {e}");
                 None
@@ -96,7 +99,7 @@ impl MftrModel {
     #[func]
     fn load(path: GString) -> Option<Gd<MftrModel>> {
         match mftr_pack::load_file(std::path::Path::new(&path.to_string())) {
-            Ok(pack) => Some(Gd::from_init_fn(|base| MftrModel { base, pack: Arc::new(pack) })),
+            Ok(pack) => Some(Gd::from_init_fn(|base| MftrModel { base, pack: Arc::new(pack), regions: false })),
             Err(e) => {
                 godot_error!("MFTR model refused: {e}");
                 None
@@ -382,7 +385,12 @@ impl MftrModel {
     fn build_mesh(&self, skinned: bool) -> Gd<ArrayMesh> {
         let lib = &self.pack.library;
         let mut mesh = ArrayMesh::new_gd();
-        for prim in self.pack.model.meshes.iter().flatten() {
+        // Region k (face bone k - 1, 0 = none) as UV2.x = k / 256: the shader reads it back.
+        let regions = if self.regions { mftr_forge::face::vertex_regions(&self.pack.model) } else { Vec::new() };
+        let region_of = regions.iter().flatten();
+        for (prim, reg) in
+            self.pack.model.meshes.iter().flatten().zip(region_of.map(Some).chain(std::iter::repeat(None)))
+        {
             let n = prim.positions.len();
             let normals = smooth_normals(&prim.positions, &prim.indices);
             let mut arrays = VarArray::new();
@@ -399,6 +407,10 @@ impl MftrModel {
             if prim.uvs.len() == n {
                 let uvs: PackedVector2Array = prim.uvs.iter().map(|u| Vector2::new(u[0], u[1])).collect();
                 arrays.set(ArrayType::TEX_UV.ord() as usize, &uvs.to_variant());
+            }
+            if let Some(r) = reg.filter(|r| r.len() == n && r.iter().any(|&x| x > 0)) {
+                let uv2: PackedVector2Array = r.iter().map(|&x| Vector2::new(x as f32 / 256.0, 0.0)).collect();
+                arrays.set(ArrayType::TEX_UV2.ord() as usize, &uv2.to_variant());
             }
             if skinned && prim.joints.len() == n && prim.weights.len() == n {
                 let map = &lib.joint_to_bone;

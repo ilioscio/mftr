@@ -271,6 +271,11 @@ func _ready() -> void:
 			# A few sculpt strokes at a point of the stage (CR9): `inflate:0.5,0.2`.
 			_creator_sculpt = args[i + 1]
 			i += 1
+		elif args[i] == "--creator-feature" and i + 1 < args.size():
+			# A face feature dragged on the stage (FR4): `move:0.5,0.5:0.5,0.42` (from, to as
+			# fractions of the stage), `turn:…`, `size:…`; `:hold` keeps the drag open, glowing.
+			_creator_feature = args[i + 1]
+			i += 1
 		elif args[i] == "--champion-file" and i + 1 < args.size():
 			# A champion made in the creator (CR2): registered here, its model forged.
 			var loaded := MftrModel.load_champion_file(args[i + 1])
@@ -663,6 +668,7 @@ var _creator_yaw := INF                 # `--creator-yaw R`: …turned this far 
 var _creator_step := ""                  # `--creator-step NAME`: …on this step (screenshots)
 var _creator_brush := ""                 # `--creator-brush TOOL:X,Y`: …and paint once there (screenshots)
 var _creator_sculpt := ""                # `--creator-sculpt BRUSH:X,Y`: …or sculpt there (screenshots)
+var _creator_feature := ""               # `--creator-feature MODE:X,Y:X,Y[:hold]`: …or drag a face feature
 var _editor_map := ""                    # `--editor-map bridge|crossroads|FILE`: …on that map
 var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's reference image
 var _shot_ward := false                  # `--shot-ward`: place a stealth ward ahead at 2.5 s
@@ -6716,6 +6722,12 @@ func _open_creator() -> void:
 		var sp := _creator_sculpt.split(":")
 		var sxy := sp[1].split(",")
 		screen.sculpt_at_fraction(sp[0], Vector2(float(sxy[0]), float(sxy[1])))
+	if _creator_feature != "":
+		await get_tree().create_timer(1.0).timeout
+		var fp := _creator_feature.split(":")
+		var a := fp[1].split(",")
+		var b := fp[2].split(",")
+		screen.feature_at_fraction(fp[0], Vector2(float(a[0]), float(a[1])), Vector2(float(b[0]), float(b[1])), 8, fp.size() > 3 and fp[3] == "hold")
 	screen.saved.connect(func(_path): champion_models.clear())
 	screen.test.connect(_start_practice)
 	screen.closed.connect(func(): _show_menu(""))

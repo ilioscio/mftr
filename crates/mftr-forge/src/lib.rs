@@ -1096,6 +1096,114 @@ mod tests {
     }
 
     #[test]
+    fn every_face_bone_owns_a_region_and_the_ray_finds_it() {
+        // FR4 (21 §2.4): regions come from the weights; a ray from the front meets the nose.
+        let c = catalog();
+        let l = Looks { outfit: vec!["head.helmet".into()], ..Looks::default() };
+        let m = c.forge("Plain", &l).unwrap().model;
+        let regions = face::vertex_regions(&m);
+        let mut owned = [0usize; face::BONES];
+        for (mi, prims) in regions.iter().enumerate() {
+            let part = m.nodes.iter().any(|n| n.mesh == Some(mi) && n.name.starts_with("part."));
+            for r in prims.iter().flatten() {
+                assert!(!part || *r == 0, "a part has no face regions");
+                if *r > 0 {
+                    owned[*r as usize - 1] += 1;
+                }
+            }
+        }
+        for (b, n) in owned.iter().enumerate() {
+            assert!(*n >= 3, "{} owns {n} vertices", face::REGION_NAMES[b]);
+        }
+        // Straight at the nose tip from in front (+Z in glTF), and over the cranium: none.
+        let w = world(&m);
+        let tip = w[m.node_by_name("face_nose_tip").unwrap()].0;
+        let (hit, _) = face::region_at(&m, &regions, [tip[0], tip[1] - 0.01, tip[2] + 1.0], [0.0, 0.0, -1.0]).unwrap();
+        assert!(
+            ["Nose tip", "Bridge of the nose", "Left nostril", "Right nostril"].contains(&face::REGION_NAMES[hit]),
+            "{}",
+            face::REGION_NAMES[hit]
+        );
+        let top = head_top(&m);
+        assert!(
+            face::region_at(&m, &regions, [0.0, top + 1.0, 0.0], [0.0, -1.0, 0.0]).is_none(),
+            "the crown isn't a feature"
+        );
+    }
+
+    #[test]
+    fn the_live_pose_is_the_bake() {
+        // FR4 (21 §3.3): posing the bones with a face shows what forging with it bakes.
+        let c = catalog();
+        let plain = c.forge("Plain", &Looks::default()).unwrap().model;
+        let mut f = face::FaceSculpt::default();
+        f.bones[11] = face::BoneDelta { t: [0, 150, -60], r: [400, 0, 0], s: [100, 100, 100] };
+        f.bones[10].s = [0; 3];
+        f.bones[19] = face::BoneDelta { t: [0, 120, -90], ..face::BoneDelta::ZERO };
+        f.bones[15].s = [120, 0, 0];
+        let baked = c.forge("Baked", &Looks { face: Some(f.clone()), ..Looks::default() }).unwrap().model;
+        for (node, (t, r, s)) in face::posed(&plain, &f) {
+            let n = &baked.nodes[baked.node_by_name(&plain.nodes[node].name).unwrap()];
+            let close = |a: &[f32], b: &[f32]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5);
+            assert!(
+                close(&t, &n.translation) && close(&r, &n.rotation) && close(&s, &n.scale),
+                "{}",
+                plain.nodes[node].name
+            );
+        }
+    }
+
+    #[test]
+    fn a_drag_moves_the_feature_with_the_cursor_and_its_mirror() {
+        // FR4 (21 §2.5): a camera looking at the face (−Z in glTF, the face toward +Z).
+        let c = catalog();
+        let m = c.forge("Plain", &Looks::default()).unwrap().model;
+        let frames = face::bone_frames(&m);
+        let w = world(&m);
+        let brow = w[m.node_by_name("face_brow_l").unwrap()].0;
+        let cam = face::CameraFrame {
+            origin: [brow[0], brow[1], brow[2] + 1.0],
+            right: [1.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            forward: [0.0, 0.0, -1.0],
+            fov_y: 30f32.to_radians(),
+            viewport_h: 1000.0,
+        };
+        // 20 px up at 1 m: 2·tan(15°)/1000·20 ≈ 10.7 mm.
+        let world_move = face::drag_to_world(&cam, [0.0, -20.0], brow);
+        assert!((world_move[1] - 0.0107).abs() < 0.0005, "{world_move:?}");
+        let (l, r) = (2, 3);
+        let mut f = face::FaceSculpt::default();
+        assert!(face::drag_face(&mut f, l, face::DragMode::Move, world_move, [0.0, -20.0], &cam, &frames, true));
+        // Up is the brow bones' +z: ~107 units of 0.1 mm, both brows, mirrored.
+        assert!((f.bones[l].t[2] - 107).abs() <= 2 && f.bones[l].t[0] == 0, "{:?}", f.bones[l]);
+        assert_eq!(f.bones[r], f.bones[l].mirrored());
+        // Sideways on the middle line stays on it with symmetry, not without.
+        let side = face::drag_to_world(&cam, [30.0, 0.0], brow);
+        let mut g = face::FaceSculpt::default();
+        assert!(!face::drag_face(&mut g, 11, face::DragMode::Move, side, [30.0, 0.0], &cam, &frames, true));
+        assert!(face::drag_face(&mut g, 11, face::DragMode::Move, side, [30.0, 0.0], &cam, &frames, false));
+        assert_ne!(g.bones[11].t[0], 0);
+        // Limits hold however far the drag goes.
+        let far = face::drag_to_world(&cam, [0.0, -5000.0], brow);
+        face::drag_face(&mut f, l, face::DragMode::Move, far, [0.0, -5000.0], &cam, &frames, true);
+        assert_eq!(f.bones[l].t[2], face::LIMITS[l].t);
+        // Size: a drag up grows it, on every axis the bone takes.
+        let mut h = face::FaceSculpt::default();
+        face::drag_face(
+            &mut h,
+            4,
+            face::DragMode::Size { width_only: false },
+            [0.0; 3],
+            [0.0, -10.0],
+            &cam,
+            &frames,
+            true,
+        );
+        assert!(h.bones[4].s.iter().all(|&s| s > 0) && h.bones[5].s == h.bones[4].s);
+    }
+
+    #[test]
     fn a_baked_face_moves_the_face_and_nothing_else() {
         // FR1 (21 §7): a face bone's rest change deforms the skinned head, by the bone's
         // weights alone. The nose tip out 2 cm, the brows up 1 cm.

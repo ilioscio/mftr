@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
+use godot::classes::Skeleton3D;
 use godot::prelude::*;
+use mftr_forge::face;
 use mftr_forge::looks::{Gender, Proportions, SKIN_TONES};
 use mftr_forge::recipe::{self, Recipe};
 use mftr_sim::ChampionId;
@@ -26,6 +28,19 @@ pub struct MftrCreator {
     /// Why the last preview couldn't be forged, or what a change of body dropped: for the
     /// screen's status line ("" when nothing).
     note: String,
+    /// The face editor (FR4, 21 §2.4–3.3): the last preview's regions and bone frames, the
+    /// region under the cursor and the point there, the drag under way, and undo.
+    face: FaceEditor,
+}
+
+#[derive(Default)]
+struct FaceEditor {
+    regions: Vec<Vec<Vec<u8>>>,
+    frames: Option<[[[f32; 3]; 3]; face::BONES]>,
+    hover: Option<usize>,
+    anchor: [f32; 3],
+    drag: Option<(usize, face::DragMode, bool)>,
+    undo: Vec<Option<face::FaceSculpt>>,
 }
 
 #[godot_api]
@@ -40,6 +55,7 @@ impl MftrCreator {
             last: None,
             aim: None,
             note: String::new(),
+            face: FaceEditor::default(),
         })
     }
 
@@ -494,6 +510,8 @@ impl MftrCreator {
                 let pack = Arc::new(pack);
                 self.last = Some(pack.clone());
                 self.aim = aimed(&pack.model);
+                self.face.regions = face::vertex_regions(&pack.model);
+                self.face.frames = pack.model.node_by_name("face_forehead").map(|_| face::bone_frames(&pack.model));
                 if self.note.starts_with("Can't show") {
                     self.note.clear();
                 }
@@ -624,6 +642,133 @@ impl MftrCreator {
         )
     }
 
+    // --- The face editor (FR4) ------------------------------------------------------------
+
+    /// The face region under the ray `origin + t·dir` (the preview's model space, rest pose), or
+    /// -1: a face bone's index, its name from `face_region_name`. Remembers it for a drag.
+    #[func]
+    fn face_hover(&mut self, origin: Vector3, dir: Vector3) -> i64 {
+        let Some(last) = self.last.clone() else { return -1 };
+        if self.face.frames.is_none() {
+            return -1;
+        }
+        let aim = self.aim.clone();
+        let model = aim.as_deref().unwrap_or(&last.model);
+        let hit = face::region_at(model, &self.face.regions, [origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z]);
+        self.face.hover = hit.map(|(r, _)| r);
+        if let Some((_, p)) = hit {
+            self.face.anchor = p;
+        }
+        self.face.hover.map_or(-1, |r| r as i64)
+    }
+
+    /// The other side's region (itself on the middle line), which follows with symmetry.
+    #[func]
+    fn face_mirror(&self, region: i64) -> i64 {
+        if (0..face::BONES as i64).contains(&region) { face::mirror_of(region as usize) as i64 } else { -1 }
+    }
+
+    #[func]
+    fn face_region_name(&self, region: i64) -> GString {
+        GString::from(face::REGION_NAMES.get(region as usize).copied().unwrap_or(""))
+    }
+
+    /// Start dragging the hovered region: `mode` "move", "turn", "size" or "size_width". False
+    /// when nothing is under the cursor.
+    #[func]
+    fn face_begin(&mut self, mode: GString, symmetry: bool) -> bool {
+        let Some(region) = self.face.hover else { return false };
+        let mode = match mode.to_string().as_str() {
+            "turn" => face::DragMode::Turn,
+            "size" => face::DragMode::Size { width_only: false },
+            "size_width" => face::DragMode::Size { width_only: true },
+            _ => face::DragMode::Move,
+        };
+        self.face.undo.push(self.recipe.looks.face.clone());
+        if self.face.undo.len() > 64 {
+            self.face.undo.remove(0);
+        }
+        self.face.drag = Some((region, mode, symmetry));
+        true
+    }
+
+    /// A mouse move of `relative` pixels while dragging. `camera` is the stage camera in the
+    /// preview's model space (`origin`, `right`, `up`, `forward`, `fov_y` radians,
+    /// `viewport_h`). Poses `skeleton`'s face bones at once (no forge until `face_end`).
+    #[func]
+    fn face_drag(&mut self, relative: Vector2, camera: VarDictionary, skeleton: Gd<Skeleton3D>) -> bool {
+        let (Some((region, mode, symmetry)), Some(frames), Some(last)) =
+            (self.face.drag, self.face.frames, self.last.clone())
+        else {
+            return false;
+        };
+        let v = |k: &str| camera.get(k).and_then(|x| x.try_to::<Vector3>().ok()).map_or([0.0; 3], |v| [v.x, v.y, v.z]);
+        let f = |k: &str| camera.get(k).and_then(|x| x.try_to::<f32>().ok()).unwrap_or(0.0);
+        let cam = face::CameraFrame {
+            origin: v("origin"),
+            right: v("right"),
+            up: v("up"),
+            forward: v("forward"),
+            fov_y: f("fov_y"),
+            viewport_h: f("viewport_h"),
+        };
+        let px = [relative.x, relative.y];
+        let world = face::drag_to_world(&cam, px, self.face.anchor);
+        let mut sculpt = self.recipe.looks.face.clone().unwrap_or_default();
+        if !face::drag_face(&mut sculpt, region, mode, world, px, &cam, &frames, symmetry) {
+            return false;
+        }
+        if mode == face::DragMode::Move {
+            // The plane follows the feature, so the next pixel is measured where it now is.
+            self.face.anchor = [0, 1, 2].map(|k| self.face.anchor[k] + world[k]);
+        }
+        self.recipe.looks.face = (!sculpt.is_neutral()).then_some(sculpt);
+        self.pose_face(&last.model, skeleton);
+        true
+    }
+
+    /// The drag is over: true when the face changed (the screen then forges the preview).
+    #[func]
+    fn face_end(&mut self) -> bool {
+        let Some(_) = self.face.drag.take() else { return false };
+        let changed = self.face.undo.last() != Some(&self.recipe.looks.face);
+        if !changed {
+            self.face.undo.pop();
+        }
+        changed
+    }
+
+    /// Back one drag: false when there's nothing to undo.
+    #[func]
+    fn face_undo(&mut self) -> bool {
+        match self.face.undo.pop() {
+            Some(f) => {
+                self.recipe.looks.face = f;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Every feature back where the sliders put it (undoable).
+    #[func]
+    fn face_clear(&mut self) {
+        if self.recipe.looks.face.is_some() {
+            self.face.undo.push(self.recipe.looks.face.take());
+        }
+    }
+
+    /// Whether the face has been dragged at all (for the screen's buttons).
+    #[func]
+    fn face_edited(&self) -> bool {
+        self.recipe.looks.face.is_some()
+    }
+
+    #[func]
+    fn face_can_undo(&self) -> bool {
+        !self.face.undo.is_empty()
+    }
+
     /// Undo every sculpt stroke.
     #[func]
     fn clear_sculpt(&mut self) {
@@ -696,4 +841,22 @@ fn aimed(model: &mftr_pack::glb::Model) -> Option<Arc<mftr_pack::glb::Model>> {
         }
     }
     Some(Arc::new(m))
+}
+
+impl MftrCreator {
+    /// Pose `skeleton`'s face bones as the recipe's face (its own sculpt and its sliders) on the
+    /// forged `model`: what the bake would make, set as the bones' pose.
+    fn pose_face(&self, model: &mftr_pack::glb::Model, mut skeleton: Gd<Skeleton3D>) {
+        let looks = &self.recipe.looks;
+        let shown = face::compose(looks.face.as_ref(), &looks.shape).unwrap_or_default();
+        for (node, (t, r, s)) in face::posed(model, &shown) {
+            let idx = skeleton.find_bone(model.nodes[node].name.as_str());
+            if idx < 0 {
+                continue;
+            }
+            skeleton.set_bone_pose_position(idx, Vector3::new(t[0], t[1], t[2]));
+            skeleton.set_bone_pose_rotation(idx, Quaternion::new(r[0], r[1], r[2], r[3]));
+            skeleton.set_bone_pose_scale(idx, Vector3::new(s[0], s[1], s[2]));
+        }
+    }
 }

@@ -1088,6 +1088,44 @@ The feature bones now peak at 0.35–0.6, the eyes at 1.0. At +1 a preset moves 
 - **`head_width` widens the face, not the skull.** No bone covers the cranium's sides, so the skull widens ~2 mm and the helmet 1.3%, with 15 mm or more of clearance kept.
 - **Head `sculpt:` offsets** still apply by weld id. §2.7's drop on load waits for FR4's editor, which replaces head sculpting.
 
+### FR4 status (2026-11-11): built, awaiting the owner's try
+
+**Features is the Face step's default tool,** ahead of the sculpt brushes:
+
+- Pointing at the face lights the region under the cursor and names it on the stage ("Nose tip · drag to move…").
+- A drag on a region moves the feature with the cursor; a right-drag turns it.
+- Shift-drag or the wheel sizes it (Alt: only across).
+- With Symmetry on, the other side follows, mirrored, and lights too. On the middle line a change stays centred.
+- A drag off the face turns the model; the wheel off it zooms.
+- Undo (Ctrl+Z) steps back one drag, and Reset features clears them.
+- The sliders stay below, summed with the drags (`face::compose`).
+
+**Where it departs from §2.4–§4:**
+
+- **Regions come from the weights,** not from Blender. A vertex goes to the face bone whose weight on it is the greatest share of that bone's own peak, so the 24 regions are the 24 bones, mirrored left and right. By raw weight the eyes, which carry their lids whole, would take the brows. Nothing new is exported.
+- **No separate controller node.** `MftrCreator` holds the editor, since it already holds the recipe and the skinned preview: `face_hover`, `face_begin`, `face_drag`, `face_end`, `face_undo`, `face_clear`.
+- **The hover raycast uses the skinned preview** (FR3's aim model), not a separate head proxy.
+- **The region rides in UV2,** not `CUSTOM0`, and only on creator previews: `UV2.x = (bone + 1) / 256`, 0 for none. The shader reads it as a `flat` varying, so a triangle takes one region whole. Hover, active and mirror are uniforms; no buffer changes.
+- **Live drags pose the skeleton.** Each face bone is posed as `baked_bone(bound rest, the face)`, the same function the bake now calls, so the drag shows exactly what the next forge bakes. The preview is forged once, when the drag ends.
+
+**In `mftr_forge::face`:** `vertex_regions`, `region_at` (Möller–Trumbore over the body), `posed`, `bone_frames`, `CameraFrame`, `drag_to_world`, `DragMode`, `apply_drag`, `drag_face`, `mirror_of` and `REGION_NAMES`.
+
+**Checks:**
+
+- Captures in the game with `--creator-feature MODE:X,Y:X,Y[:hold]`: brows, eyes (both with symmetry), upper lip and chin each light alone, and a chin dragged down lengthens it.
+- Tests:
+  - every face bone owns a region, and parts own none;
+  - the ray finds the nose from the front and nothing over the crown;
+  - the live pose equals the bake;
+  - a 20 px drag at 1 m moves a brow 10.7 mm, its mirror follows, the middle line holds with symmetry, and limits hold;
+  - a size drag grows both eyes.
+
+**Not yet:**
+
+- **The owner's try,** the FR4 exit: sculpting a face by dragging, with no slider, and finding that the highlight shows what will move.
+- **Neighbour shares** (a nose-tip drag pulling the bridge a little): every region moves its own bone only.
+- **Head `sculpt:` offsets** still apply by weld id (§2.7). The brushes stay on the Face step.
+
 ## 8. Reported defects in the creator (2026-11-09)
 
 The owner's test found the creator glitchy. These are logged here so the face work doesn't bury them. Most are independent of the face rig and should be fixed first, as their own slice (CR-fix):

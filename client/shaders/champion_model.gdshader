@@ -26,6 +26,21 @@ uniform float flash = 0.0;
 // Vertex colors are authored for a neutral studio light; the arena's sun and ambient are
 // brighter, so albedo is scaled down to keep colors in range.
 uniform float exposure = 0.72;
+// The champion creator's face editor (21 §3.2): each preview vertex carries its face region in
+// UV2.x (k / 256, 0 = none). The region under the cursor brightens; the one being dragged
+// glows in `highlight`. Changing these is a uniform write, never a buffer. -1: off (the game).
+uniform int hover_region = -1;
+uniform int active_region = -1;
+// The other side's region, which follows with symmetry on: lit a little less.
+uniform int mirror_region = -1;
+uniform vec3 highlight : source_color = vec3(1.0, 0.85, 0.55);
+// Flat: a triangle takes one vertex's region whole (interpolating would light every region
+// whose code lies between two neighbours').
+varying flat int region;
+
+void vertex() {
+	region = int(round(UV2.x * 256.0)) - 1;
+}
 
 void fragment() {
 	cloud_sun = cloud_shade((INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz);
@@ -48,6 +63,14 @@ void fragment() {
 	RIM = 0.25;
 	RIM_TINT = 0.5;
 	EMISSION = (slot == 3 ? c * 0.9 : (slot == 5 ? c * 1.4 : vec3(0.0))) + vec3(flash);
+	if (region >= 0 && region == active_region) {
+		EMISSION += highlight * 0.32;
+	} else if (region >= 0 && region == mirror_region && active_region >= 0) {
+		EMISSION += highlight * 0.2;
+	} else if (region >= 0 && (region == hover_region || region == mirror_region)) {
+		EMISSION += highlight * 0.13;
+		RIM = 0.7;
+	}
 }
 
 void light() {

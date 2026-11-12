@@ -5,7 +5,7 @@
 //! moved on the CPU and nothing is rebuilt per frame.
 
 use mftr_pack::face::FACE_RIG;
-use mftr_pack::glb::Model;
+use mftr_pack::glb::{BindTrs, Model};
 use mftr_sim::data::{self, DataError, Fields, Value};
 
 pub use mftr_pack::face::RIG_VERSION;
@@ -184,24 +184,23 @@ pub fn bake(model: &mut Model, face: &FaceSculpt) {
         if model.bind[node].is_none() {
             model.bind[node] = Some((n.translation, n.rotation, n.scale));
         }
-        if let Some(p) = face_parent(i) {
-            // Exact for uniform parent scale; along the parent's axes otherwise (the limits
-            // keep it near-uniform).
-            let ps = face.bones[p].scale();
-            n.translation = [0, 1, 2].map(|k| n.translation[k] / ps[k]);
-            n.scale = [0, 1, 2].map(|k| n.scale[k] / ps[k]);
-        }
-        // Translation is in the bone's rest frame: turn it into the parent's.
-        let t = qrot(n.rotation, d.translation());
-        for (k, v) in t.iter().enumerate() {
-            n.translation[k] += v;
-        }
-        n.rotation = qmul(n.rotation, d.rotation());
-        let s = d.scale();
-        for (k, v) in s.iter().enumerate() {
-            n.scale[k] *= v;
-        }
+        let parent_scale = face_parent(i).map_or([1.0; 3], |p| face.bones[p].scale());
+        (n.translation, n.rotation, n.scale) = baked_bone((n.translation, n.rotation, n.scale), d, parent_scale);
     }
+}
+
+/// One face bone's local transform with its delta: `rest · delta`, the translation turned from
+/// the bone's frame into its parent's, and a scaled face-bone parent's scale divided back out
+/// (scale stays local). The bake and the editor's live pose both use it.
+pub fn baked_bone(rest: BindTrs, d: &BoneDelta, parent_scale: [f32; 3]) -> BindTrs {
+    let (mut t, r, mut s) = rest;
+    // Exact for uniform parent scale; along the parent's axes otherwise (the limits keep it
+    // near-uniform).
+    t = [0, 1, 2].map(|k| t[k] / parent_scale[k]);
+    s = [0, 1, 2].map(|k| s[k] / parent_scale[k]);
+    let dt = qrot(r, d.translation());
+    let ds = d.scale();
+    ([0, 1, 2].map(|k| t[k] + dt[k]), qmul(r, d.rotation()), [0, 1, 2].map(|k| s[k] * ds[k]))
 }
 
 // --- The face sliders as presets on the bones (21 §2.7, FR3) ----------------------------------
@@ -323,6 +322,332 @@ pub fn compose(face: Option<&FaceSculpt>, shape: &[(String, f32)]) -> Option<Fac
         *d = BoneDelta { t: [q(0), q(1), q(2)], r: [q(3), q(4), q(5)], s: [q(6), q(7), q(8)] };
     }
     Some(out.clamped())
+}
+
+// --- The editor (FR4, 21 §2.4–2.5) ------------------------------------------------------------
+
+/// What each face bone's region is called on screen (21 §2.4): a region is the skin a face bone
+/// owns, so the regions and the bones share their order. "Left" is the character's left.
+pub const REGION_NAMES: [&str; BONES] = [
+    "Forehead",
+    "Brow (middle)",
+    "Left brow",
+    "Right brow",
+    "Left eye",
+    "Right eye",
+    "Left cheekbone",
+    "Right cheekbone",
+    "Left cheek",
+    "Right cheek",
+    "Bridge of the nose",
+    "Nose tip",
+    "Left nostril",
+    "Right nostril",
+    "Upper lip",
+    "Jaw",
+    "Lower lip",
+    "Left mouth corner",
+    "Right mouth corner",
+    "Chin",
+    "Left jaw angle",
+    "Right jaw angle",
+    "Left ear",
+    "Right ear",
+];
+
+/// A vertex belongs to the face bone that weighs most on it, when that is at least this much
+/// (less is the cranium, the neck, the back of the head: not editable).
+pub const REGION_MIN: f32 = 0.12;
+
+/// The other side's face bone (itself on the middle line).
+pub fn mirror_of(b: usize) -> usize {
+    let name = FACE_RIG[b].0;
+    let other = match (name.strip_suffix("_l"), name.strip_suffix("_r")) {
+        (Some(base), _) => format!("{base}_r"),
+        (_, Some(base)) => format!("{base}_l"),
+        _ => return b,
+    };
+    FACE_RIG.iter().position(|(n, _)| *n == other).unwrap_or(b)
+}
+
+/// Each body vertex's region, per mesh, per primitive: 0 for none, `b + 1` for face bone `b`'s
+/// (21 §2.4, from the weights: no exporter change). A vertex goes to the bone whose weight on it
+/// is the greatest share of that bone's own peak: the eyes carry their lids whole, and by raw
+/// weight they would take the brows too. Below `REGION_MIN` (the cranium, the neck) it has none;
+/// parts have none: they're not the face.
+pub fn vertex_regions(model: &Model) -> Vec<Vec<Vec<u8>>> {
+    let joints = model.skins.first().cloned().unwrap_or_default();
+    let joint_bone: Vec<Option<usize>> =
+        joints.iter().map(|&n| FACE_RIG.iter().position(|(b, _)| *b == model.nodes[n].name)).collect();
+    let body: Vec<bool> = (0..model.meshes.len())
+        .map(|mi| model.nodes.iter().any(|n| n.mesh == Some(mi) && !n.name.starts_with("part.")))
+        .collect();
+    let weights_of = |j: &[u32; 4], w: &[f32; 4]| {
+        let mut acc = [0.0f32; BONES];
+        for k in 0..4 {
+            if let Some(Some(b)) = joint_bone.get(j[k] as usize) {
+                acc[*b] += w[k];
+            }
+        }
+        acc
+    };
+    let usable = |mi: usize, p: &mftr_pack::glb::Primitive| {
+        body[mi] && p.joints.len() == p.positions.len() && p.weights.len() == p.positions.len()
+    };
+    let mut peak = [0.0f32; BONES];
+    for (mi, prims) in model.meshes.iter().enumerate() {
+        for p in prims.iter().filter(|p| usable(mi, p)) {
+            for (j, w) in p.joints.iter().zip(&p.weights) {
+                for (pk, x) in peak.iter_mut().zip(weights_of(j, w)) {
+                    *pk = pk.max(x);
+                }
+            }
+        }
+    }
+    model
+        .meshes
+        .iter()
+        .enumerate()
+        .map(|(mi, prims)| {
+            prims
+                .iter()
+                .map(|p| {
+                    if !usable(mi, p) {
+                        return vec![0; p.positions.len()];
+                    }
+                    p.joints
+                        .iter()
+                        .zip(&p.weights)
+                        .map(|(j, w)| {
+                            let acc = weights_of(j, w);
+                            let share = |b: usize| if peak[b] > 0.0 { acc[b] / peak[b] } else { 0.0 };
+                            let best = (0..BONES)
+                                .filter(|&b| acc[b] >= REGION_MIN)
+                                .max_by(|&a, &b| share(a).total_cmp(&share(b)));
+                            best.map_or(0, |b| b as u8 + 1)
+                        })
+                        .collect()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The face region the ray `origin + t·dir` (model space) meets first on the body, and the point:
+/// the region most of the hit triangle's vertices share, else its nearest vertex's (21 §2.4).
+/// `model` is the preview as shown (skinned), `regions` its `vertex_regions`. Parts in front
+/// of the face hide it (a helmet's brim), and the cranium has none.
+pub fn region_at(
+    model: &Model,
+    regions: &[Vec<Vec<u8>>],
+    origin: [f32; 3],
+    dir: [f32; 3],
+) -> Option<(usize, [f32; 3])> {
+    let mut best: Option<(f32, Option<usize>, [f32; 3])> = None;
+    for (mi, prims) in model.meshes.iter().enumerate() {
+        for (pi, p) in prims.iter().enumerate() {
+            let reg = regions.get(mi).and_then(|m| m.get(pi));
+            for t in p.indices.chunks(3) {
+                let v = [t[0] as usize, t[1] as usize, t[2] as usize];
+                let (a, b, c) = (p.positions[v[0]], p.positions[v[1]], p.positions[v[2]]);
+                let Some((dist, u, w)) = ray_triangle(origin, dir, a, b, c) else { continue };
+                if best.as_ref().is_some_and(|(d, _, _)| *d <= dist) {
+                    continue;
+                }
+                let region = reg.and_then(|r| {
+                    let ids = v.map(|i| r.get(i).copied().unwrap_or(0));
+                    let bary = [1.0 - u - w, u, w];
+                    let pick = if ids[0] == ids[1] || ids[0] == ids[2] {
+                        ids[0]
+                    } else if ids[1] == ids[2] {
+                        ids[1]
+                    } else {
+                        ids[(0..3).max_by(|&x, &y| bary[x].total_cmp(&bary[y])).unwrap_or(0)]
+                    };
+                    (pick > 0).then(|| pick as usize - 1)
+                });
+                let point = [0, 1, 2].map(|k| origin[k] + dir[k] * dist);
+                best = Some((dist, region, point));
+            }
+        }
+    }
+    let (_, region, point) = best?;
+    region.map(|r| (r, point))
+}
+
+/// Möller–Trumbore: the distance along the ray and the hit's barycentric (u, w), front or back.
+fn ray_triangle(o: [f32; 3], d: [f32; 3], a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> Option<(f32, f32, f32)> {
+    let sub = |x: [f32; 3], y: [f32; 3]| [x[0] - y[0], x[1] - y[1], x[2] - y[2]];
+    let cross =
+        |x: [f32; 3], y: [f32; 3]| [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
+    let dot = |x: [f32; 3], y: [f32; 3]| x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+    let (e1, e2) = (sub(b, a), sub(c, a));
+    let h = cross(d, e2);
+    let det = dot(e1, h);
+    if det.abs() < 1e-12 {
+        return None;
+    }
+    let s = sub(o, a);
+    let u = dot(s, h) / det;
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+    let q = cross(s, e1);
+    let w = dot(d, q) / det;
+    if w < 0.0 || u + w > 1.0 {
+        return None;
+    }
+    let dist = dot(e2, q) / det;
+    (dist > 0.0).then_some((dist, u, w))
+}
+
+/// Where each face bone of the forged `model` sits with `face` instead of the face it was forged
+/// with: (node, local transform), from where the mesh is bound (`Model::bind`, else the rest).
+/// The editor poses the preview's skeleton with it while a drag lasts (21 §3.3), so nothing is
+/// forged until the drag ends.
+pub fn posed(model: &Model, face: &FaceSculpt) -> Vec<(usize, BindTrs)> {
+    let face = face.clamped();
+    (0..BONES)
+        .filter_map(|b| {
+            let node = model.node_by_name(FACE_RIG[b].0)?;
+            let n = &model.nodes[node];
+            let rest = model.bind.get(node).copied().flatten().unwrap_or((n.translation, n.rotation, n.scale));
+            let parent_scale = face_parent(b).map_or([1.0; 3], |p| face.bones[p].scale());
+            Some((node, baked_bone(rest, &face.bones[b], parent_scale)))
+        })
+        .collect()
+}
+
+/// Each face bone's frame for its delta, in model space: the columns are its rest axes (as
+/// bound, before any face) — what a world drag is projected onto (21 §2.5).
+pub fn bone_frames(model: &Model) -> [[[f32; 3]; 3]; BONES] {
+    let n = model.nodes.len();
+    let mut rot: Vec<Option<[f32; 4]>> = vec![None; n];
+    fn solve(m: &Model, i: usize, rot: &mut Vec<Option<[f32; 4]>>) -> [f32; 4] {
+        if let Some(q) = rot[i] {
+            return q;
+        }
+        let local = m.bind.get(i).copied().flatten().map_or(m.nodes[i].rotation, |b| b.1);
+        let q = match m.nodes[i].parent {
+            Some(p) => qmul(solve(m, p, rot), local),
+            None => local,
+        };
+        rot[i] = Some(q);
+        q
+    }
+    let mut out = [[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]; BONES];
+    for (b, frame) in out.iter_mut().enumerate() {
+        if let Some(node) = model.node_by_name(FACE_RIG[b].0) {
+            let q = solve(model, node, &mut rot);
+            *frame = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].map(|e| qrot(q, e));
+        }
+    }
+    out
+}
+
+/// What the creator's camera knows, enough to turn pixels into metres (model space).
+#[derive(Clone, Copy, Debug)]
+pub struct CameraFrame {
+    pub origin: [f32; 3],
+    pub right: [f32; 3],
+    pub up: [f32; 3],
+    pub forward: [f32; 3],
+    /// Vertical field of view, radians.
+    pub fov_y: f32,
+    pub viewport_h: f32,
+}
+
+/// The displacement under a mouse drag of `drag_px` (x right, y down) on the plane through
+/// `anchor` facing the camera: the feature moves with the cursor.
+pub fn drag_to_world(cam: &CameraFrame, drag_px: [f32; 2], anchor: [f32; 3]) -> [f32; 3] {
+    let rel = [0, 1, 2].map(|k| anchor[k] - cam.origin[k]);
+    let depth = (rel[0] * cam.forward[0] + rel[1] * cam.forward[1] + rel[2] * cam.forward[2]).max(0.05);
+    let per_px = 2.0 * depth * (cam.fov_y * 0.5).tan() / cam.viewport_h.max(1.0);
+    [0, 1, 2].map(|k| (cam.right[k] * drag_px[0] - cam.up[k] * drag_px[1]) * per_px)
+}
+
+/// What a drag edits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragMode {
+    /// Move the feature in the camera's plane.
+    Move,
+    /// Turn it: a horizontal drag about the camera's up, a vertical one about its right.
+    Turn,
+    /// Grow or shrink it with a vertical drag (all three axes, or only across).
+    Size { width_only: bool },
+}
+
+/// One bone's delta after a drag: `world` is `drag_to_world`'s displacement, `frame` the bone's
+/// (`bone_frames`). Clamped to the bone's limits and degrees of freedom.
+pub fn apply_drag(
+    d: BoneDelta,
+    mode: DragMode,
+    world: [f32; 3],
+    drag_px: [f32; 2],
+    cam: &CameraFrame,
+    frame: &[[f32; 3]; 3],
+    limits: &Limits,
+) -> BoneDelta {
+    let to_local = |v: [f32; 3]| frame.map(|axis| axis[0] * v[0] + axis[1] * v[1] + axis[2] * v[2]);
+    let add =
+        |a: [i16; 3], v: [f32; 3], unit: f32| [0, 1, 2].map(|k| a[k].saturating_add((v[k] / unit).round() as i16));
+    let mut out = d;
+    match mode {
+        DragMode::Move => out.t = add(d.t, to_local(world), T_UNIT),
+        DragMode::Turn => {
+            // 0.4° a pixel.
+            let axis = [0, 1, 2].map(|k| (cam.up[k] * drag_px[0] + cam.right[k] * drag_px[1]) * 0.4);
+            out.r = add(d.r, to_local(axis), R_UNIT);
+        }
+        DragMode::Size { width_only } => {
+            // 0.5% a pixel up.
+            let step = (-drag_px[1] * 0.005 / S_UNIT).round() as i16;
+            out.s = if width_only {
+                [d.s[0].saturating_add(step), d.s[1], d.s[2]]
+            } else {
+                d.s.map(|v| v.saturating_add(step))
+            };
+        }
+    }
+    out.clamped(limits)
+}
+
+/// Apply a drag to face bone `b` of `face`, with the other side following when `symmetry` is on
+/// (the same change, mirrored; on the middle line, the change keeps to the middle). Returns
+/// whether anything moved.
+#[allow(clippy::too_many_arguments)]
+pub fn drag_face(
+    face: &mut FaceSculpt,
+    b: usize,
+    mode: DragMode,
+    world: [f32; 3],
+    drag_px: [f32; 2],
+    cam: &CameraFrame,
+    frames: &[[[f32; 3]; 3]; BONES],
+    symmetry: bool,
+) -> bool {
+    let old = face.bones[b];
+    let next = apply_drag(old, mode, world, drag_px, cam, &frames[b], &LIMITS[b]);
+    let diff = |a: [i16; 3], o: [i16; 3]| [0, 1, 2].map(|k| a[k] - o[k]);
+    let mut inc = BoneDelta { t: diff(next.t, old.t), r: diff(next.r, old.r), s: diff(next.s, old.s) };
+    let m = mirror_of(b);
+    if symmetry && m == b {
+        inc.t[0] = 0;
+        inc.r[1] = 0;
+        inc.r[2] = 0;
+    }
+    if inc.is_zero() {
+        return false;
+    }
+    let plus = |a: BoneDelta, i: BoneDelta, l: &Limits| {
+        let sum = |x: [i16; 3], y: [i16; 3]| [0, 1, 2].map(|k| x[k].saturating_add(y[k]));
+        BoneDelta { t: sum(a.t, i.t), r: sum(a.r, i.r), s: sum(a.s, i.s) }.clamped(l)
+    };
+    face.bones[b] = plus(old, inc, &LIMITS[b]);
+    if symmetry && m != b {
+        face.bones[m] = plus(face.bones[m], inc.mirrored(), &LIMITS[m]);
+    }
+    true
 }
 
 // --- Skinning on the CPU (tests now; the editor's hover raycast in FR4, 21 §4) ----------------
