@@ -945,6 +945,11 @@ def make_conform(old_head, fit, body):
     head_v = [v.index for v in me.vertices if any(g.group == g_head and g.weight > 0.0 for g in v.groups)
               or any(body.vertex_groups[g.group].name in face_rig.NAMES for g in v.groups if g.weight > 0.0)]
     head_v = [i for i in head_v if not any(body.vertex_groups[g.group].name.startswith("face_eye") for g in me.vertices[i].groups)]
+    # Not the body's neck, which reaches up into the head (22 §1): a part takes the head's own
+    # weights, and the neck's would put face and neck weights side by side (21 §1.5).
+    g_neck = body.vertex_groups.get("neck")
+    if g_neck is not None:
+        head_v = [i for i in head_v if not any(g.group == g_neck.index and g.weight > 0.0 for g in me.vertices[i].groups)]
     tree = BVHTree.FromPolygons([me.vertices[i].co.copy() for i in range(len(me.vertices))],
                                 [tuple(p.vertices) for p in me.polygons
                                  if all(any(g.group == g_head or body.vertex_groups[g.group].name in face_rig.NAMES

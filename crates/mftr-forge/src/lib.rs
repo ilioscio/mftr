@@ -1177,8 +1177,10 @@ mod tests {
             assert!(*n >= 3, "{} owns {n} vertices", face::REGION_NAMES[b]);
         }
         // FR6 (21 §9): the body's helpers own regions after the face's.
+        // On the CC0 body (22 §1) the hips' and neck's patches are a few big faces; BW4 retunes
+        // the patches with the presets.
         for (b, n) in owned.iter().skip(face::BODY_REGIONS).enumerate() {
-            assert!(*n >= 8, "{} owns {n} vertices", body::REGION_NAMES[b]);
+            assert!(*n >= 5, "{} owns {n} vertices", body::REGION_NAMES[b]);
         }
         // Straight at the nose tip from in front (+Z in glTF), and over the cranium: none.
         let w = world(&m);
@@ -1261,7 +1263,9 @@ mod tests {
             }
         }
         assert!(calf_out > 0.015, "the calves grew: {calf_out}");
-        assert!(chest_out > 0.02, "the chest came forward: {chest_out}");
+        // The CC0 body's chest helper peaks lower than the lofted torso's (22 §1.3): the presets
+        // are retuned on it with the body sliders (BW4).
+        assert!(chest_out > 0.015, "the chest came forward: {chest_out}");
         assert!(far < 1e-4, "feet, knees, hands and head held: {far}");
         // The feet stand where they stood.
         let floor = |m: &[(String, [f32; 3])]| m.iter().map(|(_, v)| v[1]).fold(f32::MAX, f32::min);
@@ -1585,14 +1589,14 @@ mod tests {
     #[test]
     fn brows_are_strips_that_follow_the_face_and_lips_have_their_shapes() {
         // 22 §3: every humanoid base has brow strips and the lip sliders; the brows' color is
-        // still the body's fourth paint region, as recipes painted it before.
+        // a body paint region, after the underwear's two (22 §1.5).
         let c = catalog();
         for key in
             ["humanoid_slim_masculine", "humanoid_slim_feminine", "humanoid_heavy_masculine", "humanoid_heavy_feminine"]
         {
             let m = &c.base(key).unwrap().model;
             assert!(brows::present(m), "{key}");
-            assert_eq!(brows::color_region(m), Some(3), "{key}");
+            assert!(brows::color_region(m).is_some_and(|r| r >= 2), "{key}");
             for id in ["lips_upper", "lips_lower", "lips_bow"] {
                 assert!(c.sliders(key).iter().any(|s| s == id), "{key} lacks {id}");
             }

@@ -583,6 +583,81 @@ forms.
 - Free sculpting (the brushes) doesn't move the brow strips; the face bones do.
 - The ancestry presets (§3.3) need the face shapes' reader to accept morph sliders.
 
+### BW3 status (2026-11-12): the CC0 body on all four bases
+
+**All four humanoid bases now wear the artist-made body** in place of the lofted tubes
+(`mftr_blender.cc0_body`; `creator.BODY = "lofted"` brings the old one back).
+
+**The source.** `art/creator/bodies/body_source.blend`: the realistic male and female, each
+un-subdivided twice (3,201 vertices, the same topology), made by `tools/blender/extract_bodies.py`
+from the bundle. The head's README covers the license.
+
+**The joints** come from the bundle's primitive bodies, whose parts' origins are the joints. The
+male primitive's arms hang at another angle from the realistic mesh's, so each arm's chain is
+turned onto the mesh's own arm (a line fit through it).
+
+**Departs from §1.3: skinning, then a bone-by-bone fit, not a thin-plate warp.** A warp across
+arms that hang 20° apart bent the shoulders. So:
+
+1. A skeleton with the biped's names goes on the source's joints, and Blender's automatic weights
+   skin the mesh to it: at most two bones a vertex; the underwear's split seams share one set.
+2. Each vertex goes by those weights onto the build's rig. Every bone is turned onto the rig's
+   bone of the same name, stretched to its length and thickened by the build's girth. The
+   torso widens by height, from the hips' ratio to the shoulders'.
+3. The weights come along unchanged, since they are already the rig's.
+4. The soles are squashed onto the floor below the ankle.
+
+So the heavy builds come from the same mesh by the rig and the girth. Their own sculpted mass
+shape (§1.4) is still to come.
+
+**The neck and the head.** The authored head is closed underneath. The body is cut a little
+above its neck joint, and `raise_neck` raises the neck's top in two rings into the head:
+
+- the top ring is 12 mm above where a line straight up meets the head's underside, capped at
+  the head's joint so a line past the chin never finds the lips;
+- the rings narrow 18% toward the neck's axis, so the back of the neck slopes into the skull;
+- the middle ring is 60% the neck's and 40% the head's.
+
+The face rig's seam rings start at the neck as before, and head parts don't take the neck's
+weights.
+
+**The helpers on two bones a vertex.** On the lofted body every vertex had one bone; now it can
+have two. So `body_rig` shares what the helpers leave among the vertex's own bones, and caps each
+vertex's helpers at four influences in all. Before, glTF dropped the fifth influence and
+renormalized, and that broke the weight-step rule. The head, hands and feet stay in the
+step-limit graph at zero.
+
+**Underwear (§1.5)** is regions of the body on the cloth slot: briefs on every base, a band top
+on the feminine ones, each with a trim. They are the body's paint regions 0 and 1, so recipes
+that painted the old undersuit's two still forge. The brows are region 2 now (they were 3).
+
+**Triangles:** about 4,600 below the neck. A whole base is 7,722 (masculine) or 7,858
+(feminine, with the band top's split), eyes, brows and lips included: under the old lofted ones
+(8,768) and well inside the 5,000–10,000 target.
+
+**Checked:**
+
+- Captures of all four bases, front and three-quarter.
+- The neck from the front, side, back and three-quarter; no open edge below the head but the
+  hidden top ring.
+- Cairn-, Bastion- and Rook-neo dressed in the old catalog.
+- A practice match.
+- All eight creator bases and the neo set validate.
+- Two forge tests were loosened, with the reason noted in each: a chest drag now moves 15 mm or
+  more (it was 20), and each helper owns 5 vertices or more (it was 8). The CC0 chest and hips are
+  a few big faces and their helpers peak lower; BW4 retunes the patches with the presets.
+
+**Not yet:**
+
+- **The heavy builds' own mass shape** (§1.4). Today they are the slim mesh, broadened by the rig
+  and the girth.
+- **A notch at the throat** on the feminine and heavy bases, where the neck's raise meets the
+  front of the cut.
+- **The briefs' leg openings** zigzag at the back. They follow faces, not a drawn line.
+- **The old catalog sits loose on the new limbs**, as it was made for the tubes. It is replaced
+  in BW5.
+- **The body sliders and the helpers' presets** (BW4).
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

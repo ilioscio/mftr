@@ -238,12 +238,12 @@ def _raw(name, p, own, armature, marks):
     return _falloff(1.0 - d), False
 
 
-def _final(raw):
-    """At most three helpers, the fourth's weight taken off the top three (no jump where a
+def _final(raw, cap=3):
+    """At most `cap` helpers, the next one's weight taken off the top ones (no jump where a
     helper drops out), at most PEAK in all."""
     ws = sorted(((w, i) for i, w in enumerate(raw) if w > 1e-4), reverse=True)
-    cut = ws[3][0] if len(ws) > 3 else 0.0
-    ws = [(w - cut, i) for w, i in ws[:3] if w > cut]
+    cut = ws[cap][0] if len(ws) > cap else 0.0
+    ws = [(w - cut, i) for w, i in ws[:cap] if w > cut]
     total = sum(w for w, _ in ws)
     if total > PEAK:
         ws = [(w * PEAK / total, i) for w, i in ws]
@@ -265,7 +265,9 @@ def weight(armature, body, marks):
             groups[n] = body.vertex_groups.new(name=n)
     me = body.data
     own = _dominant(body)
-    verts = [v.index for v in me.vertices if own[v.index] and not own[v.index].startswith(SKIP)]
+    # The head, hands and feet take no helper weight, but stay in the graph at nothing, so the
+    # step limit holds across their edges too (the neck's top meets the head, 22 §1).
+    verts = [v.index for v in me.vertices if own[v.index]]
     weld, ids = {}, {}
     for vi in verts:
         key = (own[vi],) + tuple(round(c, 4) for c in me.vertices[vi].co)
@@ -283,7 +285,7 @@ def weight(armature, body, marks):
     for w in range(n):
         f, h = [], []
         for nm in names:
-            x, z = _raw(nm, pos[w], bone[w], armature, marks)
+            x, z = (0.0, 0.0) if bone[w].startswith(SKIP) else _raw(nm, pos[w], bone[w], armature, marks)
             f.append(x)
             h.append(z)
         top = max(f)
@@ -307,7 +309,14 @@ def weight(armature, body, marks):
     # mesh has room for them, and the creases stay clean. (Smoothing instead would flatten
     # every peak on the torso's 16 sides.)
     live = [i for i in range(len(names)) if any(r[i] > 0 for r in raw)]
-    final = [_final(r) for r in raw]
+    # Four influences a vertex in all (glTF's): the helpers get what the body's own bones leave
+    # (one bone a vertex on the lofted body, two on the CC0 one, 22 §1.3).
+    helper_set = set(names)
+    caps = [3] * n
+    for vi, w in ids.items():
+        k = sum(1 for g in me.vertices[vi].groups if g.weight > 0 and body.vertex_groups[g.group].name not in helper_set)
+        caps[w] = min(caps[w], max(1, 4 - k))
+    final = [_final(r, caps[w]) for w, r in enumerate(raw)]
     rounds = 0
     step = MAX_STEP * 0.95
     for rounds in range(1, 12):
@@ -324,14 +333,21 @@ def weight(armature, body, marks):
                         if ra[i] > rb[i] + step:
                             ra[i] = rb[i] + step
                             changed = True
-        final = [_final(r) for r in raw]
+        final = [_final(r, caps[w]) for w, r in enumerate(raw)]
         step *= 0.9
     for vi, w in ids.items():
+        if own[vi].startswith(SKIP):
+            continue
         total = 0.0
         for x, i in final[w]:
             groups[names[i]].add([vi], x, "REPLACE")
             total += x
-        groups[own[vi]].add([vi], 1.0 - total, "REPLACE")
+        # The vertex's own bones share what's left, as they shared the whole.
+        mine = [(body.vertex_groups[g.group].name, g.weight) for g in me.vertices[vi].groups
+                if g.weight > 0 and body.vertex_groups[g.group].name not in helper_set]
+        whole = sum(x for _, x in mine) or 1.0
+        for name, x in mine or [(own[vi], 1.0)]:
+            groups[name].add([vi], x / whole * (1.0 - total), "REPLACE")
     peaks = {}
     for f in final:
         for x, i in f:

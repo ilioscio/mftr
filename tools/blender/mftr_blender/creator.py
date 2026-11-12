@@ -152,6 +152,38 @@ def use_build(gender, build="humanoid_slim"):
     mesh.GIRTH = _girth(spec["girth"])
 
 
+# The body below the head (22 §1, BW3): "cc0", the artist-made body fitted to the rig
+# (`cc0_body`), or "lofted", the block-out tubes it replaced.
+BODY = "cc0"
+
+
+def _cc0_body(armature, name, gender, build, head_part):
+    """The CC0 body fitted to `armature`, with the authored head (`head_part`) joined on: one
+    object named `name`, skinned to the rig. The body's vertices come first, so its paint regions
+    (the underwear's) come before the head's (the brows')."""
+    from . import cc0_body
+    head_only = mesh.build_mannequin(armature, name=name + "_head", part_list=[head_part])
+    flesh = cc0_body.make(armature, gender, build, mesh.girth)
+    n_body = len(flesh.data.vertices)
+    for o in bpy.context.view_layer.objects:
+        o.select_set(False)
+    flesh.select_set(True)
+    head_only.select_set(True)
+    bpy.context.view_layer.objects.active = flesh
+    bpy.ops.object.join()
+    flesh.name = name
+    flesh.data.name = name
+    me = flesh.data
+    me.color_attributes.active_color = me.color_attributes["Col"]
+    me.color_attributes.render_color_index = me.color_attributes.active_color_index
+    # The neck runs on up into the head, which is closed underneath.
+    cc0_body.raise_neck(flesh, n_body, armature.data.bones["head"].head_local.z)
+    flesh.parent = armature
+    mod = flesh.modifiers.new("Armature", "ARMATURE")
+    mod.object = armature
+    return flesh
+
+
 def build_base(gender, name, build="humanoid_slim"):
     """The armature and the base mesh for `gender`, in the scene. Returns (armature, body)."""
     bpy.ops.wm.read_homefile(use_empty=True)
@@ -172,9 +204,12 @@ def build_base(gender, name, build="humanoid_slim"):
         authored_head.build(bm, layers, groups, mats, h, mix, fit)
 
     try:
-        parts = (champion.detailed(_body_parts(gender)) + champion.hand_parts("l", SKIN, scale=hands)
-                 + champion.hand_parts("r", SKIN, scale=hands))
-        body = mesh.build_mannequin(armature, name=name, part_list=parts + [head_part])
+        if BODY == "lofted":
+            parts = (champion.detailed(_body_parts(gender)) + champion.hand_parts("l", SKIN, scale=hands)
+                     + champion.hand_parts("r", SKIN, scale=hands))
+            body = mesh.build_mannequin(armature, name=name, part_list=parts + [head_part])
+        else:
+            body = _cc0_body(armature, name, gender, build, head_part)
     finally:
         head.DEFAULT_DETAIL = 1
     face_rig.weight(armature, body, h, piv)
