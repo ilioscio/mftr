@@ -487,6 +487,9 @@ def marry_neck(obj, n_body, joint, neck, rise=0.008):
     lower = [f for f in bm.faces if all(v.index >= n_body for v in f.verts)
              and f.calc_center_median().z < joint.z + 0.005]
     tree = BVHTree.FromPolygons([v.co.copy() for v in bm.verts], [[v.index for v in f.verts] for f in lower])
+    # And the whole head: the back of the neck rises straight into the skull's base.
+    whole = BVHTree.FromPolygons([v.co.copy() for v in bm.verts],
+                                 [[v.index for v in f.verts] for f in bm.faces if all(v.index >= n_body for v in f.verts)])
     # The cut: through (y_f, z_f) at the throat and (y_b, z_b) behind the skull's base.
     # Never above just under the chin (a heavy build's short neck puts the chin low).
     chin = min((v.co.z for v in bm.verts if v.index >= n_body and v.co.y < joint.y - 0.03), default=joint.z)
@@ -546,6 +549,14 @@ def marry_neck(obj, n_body, joint, neck, rise=0.008):
                 loc = up(drawn(v, t))
                 if loc is None:
                     loc = up(drawn(v, need[i])) if need[i] is not None else None
+        if loc is None and not front[i]:
+            # The back and sides: straight up into the skull's base (the nape keeps its line),
+            # drawn in toward the middle only if a line would miss or reach up past the ears.
+            for t in steps:
+                hit = whole.ray_cast(drawn(v, t), Vector((0.0, 0.0, 1.0)), 0.2)[0]
+                if hit is not None and hit.z <= joint.z + 0.05:
+                    loc = hit
+                    break
         if loc is None:
             loc, _n, _i, _d = tree.find_nearest(v.co)
         if loc is None:

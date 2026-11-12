@@ -785,6 +785,9 @@ The owner's notes on the quality pass:
   line misses the jaw is drawn back toward the neck's middle, as far as its neighbours are, so
   the front edge stays even. The back and sides go to the nearest point of the head's lower
   surface.
+- The back and sides rise straight up into the skull's base, drawn in toward the middle only
+  where a line would miss or reach past the ears, so the nape keeps its line. Snapping them to
+  the head's lower surface had pulled the nape forward, under the jaw (the owner's third note).
 - The seam's vertices are wholly the head's.
 - Neck girths are 1.0 or less: the realistic neck is thick already.
 
