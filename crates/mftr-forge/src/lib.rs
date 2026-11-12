@@ -1177,10 +1177,8 @@ mod tests {
             assert!(*n >= 3, "{} owns {n} vertices", face::REGION_NAMES[b]);
         }
         // FR6 (21 §9): the body's helpers own regions after the face's.
-        // On the CC0 body (22 §1) the hips' and neck's patches are a few big faces; BW4 retunes
-        // the patches with the presets.
         for (b, n) in owned.iter().skip(face::BODY_REGIONS).enumerate() {
-            assert!(*n >= 5, "{} owns {n} vertices", body::REGION_NAMES[b]);
+            assert!(*n >= 8, "{} owns {n} vertices", body::REGION_NAMES[b]);
         }
         // Straight at the nose tip from in front (+Z in glTF), and over the cranium: none.
         let w = world(&m);
@@ -1263,8 +1261,8 @@ mod tests {
             }
         }
         assert!(calf_out > 0.015, "the calves grew: {calf_out}");
-        // The CC0 body's chest helper peaks lower than the lofted torso's (22 §1.3): the presets
-        // are retuned on it with the body sliders (BW4).
+        // The CC0 body's chest helper peaks lower than the lofted torso's (about 0.47, shared
+        // with the back and the trapezius, 22 BW4).
         assert!(chest_out > 0.015, "the chest came forward: {chest_out}");
         assert!(far < 1e-4, "feet, knees, hands and head held: {far}");
         // The feet stand where they stood.

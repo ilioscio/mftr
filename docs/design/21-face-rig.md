@@ -1222,7 +1222,7 @@ it for captures.
 the way the head was (22 §1). The last steps are:
 
 - tuning the other three bases (they carry the helpers now, untuned);
-- the seven body sliders as presets on the helpers (`art/creator/bodies/presets.txt` is empty);
+- the seven body sliders as presets on the helpers (done in 22 BW4);
 - `rigid` flags in the catalog.
 
 They wait for that body (22 BW3–BW4), where they'll be redone on real anatomy.

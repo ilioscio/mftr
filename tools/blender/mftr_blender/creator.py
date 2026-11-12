@@ -455,8 +455,11 @@ def add_shape_keys(armature, body, fit=None):
     # The face sliders are presets on the face bones now (21 §2.7, art/creator/heads/presets.txt):
     # a base with a face rig carries only the body's as morph targets.
     rigged = "face_forehead" in armature.data.bones
+    # And with the body's helpers, the body sliders are presets on those (21 §9.2,
+    # art/creator/bodies/presets.txt).
+    helpers = "body_neck" in armature.data.bones
     for sid, _desc, groups, plus, minus in sliders():
-        if rigged and groups == ("head",):
+        if (rigged and groups == ("head",)) or (helpers and groups != ("head",)):
             continue
         r = Region(body, set(groups))
         r.armature = armature.name

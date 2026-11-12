@@ -287,6 +287,33 @@ pub fn settle_rigid(model: &mut Model, rigid: &[&str]) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_body_sliders_are_presets_on_the_helpers() {
+        // 22 BW4: the old morph sliders' ids, now on the helpers; symmetric and within limits.
+        let ids: Vec<&str> = presets().iter().map(|p| p.id.as_str()).collect();
+        for id in
+            ["body_bulk", "body_belly", "body_chest", "body_hips", "body_shoulders", "body_muscle", "neck_thickness"]
+        {
+            assert!(ids.contains(&id), "{id}");
+        }
+        for p in presets() {
+            assert!(!p.sculpt.is_neutral(), "{}", p.id);
+            assert_eq!(p.sculpt.clamped(), p.sculpt, "{}", p.id);
+            for (i, (name, _)) in BODY_RIG.iter().enumerate() {
+                if let Some(side) = name.strip_suffix("_l") {
+                    let j = BODY_RIG.iter().position(|(b, _)| *b == format!("{side}_r")).unwrap();
+                    assert_eq!(p.sculpt.bones[i].mirrored(), p.sculpt.bones[j], "{}: {name}", p.id);
+                }
+            }
+        }
+        // A recipe's sliders compose onto the helpers: a bigger belly moves the belly forward.
+        let b = compose(None, &[("body_belly".into(), 1.0)]).unwrap();
+        let belly = BODY.index("body_belly").unwrap();
+        assert!(b.bones[belly].t[2] > 0);
+        assert!(compose(None, &[]).is_none());
+    }
+
     use super::*;
     use mftr_sim::data;
 

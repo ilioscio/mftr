@@ -658,6 +658,44 @@ that painted the old undersuit's two still forge. The brows are region 2 now (th
   in BW5.
 - **The body sliders and the helpers' presets** (BW4).
 
+### BW4 status (2026-11-12): the body sliders on the helpers
+
+**The seven body sliders are presets on the helpers**, the face sliders' way (21 §2.7):
+`art/creator/bodies/presets.txt`, read by `mftr_forge::body::presets`. That is FR6's step 4.
+
+- **Same ids as the old morphs**: `body_bulk`, `body_belly`, `body_chest`, `body_hips`,
+  `body_shoulders`, `body_muscle` and `neck_thickness`. A recipe's `shape: (body_bulk: 0.6)` now
+  moves the helpers, so old recipes forge unchanged. The Cairn-, Bastion- and Rook-neo tests pass.
+- **Helper frames:** the torso's helpers stand upright (+x out to the left, +y up, +z forward);
+  the limbs' lie along the limb. The file says so.
+- **Close to the limits.** On the CC0 body the helpers' weights peak at 0.3–0.6 on the torso and
+  0.6–0.9 on the limbs, so each preset runs close to its helper's limits, which keep the
+  silhouette inside 20 §6.2's bounds. A slider at 1 is a clear change, and sliders summed together
+  are clamped.
+- **Fewer morph targets:** a base with the helpers no longer carries the body sliders as morphs.
+  It keeps the face's ten.
+
+**The helpers retuned on the new body:**
+
+- The torso patches grow with the build's shoulder spread (×0.8–1.35). On the heavy masculine
+  base, the chest's peak rose from 0.31 to 0.41 and the trapezius's from 0.22 to 0.40.
+- The glutes' patch moved down onto the CC0 buttocks. Every helper again owns 8 vertices or
+  more, so that forge test is back at its old bar.
+- The chest test stays at 15 mm (it was 20). The masculine chest helper peaks at about 0.47,
+  shared with the back and the trapezius.
+
+**Checked:**
+
+- Captures of every slider at its end on the slim masculine base, and bulk, belly, chest and
+  hips on the slim feminine.
+- A test: the seven presets exist, are symmetric and within limits, and compose (a belly comes
+  forward).
+- All eight bases and the neo set validate.
+
+**Not yet (as BW3 left them):** the heavy builds' own mass shape; the throat notch where the
+heavy masculine's head meets its shoulders; the underwear's jagged edges, which go to BW5 as
+wardrobe items with drawn edges; the sex blend as a slider, if the owner wants one (§1.4).
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

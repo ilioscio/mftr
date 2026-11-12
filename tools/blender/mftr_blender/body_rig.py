@@ -68,7 +68,8 @@ PATCH = {
     "body_belly": ("spine_01", 0.60, 0, (0.20, 0.16, 0.17), "axis", ("spine_01", "spine_02", "pelvis")),
     "body_waist": ("spine_01", 0.55, 90, (0.16, 0.18, 0.13), "axis", ("spine_01", "spine_02", "pelvis")),
     "body_hip": ("pelvis", 0.25, 90, (0.16, 0.18, 0.14), "axis", ("pelvis", "thigh")),
-    "body_glute": ("pelvis", 0.10, 158, (0.16, 0.16, 0.15), "under", ("pelvis", "thigh")),
+    # Below the hip joints on the CC0 body (22 §1): the buttocks' mass sits low.
+    "body_glute": ("pelvis", -0.35, 158, (0.17, 0.18, 0.17), "under", ("pelvis", "thigh")),
     # The trapezius: the slope from the neck to the shoulder, on top of the chest.
     "body_trap": ("clavicle", 0.45, None, (0.10, 0.12, 0.08), "under", ("chest", "neck", "clavicle")),
 }
@@ -198,6 +199,11 @@ def _falloff(u):
     return u * u * (3.0 - 2.0 * u)
 
 
+def _torso_scale(armature):
+    """The build's torso against the slim masculine one's: its shoulder joints' spread."""
+    return max(0.8, min(1.35, armature.data.bones["upperarm_l"].head_local.x / 0.203))
+
+
 def _raw(name, p, own, armature, marks):
     """Helper `name`'s falloff at `p` (a vertex of bone `own`), 0 off its bones; and whether
     the vertex is held at 0 (off its bones or past a joint)."""
@@ -228,6 +234,9 @@ def _raw(name, p, own, armature, marks):
     _bone, _t, _angle, reach, _pivot, allowed = PATCH[kind]
     if own not in {_sided(x, side) for x in allowed}:
         return 0.0, True
+    # The patches were drawn for the slim masculine torso: they grow with the build's.
+    k = _torso_scale(armature)
+    reach = (reach[0] * k, reach[1] * k, reach[2] * k)
     centre = marks[name][1]
     q = p - centre
     if kind == "body_trap":
