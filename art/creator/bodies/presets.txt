@@ -1,0 +1,1 @@
+# The body sliders as presets on the body's helper bones (21 §9.2, FR6).

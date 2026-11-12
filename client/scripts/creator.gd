@@ -1080,12 +1080,21 @@ func _brushing() -> bool:
 	return (step == "paint" and _paint_tool != "fill") or _sculpting() or _featuring()
 
 
-## The tool in use on this step: on the Face step "features" (the default) or a brush; on the
-## Body step "" (sliders only) or a brush.
+## The tool in use on this step: "features" (dragging the face's features or the body's masses:
+## the default where the base has the bones for it), a brush, or "" (the Body step's sliders
+## alone, the model in motion).
 func _tool_now() -> String:
-	if step == "face":
-		return "features" if _sculpt_tool == "" else _sculpt_tool
-	return "" if _sculpt_tool == "features" else _sculpt_tool
+	if _sculpt_tool == "" or _sculpt_tool == "features":
+		return "features" if _can_feature() else ""
+	if _sculpt_tool == "sliders":
+		return "" if step == "body" else "features"
+	return _sculpt_tool
+
+
+## Whether this step's model can be dragged: the face always, the body on a base with the
+## helper bones (21 §9: the humanoids).
+func _can_feature() -> bool:
+	return step == "face" or (step == "body" and creator.body_rigged())
 
 
 func _sculpting() -> bool:
@@ -1093,22 +1102,36 @@ func _sculpting() -> bool:
 	return (step == "face" or step == "body") and t != "" and t != "features"
 
 
-## Dragging the face's features (FR4, 21 §3): what lights up under the cursor is what moves.
+## Dragging the face's features (FR4, 21 §3) or the body's masses (FR6, 21 §9): what lights up
+## under the cursor is what moves.
 func _featuring() -> bool:
-	return step == "face" and _tool_now() == "features"
+	return (step == "face" or step == "body") and _tool_now() == "features"
+
+
+## The creator's method for this step's drag: `face_begin` on the Face step, `body_begin` on the
+## Body step.
+func _feat(method: String) -> String:
+	return ("body_" if step == "body" else "face_") + method
 
 
 ## The Face step's tools (Features, or a brush) and the Body step's (sliders or a brush), above
 ## the sliders; a brush has size, strength and symmetry.
 func _sculpt_tools() -> void:
-	var first := ["features", "Features"] if step == "face" else ["", "Sliders"]
-	_tool_row([first, ["push", "Push"], ["pull", "Pull"], ["grab", "Grab"], ["inflate", "Inflate"], ["smooth", "Smooth"], ["flatten", "Flat"]],
-		_tool_now(), func(t):
+	var tools := [["push", "Push"], ["pull", "Pull"], ["grab", "Grab"], ["inflate", "Inflate"], ["smooth", "Smooth"], ["flatten", "Flat"]]
+	if step == "body":
+		# Sliders alone leave the model in motion; a drag or a brush holds it still.
+		tools.push_front(["sliders", "In motion" if _can_feature() else "Sliders"])
+	if _can_feature():
+		tools.push_front(["features", "Features" if step == "face" else "Drag"])
+	_tool_row(tools, "sliders" if _tool_now() == "" else _tool_now(), func(t):
 			_sculpt_tool = t
 			_hold_rest()
 			_show_step(step))
 	if _tool_now() == "features":
-		_hint("Point at the face: what lights up is what moves. Drag it; right-drag turns it; Shift-drag or the wheel sizes it (Alt: only across). Drag off the face to turn the model.")
+		if step == "face":
+			_hint("Point at the face: what lights up is what moves. Drag it; right-drag turns it; Shift-drag or the wheel sizes it (Alt: only across). Drag off the face to turn the model.")
+		else:
+			_hint("Point at the body: what lights up is what moves. Drag it; Shift-drag or the wheel sizes it (Alt: only across). Right-drag, or a drag off the body, turns the model.")
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 6)
 		var mirror := CheckBox.new()
@@ -1120,15 +1143,15 @@ func _sculpt_tools() -> void:
 		var undo := Button.new()
 		undo.text = "Undo"
 		undo.tooltip_text = "Back one drag (Ctrl+Z)"
-		undo.disabled = not creator.face_can_undo()
+		undo.disabled = not creator.call(_feat("can_undo"))
 		undo.pressed.connect(_face_undo)
 		row.add_child(undo)
 		var clear := Button.new()
-		clear.text = "Reset features"
-		clear.tooltip_text = "Every feature back where the sliders put it"
-		clear.disabled = not creator.face_edited()
+		clear.text = "Reset features" if step == "face" else "Reset drags"
+		clear.tooltip_text = "Every feature back where the sliders put it" if step == "face" else "Every part of the body back where the sliders put it"
+		clear.disabled = not creator.call(_feat("edited"))
 		clear.pressed.connect(func():
-			creator.face_clear()
+			creator.call(_feat("clear"))
 			_changed(true)
 			_show_step(step))
 		row.add_child(clear)
@@ -1320,14 +1343,15 @@ func _stage_input(event: InputEvent) -> void:
 		_pivot.rotation.y = _yaw
 
 
-## The Face step with Features (FR4, 21 §3.1): hover lights a region; a drag on it moves, turns
-## or sizes it, posing the bones at once; the preview is forged when the drag ends. A drag off
-## the face turns the model; the wheel off the face zooms.
+## The Face step with Features (FR4, 21 §3.1) and the Body step with Drag (FR6, 21 §9): hover
+## lights a region; a drag on it moves, turns (the face only: the body's masses don't turn) or
+## sizes it, posing the bones at once; the preview is forged when the drag ends. A drag off the
+## model turns it; the wheel off it zooms.
 func _feature_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		var motion := event as InputEventMouseMotion
 		if _face_drag != "":
-			creator.face_drag(motion.relative, _camera_frame(), _skeleton)
+			creator.call(_feat("drag"), motion.relative, _camera_frame(), _skeleton)
 		elif _dragging:
 			_yaw += motion.relative.x * 0.01
 			_pivot.rotation.y = _yaw
@@ -1343,7 +1367,9 @@ func _feature_input(event: InputEvent) -> void:
 			var mode := "move" if mb.button_index == MOUSE_BUTTON_LEFT else "turn"
 			if mb.shift_pressed:
 				mode = "size_width" if mb.alt_pressed else "size"
-			if region >= 0 and creator.face_begin(mode, _sculpt_mirror):
+			if step == "body" and mode == "turn":
+				region = -1  # a right-drag on the body turns the model
+			if region >= 0 and creator.call(_feat("begin"), mode, _sculpt_mirror):
 				_face_drag = mode
 				_set_active(region)
 			else:
@@ -1352,41 +1378,43 @@ func _feature_input(event: InputEvent) -> void:
 			if _face_drag != "":
 				_face_drag = ""
 				_set_active(-1)
-				if creator.face_end():
+				if creator.call(_feat("end")):
 					_changed(true)
 					_show_step(step)
 			_dragging = false
 	elif mb.pressed and (mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN):
 		var up := mb.button_index == MOUSE_BUTTON_WHEEL_UP
-		if _region_at(mb.position) >= 0 and creator.face_begin("size_width" if mb.alt_pressed else "size", _sculpt_mirror):
-			creator.face_drag(Vector2(0, -6.0 if up else 6.0), _camera_frame(), _skeleton)
-			if creator.face_end():
+		if _region_at(mb.position) >= 0 and creator.call(_feat("begin"), "size_width" if mb.alt_pressed else "size", _sculpt_mirror):
+			creator.call(_feat("drag"), Vector2(0, -6.0 if up else 6.0), _camera_frame(), _skeleton)
+			if creator.call(_feat("end")):
 				_changed(true)
 		else:
 			_zoom = clampf(_zoom * (1.1 if up else 1.0 / 1.1), 0.5, 3.0)
 			_place_camera()
 
 
-## The face region under the stage's `pos` (-1 for none), as the creator remembers it.
+## The region of this step (the face's, the body's) under the stage's `pos` (-1 for none), as
+## the creator remembers it.
 func _region_at(pos: Vector2) -> int:
 	if _model_node == null or _camera == null:
 		return -1
 	var inv := _model_node.global_transform.affine_inverse()
 	var origin := inv * _camera.project_ray_origin(pos)
 	var dir := (inv.basis * _camera.project_ray_normal(pos)).normalized()
-	return creator.face_hover(origin, dir)
+	return creator.call(_feat("hover"), origin, dir)
 
 
 func _set_hover(region: int) -> void:
 	if region == _hover_region:
 		return
 	_hover_region = region
-	var mirror := creator.face_mirror(region) if region >= 0 and _sculpt_mirror else -1
+	var mirror := creator.region_mirror(region) if region >= 0 and _sculpt_mirror else -1
 	for mat in _mats:
 		mat.set_shader_parameter("hover_region", region)
 		mat.set_shader_parameter("mirror_region", mirror if mirror != region else -1)
 	if _how != null:
-		_how.text = HOW if region < 0 else "%s   ·   drag to move · right-drag to turn · Shift-drag or wheel to size" % creator.face_region_name(region)
+		var ways := "drag to move · right-drag to turn · Shift-drag or wheel to size" if step == "face" else "drag to move · Shift-drag or wheel to size"
+		_how.text = HOW if region < 0 else "%s   ·   %s" % [creator.region_name(region), ways]
 		_how.add_theme_color_override("font_color", UI.DIM if region < 0 else UI.CREAM)
 
 
@@ -1397,7 +1425,7 @@ func _set_active(region: int) -> void:
 
 
 func _face_undo() -> void:
-	if creator.face_undo():
+	if creator.call(_feat("undo")):
 		_changed(true)
 		_show_step(step)
 
@@ -1419,27 +1447,27 @@ func _camera_frame() -> Dictionary:
 ## Hover a feature and drag it from one point of the stage to another (fractions of its size),
 ## in `steps` moves (`--creator-feature`, for screenshots and checks). With `hold`, the drag
 ## stays open, its region glowing.
-func feature_at_fraction(mode: String, from: Vector2, to: Vector2, steps := 8, hold := false) -> void:
+func feature_at_fraction(mode: String, from: Vector2, to: Vector2, steps := 8, hold := false, on := "face") -> void:
 	_sculpt_tool = "features"
-	_show_step("face")
+	_show_step(on)
 	_hold_rest()
 	var size := Vector2(_viewport.size)
 	var region := _region_at(from * size)
 	_set_hover(region)
-	if region < 0 or not creator.face_begin(mode, _sculpt_mirror):
+	if region < 0 or not creator.call(_feat("begin"), mode, _sculpt_mirror):
 		return
 	_face_drag = mode
 	_set_active(region)
 	var step_px := (to - from) * size / float(steps)
 	for i in steps:
-		creator.face_drag(step_px, _camera_frame(), _skeleton)
+		creator.call(_feat("drag"), step_px, _camera_frame(), _skeleton)
 	if hold:
 		return
 	_face_drag = ""
 	_set_active(-1)
-	if creator.face_end():
+	if creator.call(_feat("end")):
 		_changed(true)
-		_show_step("face")
+		_show_step(on)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -1451,7 +1479,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_yaw += 0.3
 	elif event.keycode == KEY_S and event.ctrl_pressed:
 		_save()
-	elif event.keycode == KEY_Z and event.ctrl_pressed and step == "face":
+	elif event.keycode == KEY_Z and event.ctrl_pressed and _featuring():
 		_face_undo()
 	_pivot.rotation.y = _yaw
 

@@ -275,6 +275,11 @@ func _ready() -> void:
 			# A random face from the shapes (FR5), seeded: captures of what Randomize gives.
 			_creator_random_face = int(args[i + 1])
 			i += 1
+		elif args[i] == "--creator-body" and i + 1 < args.size():
+			# A part of the body dragged on the stage (FR6), as `--creator-feature`:
+			# `size:0.5,0.4:0.5,0.3` grows what's under the first point; `move:…`; `:hold`.
+			_creator_body = args[i + 1]
+			i += 1
 		elif args[i] == "--creator-feature" and i + 1 < args.size():
 			# A face feature dragged on the stage (FR4): `move:0.5,0.5:0.5,0.42` (from, to as
 			# fractions of the stage), `turn:…`, `size:…`; `:hold` keeps the drag open, glowing.
@@ -674,6 +679,7 @@ var _creator_brush := ""                 # `--creator-brush TOOL:X,Y`: …and pa
 var _creator_sculpt := ""                # `--creator-sculpt BRUSH:X,Y`: …or sculpt there (screenshots)
 var _creator_random_face := -1           # `--creator-random-face SEED`: …with a random face
 var _creator_feature := ""               # `--creator-feature MODE:X,Y:X,Y[:hold]`: …or drag a face feature
+var _creator_body := ""                  # `--creator-body MODE:X,Y:X,Y[:hold]`: …or a part of the body
 var _editor_map := ""                    # `--editor-map bridge|crossroads|FILE`: …on that map
 var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's reference image
 var _shot_ward := false                  # `--shot-ward`: place a stealth ward ahead at 2.5 s
@@ -6736,6 +6742,14 @@ func _open_creator() -> void:
 		var a := fp[1].split(",")
 		var b := fp[2].split(",")
 		screen.feature_at_fraction(fp[0], Vector2(float(a[0]), float(a[1])), Vector2(float(b[0]), float(b[1])), 8, fp.size() > 3 and fp[3] == "hold")
+	if _creator_body != "":
+		await get_tree().create_timer(1.0).timeout
+		# Several drags, one after another: `size:…;move:…`.
+		for drag in _creator_body.split(";"):
+			var bp := drag.split(":")
+			var ba := bp[1].split(",")
+			var bb := bp[2].split(",")
+			screen.feature_at_fraction(bp[0], Vector2(float(ba[0]), float(ba[1])), Vector2(float(bb[0]), float(bb[1])), 8, bp.size() > 3 and bp[3] == "hold", "body")
 	screen.saved.connect(func(_path): champion_models.clear())
 	screen.test.connect(_start_practice)
 	screen.closed.connect(func(): _show_menu(""))

@@ -24,8 +24,11 @@ pub const PROP_TRIANGLES_TARGET: (usize, usize) = (20, 12_000);
 pub const PROP_TRIANGLES_MAX: usize = 18_000;
 /// A prop's bones: `root`, plus up to this many `part_<name>` bones for pieces that move.
 pub const PROP_PARTS_MAX: usize = 8;
+/// Bones a rig aims for, the face's and the body's sculpt bones aside (21 §1.3, §9.1: a creator
+/// base carries 24 of each, which no clip keys).
 pub const BONES_TARGET: usize = 64;
-pub const BONES_MAX: usize = 80;
+/// Every bone, sculpt bones included: the biped's 34, 16 extras, 24 face and 24 body bones fit.
+pub const BONES_MAX: usize = 100;
 pub const INFLUENCES_TARGET: usize = 2;
 /// `accent` is the team color; `accent_glow` is the team color, glowing (A5: minions' eyes and
 /// orbs). Neither counts toward the four other slots.
@@ -97,6 +100,7 @@ pub fn biped_bone_allowed(name: &str) -> bool {
         || SOCKETS.contains(&name)
         || BIPED_OPTIONAL.contains(&name)
         || crate::face::is_face_bone(name)
+        || crate::body::is_body_bone(name)
         || is_extra_bone(name)
 }
 

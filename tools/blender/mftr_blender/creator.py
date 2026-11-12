@@ -100,6 +100,11 @@ def _body_parts(gender):
         limb = bone.split("_")[0] in ("upperarm", "forearm", "thigh", "calf")
         k = 1.3 if limb else (1.1 if bone in ("pelvis", "spine_01", "spine_02", "chest") else 1.0)
         prof = [(t, rr * k, d * k) for t, rr, d in prof]
+        if bone.startswith(("forearm", "calf")) and len(prof) == 2 and (Vector(mesh._resolve(b)) - Vector(mesh._resolve(a))).length > 0.12:
+            # Rings along the forearm and the upper calf, so their helpers (21 §9) fade in and
+            # out inside them rather than across one long face.
+            (t0, r0, d0), (t1, r1, d1) = prof
+            prof = [(t0 + (t1 - t0) * u, r0 + (r1 - r0) * u, d0 + (d1 - d0) * u) for u in (0.0, 1 / 3, 2 / 3, 1.0)]
         if gender == "feminine" and bone in ("spine_01", "spine_02"):
             prof = [(t, r * 0.88, d * 0.95) for t, r, d in prof]
         if gender == "feminine" and bone == "pelvis" and slot == "cloth":
@@ -173,6 +178,9 @@ def build_base(gender, name, build="humanoid_slim"):
     finally:
         head.DEFAULT_DETAIL = 1
     face_rig.weight(armature, body, h, piv)
+    # The body's helper bones and their weights (21 §9, FR6).
+    from . import body_rig
+    body_rig.rig_body(armature, body)
     return armature, body
 
 
@@ -190,9 +198,11 @@ class Region:
         names = {g.index: g.name for g in body.vertex_groups}
         self.cos = [v.co.copy() for v in body.data.vertices]
         self.of = []
+        from .body_rig import NAMES as HELPERS
         for v in body.data.vertices:
-            gs = [names[g.group] for g in v.groups if g.weight > 0.5]
-            self.of.append(gs[0] if gs else "")
+            # The vertex's own bone: the body's helpers (21 §9) share it, never own it.
+            gs = sorted(((g.weight, names[g.group]) for g in v.groups if names[g.group] not in HELPERS), reverse=True)
+            self.of.append(gs[0][1] if gs and gs[0][0] > 0.05 else "")
         self.idx = [i for i, g in enumerate(self.of) if g in groups]
         pts = [self.cos[i] for i in self.idx]
         self.lo = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
@@ -494,6 +504,10 @@ def build(gender, name, build="humanoid_slim"):
     h = base_head(gender, build)
     fit = authored_head.prepare(h, armature.data.bones["head"].head_local)
     made = parts.build_parts(armature, body, h, conform=authored_head.make_conform(h, fit, body))
+    # Parts grow with the body under them: its helper weights, from the nearest surface (21 §9.2).
+    from . import body_rig
+    for obj in [o for o in bpy.data.objects if o.name.startswith("part.") and not o.name.startswith(("part.weapon.", "part.offhand."))]:
+        body_rig.transfer(body, obj)
     # Weapons ride the prop bones, as the official champions' do, so the moves' clips (whose
     # wrists stay human, 14 §3.3) hold them where their champions held theirs.
     from . import wrists

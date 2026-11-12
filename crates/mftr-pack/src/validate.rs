@@ -95,6 +95,10 @@ pub fn validate_model(model: &Model, glb_len: usize, side: &Sidecar) -> Report {
     for p in crate::face::problems(model) {
         r.err(p);
     }
+    // The body's helper bones (21 §9), likewise.
+    for p in crate::body::problems(model) {
+        r.err(p);
+    }
     if side.kind == "prop" {
         check_prop(&mut r, model);
         return r;
@@ -288,11 +292,11 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
     }
 
     let mut over_target = 0usize;
-    // A face vertex may blend its head with up to three face bones (21 §1.4): not counted.
-    let face_joint: Vec<bool> = m
-        .skins
-        .first()
-        .map_or(Vec::new(), |j| j.iter().map(|&n| crate::face::is_face_bone(&m.nodes[n].name)).collect());
+    // A face vertex may blend its head with up to three face bones (21 §1.4), and a body
+    // vertex its bone with up to three helpers (21 §9.2): not counted.
+    let sculpt_bone = |n: &str| crate::face::is_face_bone(n) || crate::body::is_body_bone(n);
+    let face_joint: Vec<bool> =
+        m.skins.first().map_or(Vec::new(), |j| j.iter().map(|&n| sculpt_bone(&m.nodes[n].name)).collect());
     for (mi, prims) in m.meshes.iter().enumerate() {
         for p in prims {
             if !p.has_color {
@@ -354,10 +358,11 @@ fn check_skeleton(r: &mut Report, m: &Model) -> Vec<usize> {
     }
     let joints = m.skins[0].clone();
     let names: Vec<&str> = joints.iter().map(|&j| m.nodes[j].name.as_str()).collect();
+    let animated = names.iter().filter(|n| !crate::face::is_face_bone(n) && !crate::body::is_body_bone(n)).count();
     if names.len() > rules::BONES_MAX {
         r.err(format!("{} bones, over the {} cap", names.len(), rules::BONES_MAX));
-    } else if names.len() > rules::BONES_TARGET {
-        r.warn(format!("{} bones, over the {} target", names.len(), rules::BONES_TARGET));
+    } else if animated > rules::BONES_TARGET {
+        r.warn(format!("{animated} bones, over the {} target", rules::BONES_TARGET));
     }
     for n in &names {
         if !rules::biped_bone_allowed(n) {

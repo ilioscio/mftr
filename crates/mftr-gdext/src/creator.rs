@@ -6,9 +6,10 @@ use std::sync::Arc;
 
 use godot::classes::Skeleton3D;
 use godot::prelude::*;
-use mftr_forge::face;
-use mftr_forge::looks::{Gender, Proportions, SKIN_TONES};
+use mftr_forge::face::{BoneSet, FaceSculpt, Frame, Sculpt};
+use mftr_forge::looks::{Gender, Looks, Proportions, SKIN_TONES};
 use mftr_forge::recipe::{self, Recipe};
+use mftr_forge::{body, face};
 use mftr_sim::ChampionId;
 
 use crate::model::{MftrModel, catalog};
@@ -28,19 +29,99 @@ pub struct MftrCreator {
     /// Why the last preview couldn't be forged, or what a change of body dropped: for the
     /// screen's status line ("" when nothing).
     note: String,
-    /// The face editor (FR4, 21 §2.4–3.3): the last preview's regions and bone frames, the
-    /// region under the cursor and the point there, the drag under way, and undo.
-    face: FaceEditor,
+    /// The last preview's regions (`face::vertex_regions`): the face's, then the body's.
+    regions: Vec<Vec<Vec<u8>>>,
+    /// The face editor (FR4, 21 §2.4–3.3) and the body's (FR6, 21 §9): the same drag on two
+    /// sets of bones.
+    face: Editor<FaceSculpt>,
+    body: Editor<body::BodySculpt>,
 }
 
-#[derive(Default)]
-struct FaceEditor {
-    regions: Vec<Vec<Vec<u8>>>,
-    frames: Option<[[[f32; 3]; 3]; face::BONES]>,
+/// One set of bones' editor: the last preview's bone frames (None when the base has none of the
+/// set's bones), the bone under the cursor and the point there, the drag under way, and undo.
+struct Editor<S> {
+    frames: Option<Vec<Frame>>,
     hover: Option<usize>,
     anchor: [f32; 3],
     drag: Option<(usize, face::DragMode, bool)>,
-    undo: Vec<Option<face::FaceSculpt>>,
+    undo: Vec<Option<S>>,
+}
+
+impl<S> Default for Editor<S> {
+    fn default() -> Self {
+        Editor { frames: None, hover: None, anchor: [0.0; 3], drag: None, undo: Vec::new() }
+    }
+}
+
+/// A sculpt the creator edits by dragging: where the recipe keeps it, where its regions start
+/// among the preview's, and which editor is its own.
+trait Edited: Sculpt + 'static {
+    /// Its first region among `face::vertex_regions`' (the shader's region ids).
+    const BASE: usize;
+    fn of(looks: &Looks) -> &Option<Self>;
+    fn of_mut(looks: &mut Looks) -> &mut Option<Self>;
+    fn editor(c: &MftrCreator) -> &Editor<Self>;
+    fn editor_mut(c: &mut MftrCreator) -> &mut Editor<Self>;
+    /// What the forge bakes: the recipe's own sculpt with its sliders' presets.
+    fn shown(looks: &Looks) -> Option<Self>;
+}
+
+impl Edited for FaceSculpt {
+    const BASE: usize = 0;
+
+    fn of(looks: &Looks) -> &Option<Self> {
+        &looks.face
+    }
+
+    fn of_mut(looks: &mut Looks) -> &mut Option<Self> {
+        &mut looks.face
+    }
+
+    fn editor(c: &MftrCreator) -> &Editor<Self> {
+        &c.face
+    }
+
+    fn editor_mut(c: &mut MftrCreator) -> &mut Editor<Self> {
+        &mut c.face
+    }
+
+    fn shown(looks: &Looks) -> Option<Self> {
+        face::compose(looks.face.as_ref(), &looks.shape)
+    }
+}
+
+impl Edited for body::BodySculpt {
+    const BASE: usize = face::BODY_REGIONS;
+
+    fn of(looks: &Looks) -> &Option<Self> {
+        &looks.body
+    }
+
+    fn of_mut(looks: &mut Looks) -> &mut Option<Self> {
+        &mut looks.body
+    }
+
+    fn editor(c: &MftrCreator) -> &Editor<Self> {
+        &c.body
+    }
+
+    fn editor_mut(c: &mut MftrCreator) -> &mut Editor<Self> {
+        &mut c.body
+    }
+
+    fn shown(looks: &Looks) -> Option<Self> {
+        body::compose(looks.body.as_ref(), &looks.shape)
+    }
+}
+
+/// The set whose regions hold region id `region` (the face's first, then the body's).
+fn set_of(region: i64) -> Option<(&'static BoneSet, usize)> {
+    let r = usize::try_from(region).ok()?;
+    if r < face::BODY_REGIONS {
+        Some((&face::FACE, r))
+    } else {
+        (r - face::BODY_REGIONS < body::BONES).then_some((&body::BODY, r - face::BODY_REGIONS))
+    }
 }
 
 #[godot_api]
@@ -55,7 +136,9 @@ impl MftrCreator {
             last: None,
             aim: None,
             note: String::new(),
-            face: FaceEditor::default(),
+            regions: Vec::new(),
+            face: Editor::default(),
+            body: Editor::default(),
         })
     }
 
@@ -546,8 +629,10 @@ impl MftrCreator {
                 let pack = Arc::new(pack);
                 self.last = Some(pack.clone());
                 self.aim = aimed(&pack.model);
-                self.face.regions = face::vertex_regions(&pack.model);
-                self.face.frames = pack.model.node_by_name("face_forehead").map(|_| face::bone_frames(&pack.model));
+                self.regions = face::vertex_regions(&pack.model);
+                self.face.frames =
+                    pack.model.node_by_name("face_forehead").map(|_| face::bone_frames(&pack.model, &face::FACE));
+                self.body.frames = body::rigged(&pack.model).then(|| face::bone_frames(&pack.model, &body::BODY));
                 if self.note.starts_with("Can't show") {
                     self.note.clear();
                 }
@@ -678,54 +763,33 @@ impl MftrCreator {
         )
     }
 
-    // --- The face editor (FR4) ------------------------------------------------------------
+    // --- The face editor (FR4) and the body's (FR6) -----------------------------------------
+    // Regions are ids among the preview's (the shader's `hover_region`): a face bone's index,
+    // or 24 plus a body helper's.
 
     /// The face region under the ray `origin + t·dir` (the preview's model space, rest pose), or
-    /// -1: a face bone's index, its name from `face_region_name`. Remembers it for a drag.
+    /// -1: its name from `region_name`. Remembers it for a drag.
     #[func]
     fn face_hover(&mut self, origin: Vector3, dir: Vector3) -> i64 {
-        let Some(last) = self.last.clone() else { return -1 };
-        if self.face.frames.is_none() {
-            return -1;
-        }
-        let aim = self.aim.clone();
-        let model = aim.as_deref().unwrap_or(&last.model);
-        let hit = face::region_at(model, &self.face.regions, [origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z]);
-        self.face.hover = hit.map(|(r, _)| r);
-        if let Some((_, p)) = hit {
-            self.face.anchor = p;
-        }
-        self.face.hover.map_or(-1, |r| r as i64)
+        self.hover::<FaceSculpt>(origin, dir)
     }
 
     /// The other side's region (itself on the middle line), which follows with symmetry.
     #[func]
     fn face_mirror(&self, region: i64) -> i64 {
-        if (0..face::BONES as i64).contains(&region) { face::mirror_of(region as usize) as i64 } else { -1 }
+        self.region_mirror(region)
     }
 
     #[func]
     fn face_region_name(&self, region: i64) -> GString {
-        GString::from(face::REGION_NAMES.get(region as usize).copied().unwrap_or(""))
+        self.region_name(region)
     }
 
     /// Start dragging the hovered region: `mode` "move", "turn", "size" or "size_width". False
     /// when nothing is under the cursor.
     #[func]
     fn face_begin(&mut self, mode: GString, symmetry: bool) -> bool {
-        let Some(region) = self.face.hover else { return false };
-        let mode = match mode.to_string().as_str() {
-            "turn" => face::DragMode::Turn,
-            "size" => face::DragMode::Size { width_only: false },
-            "size_width" => face::DragMode::Size { width_only: true },
-            _ => face::DragMode::Move,
-        };
-        self.face.undo.push(self.recipe.looks.face.clone());
-        if self.face.undo.len() > 64 {
-            self.face.undo.remove(0);
-        }
-        self.face.drag = Some((region, mode, symmetry));
-        true
+        self.begin::<FaceSculpt>(&mode.to_string(), symmetry)
     }
 
     /// A mouse move of `relative` pixels while dragging. `camera` is the stage camera in the
@@ -733,65 +797,25 @@ impl MftrCreator {
     /// `viewport_h`). Poses `skeleton`'s face bones at once (no forge until `face_end`).
     #[func]
     fn face_drag(&mut self, relative: Vector2, camera: VarDictionary, skeleton: Gd<Skeleton3D>) -> bool {
-        let (Some((region, mode, symmetry)), Some(frames), Some(last)) =
-            (self.face.drag, self.face.frames, self.last.clone())
-        else {
-            return false;
-        };
-        let v = |k: &str| camera.get(k).and_then(|x| x.try_to::<Vector3>().ok()).map_or([0.0; 3], |v| [v.x, v.y, v.z]);
-        let f = |k: &str| camera.get(k).and_then(|x| x.try_to::<f32>().ok()).unwrap_or(0.0);
-        let cam = face::CameraFrame {
-            origin: v("origin"),
-            right: v("right"),
-            up: v("up"),
-            forward: v("forward"),
-            fov_y: f("fov_y"),
-            viewport_h: f("viewport_h"),
-        };
-        let px = [relative.x, relative.y];
-        let world = face::drag_to_world(&cam, px, self.face.anchor);
-        let mut sculpt = self.recipe.looks.face.clone().unwrap_or_default();
-        if !face::drag_face(&mut sculpt, region, mode, world, px, &cam, &frames, symmetry) {
-            return false;
-        }
-        if mode == face::DragMode::Move {
-            // The plane follows the feature, so the next pixel is measured where it now is.
-            self.face.anchor = [0, 1, 2].map(|k| self.face.anchor[k] + world[k]);
-        }
-        self.recipe.looks.face = (!sculpt.is_neutral()).then_some(sculpt);
-        self.pose_face(&last.model, skeleton);
-        true
+        self.drag::<FaceSculpt>(relative, &camera, skeleton)
     }
 
     /// The drag is over: true when the face changed (the screen then forges the preview).
     #[func]
     fn face_end(&mut self) -> bool {
-        let Some(_) = self.face.drag.take() else { return false };
-        let changed = self.face.undo.last() != Some(&self.recipe.looks.face);
-        if !changed {
-            self.face.undo.pop();
-        }
-        changed
+        self.end::<FaceSculpt>()
     }
 
     /// Back one drag: false when there's nothing to undo.
     #[func]
     fn face_undo(&mut self) -> bool {
-        match self.face.undo.pop() {
-            Some(f) => {
-                self.recipe.looks.face = f;
-                true
-            }
-            None => false,
-        }
+        self.undo::<FaceSculpt>()
     }
 
     /// Every feature back where the sliders put it (undoable).
     #[func]
     fn face_clear(&mut self) {
-        if self.recipe.looks.face.is_some() {
-            self.face.undo.push(self.recipe.looks.face.take());
-        }
+        self.clear::<FaceSculpt>();
     }
 
     /// Whether the face has been dragged at all (for the screen's buttons).
@@ -803,6 +827,71 @@ impl MftrCreator {
     #[func]
     fn face_can_undo(&self) -> bool {
         !self.face.undo.is_empty()
+    }
+
+    /// The body region under the ray, or -1 (as `face_hover`; a body helper's region id).
+    #[func]
+    fn body_hover(&mut self, origin: Vector3, dir: Vector3) -> i64 {
+        self.hover::<body::BodySculpt>(origin, dir)
+    }
+
+    /// The other side's region for any region id (itself on the middle line).
+    #[func]
+    fn region_mirror(&self, region: i64) -> i64 {
+        match set_of(region) {
+            Some((set, b)) => region - b as i64 + set.mirror(b) as i64,
+            None => -1,
+        }
+    }
+
+    /// What a region id is called on screen ("" for none).
+    #[func]
+    fn region_name(&self, region: i64) -> GString {
+        GString::from(set_of(region).map_or("", |(set, b)| set.regions[b]))
+    }
+
+    /// Start dragging the hovered body region: `mode` "move", "size" or "size_width".
+    #[func]
+    fn body_begin(&mut self, mode: GString, symmetry: bool) -> bool {
+        self.begin::<body::BodySculpt>(&mode.to_string(), symmetry)
+    }
+
+    /// As `face_drag`, on the body's helpers.
+    #[func]
+    fn body_drag(&mut self, relative: Vector2, camera: VarDictionary, skeleton: Gd<Skeleton3D>) -> bool {
+        self.drag::<body::BodySculpt>(relative, &camera, skeleton)
+    }
+
+    #[func]
+    fn body_end(&mut self) -> bool {
+        self.end::<body::BodySculpt>()
+    }
+
+    #[func]
+    fn body_undo(&mut self) -> bool {
+        self.undo::<body::BodySculpt>()
+    }
+
+    /// Every mass back where the sliders put it (undoable).
+    #[func]
+    fn body_clear(&mut self) {
+        self.clear::<body::BodySculpt>();
+    }
+
+    #[func]
+    fn body_edited(&self) -> bool {
+        self.recipe.looks.body.is_some()
+    }
+
+    #[func]
+    fn body_can_undo(&self) -> bool {
+        !self.body.undo.is_empty()
+    }
+
+    /// Whether the body can be dragged at all: the base has the helper bones.
+    #[func]
+    fn body_rigged(&self) -> bool {
+        self.body.frames.is_some()
     }
 
     /// Undo every sculpt stroke.
@@ -880,11 +969,106 @@ fn aimed(model: &mftr_pack::glb::Model) -> Option<Arc<mftr_pack::glb::Model>> {
 }
 
 impl MftrCreator {
-    /// Pose `skeleton`'s face bones as the recipe's face (its own sculpt and its sliders) on the
-    /// forged `model`: what the bake would make, set as the bones' pose.
-    fn pose_face(&self, model: &mftr_pack::glb::Model, mut skeleton: Gd<Skeleton3D>) {
-        let looks = &self.recipe.looks;
-        let shown = face::compose(looks.face.as_ref(), &looks.shape).unwrap_or_default();
+    fn hover<S: Edited>(&mut self, origin: Vector3, dir: Vector3) -> i64 {
+        let Some(last) = self.last.clone() else { return -1 };
+        if S::editor(self).frames.is_none() {
+            return -1;
+        }
+        let aim = self.aim.clone();
+        let model = aim.as_deref().unwrap_or(&last.model);
+        let own = S::BASE..S::BASE + S::set().rig.len();
+        let hit = face::region_at(model, &self.regions, [origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z])
+            .filter(|(r, _)| own.contains(r));
+        let e = S::editor_mut(self);
+        e.hover = hit.map(|(r, _)| r - S::BASE);
+        if let Some((_, p)) = hit {
+            e.anchor = p;
+        }
+        e.hover.map_or(-1, |b| (b + S::BASE) as i64)
+    }
+
+    fn begin<S: Edited>(&mut self, mode: &str, symmetry: bool) -> bool {
+        let Some(bone) = S::editor(self).hover else { return false };
+        let mode = match mode {
+            "turn" => face::DragMode::Turn,
+            "size" => face::DragMode::Size { width_only: false },
+            "size_width" => face::DragMode::Size { width_only: true },
+            _ => face::DragMode::Move,
+        };
+        let was = S::of(&self.recipe.looks).clone();
+        let e = S::editor_mut(self);
+        e.undo.push(was);
+        if e.undo.len() > 64 {
+            e.undo.remove(0);
+        }
+        e.drag = Some((bone, mode, symmetry));
+        true
+    }
+
+    fn drag<S: Edited>(&mut self, relative: Vector2, camera: &VarDictionary, skeleton: Gd<Skeleton3D>) -> bool {
+        let e = S::editor(self);
+        let (Some((bone, mode, symmetry)), Some(frames), Some(last)) = (e.drag, e.frames.clone(), self.last.clone())
+        else {
+            return false;
+        };
+        let anchor = e.anchor;
+        let v = |k: &str| camera.get(k).and_then(|x| x.try_to::<Vector3>().ok()).map_or([0.0; 3], |v| [v.x, v.y, v.z]);
+        let f = |k: &str| camera.get(k).and_then(|x| x.try_to::<f32>().ok()).unwrap_or(0.0);
+        let cam = face::CameraFrame {
+            origin: v("origin"),
+            right: v("right"),
+            up: v("up"),
+            forward: v("forward"),
+            fov_y: f("fov_y"),
+            viewport_h: f("viewport_h"),
+        };
+        let px = [relative.x, relative.y];
+        let world = face::drag_to_world(&cam, px, anchor);
+        let mut sculpt = S::of(&self.recipe.looks).clone().unwrap_or_default();
+        if !face::drag(&mut sculpt, bone, mode, world, px, &cam, &frames, symmetry) {
+            return false;
+        }
+        if mode == face::DragMode::Move {
+            // The plane follows the feature, so the next pixel is measured where it now is.
+            S::editor_mut(self).anchor = [0, 1, 2].map(|k| anchor[k] + world[k]);
+        }
+        let neutral = sculpt.bones().iter().all(face::BoneDelta::is_zero);
+        *S::of_mut(&mut self.recipe.looks) = (!neutral).then_some(sculpt);
+        self.pose::<S>(&last.model, skeleton);
+        true
+    }
+
+    fn end<S: Edited>(&mut self) -> bool {
+        let now = S::of(&self.recipe.looks).clone();
+        let e = S::editor_mut(self);
+        let Some(_) = e.drag.take() else { return false };
+        let changed = e.undo.last() != Some(&now);
+        if !changed {
+            e.undo.pop();
+        }
+        changed
+    }
+
+    fn undo<S: Edited>(&mut self) -> bool {
+        match S::editor_mut(self).undo.pop() {
+            Some(was) => {
+                *S::of_mut(&mut self.recipe.looks) = was;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn clear<S: Edited>(&mut self) {
+        if let Some(was) = S::of_mut(&mut self.recipe.looks).take() {
+            S::editor_mut(self).undo.push(Some(was));
+        }
+    }
+
+    /// Pose `skeleton`'s bones of a sculpt's set as the recipe has them (its own sculpt and its
+    /// sliders) on the forged `model`: what the bake would make, set as the bones' pose.
+    fn pose<S: Edited>(&self, model: &mftr_pack::glb::Model, mut skeleton: Gd<Skeleton3D>) {
+        let shown = S::shown(&self.recipe.looks).unwrap_or_default();
         for (node, (t, r, s)) in face::posed(model, &shown) {
             let idx = skeleton.find_bone(model.nodes[node].name.as_str());
             if idx < 0 {

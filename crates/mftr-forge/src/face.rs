@@ -3,6 +3,9 @@
 //! `bake` puts the deltas into the face bones' rest and records where the mesh is bound
 //! (`Model::bind`), so the client's skin deforms the head by exactly the deltas: no vertex is
 //! moved on the CPU and nothing is rebuilt per frame.
+//!
+//! The body's helper bones (21 §9, `crate::body`) are sculpted the same way, so everything here
+//! that isn't about the face itself works on a [`BoneSet`]: the face's bones or the body's.
 
 use mftr_pack::face::FACE_RIG;
 use mftr_pack::glb::{BindTrs, Model};
@@ -36,6 +39,77 @@ const FEATURE: Limits = Limits { t: 250, r: 2000, s: 550, dofs: DOF_T | DOF_R | 
 const BIG: Limits = Limits { t: 400, r: 3000, s: 750, dofs: DOF_T | DOF_R | DOF_S };
 const FRAME: Limits = Limits { t: 200, r: 1200, s: 330, dofs: DOF_T | DOF_R | DOF_S };
 
+/// A set of sculpt bones: the face's (21 §1.3) or the body's helpers (21 §9.1). The limits, the
+/// bake, the editor's drag and the recipe's forms work on either.
+#[derive(Debug)]
+pub struct BoneSet {
+    /// What a recipe calls it: `face` or `body`.
+    pub name: &'static str,
+    /// The compact form's first two bytes.
+    pub magic: [u8; 2],
+    pub version: u8,
+    /// Each bone and its parent, parents first.
+    pub rig: &'static [(&'static str, &'static str)],
+    pub limits: &'static [Limits],
+    /// What each bone's region is called on screen.
+    pub regions: &'static [&'static str],
+    /// A size drag grows a bone across (x and z) and leaves its length (y) alone: the body's
+    /// helpers lie along their limbs.
+    pub size_across: bool,
+}
+
+impl BoneSet {
+    pub fn index(&self, bone: &str) -> Option<usize> {
+        self.rig.iter().position(|(n, _)| *n == bone)
+    }
+
+    /// Bone `i`'s parent among the set's own bones (scale stays local: 21 §1.3).
+    pub fn parent(&self, i: usize) -> Option<usize> {
+        self.index(self.rig[i].1)
+    }
+
+    /// The other side's bone (itself on the middle line).
+    pub fn mirror(&self, b: usize) -> usize {
+        let name = self.rig[b].0;
+        let other = match (name.strip_suffix("_l"), name.strip_suffix("_r")) {
+            (Some(base), _) => format!("{base}_r"),
+            (_, Some(base)) => format!("{base}_l"),
+            _ => return b,
+        };
+        self.index(&other).unwrap_or(b)
+    }
+}
+
+/// The face's bones.
+pub static FACE: BoneSet = BoneSet {
+    name: "face",
+    magic: *b"FS",
+    version: RIG_VERSION,
+    rig: &FACE_RIG,
+    limits: &LIMITS,
+    regions: &REGION_NAMES,
+    size_across: false,
+};
+
+/// A sculpt on a set of bones: one delta per bone, in the set's order.
+pub trait Sculpt: Clone + Default + PartialEq {
+    fn set() -> &'static BoneSet;
+    fn bones(&self) -> &[BoneDelta];
+    fn bones_mut(&mut self) -> &mut [BoneDelta];
+
+    /// Inside every bone's limits.
+    fn within_limits(&self) -> Self {
+        let mut out = self.clone();
+        for (d, l) in out.bones_mut().iter_mut().zip(Self::set().limits) {
+            *d = d.clamped(l);
+        }
+        out
+    }
+}
+
+/// A bone's frame: its rest axes in model space, as columns.
+pub type Frame = [[f32; 3]; 3];
+
 /// Per face bone, in `FACE_RIG` order.
 pub const LIMITS: [Limits; BONES] = [
     FRAME,                                     // face_forehead
@@ -66,8 +140,7 @@ pub const LIMITS: [Limits; BONES] = [
 
 /// Each face bone's parent among the face bones (scale stays local: 21 §1.3).
 pub fn face_parent(i: usize) -> Option<usize> {
-    let parent = FACE_RIG[i].1;
-    FACE_RIG.iter().position(|(n, _)| *n == parent)
+    FACE.parent(i)
 }
 
 /// One bone's delta from rest, in the bone's own rest frame.
@@ -140,11 +213,21 @@ impl FaceSculpt {
     }
 
     pub fn clamped(&self) -> FaceSculpt {
-        let mut out = self.clone();
-        for (d, l) in out.bones.iter_mut().zip(&LIMITS) {
-            *d = d.clamped(l);
-        }
-        out
+        self.within_limits()
+    }
+}
+
+impl Sculpt for FaceSculpt {
+    fn set() -> &'static BoneSet {
+        &FACE
+    }
+
+    fn bones(&self) -> &[BoneDelta] {
+        &self.bones
+    }
+
+    fn bones_mut(&mut self) -> &mut [BoneDelta] {
+        &mut self.bones
     }
 }
 
@@ -162,21 +245,25 @@ fn qrot(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
     [p[0], p[1], p[2]]
 }
 
-/// Bake `face` into a forged model (21 §2.3): each face bone's rest becomes rest · delta, a
-/// face bone whose parent was scaled has that scale divided back out (scale stays local), and
-/// `Model::bind` keeps every face bone bound where it was, so the skin deforms the mesh by
-/// exactly the deltas. Parents precede children in `FACE_RIG`, so one pass suffices.
-pub fn bake(model: &mut Model, face: &FaceSculpt) {
-    if face.is_neutral() {
+/// Bake a sculpt (a face, a body) into a forged model (21 §2.3): each of its bones' rest becomes
+/// rest · delta, a bone whose parent in the set was scaled has that scale divided back out
+/// (scale stays local), and `Model::bind` keeps every moved bone bound where it was, so the skin
+/// deforms the mesh by exactly the deltas. Parents precede children in a set, so one pass
+/// suffices.
+pub fn bake<S: Sculpt>(model: &mut Model, sculpt: &S) {
+    let set = S::set();
+    let sculpt = sculpt.within_limits();
+    let bones = sculpt.bones();
+    if bones.iter().all(BoneDelta::is_zero) {
         return;
     }
-    let face = face.clamped();
     if model.bind.len() < model.nodes.len() {
         model.bind.resize(model.nodes.len(), None);
     }
-    for (i, d) in face.bones.iter().enumerate() {
-        let Some(node) = model.node_by_name(FACE_RIG[i].0) else { continue };
-        let parent_scaled = face_parent(i).is_some_and(|p| !face.bones[p].s.iter().all(|&v| v == 0));
+    for (i, d) in bones.iter().enumerate() {
+        let Some(node) = model.node_by_name(set.rig[i].0) else { continue };
+        let parent = set.parent(i);
+        let parent_scaled = parent.is_some_and(|p| !bones[p].s.iter().all(|&v| v == 0));
         if d.is_zero() && !parent_scaled {
             continue;
         }
@@ -184,13 +271,13 @@ pub fn bake(model: &mut Model, face: &FaceSculpt) {
         if model.bind[node].is_none() {
             model.bind[node] = Some((n.translation, n.rotation, n.scale));
         }
-        let parent_scale = face_parent(i).map_or([1.0; 3], |p| face.bones[p].scale());
+        let parent_scale = parent.map_or([1.0; 3], |p| bones[p].scale());
         (n.translation, n.rotation, n.scale) = baked_bone((n.translation, n.rotation, n.scale), d, parent_scale);
     }
 }
 
-/// One face bone's local transform with its delta: `rest · delta`, the translation turned from
-/// the bone's frame into its parent's, and a scaled face-bone parent's scale divided back out
+/// One sculpt bone's local transform with its delta: `rest · delta`, the translation turned from
+/// the bone's frame into its parent's, and a scaled sculpt-bone parent's scale divided back out
 /// (scale stays local). The bake and the editor's live pose both use it.
 pub fn baked_bone(rest: BindTrs, d: &BoneDelta, parent_scale: [f32; 3]) -> BindTrs {
     let (mut t, r, mut s) = rest;
@@ -207,13 +294,14 @@ pub fn baked_bone(rest: BindTrs, d: &BoneDelta, parent_scale: [f32; 3]) -> BindT
 
 const PRESETS_SOURCE: &str = include_str!("../../../art/creator/heads/presets.txt");
 
-/// A face slider: the bone moves of its +1 end (its -1 end the opposite, unless one-sided).
+/// A slider as a preset on the bones: the bone moves of its +1 end (its -1 end the opposite,
+/// unless one-sided).
 #[derive(Clone, Debug)]
-pub struct Preset {
+pub struct Preset<S = FaceSculpt> {
     pub id: String,
     pub about: String,
     pub one_sided: bool,
-    pub face: FaceSculpt,
+    pub sculpt: S,
 }
 
 /// Every face slider, in the file's order (`art/creator/heads/presets.txt`).
@@ -226,8 +314,12 @@ pub fn preset(id: &str) -> Option<&'static Preset> {
     presets().iter().find(|p| p.id == id)
 }
 
-fn read_presets(text: &str) -> Result<Vec<Preset>, String> {
-    let mut out: Vec<Preset> = Vec::new();
+/// Read a presets file (`[id] about`, then `bone t|r|s x y z [mirror]` lines) for the bones of
+/// `S`. Strict: an unknown bone, a move past a bone's limits or degrees of freedom, or the same
+/// move twice is an error.
+pub(crate) fn read_presets<S: Sculpt>(text: &str) -> Result<Vec<Preset<S>>, String> {
+    let set = S::set();
+    let mut out: Vec<Preset<S>> = Vec::new();
     for (n, line) in text.lines().enumerate() {
         let at = format!("line {}", n + 1);
         let line = line.trim();
@@ -243,7 +335,7 @@ fn read_presets(text: &str) -> Result<Vec<Preset>, String> {
             if out.iter().any(|p| p.id == id) {
                 return Err(format!("{at}: `{id}` twice"));
             }
-            out.push(Preset { id: id.into(), about: about.trim().into(), one_sided, face: FaceSculpt::default() });
+            out.push(Preset { id: id.into(), about: about.trim().into(), one_sided, sculpt: S::default() });
             continue;
         }
         let p = out.last_mut().ok_or(format!("{at}: a bone before any `[id]`"))?;
@@ -251,16 +343,13 @@ fn read_presets(text: &str) -> Result<Vec<Preset>, String> {
         if !(5..=6).contains(&words.len()) || (words.len() == 6 && words[5] != "mirror") {
             return Err(format!("{at}: `bone t|r|s x y z [mirror]`"));
         }
-        let i = FACE_RIG
-            .iter()
-            .position(|(b, _)| *b == words[0])
-            .ok_or(format!("{at}: `{}` isn't a face bone", words[0]))?;
+        let i = set.index(words[0]).ok_or(format!("{at}: `{}` isn't a {} bone", words[0], set.name))?;
         let v: [i16; 3] = [2, 3, 4].map(|k| words[k].parse::<i16>().unwrap_or(i16::MIN));
         if v.contains(&i16::MIN) {
             return Err(format!("{at}: x y z are whole numbers"));
         }
-        let mut set = |i: usize, d: BoneDelta| -> Result<(), String> {
-            let b = &mut p.face.bones[i];
+        let mut put = |i: usize, d: BoneDelta| -> Result<(), String> {
+            let b = &mut p.sculpt.bones_mut()[i];
             let slot = match words[1] {
                 "t" => (&mut b.t, d.t),
                 "r" => (&mut b.r, d.r),
@@ -268,21 +357,20 @@ fn read_presets(text: &str) -> Result<Vec<Preset>, String> {
                 k => return Err(format!("{at}: kind `{k}` (t, r or s)")),
             };
             if *slot.0 != [0; 3] {
-                return Err(format!("{at}: `{}` {} twice", FACE_RIG[i].0, words[1]));
+                return Err(format!("{at}: `{}` {} twice", set.rig[i].0, words[1]));
             }
             *slot.0 = slot.1;
-            if b.clamped(&LIMITS[i]) != *b {
-                return Err(format!("{at}: outside `{}`'s limits or degrees of freedom", FACE_RIG[i].0));
+            if b.clamped(&set.limits[i]) != *b {
+                return Err(format!("{at}: outside `{}`'s limits or degrees of freedom", set.rig[i].0));
             }
             Ok(())
         };
         let d = BoneDelta { t: v, r: v, s: v };
-        set(i, d)?;
+        put(i, d)?;
         if words.len() == 6 {
             let name = words[0].strip_suffix("_l").ok_or(format!("{at}: `mirror` goes on a `_l` bone"))?;
-            let j =
-                FACE_RIG.iter().position(|(b, _)| *b == format!("{name}_r")).ok_or(format!("{at}: no `{name}_r`"))?;
-            set(j, d.mirrored())?;
+            let j = set.index(&format!("{name}_r")).ok_or(format!("{at}: no `{name}_r`"))?;
+            put(j, d.mirrored())?;
         }
     }
     Ok(out)
@@ -291,37 +379,43 @@ fn read_presets(text: &str) -> Result<Vec<Preset>, String> {
 /// The face a recipe gets: its own `face` plus each face slider in `shape` times its preset,
 /// summed and clamped. None when neither moves anything.
 pub fn compose(face: Option<&FaceSculpt>, shape: &[(String, f32)]) -> Option<FaceSculpt> {
-    let mut acc = [[0f32; 9]; BONES];
-    if let Some(f) = face {
-        for (a, d) in acc.iter_mut().zip(&f.bones) {
-            for (k, v) in d.t.iter().chain(&d.r).chain(&d.s).enumerate() {
-                a[k] += *v as f32;
+    compose_with(face, shape, presets())
+}
+
+/// A sculpt plus each slider in `shape` that `presets` knows times its preset, summed, rounded
+/// and clamped to the bones' limits. None when nothing moves.
+pub fn compose_with<S: Sculpt>(own: Option<&S>, shape: &[(String, f32)], presets: &[Preset<S>]) -> Option<S> {
+    let mut acc = vec![[0f32; 9]; S::set().rig.len()];
+    let mut add = |s: &S, k: f32| {
+        for (a, d) in acc.iter_mut().zip(s.bones()) {
+            for (i, v) in d.t.iter().chain(&d.r).chain(&d.s).enumerate() {
+                a[i] += *v as f32 * k;
             }
         }
+    };
+    let mut any = false;
+    if let Some(s) = own {
+        add(s, 1.0);
+        any = !s.bones().iter().all(BoneDelta::is_zero);
     }
-    let mut any = face.is_some_and(|f| !f.is_neutral());
     for (id, value) in shape {
-        let Some(p) = preset(id) else { continue };
+        let Some(p) = presets.iter().find(|p| p.id == *id) else { continue };
         let v = if p.one_sided { value.max(0.0) } else { *value };
         if v == 0.0 {
             continue;
         }
         any = true;
-        for (a, d) in acc.iter_mut().zip(&p.face.bones) {
-            for (k, x) in d.t.iter().chain(&d.r).chain(&d.s).enumerate() {
-                a[k] += *x as f32 * v;
-            }
-        }
+        add(&p.sculpt, v);
     }
     if !any {
         return None;
     }
-    let mut out = FaceSculpt::default();
-    for (d, a) in out.bones.iter_mut().zip(&acc) {
+    let mut out = S::default();
+    for (d, a) in out.bones_mut().iter_mut().zip(&acc) {
         let q = |k: usize| a[k].round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
         *d = BoneDelta { t: [q(0), q(1), q(2)], r: [q(3), q(4), q(5)], s: [q(6), q(7), q(8)] };
     }
-    Some(out.clamped())
+    Some(out.within_limits())
 }
 
 // --- The editor (FR4, 21 §2.4–2.5) ------------------------------------------------------------
@@ -361,45 +455,50 @@ pub const REGION_MIN: f32 = 0.12;
 
 /// The other side's face bone (itself on the middle line).
 pub fn mirror_of(b: usize) -> usize {
-    let name = FACE_RIG[b].0;
-    let other = match (name.strip_suffix("_l"), name.strip_suffix("_r")) {
-        (Some(base), _) => format!("{base}_r"),
-        (_, Some(base)) => format!("{base}_l"),
-        _ => return b,
-    };
-    FACE_RIG.iter().position(|(n, _)| *n == other).unwrap_or(b)
+    FACE.mirror(b)
 }
 
-/// Each body vertex's region, per mesh, per primitive: 0 for none, `b + 1` for face bone `b`'s
-/// (21 §2.4, from the weights: no exporter change). A vertex goes to the bone whose weight on it
-/// is the greatest share of that bone's own peak: the eyes carry their lids whole, and by raw
-/// weight they would take the brows too. Below `REGION_MIN` (the cranium, the neck) it has none;
-/// parts have none: they're not the face.
+/// Each body vertex's region, per mesh, per primitive: 0 for none, `r + 1` for region `r`: a
+/// face bone's index, or `BODY_REGIONS` plus a body helper's (21 §2.4, §9; from the weights: no
+/// exporter change). A vertex goes to the bone whose weight on it is the greatest share of that
+/// bone's own peak: the eyes carry their lids whole, and by raw weight they would take the brows
+/// too. Below `REGION_MIN` (the cranium, the hands, the joints) it has none; parts have none:
+/// they're not the face or the body.
 pub fn vertex_regions(model: &Model) -> Vec<Vec<Vec<u8>>> {
+    let sets: [&BoneSet; 2] = [&FACE, &crate::body::BODY];
+    let total: usize = sets.iter().map(|s| s.rig.len()).sum();
     let joints = model.skins.first().cloned().unwrap_or_default();
-    let joint_bone: Vec<Option<usize>> =
-        joints.iter().map(|&n| FACE_RIG.iter().position(|(b, _)| *b == model.nodes[n].name)).collect();
+    let joint_region: Vec<Option<usize>> = joints
+        .iter()
+        .map(|&n| {
+            let mut base = 0;
+            for set in sets {
+                if let Some(b) = set.index(&model.nodes[n].name) {
+                    return Some(base + b);
+                }
+                base += set.rig.len();
+            }
+            None
+        })
+        .collect();
     let body: Vec<bool> = (0..model.meshes.len())
         .map(|mi| model.nodes.iter().any(|n| n.mesh == Some(mi) && !n.name.starts_with("part.")))
         .collect();
+    // A vertex's (region, weight) per influence; `usize::MAX` where the joint has no region.
     let weights_of = |j: &[u32; 4], w: &[f32; 4]| {
-        let mut acc = [0.0f32; BONES];
-        for k in 0..4 {
-            if let Some(Some(b)) = joint_bone.get(j[k] as usize) {
-                acc[*b] += w[k];
-            }
-        }
-        acc
+        [0, 1, 2, 3].map(|k| (joint_region.get(j[k] as usize).copied().flatten().unwrap_or(usize::MAX), w[k]))
     };
     let usable = |mi: usize, p: &mftr_pack::glb::Primitive| {
         body[mi] && p.joints.len() == p.positions.len() && p.weights.len() == p.positions.len()
     };
-    let mut peak = [0.0f32; BONES];
+    let mut peak = vec![0.0f32; total];
     for (mi, prims) in model.meshes.iter().enumerate() {
         for p in prims.iter().filter(|p| usable(mi, p)) {
             for (j, w) in p.joints.iter().zip(&p.weights) {
-                for (pk, x) in peak.iter_mut().zip(weights_of(j, w)) {
-                    *pk = pk.max(x);
+                for (r, x) in weights_of(j, w) {
+                    if r < total {
+                        peak[r] = peak[r].max(x);
+                    }
                 }
             }
         }
@@ -419,12 +518,11 @@ pub fn vertex_regions(model: &Model) -> Vec<Vec<Vec<u8>>> {
                         .iter()
                         .zip(&p.weights)
                         .map(|(j, w)| {
-                            let acc = weights_of(j, w);
-                            let share = |b: usize| if peak[b] > 0.0 { acc[b] / peak[b] } else { 0.0 };
-                            let best = (0..BONES)
-                                .filter(|&b| acc[b] >= REGION_MIN)
-                                .max_by(|&a, &b| share(a).total_cmp(&share(b)));
-                            best.map_or(0, |b| b as u8 + 1)
+                            weights_of(j, w)
+                                .into_iter()
+                                .filter(|&(r, x)| r < total && x >= REGION_MIN)
+                                .max_by(|a, b| (a.1 / peak[a.0]).total_cmp(&(b.1 / peak[b.0])))
+                                .map_or(0, |(r, _)| r as u8 + 1)
                         })
                         .collect()
                 })
@@ -433,7 +531,11 @@ pub fn vertex_regions(model: &Model) -> Vec<Vec<Vec<u8>>> {
         .collect()
 }
 
-/// The face region the ray `origin + t·dir` (model space) meets first on the body, and the point:
+/// Where the body's regions start among `vertex_regions`' indices: after the face's.
+pub const BODY_REGIONS: usize = BONES;
+
+/// The region (a face bone's, or `BODY_REGIONS` plus a body helper's) the ray `origin + t·dir`
+/// (model space) meets first on the body, and the point:
 /// the region most of the hit triangle's vertices share, else its nearest vertex's (21 §2.4).
 /// `model` is the preview as shown (skinned), `regions` its `vertex_regions`. Parts in front
 /// of the face hide it (a helmet's brim), and the cranium has none.
@@ -501,26 +603,28 @@ fn ray_triangle(o: [f32; 3], d: [f32; 3], a: [f32; 3], b: [f32; 3], c: [f32; 3])
     (dist > 0.0).then_some((dist, u, w))
 }
 
-/// Where each face bone of the forged `model` sits with `face` instead of the face it was forged
-/// with: (node, local transform), from where the mesh is bound (`Model::bind`, else the rest).
+/// Where each bone of a sculpt's set sits on the forged `model` with `sculpt` instead of the one
+/// it was forged with: (node, local transform), from where the mesh is bound (`Model::bind`, else the rest).
 /// The editor poses the preview's skeleton with it while a drag lasts (21 §3.3), so nothing is
 /// forged until the drag ends.
-pub fn posed(model: &Model, face: &FaceSculpt) -> Vec<(usize, BindTrs)> {
-    let face = face.clamped();
-    (0..BONES)
+pub fn posed<S: Sculpt>(model: &Model, sculpt: &S) -> Vec<(usize, BindTrs)> {
+    let set = S::set();
+    let sculpt = sculpt.within_limits();
+    let bones = sculpt.bones();
+    (0..bones.len())
         .filter_map(|b| {
-            let node = model.node_by_name(FACE_RIG[b].0)?;
+            let node = model.node_by_name(set.rig[b].0)?;
             let n = &model.nodes[node];
             let rest = model.bind.get(node).copied().flatten().unwrap_or((n.translation, n.rotation, n.scale));
-            let parent_scale = face_parent(b).map_or([1.0; 3], |p| face.bones[p].scale());
-            Some((node, baked_bone(rest, &face.bones[b], parent_scale)))
+            let parent_scale = set.parent(b).map_or([1.0; 3], |p| bones[p].scale());
+            Some((node, baked_bone(rest, &bones[b], parent_scale)))
         })
         .collect()
 }
 
-/// Each face bone's frame for its delta, in model space: the columns are its rest axes (as
-/// bound, before any face) — what a world drag is projected onto (21 §2.5).
-pub fn bone_frames(model: &Model) -> [[[f32; 3]; 3]; BONES] {
+/// Each bone of `set`'s frame for its delta, in model space: the columns are its rest axes (as
+/// bound, before any sculpt) — what a world drag is projected onto (21 §2.5).
+pub fn bone_frames(model: &Model, set: &BoneSet) -> Vec<Frame> {
     let n = model.nodes.len();
     let mut rot: Vec<Option<[f32; 4]>> = vec![None; n];
     fn solve(m: &Model, i: usize, rot: &mut Vec<Option<[f32; 4]>>) -> [f32; 4] {
@@ -535,9 +639,9 @@ pub fn bone_frames(model: &Model) -> [[[f32; 3]; 3]; BONES] {
         rot[i] = Some(q);
         q
     }
-    let mut out = [[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]; BONES];
+    let mut out = vec![[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]; set.rig.len()];
     for (b, frame) in out.iter_mut().enumerate() {
-        if let Some(node) = model.node_by_name(FACE_RIG[b].0) {
+        if let Some(node) = model.node_by_name(set.rig[b].0) {
             let q = solve(model, node, &mut rot);
             *frame = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].map(|e| qrot(q, e));
         }
@@ -578,15 +682,18 @@ pub enum DragMode {
 }
 
 /// One bone's delta after a drag: `world` is `drag_to_world`'s displacement, `frame` the bone's
-/// (`bone_frames`). Clamped to the bone's limits and degrees of freedom.
+/// (`bone_frames`). Clamped to the bone's limits and degrees of freedom. With `across`, a size
+/// drag leaves the bone's length (y) alone (`BoneSet::size_across`).
+#[allow(clippy::too_many_arguments)]
 pub fn apply_drag(
     d: BoneDelta,
     mode: DragMode,
     world: [f32; 3],
     drag_px: [f32; 2],
     cam: &CameraFrame,
-    frame: &[[f32; 3]; 3],
+    frame: &Frame,
     limits: &Limits,
+    across: bool,
 ) -> BoneDelta {
     let to_local = |v: [f32; 3]| frame.map(|axis| axis[0] * v[0] + axis[1] * v[1] + axis[2] * v[2]);
     let add =
@@ -604,6 +711,8 @@ pub fn apply_drag(
             let step = (-drag_px[1] * 0.005 / S_UNIT).round() as i16;
             out.s = if width_only {
                 [d.s[0].saturating_add(step), d.s[1], d.s[2]]
+            } else if across {
+                [d.s[0].saturating_add(step), d.s[1], d.s[2].saturating_add(step)]
             } else {
                 d.s.map(|v| v.saturating_add(step))
             };
@@ -612,25 +721,28 @@ pub fn apply_drag(
     out.clamped(limits)
 }
 
-/// Apply a drag to face bone `b` of `face`, with the other side following when `symmetry` is on
-/// (the same change, mirrored; on the middle line, the change keeps to the middle). Returns
-/// whether anything moved.
+/// Apply a drag to bone `b` of a sculpt (a face, a body), with the other side following when
+/// `symmetry` is on (the same change, mirrored; on the middle line, the change keeps to the
+/// middle). Returns whether anything moved.
 #[allow(clippy::too_many_arguments)]
-pub fn drag_face(
-    face: &mut FaceSculpt,
+pub fn drag<S: Sculpt>(
+    sculpt: &mut S,
     b: usize,
     mode: DragMode,
     world: [f32; 3],
     drag_px: [f32; 2],
     cam: &CameraFrame,
-    frames: &[[[f32; 3]; 3]; BONES],
+    frames: &[Frame],
     symmetry: bool,
 ) -> bool {
-    let old = face.bones[b];
-    let next = apply_drag(old, mode, world, drag_px, cam, &frames[b], &LIMITS[b]);
+    let set = S::set();
+    let limits = set.limits;
+    let bones = sculpt.bones_mut();
+    let old = bones[b];
+    let next = apply_drag(old, mode, world, drag_px, cam, &frames[b], &limits[b], set.size_across);
     let diff = |a: [i16; 3], o: [i16; 3]| [0, 1, 2].map(|k| a[k] - o[k]);
     let mut inc = BoneDelta { t: diff(next.t, old.t), r: diff(next.r, old.r), s: diff(next.s, old.s) };
-    let m = mirror_of(b);
+    let m = set.mirror(b);
     if symmetry && m == b {
         inc.t[0] = 0;
         inc.r[1] = 0;
@@ -643,12 +755,14 @@ pub fn drag_face(
         let sum = |x: [i16; 3], y: [i16; 3]| [0, 1, 2].map(|k| x[k].saturating_add(y[k]));
         BoneDelta { t: sum(a.t, i.t), r: sum(a.r, i.r), s: sum(a.s, i.s) }.clamped(l)
     };
-    face.bones[b] = plus(old, inc, &LIMITS[b]);
+    bones[b] = plus(old, inc, &limits[b]);
     if symmetry && m != b {
-        face.bones[m] = plus(face.bones[m], inc.mirrored(), &LIMITS[m]);
+        bones[m] = plus(bones[m], inc.mirrored(), &limits[m]);
     }
     true
 }
+
+pub use self::drag as drag_face;
 
 // --- Face shapes (21 §7, FR5) -----------------------------------------------------------------
 
@@ -830,24 +944,30 @@ fn err<T>(at: &str, msg: impl Into<String>) -> Result<T, DataError> {
 /// Strict: unknown bones, a rig this build doesn't know, values out of range and DOFs a bone
 /// doesn't take are errors (clamping would let two clients disagree).
 pub fn read(v: Value, at: &str) -> Result<FaceSculpt, DataError> {
+    read_sculpt(v, at)
+}
+
+/// `read` for any set's sculpt (the recipe's `face:` or `body:`).
+pub fn read_sculpt<S: Sculpt>(v: Value, at: &str) -> Result<S, DataError> {
+    let set = S::set();
     let mut f = Fields::of(v, at, None)?;
     let (r, rat) = f.req("rig")?;
     let rig = data::int(r, &rat, 255)? as u8;
-    if rig != RIG_VERSION {
-        return err(&rat, format!("face rig {rig} isn't supported (this build reads {RIG_VERSION})"));
+    if rig != set.version {
+        return err(&rat, format!("{} rig {rig} isn't supported (this build reads {})", set.name, set.version));
     }
-    let mut face = FaceSculpt::default();
+    let mut out = S::default();
     if let Some((b, bat)) = f.take("bones") {
         let Value::Fields(None, items) = b else {
             return err(&bat, "expected `(bone: (t: …, r: …, s: …), …)`");
         };
         for (name, v) in items {
             let bat = format!("{bat}.{name}");
-            let Some(i) = FACE_RIG.iter().position(|(n, _)| *n == name) else {
-                return err(&bat, format!("`{name}` isn't a face bone"));
+            let Some(i) = set.index(&name) else {
+                return err(&bat, format!("`{name}` isn't a {} bone", set.name));
             };
             let mut g = Fields::of(v, &bat, None)?;
-            let l = LIMITS[i];
+            let l = set.limits[i];
             let mut comp = |key: &str, max: i16, dof: u8| -> Result<[i16; 3], DataError> {
                 let Some((v, cat)) = g.take(key) else { return Ok([0; 3]) };
                 if l.dofs & dof == 0 {
@@ -872,17 +992,18 @@ pub fn read(v: Value, at: &str) -> Result<FaceSculpt, DataError> {
             let r = comp("r", l.r, DOF_R)?;
             let s = comp("s", l.s, DOF_S)?;
             g.done()?;
-            face.bones[i] = BoneDelta { t, r, s };
+            out.bones_mut()[i] = BoneDelta { t, r, s };
         }
     }
     f.done()?;
-    Ok(face)
+    Ok(out)
 }
 
-/// The recipe's text for `face` (only the bones that moved), as `read` reads it.
-pub fn write(face: &FaceSculpt) -> String {
+/// The recipe's text for a sculpt (only the bones that moved), as `read_sculpt` reads it.
+pub fn write<S: Sculpt>(sculpt: &S) -> String {
+    let set = S::set();
     let mut bones = Vec::new();
-    for (i, d) in face.bones.iter().enumerate() {
+    for (i, d) in sculpt.bones().iter().enumerate() {
         if d.is_zero() {
             continue;
         }
@@ -892,26 +1013,27 @@ pub fn write(face: &FaceSculpt) -> String {
                 parts.push(format!("{key}: ({}, {}, {})", v[0], v[1], v[2]));
             }
         }
-        bones.push(format!("{}: ({})", FACE_RIG[i].0, parts.join(", ")));
+        bones.push(format!("{}: ({})", set.rig[i].0, parts.join(", ")));
     }
-    format!("(rig: {}, bones: ({}))", face.rig, bones.join(", "))
+    format!("(rig: {}, bones: ({}))", set.version, bones.join(", "))
 }
 
 // --- The compact form (sync, hashing, undo, 21 §2.6) ------------------------------------------
 
-/// `FS` + version + rig, a 32-bit mask of the bones present, then per present bone a 9-bit
-/// mask of its non-zero components and those components as little-endian i16. At most
-/// 8 + 24 × (2 + 18) = 488 bytes.
-pub fn to_bytes(face: &FaceSculpt) -> Vec<u8> {
-    let mut out = vec![b'F', b'S', 1, face.rig];
+/// The set's two letters (`FS` a face, `BS` a body) + version + rig, a 32-bit mask of the bones
+/// present, then per present bone a 9-bit mask of its non-zero components and those components
+/// as little-endian i16. At most 8 + 24 × (2 + 18) = 488 bytes.
+pub fn to_bytes<S: Sculpt>(sculpt: &S) -> Vec<u8> {
+    let set = S::set();
+    let mut out = vec![set.magic[0], set.magic[1], 1, set.version];
     let mut mask = 0u32;
-    for (i, b) in face.bones.iter().enumerate() {
+    for (i, b) in sculpt.bones().iter().enumerate() {
         if !b.is_zero() {
             mask |= 1 << i;
         }
     }
     out.extend_from_slice(&mask.to_le_bytes());
-    for b in face.bones.iter().filter(|b| !b.is_zero()) {
+    for b in sculpt.bones().iter().filter(|b| !b.is_zero()) {
         let comps = [b.t[0], b.t[1], b.t[2], b.r[0], b.r[1], b.r[2], b.s[0], b.s[1], b.s[2]];
         let cmask = comps.iter().enumerate().fold(0u16, |m, (k, v)| if *v != 0 { m | 1 << k } else { m });
         out.extend_from_slice(&cmask.to_le_bytes());
@@ -923,42 +1045,51 @@ pub fn to_bytes(face: &FaceSculpt) -> Vec<u8> {
 }
 
 pub fn from_bytes(bytes: &[u8]) -> Result<FaceSculpt, String> {
-    let get = |at: usize, n: usize| bytes.get(at..at + n).ok_or_else(|| "face: truncated".to_string());
-    if get(0, 3)? != [b'F', b'S', 1] {
-        return Err("face: not a version-1 face".into());
+    sculpt_from_bytes(bytes)
+}
+
+/// `from_bytes` for any set's sculpt.
+pub fn sculpt_from_bytes<S: Sculpt>(bytes: &[u8]) -> Result<S, String> {
+    let set = S::set();
+    let name = set.name;
+    let get = |at: usize, n: usize| bytes.get(at..at + n).ok_or_else(|| format!("{name}: truncated"));
+    if get(0, 3)? != [set.magic[0], set.magic[1], 1] {
+        return Err(format!("{name}: not a version-1 {name}"));
     }
-    let rig = bytes[3];
-    if rig != RIG_VERSION {
-        return Err(format!("face: rig {rig} isn't supported"));
+    let rig = get(3, 1)?[0];
+    if rig != set.version {
+        return Err(format!("{name}: rig {rig} isn't supported"));
     }
-    let mask = u32::from_le_bytes(get(4, 4)?.try_into().map_err(|_| "face: truncated")?);
-    if mask >> BONES != 0 {
-        return Err("face: unknown bones".into());
+    let short = |_| format!("{name}: truncated");
+    let mask = u32::from_le_bytes(get(4, 4)?.try_into().map_err(short)?);
+    let n = set.rig.len();
+    if n < 32 && mask >> n != 0 {
+        return Err(format!("{name}: unknown bones"));
     }
-    let mut face = FaceSculpt::default();
+    let mut out = S::default();
     let mut at = 8;
-    for i in 0..BONES {
+    for i in 0..n {
         if mask & (1 << i) == 0 {
             continue;
         }
-        let cmask = u16::from_le_bytes(get(at, 2)?.try_into().map_err(|_| "face: truncated")?);
+        let cmask = u16::from_le_bytes(get(at, 2)?.try_into().map_err(short)?);
         at += 2;
         if cmask >> 9 != 0 || cmask == 0 {
-            return Err("face: bad component mask".into());
+            return Err(format!("{name}: bad component mask"));
         }
         let mut c = [0i16; 9];
         for (k, x) in c.iter_mut().enumerate() {
             if cmask & (1 << k) != 0 {
-                *x = i16::from_le_bytes(get(at, 2)?.try_into().map_err(|_| "face: truncated")?);
+                *x = i16::from_le_bytes(get(at, 2)?.try_into().map_err(short)?);
                 at += 2;
             }
         }
-        face.bones[i] = BoneDelta { t: [c[0], c[1], c[2]], r: [c[3], c[4], c[5]], s: [c[6], c[7], c[8]] };
+        out.bones_mut()[i] = BoneDelta { t: [c[0], c[1], c[2]], r: [c[3], c[4], c[5]], s: [c[6], c[7], c[8]] };
     }
     if at != bytes.len() {
-        return Err("face: trailing bytes".into());
+        return Err(format!("{name}: trailing bytes"));
     }
-    Ok(face)
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -994,14 +1125,14 @@ mod tests {
         let all = presets();
         assert_eq!(all.len(), 28);
         for p in all {
-            assert!(!p.face.is_neutral(), "{}", p.id);
+            assert!(!p.sculpt.is_neutral(), "{}", p.id);
             assert!(!p.about.is_empty(), "{}", p.id);
-            assert_eq!(p.face.clamped(), p.face, "{}", p.id);
+            assert_eq!(p.sculpt.clamped(), p.sculpt, "{}", p.id);
             // Every face slider moves both sides alike.
             for (i, (name, _)) in FACE_RIG.iter().enumerate() {
                 if let Some(side) = name.strip_suffix("_l") {
                     let j = FACE_RIG.iter().position(|(b, _)| *b == format!("{side}_r")).unwrap();
-                    assert_eq!(p.face.bones[i].mirrored(), p.face.bones[j], "{}: {name}", p.id);
+                    assert_eq!(p.sculpt.bones[i].mirrored(), p.sculpt.bones[j], "{}: {name}", p.id);
                 }
             }
         }
@@ -1044,7 +1175,7 @@ nose_reach 0.2"),
 
     #[test]
     fn the_presets_reader_is_strict() {
-        let bad = |t: &str| read_presets(t).is_err();
+        let bad = |t: &str| read_presets::<FaceSculpt>(t).is_err();
         assert!(!bad("[a] A
 face_chin t 0 100 0
 [b+] B
@@ -1086,7 +1217,7 @@ face_chin t 0 50 0"),
     fn sliders_compose_into_the_face() {
         let tip = FACE_RIG.iter().position(|(b, _)| *b == "face_nose_tip").unwrap();
         let chin = FACE_RIG.iter().position(|(b, _)| *b == "face_chin").unwrap();
-        let reach = preset("nose_reach").unwrap().face.bones[tip].t;
+        let reach = preset("nose_reach").unwrap().sculpt.bones[tip].t;
         let s = |v: &[(&str, f32)]| v.iter().map(|(k, x)| (k.to_string(), *x)).collect::<Vec<_>>();
         assert_eq!(compose(None, &[]), None);
         // Body sliders aren't the face's.

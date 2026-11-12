@@ -255,7 +255,7 @@ sockets (non-deforming): socket_projectile, socket_weapon_tip, socket_cast, sock
 optional: smear (scale-only, for 1-frame smears)
 ```
 
-- **~30 deforming bones plus extras and sockets; ≤ 64 total**, hard cap 80. Fingers are "mittens": one bone for the fingers and one for the thumb, which fits the faceted style.
+- **~30 deforming bones plus extras and sockets; ≤ 64 total**, hard cap 100. The creator's sculpt bones (24 face bones, 21 §1.3; 24 body helpers, 21 §9.1) don't count toward the 64: no clip keys them, and they're baked into the rest. Fingers are "mittens": one bone for the fingers and one for the thumb, which fits the faceted style.
 - **Weights:** at most **2 influences** per vertex *(start)*, hard cap 4. Armor plates are rigid (1 influence), the authentic PS1 look and the crispest facets.
 - **Props** (weapons) are separate meshes parented to `prop_l`/`prop_r`, so they can be thrown, swapped or hidden by clips.
 - **Axes:** the character faces **−Y in Blender** (looking at you in Front view), which exports to glTF +Z = Godot's `MODEL_FRONT`. Z is up. The rest pose is an A-pose.

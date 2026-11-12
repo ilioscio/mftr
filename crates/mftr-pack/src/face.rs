@@ -139,23 +139,42 @@ pub fn problems(model: &Model) -> Vec<String> {
                     face_w[v]
                 ));
             }
-            // No pinching: per face bone, its weight changes little along every edge.
+        }
+    }
+    out.extend(weight_steps(model, "face rig", &|n| is_face_bone(n)));
+    out
+}
+
+/// No pinching (21 §1.4): for every bone `of` picks, its weight changes by at most
+/// `MAX_WEIGHT_STEP` along every edge of every skinned mesh. One problem per primitive.
+pub(crate) fn weight_steps(model: &Model, what: &str, of: &dyn Fn(&str) -> bool) -> Vec<String> {
+    let mut out = Vec::new();
+    let Some(joints) = model.skins.first() else { return out };
+    let picked: Vec<bool> = joints.iter().map(|&n| of(&model.nodes[n].name)).collect();
+    for (mi, prims) in model.meshes.iter().enumerate() {
+        for (pi, p) in prims.iter().enumerate() {
+            if p.joints.is_empty() || p.weights.is_empty() {
+                continue;
+            }
+            let weight_of = |v: usize, j: usize| -> f32 {
+                (0..4).filter(|&k| p.joints[v][k] as usize == j).map(|k| p.weights[v][k]).sum()
+            };
             'edges: for t in p.indices.chunks(3) {
                 for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
-                    let (a, b) = (a as usize, b as usize);
-                    for (j, face) in face_joint.iter().enumerate() {
-                        if !face {
-                            continue;
-                        }
-                        let wa = weight_of(a, &|x| x == j);
-                        let wb = weight_of(b, &|x| x == j);
-                        if (wa - wb).abs() > MAX_WEIGHT_STEP + 1.0 / 255.0 {
-                            out.push(format!(
-                                "face rig: mesh {mi} primitive {pi}: `{}` jumps {:.2} along an edge (at most {MAX_WEIGHT_STEP}, 21 §1.4)",
-                                model.nodes[joints[j]].name,
-                                (wa - wb).abs()
-                            ));
-                            break 'edges;
+                    for (v, o) in [(a as usize, b as usize), (b as usize, a as usize)] {
+                        for k in 0..4 {
+                            let j = p.joints[v][k] as usize;
+                            if p.weights[v][k] <= 0.0 || !picked.get(j).copied().unwrap_or(false) {
+                                continue;
+                            }
+                            let step = (weight_of(v, j) - weight_of(o, j)).abs();
+                            if step > MAX_WEIGHT_STEP + 1.0 / 255.0 {
+                                out.push(format!(
+                                    "{what}: mesh {mi} primitive {pi}: `{}` jumps {step:.2} along an edge (at most {MAX_WEIGHT_STEP}, 21 §1.4)",
+                                    model.nodes[joints[j]].name,
+                                ));
+                                break 'edges;
+                            }
                         }
                     }
                 }

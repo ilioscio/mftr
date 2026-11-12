@@ -12,6 +12,7 @@
 //! attaches the library's clips. The result is an ordinary validated pack (`mftr_pack::Loaded`)
 //! that the client draws and animates like any other. It is deterministic and has no Godot in it.
 
+pub mod body;
 pub mod face;
 pub mod image;
 pub mod libmoves;
@@ -51,6 +52,10 @@ pub struct Part {
     /// It shows the team accent itself (a sash, a band).
     pub accent: bool,
     pub triangles: u32,
+    /// A plate, a pack: it moves with the body under it but takes little of its growth
+    /// (21 §9.2, `body::settle_rigid`).
+    #[nserde(default)]
+    pub rigid: bool,
 }
 
 #[derive(Clone, Debug, nanoserde::DeRon)]
@@ -136,6 +141,10 @@ impl Catalog {
         // On a base with a face rig, the face sliders are presets on its bones (21 §2.7).
         if b.model.node_by_name("face_forehead").is_some() {
             out.extend(face::presets().iter().map(|p| p.id.clone()));
+        }
+        // And on one with the body's helpers, the body sliders are presets on those (21 §9.2).
+        if body::rigged(&b.model) {
+            out.extend(body::presets().iter().map(|p| p.id.clone()));
         }
         for n in b.model.target_names.iter().flatten() {
             let id = n.trim_end_matches(['+', '-', '~']).to_string();
@@ -261,6 +270,20 @@ impl Catalog {
         {
             face::bake(&mut model, &face);
         }
+        // The body likewise (21 §9): its helpers' deltas are relative to the proportioned rest,
+        // and its sliders are presets on them. Rigid parts then settle on the body.
+        if body::rigged(&model) {
+            if let Some(b) = body::compose(looks.body.as_ref(), &looks.shape) {
+                face::bake(&mut model, &b);
+            }
+            let rigid: Vec<&str> = self
+                .parts(&key)
+                .iter()
+                .filter(|p| p.rigid && looks.outfit.contains(&p.id))
+                .map(|p| p.id.as_str())
+                .collect();
+            body::settle_rigid(&mut model, &rigid);
+        }
         let side = sidecar::Sidecar {
             id: name.to_string(),
             kind: "champion".to_string(),
@@ -316,7 +339,18 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
         return Err("the outfit covers the team accent: wear a part that shows it (20 §7.2)".into());
     }
     let joints = model.skins.first().cloned().unwrap_or_default();
-    let hide_joint: Vec<bool> = joints.iter().map(|&n| hidden.contains(&model.nodes[n].name.as_str())).collect();
+    // A body helper (21 §9) hides with its parent: it's that bone's mass.
+    let hide_joint: Vec<bool> = joints
+        .iter()
+        .map(|&n| {
+            let node = &model.nodes[n];
+            let owner = match node.parent {
+                Some(p) if mftr_pack::body::is_body_bone(&node.name) => &model.nodes[p].name,
+                _ => &node.name,
+            };
+            hidden.contains(&owner.as_str())
+        })
+        .collect();
     for node in &model.nodes {
         let Some(mi) = node.mesh else { continue };
         let prims = &mut model.meshes[mi];
@@ -328,10 +362,16 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
             }
             None if !hidden.is_empty() => {
                 for p in prims.iter_mut() {
+                    // Under a part when most of the vertex's weight is on hidden bones.
                     let under = |v: u32| {
-                        p.joints
-                            .get(v as usize)
-                            .is_some_and(|j| hide_joint.get(j[0] as usize).copied().unwrap_or(false))
+                        let (Some(j), Some(w)) = (p.joints.get(v as usize), p.weights.get(v as usize)) else {
+                            return false;
+                        };
+                        let on: f32 = (0..4)
+                            .filter(|&k| hide_joint.get(j[k] as usize).copied().unwrap_or(false))
+                            .map(|k| w[k])
+                            .sum();
+                        on > 0.5
                     };
                     let kept: Vec<u32> = p
                         .indices
@@ -359,12 +399,13 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
 /// sliders on a base with a face rig move bones instead (`face::compose`).
 fn shape(model: &mut Model, looks: &Looks) {
     let rigged = model.node_by_name("face_forehead").is_some();
+    let helpers = body::rigged(model);
     for (mi, prims) in model.meshes.iter_mut().enumerate() {
         let names = &model.target_names[mi];
         for p in prims.iter_mut() {
             for (ti, name) in names.iter().enumerate() {
                 let id = name.trim_end_matches(['+', '-', '~']);
-                if rigged && face::preset(id).is_some() {
+                if (rigged && face::preset(id).is_some()) || (helpers && body::preset(id).is_some()) {
                     continue;
                 }
                 let v = looks.slider(id);
@@ -475,20 +516,21 @@ fn proportion(model: &mut Model, p: &looks::Proportions) {
     let n = model.nodes.len();
     let scales: Vec<BoneScale> = (0..n)
         .map(|b| {
-            let Some((i, stretch)) = proportion_of(&model.nodes[b].name) else { return BoneScale::NONE };
+            let node = &model.nodes[b];
+            // A body helper (21 §9) carries its vertices as its parent would: a longer thigh
+            // stretches the thigh's mass with it. The parent's axis, in the helper's frame.
+            if let Some(parent) = node.parent.filter(|_| mftr_pack::body::is_body_bone(&node.name)) {
+                let Some((i, true)) = proportion_of(&model.nodes[parent].name) else { return BoneScale::NONE };
+                let Some(axis) = stretch_axis(model, parent) else { return BoneScale::NONE };
+                return BoneScale { axis: rotate(inv(node.rotation), axis), along: p.factor(i), whole: 1.0 };
+            }
+            let Some((i, stretch)) = proportion_of(&node.name) else { return BoneScale::NONE };
             if !stretch {
                 return BoneScale { whole: p.factor(i), ..BoneScale::NONE };
             }
-            let child = (0..n)
-                .filter(|&c| model.nodes[c].parent == Some(b))
-                .map(|c| model.nodes[c].translation)
-                .max_by(|a, b| len(*a).total_cmp(&len(*b)));
-            match child {
-                Some(t) if len(t) > 1e-6 => {
-                    let l = len(t);
-                    BoneScale { axis: [t[0] / l, t[1] / l, t[2] / l], along: p.factor(i), whole: 1.0 }
-                }
-                _ => BoneScale::NONE,
+            match stretch_axis(model, b) {
+                Some(axis) => BoneScale { axis, along: p.factor(i), whole: 1.0 },
+                None => BoneScale::NONE,
             }
         })
         .collect();
@@ -540,6 +582,19 @@ fn proportion(model: &mut Model, p: &looks::Proportions) {
             }
         }
     }
+}
+
+/// The axis a stretched bone scales along, in its own frame: toward its furthest child that
+/// isn't a body helper (those sit on the bone, not at its end).
+fn stretch_axis(model: &Model, b: usize) -> Option<[f32; 3]> {
+    let t = model
+        .nodes
+        .iter()
+        .filter(|c| c.parent == Some(b) && !mftr_pack::body::is_body_bone(&c.name))
+        .map(|c| c.translation)
+        .max_by(|a, b| len(*a).total_cmp(&len(*b)))?;
+    let l = len(t);
+    (l > 1e-6).then(|| [t[0] / l, t[1] / l, t[2] / l])
 }
 
 fn len(v: [f32; 3]) -> f32 {
@@ -1102,7 +1157,7 @@ mod tests {
         let l = Looks { outfit: vec!["head.helmet".into()], ..Looks::default() };
         let m = c.forge("Plain", &l).unwrap().model;
         let regions = face::vertex_regions(&m);
-        let mut owned = [0usize; face::BONES];
+        let mut owned = [0usize; face::BONES + body::BONES];
         for (mi, prims) in regions.iter().enumerate() {
             let part = m.nodes.iter().any(|n| n.mesh == Some(mi) && n.name.starts_with("part."));
             for r in prims.iter().flatten() {
@@ -1112,8 +1167,12 @@ mod tests {
                 }
             }
         }
-        for (b, n) in owned.iter().enumerate() {
+        for (b, n) in owned.iter().enumerate().take(face::BONES) {
             assert!(*n >= 3, "{} owns {n} vertices", face::REGION_NAMES[b]);
+        }
+        // FR6 (21 §9): the body's helpers own regions after the face's.
+        for (b, n) in owned.iter().skip(face::BODY_REGIONS).enumerate() {
+            assert!(*n >= 8, "{} owns {n} vertices", body::REGION_NAMES[b]);
         }
         // Straight at the nose tip from in front (+Z in glTF), and over the cranium: none.
         let w = world(&m);
@@ -1129,6 +1188,81 @@ mod tests {
             face::region_at(&m, &regions, [0.0, top + 1.0, 0.0], [0.0, -1.0, 0.0]).is_none(),
             "the crown isn't a feature"
         );
+    }
+
+    /// Every vertex of the forged model where the skin shows it, with the node of its mesh.
+    fn shown(m: &Model) -> Vec<(String, [f32; 3])> {
+        let skinned = face::skinned(m);
+        let mut out = Vec::new();
+        for n in &m.nodes {
+            let Some(mi) = n.mesh else { continue };
+            for v in skinned[mi].iter().flatten() {
+                out.push((n.name.clone(), *v));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_body_is_sculpted_on_its_helpers() {
+        // FR6 (21 §9): a ray at the chest finds the chest; a body's deltas are baked into the
+        // helpers' rest, move the mass they own and nothing far from it, and leave the mesh
+        // buffer and the feet alone.
+        let c = catalog();
+        let plain = c.forge("Plain", &Looks::default()).unwrap().model;
+        assert!(body::rigged(&plain));
+        let regions = face::vertex_regions(&plain);
+        let w = world(&plain);
+        let pec = w[plain.node_by_name("body_pec_l").unwrap()].0;
+        let (hit, _) = face::region_at(&plain, &regions, [pec[0], pec[1], pec[2] + 1.0], [0.0, 0.0, -1.0]).unwrap();
+        assert_eq!(body::REGION_NAMES[hit - face::BODY_REGIONS], "Left chest");
+        let calf = w[plain.node_by_name("body_calf_r").unwrap()].0;
+        let (hit, _) = face::region_at(&plain, &regions, [calf[0], calf[1], calf[2] + 1.0], [0.0, 0.0, -1.0]).unwrap();
+        assert_eq!(body::REGION_NAMES[hit - face::BODY_REGIONS], "Right calf");
+
+        let i = |n: &str| body::BODY.index(n).unwrap();
+        let mut b = body::BodySculpt::default();
+        b.bones[i("body_calf_l")].s = [400, 0, 400];
+        b.bones[i("body_calf_r")].s = [400, 0, 400];
+        b.bones[i("body_pec_l")] = face::BoneDelta { t: [0, 0, 200], r: [0; 3], s: [200, 0, 200] };
+        b.bones[i("body_pec_r")] = b.bones[i("body_pec_l")].mirrored();
+        let looks = Looks { body: Some(b.clone()), ..Looks::default() };
+        let sculpted = c.forge("Sculpted", &looks).unwrap().model;
+        // The live pose is the bake (the editor poses the helpers while a drag lasts).
+        for (node, (t, r, s)) in face::posed(&plain, &b) {
+            let n = &sculpted.nodes[node];
+            for k in 0..3 {
+                assert!((n.translation[k] - t[k]).abs() < 1e-6 && (n.scale[k] - s[k]).abs() < 1e-6, "{}", n.name);
+            }
+            assert!((0..4).all(|k| (n.rotation[k] - r[k]).abs() < 1e-6), "{}", n.name);
+        }
+        // Nothing is moved on the CPU: the buffers are the plain model's.
+        for (a, b) in plain.meshes.iter().flatten().zip(sculpted.meshes.iter().flatten()) {
+            assert_eq!(a.positions, b.positions);
+        }
+        let (was, now) = (shown(&plain), shown(&sculpted));
+        let (mut calf_out, mut chest_out, mut far) = (0.0f32, 0.0f32, 0.0f32);
+        for ((_, a), (_, b)) in was.iter().zip(&now) {
+            let d = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt();
+            if a[1] < 0.5 && a[1] > 0.15 {
+                calf_out = calf_out.max(d);
+            } else if a[1] > 1.3 && a[1] < 1.5 && a[2] > 0.05 {
+                chest_out = chest_out.max(d);
+            }
+            // The feet, the knees, the hands and the head stay where they were.
+            if a[1] < 0.08 || (a[1] > 0.52 && a[1] < 0.56) || a[1] > 1.62 || a[0].abs() > 0.55 {
+                far = far.max(d);
+            }
+        }
+        assert!(calf_out > 0.015, "the calves grew: {calf_out}");
+        assert!(chest_out > 0.02, "the chest came forward: {chest_out}");
+        assert!(far < 1e-4, "feet, knees, hands and head held: {far}");
+        // The feet stand where they stood.
+        let floor = |m: &[(String, [f32; 3])]| m.iter().map(|(_, v)| v[1]).fold(f32::MAX, f32::min);
+        assert!((floor(&was) - floor(&now)).abs() < 1e-5);
+        // A body survives its file.
+        let r = recipe::Recipe { looks: looks.clone(), ..recipe::Recipe::default() };
+        assert_eq!(recipe::Recipe::from_text(&r.to_text()).unwrap().looks, looks);
     }
 
     #[test]
@@ -1158,7 +1292,7 @@ mod tests {
         // FR4 (21 §2.5): a camera looking at the face (−Z in glTF, the face toward +Z).
         let c = catalog();
         let m = c.forge("Plain", &Looks::default()).unwrap().model;
-        let frames = face::bone_frames(&m);
+        let frames = face::bone_frames(&m, &face::FACE);
         let w = world(&m);
         let brow = w[m.node_by_name("face_brow_l").unwrap()].0;
         let cam = face::CameraFrame {
