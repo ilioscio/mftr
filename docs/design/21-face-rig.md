@@ -1126,6 +1126,42 @@ The feature bones now peak at 0.35–0.6, the eyes at 1.0. At +1 a preset moves 
 - **Neighbour shares** (a nose-tip drag pulling the bridge a little): every region moves its own bone only.
 - **Head `sculpt:` offsets** still apply by weld id (§2.7). The brushes stay on the Face step.
 
+### FR5 status (2026-11-11): built, awaiting the owner's look
+
+FR3 already made the sliders presets on the bones. FR5 adds whole faces to start from.
+
+**Face shapes:** `art/creator/heads/faces.txt` holds 12, each a set of face slider values: Noble, Brute, Gaunt, Round, Sharp, Elder, Youth, Feral, Stern, Gentle, Hawk and Elfin. The forge reads them through `face::shapes`, which rejects an unknown slider, a value past ±1, or a slider given twice.
+
+**The Face step's Shapes panel:**
+
+- A grid of the shapes; the one the sliders now match is marked.
+- A click sets the face sliders to it and leaves the body alone.
+- Random face, and the hint "A shape sets the sliders below; slide or drag from there."
+
+**Randomize (`recipe::randomize`, and `randomize_face` for the face alone):**
+
+- A rigged face is one shape at 85–100%, blended six times in ten with a second at 20–45%.
+- Six sliders are then nudged ±0.35, and values rounded to hundredths.
+- The body's sliders and proportions stay gentle (cubed, at most 0.75 and 0.45).
+- A creature, with no face sliders, keeps the old gentle randomize.
+
+**Stronger presets.** Random faces built from FR3's presets barely differed at the creator's camera. Translations and scales are now ×1.6 and turns ×1.4, capped at 90% of each bone's limit. The shapes' values are ×1.3, capped at 1.
+
+**Checks:**
+
+- Captures with the new `--creator-random-face SEED`: six slim masculine and six slim feminine random faces, front-on. Jaws, face lengths and noses differ, and each face reads as one face.
+- Four shapes at full strength in Blender against the plain head.
+- Tests:
+  - the shapes reader is strict;
+  - a shape sets the sliders and is recognised, and the body is left alone;
+  - 39 seeded random faces each lie within the jitter of a shape, and 35 or more of them differ.
+
+**Not yet:**
+
+- **The owner's look,** the FR5 exit: whether Randomize gives varied, good-looking faces.
+- **A thumbnail per shape card.**
+- **The feminine bases' faces read close to the masculine ones** (FR2's Real_FEMALE mix); shapes can't fix that, the head mix can.
+
 ## 8. Reported defects in the creator (2026-11-09)
 
 The owner's test found the creator glitchy. These are logged here so the face work doesn't bury them. Most are independent of the face rig and should be fixed first, as their own slice (CR-fix):

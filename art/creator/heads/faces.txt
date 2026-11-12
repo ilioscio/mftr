@@ -1,0 +1,136 @@
+# Face shapes (21 §7, FR5): whole faces to start from, each a set of face slider values
+# (the presets in presets.txt). The creator's Shapes panel sets the sliders to one; Randomize
+# mixes one or two and jitters a few sliders, so a random face hangs together.
+#
+# Format: `[id] Name: a line on it`, then `slider value` lines, values from -1 to 1. Sliders a
+# shape leaves out are 0. The forge reads this file (mftr_forge::face::shapes) and rejects an
+# unknown slider or a value out of range.
+
+[noble] Noble: long and high-browed, fine-boned
+face_length 0.52
+cheekbones 0.78
+nose_length 0.52
+nose_reach 0.39
+jaw_width -0.26
+chin_length 0.26
+brow_height 0.26
+mouth_lips -0.26
+head_forehead 0.52
+
+[brute] Brute: a heavy jaw and brow, small eyes
+jaw_width 1
+jaw_corners 0.91
+brow_ridge 1
+nose_width 0.78
+chin_reach 0.39
+eyes_size -0.52
+head_width 0.65
+face_length -0.26
+mouth_width 0.39
+brow_angle 0.52
+
+[gaunt] Gaunt: hollow cheeks under sharp cheekbones
+cheeks_hollow 1
+cheekbones 0.91
+face_length 0.65
+nose_length 0.52
+eyes_size -0.26
+jaw_width -0.39
+chin_length 0.39
+mouth_lips -0.65
+
+[round] Round: full-cheeked and short-faced
+head_width 0.78
+cheeks_hollow -1
+face_length -0.65
+nose_tip 0.52
+nose_length -0.39
+jaw_width 0.26
+jaw_corners -0.52
+eyes_size 0.39
+chin_length -0.39
+mouth_lips 0.39
+
+[sharp] Sharp: a pointed chin and narrow jaw, slanted eyes
+chin_length 0.65
+chin_reach 0.52
+cheekbones 0.65
+jaw_width -0.78
+nose_hook 0.65
+eyes_tilt 0.65
+brow_angle 0.52
+ears_point 0.39
+face_length 0.39
+
+[elder] Elder: a long nose, sunken cheeks, the corners of the mouth down
+brow_ridge 0.52
+cheeks_hollow 0.65
+nose_length 0.78
+nose_hook 0.39
+mouth_corners -0.52
+eyes_size -0.39
+ears_size 0.52
+mouth_lips -0.78
+brow_angle -0.39
+
+[youth] Youth: big-eyed, snub-nosed, soft
+eyes_size 0.65
+nose_length -0.52
+nose_tip 0.65
+face_length -0.39
+cheeks_hollow -0.52
+mouth_lips 0.52
+jaw_width -0.39
+brow_ridge -0.65
+head_forehead 0.39
+
+[feral] Feral: a scowling brow, a broad flat nose, pointed ears
+brow_ridge 0.91
+nose_width 0.65
+nose_reach -0.39
+jaw_corners 0.65
+ears_point 1
+eyes_tilt 0.78
+brow_angle 0.91
+mouth_width 0.52
+eyes_spacing 0.39
+
+[stern] Stern: a low, set brow over a hard mouth
+brow_angle 1
+brow_height -0.52
+mouth_corners -0.65
+jaw_width 0.52
+chin_reach 0.39
+cheekbones 0.39
+mouth_lips -0.52
+nose_hook 0.39
+
+[gentle] Gentle: an open brow and a soft smile
+brow_angle -0.65
+mouth_corners 0.52
+eyes_size 0.39
+cheeks_hollow -0.39
+nose_width -0.26
+jaw_corners -0.39
+brow_height 0.39
+mouth_lips 0.26
+
+[hawk] Hawk: a hooked, prominent nose and close-set eyes
+nose_hook 1
+nose_reach 0.65
+nose_length 0.65
+eyes_spacing -0.39
+cheekbones 0.52
+chin_reach -0.26
+brow_ridge 0.65
+face_length 0.39
+
+[elfin] Elfin: pointed ears, high cheekbones, a fine jaw
+ears_point 1
+eyes_tilt 0.65
+cheekbones 0.78
+chin_length 0.39
+jaw_width -0.65
+nose_width -0.52
+face_length 0.26
+eyes_size 0.26

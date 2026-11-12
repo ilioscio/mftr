@@ -174,6 +174,9 @@ func _build_steps() -> Control:
 	v.add_child(_name_label)
 	_sub_label = Label.new()
 	_sub_label.theme_type_variation = "HintLabel"
+	# Wraps rather than widening the rail ("unsaved" comes and goes).
+	_sub_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_sub_label.custom_minimum_size = Vector2(200, 0)
 	v.add_child(_sub_label)
 	var gap := Control.new()
 	gap.custom_minimum_size = Vector2(0, 14)
@@ -498,6 +501,7 @@ func _show_step(id: String) -> void:
 				_hint("More colors, the brush and decals are in the Paint step.")
 		"face":
 			_sculpt_tools()
+			_face_shapes()
 			var have: Array = Array(creator.sliders())
 			var listed := {}
 			for group in FACE_GROUPS:
@@ -1492,6 +1496,58 @@ func _thousands(n: int) -> String:
 		out = "," + t.substr(t.length() - 3) + out
 		t = t.substr(0, t.length() - 3)
 	return t + out
+
+
+## The face shapes (21 §7 FR5): whole faces to start from, the current one marked; Random face
+## mixes them. The sliders below then fine-tune, and drags go on top.
+func _face_shapes() -> void:
+	var shapes: Array = creator.face_shapes()
+	if shapes.is_empty():
+		return
+	_section("Shapes")
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	var now: String = creator.face_shape()
+	for sh in shapes:
+		var b := Button.new()
+		b.text = sh.name
+		b.tooltip_text = sh.about
+		b.toggle_mode = true
+		b.button_pressed = sh.id == now
+		b.focus_mode = Control.FOCUS_NONE
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var m := Vector4(8, 7, 8, 7)
+		var on := UI._box(UI.SLATE_HI, UI.GOLD, 1, 5, m)
+		b.add_theme_stylebox_override("normal", UI._box(UI.INK_2, Color(0.2, 0.22, 0.26), 1, 5, m))
+		b.add_theme_stylebox_override("hover", UI._box(UI.SLATE, UI.GOLD, 1, 5, m))
+		b.add_theme_stylebox_override("pressed", on)
+		b.add_theme_stylebox_override("hover_pressed", on)
+		b.pressed.connect(func():
+			creator.set_face_shape(sh.id)
+			_changed(true)
+			_show_step(step))
+		grid.add_child(b)
+	_panel.add_child(grid)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var rand := Button.new()
+	rand.text = "Random face"
+	rand.tooltip_text = "One or two shapes mixed, a few features nudged"
+	rand.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rand.pressed.connect(func(): random_face(int(Time.get_ticks_usec())))
+	row.add_child(rand)
+	_panel.add_child(row)
+	_hint("A shape sets the sliders below; slide or drag from there.")
+
+
+## A random face (`--creator-random-face SEED` for captures).
+func random_face(seed: int) -> void:
+	seed_n += 1
+	creator.random_face(seed + seed_n)
+	_changed(true)
+	_show_step(step)
 
 
 func _randomize() -> void:

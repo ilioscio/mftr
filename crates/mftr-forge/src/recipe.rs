@@ -298,19 +298,91 @@ impl Dice {
     }
 }
 
-/// Every slider (and proportion) set at random: mostly gentle, now and then extreme, so a
-/// randomized champion is a starting point rather than a monster (20 §2).
+/// A champion's looks at random (20 §2, 21 §7 FR5). A rigged face is one of the face shapes
+/// (`face::shapes`), mixed now and then with a second, with a few of its sliders nudged, so it
+/// hangs together; the body's sliders and proportions are gentle, now and then strong. A
+/// starting point rather than a monster. `sliders` are the base's (`Catalog::sliders`).
 pub fn randomize(looks: &mut Looks, sliders: &[String], seed: u64) {
     let mut d = Dice::new(seed);
-    for id in sliders {
+    let is_face = |id: &str| crate::face::preset(id).is_some() && sliders.iter().any(|s| s == id);
+    let shapes = crate::face::shapes();
+    if sliders.iter().any(|s| is_face(s)) && !shapes.is_empty() {
+        random_face(looks, sliders, &mut d);
+    }
+    for id in sliders.iter().filter(|id| !is_face(id)) {
         let v = d.signed();
-        looks.set_slider(id, v * v * v.signum() * 0.9);
+        looks.set_slider(id, v * v * v.signum() * 0.75);
     }
     for i in 0..looks::Proportions::NAMES.len() {
         let v = d.signed();
-        looks.proportions.set(i, v * 0.6);
+        looks.proportions.set(i, v * 0.45);
     }
     looks.skin = ((d.signed() + 1.0) * 4.0) as u8 % 8;
+}
+
+/// A face at random from the face shapes, alone: what the Face step's Random face does.
+pub fn randomize_face(looks: &mut Looks, sliders: &[String], seed: u64) {
+    random_face(looks, sliders, &mut Dice::new(seed));
+}
+
+/// Set the face sliders to face shape `id` (the others to 0): the Face step's Shapes panel.
+/// False if there's no such shape.
+pub fn apply_face_shape(looks: &mut Looks, id: &str) -> bool {
+    let Some(s) = crate::face::shape(id) else { return false };
+    looks.shape.retain(|(k, _)| crate::face::preset(k).is_none());
+    for (k, v) in &s.sliders {
+        looks.set_slider(k, *v);
+    }
+    true
+}
+
+/// The face shape the face sliders are set to now, if one exactly.
+pub fn face_shape_of(looks: &Looks) -> Option<&'static str> {
+    crate::face::shapes()
+        .iter()
+        .find(|s| {
+            crate::face::presets().iter().all(|p| {
+                let want = s.sliders.iter().find(|(k, _)| *k == p.id).map_or(0.0, |(_, v)| *v);
+                (looks.slider(&p.id) - want).abs() < 0.005
+            })
+        })
+        .map(|s| s.id.as_str())
+}
+
+fn random_face(looks: &mut Looks, sliders: &[String], d: &mut Dice) {
+    let shapes = crate::face::shapes();
+    let pick = |d: &mut Dice| ((d.signed() + 1.0) * 0.5 * shapes.len() as f32) as usize % shapes.len();
+    let a = pick(d);
+    let mut mix: Vec<(usize, f32)> = vec![(a, 0.85 + 0.15 * (d.signed() + 1.0) * 0.5)];
+    // Six in ten faces blend in a second shape, lightly.
+    if d.signed() > -0.2 {
+        let b = pick(d);
+        if b != a {
+            mix.push((b, 0.2 + 0.25 * (d.signed() + 1.0) * 0.5));
+        }
+    }
+    let face_ids: Vec<&String> = sliders.iter().filter(|s| crate::face::preset(s).is_some()).collect();
+    looks.shape.retain(|(k, _)| crate::face::preset(k).is_none());
+    for id in &face_ids {
+        let v: f32 = mix
+            .iter()
+            .map(|&(i, w)| shapes[i].sliders.iter().find(|(k, _)| k == *id).map_or(0.0, |(_, v)| *v) * w)
+            .sum();
+        if v != 0.0 {
+            looks.set_slider(id, v);
+        }
+    }
+    // A few sliders nudged, so two faces of one shape differ.
+    for _ in 0..6 {
+        let id = face_ids[((d.signed() + 1.0) * 0.5 * face_ids.len() as f32) as usize % face_ids.len()];
+        let v = (looks.slider(id) + d.signed() * 0.35).clamp(-1.0, 1.0);
+        looks.set_slider(id, (v * 100.0).round() / 100.0);
+    }
+    // Rounded, so the file stays readable.
+    for (_, v) in looks.shape.iter_mut() {
+        *v = (*v * 100.0).round() / 100.0;
+    }
+    looks.shape.retain(|(_, v)| *v != 0.0);
 }
 
 #[cfg(test)]
@@ -382,13 +454,52 @@ mod tests {
     }
 
     #[test]
+    fn faces_come_from_the_shapes() {
+        // FR5 (21 §7): a shape sets the face sliders exactly and is recognised; a random face is
+        // close to one shape (it hangs together), and two seeds give different faces.
+        let ids: Vec<String> =
+            crate::face::presets().iter().map(|p| p.id.clone()).chain(["body_bulk".to_string()]).collect();
+        assert!(crate::face::shapes().len() >= 10);
+        let mut l = Looks::default();
+        l.set_slider("body_bulk", 0.4);
+        assert!(apply_face_shape(&mut l, "brute"));
+        assert_eq!(face_shape_of(&l), Some("brute"));
+        assert_eq!(l.slider("jaw_width"), 1.0);
+        assert_eq!(l.slider("body_bulk"), 0.4, "the body is left alone");
+        l.set_slider("nose_reach", 0.3);
+        assert_eq!(face_shape_of(&l), None);
+        assert!(!apply_face_shape(&mut l, "nobody"));
+        let mut seen = std::collections::HashSet::new();
+        for seed in 1..40u64 {
+            let mut r = Looks::default();
+            randomize_face(&mut r, &ids, seed);
+            assert!(r.shape.iter().all(|(k, v)| crate::face::preset(k).is_some() && v.abs() <= 1.0));
+            // Nearest shape by distance over the face sliders: within the jitter of one.
+            let dist = |s: &crate::face::Shape| -> f32 {
+                crate::face::presets()
+                    .iter()
+                    .map(|p| {
+                        let want = s.sliders.iter().find(|(k, _)| *k == p.id).map_or(0.0, |(_, v)| *v);
+                        (r.slider(&p.id) - want).powi(2)
+                    })
+                    .sum::<f32>()
+                    .sqrt()
+            };
+            let best = crate::face::shapes().iter().map(dist).fold(f32::MAX, f32::min);
+            assert!(best < 1.2, "seed {seed}: {best}");
+            seen.insert(format!("{:?}", r.shape));
+        }
+        assert!(seen.len() >= 35, "varied: {}", seen.len());
+    }
+
+    #[test]
     fn randomize_is_seeded_and_gentle() {
         let ids: Vec<String> = ["jaw_width", "nose_reach", "body_bulk"].iter().map(|s| s.to_string()).collect();
         let (mut a, mut b) = (Looks::default(), Looks::default());
         randomize(&mut a, &ids, 7);
         randomize(&mut b, &ids, 7);
         assert_eq!(a, b);
-        assert!(a.shape.iter().all(|(_, v)| v.abs() <= 0.9));
+        assert!(a.shape.iter().all(|(_, v)| v.abs() <= 1.0));
         let mut c = Looks::default();
         randomize(&mut c, &ids, 8);
         assert_ne!(a, c);

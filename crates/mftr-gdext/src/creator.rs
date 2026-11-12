@@ -494,6 +494,42 @@ impl MftrCreator {
         recipe::randomize(&mut self.recipe.looks, &ids, seed as u64);
     }
 
+    /// The face shapes (21 §7 FR5): `[{id, name, about}]`, empty on a base without a face rig.
+    #[func]
+    fn face_shapes(&self) -> VarArray {
+        let mut out = VarArray::new();
+        if !self.sliders().as_slice().iter().any(|s| mftr_forge::face::preset(&s.to_string()).is_some()) {
+            return out;
+        }
+        for s in mftr_forge::face::shapes() {
+            let mut d = VarDictionary::new();
+            d.set("id", s.id.as_str());
+            d.set("name", s.name.as_str());
+            d.set("about", s.about.as_str());
+            out.push(&d.to_variant());
+        }
+        out
+    }
+
+    /// The face shape the face sliders are set to ("" when they've moved off every one).
+    #[func]
+    fn face_shape(&self) -> GString {
+        GString::from(recipe::face_shape_of(&self.recipe.looks).unwrap_or(""))
+    }
+
+    /// Set the face sliders to face shape `id`.
+    #[func]
+    fn set_face_shape(&mut self, id: GString) {
+        recipe::apply_face_shape(&mut self.recipe.looks, &id.to_string());
+    }
+
+    /// A face at random from the shapes (the body left as it is).
+    #[func]
+    fn random_face(&mut self, seed: i64) {
+        let ids: Vec<String> = self.sliders().as_slice().iter().map(|s| s.to_string()).collect();
+        recipe::randomize_face(&mut self.recipe.looks, &ids, seed as u64);
+    }
+
     /// Back to the plain base: every slider and proportion 0.
     #[func]
     fn reset_shape(&mut self) {

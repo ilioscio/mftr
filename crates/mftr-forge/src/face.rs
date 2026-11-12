@@ -650,6 +650,66 @@ pub fn drag_face(
     true
 }
 
+// --- Face shapes (21 §7, FR5) -----------------------------------------------------------------
+
+const SHAPES_SOURCE: &str = include_str!("../../../art/creator/heads/faces.txt");
+
+/// A whole face to start from: a value for some of the face sliders (the rest 0).
+#[derive(Clone, Debug)]
+pub struct Shape {
+    pub id: String,
+    pub name: String,
+    pub about: String,
+    pub sliders: Vec<(String, f32)>,
+}
+
+/// Every face shape, in the file's order (`art/creator/heads/faces.txt`).
+pub fn shapes() -> &'static [Shape] {
+    static ALL: std::sync::OnceLock<Vec<Shape>> = std::sync::OnceLock::new();
+    ALL.get_or_init(|| read_shapes(SHAPES_SOURCE).unwrap_or_else(|e| panic!("art/creator/heads/faces.txt: {e}")))
+}
+
+pub fn shape(id: &str) -> Option<&'static Shape> {
+    shapes().iter().find(|s| s.id == id)
+}
+
+fn read_shapes(text: &str) -> Result<Vec<Shape>, String> {
+    let mut out: Vec<Shape> = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let at = format!("line {}", n + 1);
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix('[') {
+            let (id, title) = rest.split_once(']').ok_or(format!("{at}: `[id] Name: about`"))?;
+            let (name, about) = title.split_once(':').ok_or(format!("{at}: `[id] Name: about`"))?;
+            if out.iter().any(|s| s.id == id) {
+                return Err(format!("{at}: `{id}` twice"));
+            }
+            out.push(Shape {
+                id: id.into(),
+                name: name.trim().into(),
+                about: about.trim().into(),
+                sliders: Vec::new(),
+            });
+            continue;
+        }
+        let s = out.last_mut().ok_or(format!("{at}: a slider before any `[id]`"))?;
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let [slider, value] = words[..] else { return Err(format!("{at}: `slider value`")) };
+        if preset(slider).is_none() {
+            return Err(format!("{at}: `{slider}` isn't a face slider"));
+        }
+        let v: f32 = value.parse().map_err(|_| format!("{at}: `{value}` isn't a number"))?;
+        if !(-1.0..=1.0).contains(&v) || s.sliders.iter().any(|(k, _)| k == slider) {
+            return Err(format!("{at}: `{slider}` from -1 to 1, once"));
+        }
+        s.sliders.push((slider.into(), v));
+    }
+    Ok(out)
+}
+
 // --- Skinning on the CPU (tests now; the editor's hover raycast in FR4, 21 §4) ----------------
 
 /// A node's global affine transform: a 3×3 linear part (columns) and a translation.
@@ -946,6 +1006,40 @@ mod tests {
             }
         }
         assert_eq!(all.iter().filter(|p| p.one_sided).map(|p| p.id.as_str()).collect::<Vec<_>>(), ["ears_point"]);
+    }
+
+    #[test]
+    fn the_shapes_reader_is_strict() {
+        let bad = |t: &str| read_shapes(t).is_err();
+        assert!(!bad("[a] A: one
+nose_reach 0.5
+[b] B: two
+chin_reach -1"));
+        assert!(bad("nose_reach 0.5"), "a slider before any shape");
+        assert!(
+            bad("[a] A
+nose_reach 0.5"),
+            "a name without a line on it"
+        );
+        assert!(
+            bad("[a] A: one
+nose 0.5"),
+            "no such slider"
+        );
+        assert!(
+            bad("[a] A: one
+nose_reach 1.5"),
+            "past 1"
+        );
+        assert!(
+            bad("[a] A: one
+nose_reach 0.5
+nose_reach 0.2"),
+            "the same slider twice"
+        );
+        assert!(bad("[a] A: one
+[a] B: two"));
+        assert_eq!(shape("brute").unwrap().name, "Brute");
     }
 
     #[test]

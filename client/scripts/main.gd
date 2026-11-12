@@ -271,6 +271,10 @@ func _ready() -> void:
 			# A few sculpt strokes at a point of the stage (CR9): `inflate:0.5,0.2`.
 			_creator_sculpt = args[i + 1]
 			i += 1
+		elif args[i] == "--creator-random-face" and i + 1 < args.size():
+			# A random face from the shapes (FR5), seeded: captures of what Randomize gives.
+			_creator_random_face = int(args[i + 1])
+			i += 1
 		elif args[i] == "--creator-feature" and i + 1 < args.size():
 			# A face feature dragged on the stage (FR4): `move:0.5,0.5:0.5,0.42` (from, to as
 			# fractions of the stage), `turn:…`, `size:…`; `:hold` keeps the drag open, glowing.
@@ -668,6 +672,7 @@ var _creator_yaw := INF                 # `--creator-yaw R`: …turned this far 
 var _creator_step := ""                  # `--creator-step NAME`: …on this step (screenshots)
 var _creator_brush := ""                 # `--creator-brush TOOL:X,Y`: …and paint once there (screenshots)
 var _creator_sculpt := ""                # `--creator-sculpt BRUSH:X,Y`: …or sculpt there (screenshots)
+var _creator_random_face := -1           # `--creator-random-face SEED`: …with a random face
 var _creator_feature := ""               # `--creator-feature MODE:X,Y:X,Y[:hold]`: …or drag a face feature
 var _editor_map := ""                    # `--editor-map bridge|crossroads|FILE`: …on that map
 var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's reference image
@@ -6722,6 +6727,9 @@ func _open_creator() -> void:
 		var sp := _creator_sculpt.split(":")
 		var sxy := sp[1].split(",")
 		screen.sculpt_at_fraction(sp[0], Vector2(float(sxy[0]), float(sxy[1])))
+	if _creator_random_face >= 0:
+		await get_tree().create_timer(0.5).timeout
+		screen.random_face(_creator_random_face)
 	if _creator_feature != "":
 		await get_tree().create_timer(1.0).timeout
 		var fp := _creator_feature.split(":")
