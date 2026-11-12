@@ -13,13 +13,14 @@ signal saved(path: String)
 signal test(path: String, champion: String)
 
 const DIR := "user://champions"
+const UI := preload("res://scripts/ui_theme.gd")
 const SLOTS := ["skin", "cloth", "metal", "emissive", "accent", "accent_glow"]
 const TEAM := Color(0.3, 0.85, 0.8)
 ## (id, title, what it's for, built yet)
 const STEPS := [
 	["build", "1  Build", "The body plan: its skeleton, base meshes, sliders and moves.", true],
 	["gender", "2  Gender", "The base shape: every slider stays available after the choice.", true],
-	["face", "3  Face", "Shape the head: each slider blends between two sculpted extremes.", true],
+	["face", "3  Face", "Shape the head: each slider moves the face's bones. Sculpt for anything they can't reach.", true],
 	["body", "4  Body", "Proportions scale the skeleton; shape sliders reshape the body.", true],
 	["clothes", "5  Clothes", "Clothes, armor, accessories and weapons: one part per slot. They follow your sliders.", true],
 	["paint", "6  Paint", "Fill each part's colors from the palette; the signature hue lights what glows. Brush, decals and the eraser paint right on the model.", true],
@@ -54,6 +55,14 @@ var art_root := ""
 var step := "build"
 const BUILD_NAMES := {"humanoid_slim": "Slim humanoid", "humanoid_heavy": "Heavy humanoid", "beast": "Four-legged beast",
 	"serpent": "Serpentoid", "spectre": "Floating spectre", "machine": "Rolling machine"}
+const BUILD_INFO := {
+	"humanoid_slim": "Lean and quick. Every humanoid part and move, a sculptable face.",
+	"humanoid_heavy": "The brute: broad, low-hipped, long-armed, like Rook, Bastion and Cairn.",
+	"beast": "Four legs. Any kit, animated by its own moves' shapes; its own parts.",
+	"serpent": "A coiling body that slithers; its own parts and moves.",
+	"spectre": "Robed and floating above the ground; its own parts and moves.",
+	"machine": "Rolls on a wheel: plates, pistons, its own parts and moves.",
+}
 var file_path := ""
 var dirty := false
 var seed_n := 1
@@ -88,8 +97,15 @@ var _step_buttons := {}
 var _paint_target := "body"
 var _paint_region := 0
 var _panel: VBoxContainer
-var _status: Label
 var _title: Label
+var _step_label: Label
+var _hint_label: Label
+var _name_label: Label
+var _sub_label: Label
+var _toast: PanelContainer
+var _toast_label: Label
+var _meter: Label
+var _meter_bar: ProgressBar
 
 
 func setup(art: String) -> void:
@@ -103,7 +119,7 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(_fit)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	var bg := ColorRect.new()
-	bg.color = Color(0.09, 0.1, 0.12)
+	bg.color = Color(0.03, 0.035, 0.05)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 	var root := HBoxContainer.new()
@@ -117,24 +133,51 @@ func _ready() -> void:
 	_rebuild()
 
 
+## `c` inside a margin of `m` pixels on every side.
+func _pad(c: Control, m := 16) -> MarginContainer:
+	var mc := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		mc.add_theme_constant_override("margin_" + side, m)
+	mc.add_child(c)
+	return mc
+
+
+func _gap(h: float) -> void:
+	var g := Control.new()
+	g.custom_minimum_size = Vector2(0, h)
+	_panel.add_child(g)
+
+
+## The left rail: who is being made, the steps (the current one marked in gold), and what to do
+## with it (Test first).
 func _build_steps() -> Control:
 	var box := PanelContainer.new()
-	box.custom_minimum_size = Vector2(230, 0)
+	box.custom_minimum_size = Vector2(264, 0)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
-	box.add_child(v)
-	var title := Label.new()
-	title.text = "Champion Creator"
-	title.theme_type_variation = "TitleLabel"
-	v.add_child(title)
+	v.add_theme_constant_override("separation", 3)
+	box.add_child(_pad(v, 18))
+	var eyebrow := Label.new()
+	eyebrow.text = "CHAMPION CREATOR"
+	eyebrow.theme_type_variation = "HeaderLabel"
+	v.add_child(eyebrow)
+	_name_label = Label.new()
+	_name_label.theme_type_variation = "TitleLabel"
+	_name_label.clip_text = true
+	_name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	v.add_child(_name_label)
+	_sub_label = Label.new()
+	_sub_label.theme_type_variation = "HintLabel"
+	v.add_child(_sub_label)
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(0, 14)
+	v.add_child(gap)
 	for s in STEPS:
 		var b := Button.new()
-		b.text = s[1]
+		b.text = "%s     %s" % [s[1].substr(0, 1), s[1].substr(3)]
 		b.toggle_mode = true
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		b.tooltip_text = s[2]
-		if not s[3]:
-			b.modulate = Color(1, 1, 1, 0.55)
+		_style_step(b)
 		b.pressed.connect(_show_step.bind(s[0]))
 		v.add_child(b)
 		_step_buttons[s[0]] = b
@@ -142,88 +185,258 @@ func _build_steps() -> Control:
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(spacer)
 	var test_button := Button.new()
-	test_button.text = "Test"
+	test_button.text = "Test in a practice duel"
 	test_button.theme_type_variation = "PrimaryButton"
-	test_button.tooltip_text = "Save, then play it in a practice duel against a bot (Esc comes back here)."
+	test_button.custom_minimum_size = Vector2(0, 44)
+	test_button.tooltip_text = "Save, then play it in a practice duel against a bot (leave the match to come back here)."
 	test_button.pressed.connect(_test)
 	v.add_child(test_button)
-	for row in [["Randomize", _randomize], ["Reset shape", _reset], ["New", _new], ["Load…", _load_dialog], ["Save", _save], ["Close", _close]]:
-		var b := Button.new()
-		b.text = row[0]
-		b.pressed.connect(row[1])
-		v.add_child(b)
+	var gap2 := Control.new()
+	gap2.custom_minimum_size = Vector2(0, 6)
+	v.add_child(gap2)
+	var rows := [
+		[["Save", _save, "Save the champion file (Ctrl+S)"], ["Load…", _load_dialog, "Open a champion file"]],
+		[["New", _new, "Start over from a plain body"], ["Close", _close, "Back to the menu"]],
+	]
+	for pair in rows:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		for item in pair:
+			var b := Button.new()
+			b.text = item[0]
+			b.tooltip_text = item[2]
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			b.pressed.connect(item[1])
+			row.add_child(b)
+		v.add_child(row)
 	return box
 
 
+func _style_step(b: Button) -> void:
+	var m := Vector4(14, 9, 10, 9)
+	var on := UI._box(UI.SLATE_HI, UI.GOLD, 0, 4, m)
+	on.border_width_left = 3
+	b.add_theme_stylebox_override("normal", UI._box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 0, 4, m))
+	b.add_theme_stylebox_override("hover", UI._box(UI.SLATE, Color(0, 0, 0, 0), 0, 4, m))
+	b.add_theme_stylebox_override("pressed", on)
+	b.add_theme_stylebox_override("hover_pressed", on)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.add_theme_color_override("font_color", UI.DIM)
+	b.add_theme_color_override("font_hover_color", UI.TEXT)
+	b.add_theme_color_override("font_pressed_color", UI.CREAM)
+	b.add_theme_color_override("font_hover_pressed_color", UI.CREAM)
+
+
+## The stage: the champion on a pedestal against a vignette, lit from the front with a cool rim
+## from behind. Over it: how to turn it, the shape tools, the triangle meter and messages.
 func _build_stage() -> Control:
+	var area := Control.new()
+	area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	area.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	area.clip_contents = true
+	var bg := TextureRect.new()
+	var g := Gradient.new()
+	g.set_color(0, Color(0.22, 0.24, 0.29))
+	g.set_color(1, Color(0.045, 0.05, 0.07))
+	var gt := GradientTexture2D.new()
+	gt.gradient = g
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.45)
+	gt.fill_to = Vector2(1.1, 1.05)
+	gt.width = 512
+	gt.height = 512
+	bg.texture = gt
+	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	bg.stretch_mode = TextureRect.STRETCH_SCALE
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	area.add_child(bg)
 	var c := SubViewportContainer.new()
 	c.stretch = true
-	c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	c.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
 	c.gui_input.connect(_stage_input)
+	area.add_child(c)
 	_viewport = SubViewport.new()
 	_viewport.own_world_3d = true
+	_viewport.transparent_bg = true
 	_viewport.msaa_3d = Viewport.MSAA_4X
 	c.add_child(_viewport)
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.16, 0.17, 0.2)
+	e.background_mode = Environment.BG_CLEAR_COLOR
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(0.55, 0.58, 0.65)
-	e.ambient_light_energy = 0.6
+	e.ambient_light_energy = 0.55
 	env.environment = e
 	_viewport.add_child(env)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-45, -30, 0)
-	sun.light_energy = 1.1
+	sun.light_energy = 1.15
+	sun.light_color = Color(1.0, 0.96, 0.9)
 	# The stage is one figure: shadows over a few meters, so the shadow map is fine enough for
-	# a chin's or a bust's (the default 100 m drew them as jagged blocks).
+	# a chin's or a staff's (the default 100 m drew them as jagged blocks).
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 	sun.directional_shadow_max_distance = 6.0
 	sun.shadow_blur = 1.5
 	_viewport.add_child(sun)
+	# A cool rim from behind: the silhouette stands off the backdrop.
+	var rim := DirectionalLight3D.new()
+	rim.rotation_degrees = Vector3(-25, 155, 0)
+	rim.light_energy = 0.7
+	rim.light_color = Color(0.62, 0.74, 1.0)
+	_viewport.add_child(rim)
+	# The pedestal: a dark disc with a gold ring.
 	var floor := MeshInstance3D.new()
 	var disc := CylinderMesh.new()
 	disc.top_radius = 0.8
-	disc.bottom_radius = 0.8
-	disc.height = 0.02
+	disc.bottom_radius = 0.84
+	disc.height = 0.06
 	floor.mesh = disc
-	floor.position.y = -0.01
+	floor.position.y = -0.03
 	var fm := StandardMaterial3D.new()
-	fm.albedo_color = Color(0.22, 0.24, 0.27)
+	fm.albedo_color = Color(0.12, 0.13, 0.16)
+	fm.roughness = 0.85
 	floor.material_override = fm
 	_viewport.add_child(floor)
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.8
+	torus.outer_radius = 0.825
+	ring.mesh = torus
+	ring.scale = Vector3(1.0, 0.4, 1.0)
+	var rm := StandardMaterial3D.new()
+	rm.albedo_color = UI.RIM
+	rm.emission_enabled = true
+	rm.emission = UI.GOLD * 0.25
+	ring.material_override = rm
+	_viewport.add_child(ring)
 	_pivot = Node3D.new()
 	_viewport.add_child(_pivot)
 	_camera = Camera3D.new()
 	_camera.fov = 30
 	_viewport.add_child(_camera)
 	_place_camera()
-	return c
+	area.add_child(_build_overlay())
+	return area
 
 
+func _build_overlay() -> Control:
+	var over := VBoxContainer.new()
+	over.set_anchors_preset(Control.PRESET_FULL_RECT)
+	over.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var top := HBoxContainer.new()
+	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top.add_theme_constant_override("separation", 6)
+	var how := Label.new()
+	how.text = "Drag to turn   ·   Wheel to zoom   ·   Q / E"
+	how.theme_type_variation = "HintLabel"
+	how.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(how)
+	var tools := [["Randomize", _randomize, "Every slider and proportion at random"], ["Reset shape", _reset, "Every slider and proportion back to 0"]]
+	for item in tools:
+		var b := Button.new()
+		b.text = item[0]
+		b.tooltip_text = item[2]
+		b.pressed.connect(item[1])
+		top.add_child(b)
+	over.add_child(_pad_ignore(top))
+	var mid := Control.new()
+	mid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	mid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	over.add_child(mid)
+	var bottom := HBoxContainer.new()
+	bottom.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bottom.add_theme_constant_override("separation", 12)
+	# The triangle budget (20 §7.2): a slim meter, gold to the target, orange past it.
+	var meter_box := PanelContainer.new()
+	meter_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	meter_box.size_flags_vertical = Control.SIZE_SHRINK_END
+	meter_box.add_theme_stylebox_override("panel", UI._box(Color(0.035, 0.045, 0.06, 0.82), Color(UI.RIM, 0.6), 1, 6, Vector4(12, 8, 12, 10)))
+	var meter := VBoxContainer.new()
+	meter.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	meter.add_theme_constant_override("separation", 5)
+	meter_box.add_child(meter)
+	_meter = Label.new()
+	_meter.theme_type_variation = "HintLabel"
+	meter.add_child(_meter)
+	_meter_bar = ProgressBar.new()
+	_meter_bar.custom_minimum_size = Vector2(220, 6)
+	_meter_bar.show_percentage = false
+	_meter_bar.max_value = 14000
+	_meter_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_meter_bar.add_theme_stylebox_override("background", UI._box(Color(0, 0, 0, 0.45), Color(0, 0, 0, 0), 0, 3, Vector4(0, 0, 0, 0)))
+	meter.add_child(_meter_bar)
+	bottom.add_child(meter_box)
+	var push := Control.new()
+	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	push.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bottom.add_child(push)
+	_toast = PanelContainer.new()
+	_toast.visible = false
+	_toast.size_flags_vertical = Control.SIZE_SHRINK_END
+	_toast_label = Label.new()
+	_toast_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_toast_label.custom_minimum_size = Vector2(420, 0)
+	_toast.add_child(_toast_label)
+	bottom.add_child(_toast)
+	over.add_child(_pad_ignore(bottom))
+	return over
+
+
+func _pad_ignore(c: Control) -> MarginContainer:
+	var mc := _pad(c, 16)
+	mc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return mc
+
+
+## A message over the stage: `kind` "error", "ok" or "note"; "" hides it.
+func _toast_show(text: String, kind := "note") -> void:
+	if _toast == null:
+		return
+	_toast.visible = text != ""
+	if text == "":
+		return
+	var tint: Color = {"error": Color(0.95, 0.45, 0.38), "ok": Color(0.55, 0.88, 0.55)}.get(kind, UI.GOLD)
+	var sb := UI._box(Color(0.035, 0.045, 0.06, 0.94), tint, 1, 6, Vector4(14, 10, 14, 10))
+	sb.border_width_left = 4
+	_toast.add_theme_stylebox_override("panel", sb)
+	_toast_label.add_theme_color_override("font_color", UI.TEXT if kind == "note" else tint.lightened(0.25))
+	_toast_label.text = text
+
+
+## The side panel: the step's name and what it's for, then its controls. A fixed width, so the
+## stage doesn't jump between steps.
 func _build_side() -> Control:
 	var box := PanelContainer.new()
-	box.custom_minimum_size = Vector2(380, 0)
+	box.custom_minimum_size = Vector2(404, 0)
 	var outer := VBoxContainer.new()
-	box.add_child(outer)
+	outer.add_theme_constant_override("separation", 4)
+	box.add_child(_pad(outer, 18))
+	_step_label = Label.new()
+	_step_label.theme_type_variation = "HeaderLabel"
+	outer.add_child(_step_label)
 	_title = Label.new()
 	_title.theme_type_variation = "TitleLabel"
 	outer.add_child(_title)
+	_hint_label = Label.new()
+	_hint_label.theme_type_variation = "HintLabel"
+	_hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_hint_label.custom_minimum_size = Vector2(360, 0)
+	outer.add_child(_hint_label)
+	outer.add_child(HSeparator.new())
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	outer.add_child(scroll)
 	_panel = VBoxContainer.new()
 	_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_panel.add_theme_constant_override("separation", 6)
-	scroll.add_child(_panel)
-	_status = Label.new()
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status.add_theme_color_override("font_color", Color(1.0, 0.6, 0.45))
-	outer.add_child(_status)
+	_panel.add_theme_constant_override("separation", 8)
+	# Room for the scrollbar.
+	var inner := MarginContainer.new()
+	inner.add_theme_constant_override("margin_right", 10)
+	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inner.add_child(_panel)
+	scroll.add_child(inner)
 	return box
 
 
@@ -241,26 +454,34 @@ func _show_step(id: String) -> void:
 	for c in _panel.get_children():
 		c.queue_free()
 	var info: Array = STEPS.filter(func(s): return s[0] == id)[0]
+	var at: int = STEPS.find(info) + 1
+	_step_label.text = "STEP %d OF %d" % [at, STEPS.size()]
 	_title.text = info[1].substr(3)
-	_hint(info[2])
+	_hint_label.text = info[2]
+	_update_header()
 	match id:
 		"build":
 			for b in creator.builds():
 				_choice(BUILD_NAMES.get(String(b[0]), String(b[0]).capitalize()), creator.build() == b[0], func():
 					creator.set_build(b[0])
 					_changed(true)
-					_show_step("build"))
-			_hint("Both humanoids share the moves and parts; the heavy one is the brute (Rook, Bastion, Cairn). The beast has its own moves' animations (any kit, animated by its shapes) and parts. The serpentoid, spectre and machine likewise.")
+					_show_step("build"), BUILD_INFO.get(String(b[0]), ""))
 		"gender":
 			if creator.gender() == "":
 				_title.text = "Body colors"
-				_hint("This body has no genders.")
+				_hint_label.text = "This body has no genders: give it its own colors."
 			else:
+				var pair := HBoxContainer.new()
+				pair.add_theme_constant_override("separation", 8)
+				_panel.add_child(pair)
 				for g in [["masculine", "Masculine"], ["feminine", "Feminine"]]:
-					_choice(g[1], creator.gender() == g[0], func():
+					var card := _choice(g[1], creator.gender() == g[0], func():
 						creator.set_gender(g[0])
 						_changed(true)
 						_show_step("gender"))
+					card.reparent(pair)
+					card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				_gap(6)
 			if creator.has_skin():
 				_skin_picker()
 			else:
@@ -287,12 +508,13 @@ func _show_step(id: String) -> void:
 					_slider(_label_of(id2), creator.slider(id2), func(v): creator.set_slider(id2, v))
 		"body":
 			_sculpt_tools()
+			_section("Proportions")
 			for p in creator.proportions():
-				_slider(PROPORTION_NAMES.get(p, p), creator.proportion(p), func(v): creator.set_proportion(p, v))
-			_panel.add_child(HSeparator.new())
+				_slider(PROPORTION_NAMES.get(p, p), creator.proportion(p), func(v): creator.set_proportion(p, v), "smaller", "bigger")
+			_section("Shape")
 			for id2 in creator.sliders():
 				if not _is_face(id2):
-					_slider(_label_of(id2), creator.slider(id2), func(v): creator.set_slider(id2, v))
+					_slider(_label_of(id2).trim_prefix("Body "), creator.slider(id2), func(v): creator.set_slider(id2, v), "less", "more")
 		"clothes":
 			var by_slot := {}
 			for p in creator.parts():
@@ -303,28 +525,43 @@ func _show_step(id: String) -> void:
 			for slot in creator.slots():
 				if not by_slot.has(slot):
 					continue
+				var row := HBoxContainer.new()
+				row.add_theme_constant_override("separation", 10)
 				var l := Label.new()
 				l.text = String(slot).capitalize()
-				_panel.add_child(l)
+				l.custom_minimum_size = Vector2(96, 0)
+				l.add_theme_color_override("font_color", UI.DIM)
+				row.add_child(l)
 				var pick := OptionButton.new()
+				pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				pick.fit_to_longest_item = false
+				pick.clip_text = true
 				pick.add_item("None")
 				var options: Array = by_slot[slot]
 				for i in options.size():
-					pick.add_item("%s  (%d)" % [options[i].name, options[i].triangles])
+					pick.add_item(options[i].name)
+					pick.set_item_tooltip(i + 1, "%d triangles" % options[i].triangles)
 					if worn.has(options[i].id):
 						pick.select(i + 1)
 				pick.item_selected.connect(func(i):
 					creator.set_part(slot, "" if i == 0 else options[i - 1].id)
 					_changed(true))
-				_panel.add_child(pick)
-			_hint("Paint them in the Paint step: fills, brush and decals.")
+				row.add_child(pick)
+				_panel.add_child(row)
+			_gap(4)
+			_hint("Colors come next, in Paint: fills, the brush and decals.")
 		"paint":
 			var targets: PackedStringArray = creator.paint_targets()
 			if not targets.has(_paint_target):
 				_paint_target = "body"
+			var names := {"body": "Body"}
+			for p in creator.parts():
+				names[p.id] = p.name
+			_section("What to paint")
 			var tpick := OptionButton.new()
+			tpick.fit_to_longest_item = false
 			for i in targets.size():
-				tpick.add_item("Body" if targets[i] == "body" else targets[i])
+				tpick.add_item(names.get(targets[i], targets[i]))
 				if targets[i] == _paint_target:
 					tpick.select(i)
 			tpick.item_selected.connect(func(i):
@@ -333,35 +570,24 @@ func _show_step(id: String) -> void:
 				_show_step("paint"))
 			_panel.add_child(tpick)
 			var regions: PackedColorArray = creator.paint_regions(_paint_target)
-			var row := HBoxContainer.new()
+			var row := HFlowContainer.new()
+			row.add_theme_constant_override("h_separation", 6)
 			for i in regions.size():
-				row.add_child(_swatch(regions[i], i == _paint_region, func():
+				row.add_child(_swatch(regions[i], _paint_tool == "fill" and i == _paint_region, func():
 					_paint_region = i
-					_show_step("paint")))
+					_paint_tool = "fill"
+					_show_step("paint"), 42))
 			_panel.add_child(row)
-			var tools := HBoxContainer.new()
-			for t in [["fill", "Fill"], ["brush", "Brush"], ["decal", "Decal"], ["erase", "Erase"]]:
-				var b := Button.new()
-				b.text = t[1]
-				b.toggle_mode = true
-				b.button_pressed = _paint_tool == t[0]
-				b.pressed.connect(func():
-					_paint_tool = t[0]
-					_hold_rest()
-					_show_step("paint"))
-				tools.add_child(b)
-			_panel.add_child(tools)
+			_section("Tool")
+			_tool_row([["fill", "Fill"], ["brush", "Brush"], ["decal", "Decal"], ["erase", "Erase"]], _paint_tool, func(t):
+				_paint_tool = t
+				_hold_rest()
+				_show_step("paint"))
 			if _paint_tool == "fill":
-				_hint("Pick a part and a region, then a color.")
+				_hint("Pick one of its colors above, then a new one below.")
 			else:
-				_hint("Left-click and drag on the model to paint; right-drag turns it.")
-				var size := HSlider.new()
-				size.min_value = 0.015
-				size.max_value = 0.3
-				size.step = 0.005
-				size.value = _brush_size
-				size.value_changed.connect(func(v): _brush_size = v)
-				_panel.add_child(size)
+				_hint("Left-drag on the model to paint; right-drag turns it.")
+				_slider_raw("Brush size", _brush_size, 0.015, 0.3, func(v): _brush_size = v)
 			if _paint_tool == "decal":
 				var dpick := OptionButton.new()
 				var decals: Array = creator.decals()
@@ -371,8 +597,11 @@ func _show_step(id: String) -> void:
 						dpick.select(i)
 				dpick.item_selected.connect(func(i): _decal = decals[i].id)
 				_panel.add_child(dpick)
+			_section("Palette")
 			var grid := GridContainer.new()
 			grid.columns = 8
+			grid.add_theme_constant_override("h_separation", 6)
+			grid.add_theme_constant_override("v_separation", 6)
 			var palette: PackedColorArray = creator.palette()
 			for k in palette.size():
 				grid.add_child(_swatch(palette[k], _paint_tool != "fill" and k == _brush_color, func():
@@ -383,9 +612,8 @@ func _show_step(id: String) -> void:
 						_brush_color = k
 					_show_step("paint")))
 			_panel.add_child(grid)
-			var sig := Label.new()
-			sig.text = "Signature hue (what glows, and later the effects)"
-			_panel.add_child(sig)
+			_section("Signature hue")
+			_hint("What glows, and the color of its effects.")
 			var hue := HSlider.new()
 			hue.min_value = 0
 			hue.max_value = 359
@@ -395,8 +623,9 @@ func _show_step(id: String) -> void:
 				creator.set_signature(int(v))
 				_changed(true))
 			_panel.add_child(hue)
+			_gap(8)
 			var clear := Button.new()
-			clear.text = "Clear paint"
+			clear.text = "Clear all paint"
 			clear.pressed.connect(func():
 				creator.clear_paint()
 				creator.clear_images()
@@ -404,11 +633,22 @@ func _show_step(id: String) -> void:
 				_show_step("paint"))
 			_panel.add_child(clear)
 		"moves":
+			_section("Moves")
+			var grid := GridContainer.new()
+			grid.columns = 2
+			grid.add_theme_constant_override("h_separation", 10)
+			grid.add_theme_constant_override("v_separation", 6)
+			_panel.add_child(grid)
 			for slot in ["attack", "q", "w", "e", "r"]:
 				var l := Label.new()
 				l.text = "Attack" if slot == "attack" else slot.to_upper()
-				_panel.add_child(l)
+				l.custom_minimum_size = Vector2(64, 0)
+				l.add_theme_color_override("font_color", UI.GOLD)
+				grid.add_child(l)
 				var mpick := OptionButton.new()
+				mpick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				mpick.fit_to_longest_item = false
+				mpick.clip_text = true
 				var options: Array = creator.move_library(slot)
 				var on: String = creator.move_on(slot)
 				for i in options.size():
@@ -419,12 +659,11 @@ func _show_step(id: String) -> void:
 					creator.set_move(slot, options[i].id)
 					_changed(true)
 					_show_step("moves"))
-				_panel.add_child(mpick)
+				grid.add_child(mpick)
 			# The passive (20 §8.1): one from the shared catalog, or none.
-			var pl := Label.new()
-			pl.text = "Passive"
-			_panel.add_child(pl)
+			_section("Passive")
 			var ppick := OptionButton.new()
+			ppick.fit_to_longest_item = false
 			var passives: Array = creator.passives()
 			var held: String = creator.passive()
 			ppick.add_item("None")
@@ -442,10 +681,9 @@ func _show_step(id: String) -> void:
 				if p.id == held:
 					_hint(p.hint)
 			# The resource (01 §9): costless, or what Q W E R spend.
-			var rl := Label.new()
-			rl.text = "Resource"
-			_panel.add_child(rl)
+			_section("Resource")
 			var rpick := OptionButton.new()
+			rpick.fit_to_longest_item = false
 			var resources: Array = creator.resources()
 			var on_res: String = creator.resource()
 			rpick.add_item("None (costless)")
@@ -461,11 +699,9 @@ func _show_step(id: String) -> void:
 			for r in resources:
 				if r.id == on_res:
 					_hint(r.hint)
-			_panel.add_child(HSeparator.new())
-			var kl := Label.new()
-			kl.text = "Or take a whole kit"
-			_panel.add_child(kl)
+			_section("Or take a whole kit")
 			var pick := OptionButton.new()
+			pick.fit_to_longest_item = false
 			var kits: PackedStringArray = creator.kits()
 			pick.add_item("—")
 			for i in kits.size():
@@ -479,53 +715,53 @@ func _show_step(id: String) -> void:
 				_changed(true)
 				_show_step("moves"))
 			_panel.add_child(pick)
-			for line in creator.kit_summary():
+			var summary := creator.kit_summary()
+			for i in summary.size():
 				var l := Label.new()
-				l.text = line
+				l.text = summary[i]
+				l.theme_type_variation = "HintLabel" if i == 0 else ""
 				_panel.add_child(l)
 		"balance":
 			var price: Dictionary = creator.price()
 			var total: float = price.total
+			var over: bool = total > price.cap
+			var past: bool = total > price.budget + 0.5
+			var amber := Color(0.95, 0.7, 0.3)
+			var head := HBoxContainer.new()
+			var big := Label.new()
+			big.text = "%.0f" % total
+			big.theme_type_variation = "TitleLabel"
+			big.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4) if over else (amber if past else UI.CREAM))
+			head.add_child(big)
+			var of := Label.new()
+			of.text = "  of %.0f points%s" % [price.budget, "  ·  over the cap: tune it down" if over else ("  ·  over budget, under the cap" if past else "")]
+			of.size_flags_vertical = Control.SIZE_SHRINK_END
+			of.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4) if over else UI.DIM)
+			head.add_child(of)
+			_panel.add_child(head)
 			var bar := ProgressBar.new()
 			bar.max_value = price.cap
 			bar.value = minf(total, price.cap)
 			bar.show_percentage = false
-			bar.custom_minimum_size = Vector2(0, 18)
+			bar.custom_minimum_size = Vector2(0, 10)
+			bar.add_theme_stylebox_override("background", UI._box(Color(0.02, 0.025, 0.035), Color(0.24, 0.26, 0.3), 1, 4, Vector4(0, 0, 0, 0)))
+			bar.add_theme_stylebox_override("fill", UI._box(Color(0.86, 0.36, 0.3) if over else (amber if past else UI.GOLD), Color(0, 0, 0, 0), 0, 4, Vector4(0, 0, 0, 0)))
 			_panel.add_child(bar)
-			var tl := Label.new()
-			tl.text = "%.0f of %.0f points%s" % [total, price.budget, "  —  over!" if total > price.cap else ""]
-			tl.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4) if total > price.cap else Color(0.7, 0.95, 0.7))
-			_panel.add_child(tl)
+			var parts := GridContainer.new()
+			parts.columns = 2
+			parts.add_theme_constant_override("v_separation", 2)
 			for part in price.parts:
 				var pl := Label.new()
-				pl.text = "    %s  %.1f" % [String(part[0]).capitalize(), part[1]]
+				pl.text = String(part[0]).capitalize()
 				pl.theme_type_variation = "HintLabel"
-				_panel.add_child(pl)
-			_panel.add_child(HSeparator.new())
-			for slot in ["attack", "q", "w", "e", "r"]:
-				var t: PackedFloat32Array = creator.tuning(slot)
-				var head := Label.new()
-				head.text = ("Attack: damage and speed" if slot == "attack" else "%s: power and cooldown" % slot.to_upper())
-				_panel.add_child(head)
-				_tune_slider("Power ×", t[0], 0.5, 1.6, func(v):
-					var now: PackedFloat32Array = creator.tuning(slot)
-					creator.tune(slot, v, now[1])
-					_changed(false))
-				_tune_slider("Cooldown ×" if slot != "attack" else "Time between attacks ×", t[1], 0.6, 2.0, func(v):
-					var now: PackedFloat32Array = creator.tuning(slot)
-					creator.tune(slot, now[0], v)
-					_changed(false))
-			_panel.add_child(HSeparator.new())
-			var stats: PackedFloat32Array = creator.stat_tuning()
-			var names := ["Health ×", "Armor ×", "Magic resist ×", "Move speed ×"]
-			for i in 4:
-				var lo := 0.94 if i == 3 else 0.8
-				var hi := 1.06 if i == 3 else 1.2
-				_tune_slider(names[i], stats[i], lo, hi, func(v):
-					var now: PackedFloat32Array = creator.stat_tuning()
-					now[i] = v
-					creator.tune_stats(now)
-					_changed(false))
+				pl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				parts.add_child(pl)
+				var pv := Label.new()
+				pv.text = "%.1f" % part[1]
+				pv.theme_type_variation = "HintLabel"
+				pv.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+				parts.add_child(pv)
+			_panel.add_child(parts)
 			var fit := Button.new()
 			fit.text = "Auto-fit to the budget"
 			fit.pressed.connect(func():
@@ -533,17 +769,45 @@ func _show_step(id: String) -> void:
 				_changed(false)
 				_show_step("balance"))
 			_panel.add_child(fit)
+			for slot in ["attack", "q", "w", "e", "r"]:
+				var t: PackedFloat32Array = creator.tuning(slot)
+				_section("Attack" if slot == "attack" else slot.to_upper())
+				_tune_slider("Damage" if slot == "attack" else "Power", t[0], 0.5, 1.6, func(v):
+					var now: PackedFloat32Array = creator.tuning(slot)
+					creator.tune(slot, v, now[1])
+					_changed(false))
+				_tune_slider("Time between" if slot == "attack" else "Cooldown", t[1], 0.6, 2.0, func(v):
+					var now: PackedFloat32Array = creator.tuning(slot)
+					creator.tune(slot, now[0], v)
+					_changed(false))
+			_section("Stats")
+			var stats: PackedFloat32Array = creator.stat_tuning()
+			var stat_names := ["Health", "Armor", "Magic resist", "Move speed"]
+			for i in 4:
+				var lo := 0.94 if i == 3 else 0.8
+				var hi := 1.06 if i == 3 else 1.2
+				_tune_slider(stat_names[i], stats[i], lo, hi, func(v):
+					var now: PackedFloat32Array = creator.stat_tuning()
+					now[i] = v
+					creator.tune_stats(now)
+					_changed(false))
 		"name":
 			var edit := LineEdit.new()
 			edit.text = creator.name()
 			edit.placeholder_text = "Name (1–32 characters)"
+			edit.add_theme_font_size_override("font_size", 22)
+			edit.custom_minimum_size = Vector2(0, 48)
 			edit.text_changed.connect(func(t):
 				creator.set_name(t)
+				_update_header()
 				_changed(false))
 			_panel.add_child(edit)
+			_hint("It shows over the champion in game, and names its file.")
+			_gap(8)
 			var save := Button.new()
 			save.text = "Save champion"
 			save.theme_type_variation = "PrimaryButton"
+			save.custom_minimum_size = Vector2(0, 44)
 			save.pressed.connect(_save)
 			_panel.add_child(save)
 		_:
@@ -564,75 +828,149 @@ func _hint(text: String) -> void:
 	var l := Label.new()
 	l.text = text
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(300, 0)
 	l.theme_type_variation = "HintLabel"
 	_panel.add_child(l)
 
 
-func _choice(text: String, on: bool, act: Callable) -> void:
+## A card to pick: its name, and a line on what it is (`about`). Gold-edged when chosen.
+func _choice(text: String, on: bool, act: Callable, about := "") -> Button:
 	var b := Button.new()
-	b.text = text
 	b.toggle_mode = true
 	b.button_pressed = on
+	b.focus_mode = Control.FOCUS_NONE
+	var m := Vector4(14, 10, 12, 10)
+	var chosen := UI._box(UI.SLATE_HI, UI.GOLD, 1, 6, m)
+	chosen.border_width_left = 4
+	b.add_theme_stylebox_override("normal", UI._box(UI.INK_2, Color(0.2, 0.22, 0.26), 1, 6, m))
+	b.add_theme_stylebox_override("hover", UI._box(UI.SLATE, UI.GOLD, 1, 6, m))
+	b.add_theme_stylebox_override("pressed", chosen)
+	b.add_theme_stylebox_override("hover_pressed", chosen)
+	if about == "":
+		b.text = text
+		b.custom_minimum_size = Vector2(0, 44)
+	else:
+		# Two lines inside the card; they let the clicks through to it.
+		var v := VBoxContainer.new()
+		v.set_anchors_preset(Control.PRESET_FULL_RECT)
+		v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		v.add_theme_constant_override("separation", 2)
+		var name_l := Label.new()
+		name_l.text = text
+		name_l.add_theme_color_override("font_color", UI.CREAM if on else UI.TEXT)
+		name_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var about_l := Label.new()
+		about_l.text = about
+		about_l.theme_type_variation = "HintLabel"
+		about_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		about_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		v.add_child(name_l)
+		v.add_child(about_l)
+		b.add_child(_pad_ignore_n(v, 12))
+		b.custom_minimum_size = Vector2(0, 84)
 	b.pressed.connect(func():
 		act.call()
 		_show_step(step))
 	_panel.add_child(b)
+	return b
 
 
-## A heading over a group of sliders.
+func _pad_ignore_n(c: Control, m: int) -> MarginContainer:
+	var mc := _pad(c, m)
+	mc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	return mc
+
+
+## A heading over a group of sliders, with air above it.
 func _section(text: String) -> void:
+	if _panel.get_child_count() > 0:
+		_gap(6)
 	var l := Label.new()
-	l.text = text
+	l.text = text.to_upper()
 	l.theme_type_variation = "HeaderLabel"
 	_panel.add_child(l)
 
 
-## A -1..1 slider; `low` and `high` name its two ends (under it, small).
+## A -1..1 slider: its name and value on one line (the value says which end, and a click on it
+## puts the slider back to 0), the slider under it. `low` and `high` name the two ends.
 func _slider(text: String, value: float, set_value: Callable, low := "", high := "") -> void:
-	var row := VBoxContainer.new()
-	row.add_theme_constant_override("separation", 0)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 0)
+	var top := HBoxContainer.new()
 	var l := Label.new()
 	l.text = text
-	row.add_child(l)
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(l)
+	var val := Button.new()
+	val.flat = true
+	val.focus_mode = Control.FOCUS_NONE
+	val.tooltip_text = "Back to the middle"
+	val.add_theme_font_size_override("font_size", 13)
+	val.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	val.add_theme_stylebox_override("hover", StyleBoxEmpty.new())
+	val.add_theme_stylebox_override("pressed", StyleBoxEmpty.new())
+	top.add_child(val)
+	box.add_child(top)
 	var s := HSlider.new()
 	s.min_value = -1.0
 	s.max_value = 1.0
 	s.step = 0.01
 	s.value = value
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Both ends are a choice: no fill from the left, the knob says where it is.
+	s.add_theme_stylebox_override("grabber_area", StyleBoxEmpty.new())
+	s.add_theme_stylebox_override("grabber_area_highlight", StyleBoxEmpty.new())
+	if low != "" or high != "":
+		s.tooltip_text = "%s  ←  →  %s" % [low if low != "" else "less", high]
+	var show := func(v: float):
+		var off := absf(v) > 0.005
+		var side: String = (high if v > 0.0 else low) if off else ""
+		val.text = ("%s  %+.2f" % [side, v]).strip_edges() if off else "—"
+		val.add_theme_color_override("font_color", UI.GOLD if off else UI.DIM)
+		val.add_theme_color_override("font_hover_color", UI.CREAM if off else UI.TEXT)
+	show.call(value)
 	s.value_changed.connect(func(v):
 		set_value.call(v)
+		show.call(v)
 		_changed(true))
-	row.add_child(s)
-	if low != "" or high != "":
-		var ends := HBoxContainer.new()
-		for t in [low, high]:
-			var e := Label.new()
-			e.text = t
-			e.theme_type_variation = "HintLabel"
-			e.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			e.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT if t == low else HORIZONTAL_ALIGNMENT_RIGHT
-			ends.add_child(e)
-		row.add_child(ends)
-	_panel.add_child(row)
+	val.pressed.connect(func(): s.value = 0.0)
+	box.add_child(s)
+	_panel.add_child(box)
 
 
-func _swatch(color: Color, selected: bool, act: Callable) -> Button:
+func _swatch(color: Color, selected: bool, act: Callable, size := 34) -> Button:
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(36, 36)
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = color
-	sb.set_border_width_all(3 if selected else 0)
-	sb.border_color = Color.WHITE
-	b.add_theme_stylebox_override("normal", sb)
-	b.add_theme_stylebox_override("hover", sb)
-	b.add_theme_stylebox_override("pressed", sb)
+	b.custom_minimum_size = Vector2(size, size)
+	b.focus_mode = Control.FOCUS_NONE
+	var normal := UI._box(color, UI.CREAM if selected else Color(0, 0, 0, 0.5), 2 if selected else 1, 5, Vector4(0, 0, 0, 0))
+	var hover := UI._box(color.lightened(0.08), UI.CREAM if selected else UI.GOLD, 2, 5, Vector4(0, 0, 0, 0))
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", normal)
 	b.pressed.connect(act)
 	return b
 
 
+## A row of tool toggles that wraps (the panel keeps its width).
+func _tool_row(tools: Array, current: String, pick: Callable) -> void:
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", 4)
+	row.add_theme_constant_override("v_separation", 4)
+	for t in tools:
+		var b := Button.new()
+		b.text = t[1]
+		b.toggle_mode = true
+		b.focus_mode = Control.FOCUS_NONE
+		b.button_pressed = current == t[0]
+		b.pressed.connect(func(): pick.call(t[0]))
+		row.add_child(b)
+	_panel.add_child(row)
+
+
 func _tune_slider(text: String, value: float, lo: float, hi: float, set_value: Callable) -> void:
 	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
 	var l := Label.new()
 	l.text = text
 	l.custom_minimum_size = Vector2(150, 0)
@@ -643,11 +981,16 @@ func _tune_slider(text: String, value: float, lo: float, hi: float, set_value: C
 	s.step = 0.01
 	s.value = value
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var v := Label.new()
-	v.text = "%.2f" % value
-	v.custom_minimum_size = Vector2(44, 0)
+	v.custom_minimum_size = Vector2(52, 0)
+	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	var show := func(x: float):
+		v.text = "×%.2f" % x
+		v.add_theme_color_override("font_color", UI.DIM if absf(x - 1.0) < 0.005 else UI.GOLD)
+	show.call(value)
 	s.value_changed.connect(func(x):
-		v.text = "%.2f" % x
+		show.call(x)
 		set_value.call(x))
 	s.drag_ended.connect(func(_changed_value): _show_step(step))
 	row.add_child(s)
@@ -661,17 +1004,20 @@ func _fill_picker(target: String) -> void:
 	if _paint_target != target or _paint_region >= regions.size():
 		_paint_target = target
 		_paint_region = 0
-	var l := Label.new()
-	l.text = "Its colors: pick one, then a color for it"
-	_panel.add_child(l)
-	var row := HBoxContainer.new()
+	_section("Its colors")
+	_hint("Pick one, then a new color for it.")
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", 6)
 	for i in regions.size():
 		row.add_child(_swatch(regions[i], i == _paint_region, func():
 			_paint_region = i
-			_show_step(step)))
+			_show_step(step), 42))
 	_panel.add_child(row)
+	_gap(4)
 	var grid := GridContainer.new()
 	grid.columns = 8
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
 	var palette: PackedColorArray = creator.palette()
 	for k in palette.size():
 		grid.add_child(_swatch(palette[k], false, func():
@@ -682,27 +1028,19 @@ func _fill_picker(target: String) -> void:
 
 
 func _skin_picker() -> void:
-	var l := Label.new()
-	l.text = "Skin"
-	_panel.add_child(l)
+	_section("Skin")
 	var grid := GridContainer.new()
 	grid.columns = 8
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
 	var tones: PackedColorArray = creator.skin_tones()
 	for i in tones.size():
-		var b := Button.new()
-		b.custom_minimum_size = Vector2(36, 36)
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = tones[i]
-		sb.set_border_width_all(3 if creator.skin() == i else 0)
-		sb.border_color = Color.WHITE
-		b.add_theme_stylebox_override("normal", sb)
-		b.add_theme_stylebox_override("hover", sb)
-		b.pressed.connect(func():
+		grid.add_child(_swatch(tones[i], creator.skin() == i, func():
 			creator.set_skin(i)
 			_changed(true)
-			_show_step(step))
-		grid.add_child(b)
+			_show_step(step)))
 	_panel.add_child(grid)
+	_hint("The first eight are natural tones; the rest are for the uncanny.")
 
 
 # --- The preview -------------------------------------------------------------------------------
@@ -737,48 +1075,52 @@ func _sculpting() -> bool:
 ## The sculpt brushes (20 §5.3) above the sliders: off, or one of six, with size, strength and
 ## symmetry.
 func _sculpt_tools() -> void:
-	var row := HBoxContainer.new()
-	for t in [["", "Sliders"], ["push", "Push"], ["pull", "Pull"], ["grab", "Grab"], ["inflate", "Inflate"], ["smooth", "Smooth"], ["flatten", "Flat"]]:
-		var b := Button.new()
-		b.text = t[1]
-		b.toggle_mode = true
-		b.button_pressed = _sculpt_tool == t[0]
-		b.pressed.connect(func():
-			_sculpt_tool = t[0]
+	_tool_row([["", "Sliders"], ["push", "Push"], ["pull", "Pull"], ["grab", "Grab"], ["inflate", "Inflate"], ["smooth", "Smooth"], ["flatten", "Flat"]],
+		_sculpt_tool, func(t):
+			_sculpt_tool = t
 			_hold_rest()
 			_show_step(step))
-		row.add_child(b)
-	_panel.add_child(row)
 	if _sculpt_tool == "":
 		return
 	_hint("Sculpt past the sliders: left-drag on the model, right-drag turns it. Parts on it follow.")
 	_slider_raw("Size", _sculpt_size, 0.015, 0.25, func(v): _sculpt_size = v)
 	_slider_raw("Strength", _sculpt_strength, 0.001, 0.015, func(v): _sculpt_strength = v)
+	var row := HBoxContainer.new()
 	var mirror := CheckBox.new()
 	mirror.text = "Symmetry"
 	mirror.button_pressed = _sculpt_mirror
+	mirror.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mirror.toggled.connect(func(on): _sculpt_mirror = on)
-	_panel.add_child(mirror)
+	row.add_child(mirror)
 	var reset := Button.new()
 	reset.text = "Undo all sculpting"
 	reset.pressed.connect(func():
 		creator.clear_sculpt()
 		_changed(true))
-	_panel.add_child(reset)
+	row.add_child(reset)
+	_panel.add_child(row)
 	_panel.add_child(HSeparator.new())
 
 
+## A plain slider from `lo` to `hi`, its name to the left (brush and sculpt sizes).
 func _slider_raw(label: String, value: float, lo: float, hi: float, on_change: Callable) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
 	var l := Label.new()
 	l.text = label
-	_panel.add_child(l)
+	l.custom_minimum_size = Vector2(96, 0)
+	l.add_theme_color_override("font_color", UI.DIM)
+	row.add_child(l)
 	var s := HSlider.new()
 	s.min_value = lo
 	s.max_value = hi
 	s.step = (hi - lo) / 100.0
 	s.value = value
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	s.value_changed.connect(on_change)
-	_panel.add_child(s)
+	row.add_child(s)
+	_panel.add_child(row)
 
 
 ## Sculpt where the stage's `pos` looks at the model; `drag` is the mouse's move (for Grab).
@@ -867,6 +1209,9 @@ func _rebuild() -> void:
 	if head >= 0:
 		_head_y = _skeleton.get_bone_global_rest(head).origin.y + 0.13
 		_top_y = _head_y + 0.15
+		# The whole figure, horns and staff too (capped: a banner pole shouldn't shrink it).
+		var mesh_top: float = (_model_node.get_node("Skeleton/Mesh") as MeshInstance3D).get_aabb().end.y
+		_top_y = clampf(mesh_top, _top_y, _top_y + 0.35)
 	_place_camera()
 
 
@@ -875,8 +1220,8 @@ func _place_camera() -> void:
 		return
 	# The gender step frames the face; on a creature it's the colors step, so the whole body.
 	var face := step == "face" or (step == "gender" and creator.gender() != "")
-	var target := Vector3(0, _head_y, 0) if face else Vector3(0, _top_y * 0.52, 0)
-	var dist := (1.5 if face else _top_y * 2.3) / _zoom
+	var target := Vector3(0, _head_y - 0.04, 0) if face else Vector3(0, _top_y * 0.52, 0)
+	var dist := (2.4 if face else _top_y * 2.3) / _zoom
 	_camera.look_at_from_position(target + Vector3(0, 0.12 if face else 0.4, dist), target)
 
 
@@ -929,13 +1274,43 @@ func _unhandled_key_input(event: InputEvent) -> void:
 # --- Files -------------------------------------------------------------------------------------
 
 func _update_status() -> void:
-	var problems: PackedStringArray = creator.problems()
-	var budget := "" if _model == null else "%d triangles (target 5,000–10,000, cap 14,000)\n" % _model.triangles()
+	if _model != null and _meter != null:
+		var tris: int = _model.triangles()
+		_meter.text = "%s triangles  ·  target 5,000–10,000" % _thousands(tris)
+		var fill := UI._box(UI.GOLD if tris <= 10000 else Color(0.95, 0.6, 0.25), Color(0, 0, 0, 0), 0, 3, Vector4(0, 0, 0, 0))
+		_meter_bar.add_theme_stylebox_override("fill", fill)
+		_meter_bar.value = tris
 	var note: String = creator.note()
-	_status.remove_theme_color_override("font_color")
+	var problems: PackedStringArray = creator.problems()
 	if note.begins_with("Can't show"):
-		_status.add_theme_color_override("font_color", Color(1.0, 0.6, 0.5))
-	_status.text = budget + ("" if note == "" else note + "\n") + ("" if problems.is_empty() else "Can't save yet: " + "; ".join(problems))
+		_toast_show(note, "error")
+	elif note != "":
+		_toast_show(note)
+	elif not problems.is_empty():
+		_toast_show("Can't save yet: " + "; ".join(problems), "error")
+	else:
+		_toast_show("")
+	_update_header()
+
+
+## Who is being made, at the top of the rail.
+func _update_header() -> void:
+	if _name_label == null:
+		return
+	var n: String = creator.name().strip_edges()
+	_name_label.text = n if n != "" else "Unnamed"
+	var b: String = BUILD_NAMES.get(String(creator.build()), String(creator.build()))
+	var g: String = creator.gender()
+	_sub_label.text = b + ("" if g == "" else "  ·  " + g.capitalize()) + ("  ·  unsaved" if dirty else "")
+
+
+func _thousands(n: int) -> String:
+	var t := str(n)
+	var out := ""
+	while t.length() > 3:
+		out = "," + t.substr(t.length() - 3) + out
+		t = t.substr(0, t.length() - 3)
+	return t + out
 
 
 func _randomize() -> void:
@@ -966,12 +1341,12 @@ func _save() -> void:
 	var path := file_path if file_path != "" else ProjectSettings.globalize_path("%s/%s.champion.ron" % [DIR, slug])
 	var err: String = creator.save(path)
 	if err != "":
-		_status.text = "Not saved: " + err
+		_toast_show("Not saved: " + err, "error")
 		return
 	file_path = path
 	dirty = false
-	_status.add_theme_color_override("font_color", Color(0.6, 0.95, 0.6))
-	_status.text = "Saved %s" % path
+	_update_header()
+	_toast_show("Saved to %s" % path, "ok")
 	saved.emit(path)
 
 
@@ -986,7 +1361,7 @@ func _test() -> void:
 func load_file(path: String) -> void:
 	var err: String = creator.load(path)
 	if err != "":
-		_status.text = "Couldn't load: " + err
+		_toast_show("Couldn't load: " + err, "error")
 		return
 	file_path = path
 	dirty = false
