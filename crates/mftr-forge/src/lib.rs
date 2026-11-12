@@ -24,6 +24,7 @@ pub mod paint;
 pub mod passives;
 pub mod recipe;
 pub mod sculpt;
+pub mod wardrobe;
 
 use std::path::Path;
 
@@ -58,6 +59,14 @@ pub struct Part {
     /// (21 §9.2, `body::settle_rigid`).
     #[nserde(default)]
     pub rigid: bool,
+    /// A wardrobe item (22 §4): it hides the body under it by its geometry
+    /// (`wardrobe::hide_covered`), not by `hides`.
+    #[nserde(default)]
+    pub covers: bool,
+    /// A wardrobe item's layer (`wardrobe::LAYERS`): a worn item of a later layer is pushed clear
+    /// of a worn one of an earlier layer (22 §4.3).
+    #[nserde(default)]
+    pub layer: String,
 }
 
 #[derive(Clone, Debug, nanoserde::DeRon)]
@@ -391,6 +400,32 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
             }
             None => {}
         }
+    }
+    // Wardrobe items hide the body under them (22 §4.4).
+    let covering: Vec<usize> = model
+        .nodes
+        .iter()
+        .filter(|n| n.name.strip_prefix("part.").is_some_and(|id| worn.iter().any(|p| p.covers && p.id == id)))
+        .filter_map(|n| n.mesh)
+        .collect();
+    if !covering.is_empty() {
+        let body: Vec<usize> =
+            model.nodes.iter().filter(|n| !n.name.starts_with("part.")).filter_map(|n| n.mesh).collect();
+        wardrobe::hide_covered(model, &body, &covering);
+    }
+    // Layered items worn together: each outer one clear of each inner one (22 §4.3).
+    let mesh_of = |id: &str| model.nodes.iter().find(|n| n.name.strip_prefix("part.") == Some(id)).and_then(|n| n.mesh);
+    let rank = |p: &Part| wardrobe::LAYERS.iter().position(|l| *l == p.layer);
+    let mut pairs = Vec::new();
+    for a in worn.iter().filter(|p| rank(p).is_some()) {
+        for b in worn.iter().filter(|p| rank(p) > rank(a)) {
+            if let (Some(ia), Some(ib)) = (mesh_of(&a.id), mesh_of(&b.id)) {
+                pairs.push((ia, ib));
+            }
+        }
+    }
+    for (inner, outer) in pairs {
+        wardrobe::layer(model, &[inner], &[outer], 0.05);
     }
     let tris = model.triangles();
     if tris > mftr_pack::rules::TRIANGLES_MAX {
@@ -1623,6 +1658,66 @@ mod tests {
         let mut high = Looks::default();
         high.set_slider("brow_height", 1.0);
         assert!(brow_top(&high) > plain + 0.002, "{} {plain}", brow_top(&high));
+    }
+
+    #[test]
+    fn a_wardrobe_item_fits_every_base_and_hides_the_body_under_it() {
+        // 22 §4 (BW5): the sewn tunic, authored once, is a covering part of every humanoid base;
+        // worn, the torso under it goes and the limbs and head stay.
+        let c = catalog();
+        for key in
+            ["humanoid_slim_masculine", "humanoid_slim_feminine", "humanoid_heavy_masculine", "humanoid_heavy_feminine"]
+        {
+            let part = c.parts(key).iter().find(|p| p.id == "torso.linen_tunic").unwrap_or_else(|| panic!("{key}"));
+            assert!(part.covers && part.accent && part.hides.is_empty(), "{key}");
+        }
+        let bare = c.forge("Bare", &Looks::default()).unwrap().model;
+        let dressed =
+            c.forge("Dressed", &Looks { outfit: vec!["torso.linen_tunic".into()], ..Looks::default() }).unwrap().model;
+        let body = |m: &Model| -> Vec<[f32; 3]> {
+            let mut out = Vec::new();
+            for n in m.nodes.iter().filter(|n| !n.name.starts_with("part.")) {
+                if let Some(mi) = n.mesh {
+                    for p in &m.meshes[mi] {
+                        out.extend(p.indices.iter().map(|&i| p.positions[i as usize]));
+                    }
+                }
+            }
+            out
+        };
+        let (b, d) = (body(&bare), body(&dressed));
+        // The torso between the belly and the chest is all under it.
+        let torso = |v: &[[f32; 3]]| v.iter().filter(|p| p[1] > 0.95 && p[1] < 1.2 && p[0].abs() < 0.2).count();
+        assert!(torso(&b) > 200 && torso(&d) * 20 < torso(&b), "{} of {} left", torso(&d), torso(&b));
+        // The head and the feet are still all there.
+        let count = |v: &[[f32; 3]], f: &dyn Fn(&[f32; 3]) -> bool| v.iter().filter(|p| f(p)).count();
+        let high = |p: &[f32; 3]| p[1] > 1.7;
+        let low = |p: &[f32; 3]| p[1] < 0.3;
+        assert_eq!(count(&b, &high), count(&d, &high));
+        assert_eq!(count(&b, &low), count(&d, &low));
+    }
+
+    #[test]
+    fn layered_items_lie_one_over_the_other() {
+        // 22 §4.3: worn together, the over layer (the tunic) is pushed clear of the under layer
+        // (the trousers), and the trousers under it go; the trousers alone pass the harness.
+        let c = catalog();
+        let one = c.forge("A", &Looks { outfit: vec!["legs.wool_trousers".into()], ..Looks::default() }).unwrap().model;
+        let two = c
+            .forge(
+                "B",
+                &Looks { outfit: vec!["torso.linen_tunic".into(), "legs.wool_trousers".into()], ..Looks::default() },
+            )
+            .unwrap()
+            .model;
+        let mesh = |m: &Model, id: &str| m.nodes.iter().find(|n| n.name == format!("part.{id}")).unwrap().mesh.unwrap();
+        let tris = |m: &Model, id: &str| m.meshes[mesh(m, id)].iter().map(|p| p.indices.len() / 3).sum::<usize>();
+        assert!(tris(&two, "legs.wool_trousers") < tris(&one, "legs.wool_trousers"), "the trousers under the tunic go");
+        let pos = face::skinned(&one);
+        let body: Vec<usize> =
+            one.nodes.iter().filter(|n| !n.name.starts_with("part.")).filter_map(|n| n.mesh).collect();
+        let fit = wardrobe::fit(&one, &pos, &body, &[mesh(&one, "legs.wool_trousers")]);
+        assert!(fit.poke <= wardrobe::POKE_MAX, "{fit:?}");
     }
 
     #[test]

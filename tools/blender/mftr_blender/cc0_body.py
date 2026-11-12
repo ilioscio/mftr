@@ -341,6 +341,9 @@ def make(armature, gender, build, girth=None):
     rig_gap = armature.data.bones["neck"].head_local.z - armature.data.bones["upperarm_l"].head_local.z
     scale = armature.data.bones["head"].head_local.z / j["head"].z
     j["spine_top"] = Vector((0.0, j["neck"].y, j["shoulder_l"].z + rig_gap / scale))
+    # Each vertex's place on the source body, for fitting the wardrobe (22 §4.2).
+    from . import wardrobe
+    wardrobe.record_source(obj)
     src = source_rig(obj, j)
     _spine_off_clavicles(obj)
     _weld_weights(obj)

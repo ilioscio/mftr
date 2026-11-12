@@ -309,6 +309,40 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("wardrobe") if args.get(1).map(String::as_str) == Some("check") => {
+            // The wardrobe's QA harness (22 §4.8): every item, and each layered pair, on every
+            // humanoid base at neutral and at each body slider's ends. Exits non-zero when one
+            // has skin poking through.
+            let art = std::path::PathBuf::from(args.get(2).map(String::as_str).unwrap_or("art"));
+            let c = match mftr_forge::Catalog::load(&art) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            };
+            let rows = mftr_forge::wardrobe::check(&c);
+            let mut failed = 0;
+            println!("{:<26} {:<44} {:<22} {:>5} {:>5} {:>6}", "base", "outfit", "body", "poke", "gaps", "verts");
+            for r in &rows {
+                let bad = r.fit.poke > mftr_forge::wardrobe::POKE_MAX;
+                failed += bad as usize;
+                println!(
+                    "{:<26} {:<44} {:<22} {:>5} {:>5} {:>6}{}",
+                    r.base,
+                    r.outfit.join(" + "),
+                    r.body,
+                    r.fit.poke,
+                    r.fit.gaps,
+                    r.fit.item_vertices,
+                    if bad { "  FAIL" } else { "" }
+                );
+            }
+            println!("{} checks, {failed} failed", rows.len());
+            if failed > 0 {
+                std::process::exit(1);
+            }
+        }
         Some("sfx") if args.get(1).map(String::as_str) == Some("build") => {
             // A4c (05 §7): render every `sounds.ron` recipe into its pack's `export/`.
             let mut recipes = Vec::new();

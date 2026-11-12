@@ -576,11 +576,18 @@ def build(gender, name, build="humanoid_slim"):
     if mass and BODY == "cc0":
         from . import cc0_body
         cc0_body.bake_mass(armature, [body] + [o for o in bpy.data.objects if o.name.startswith("part.")], mass)
+    # The wardrobe's items (22 §4, BW5), fitted from the reference body onto the finished body:
+    # after its mass, so a heavy build's cloth sits on its own bulk, not grown from the slim's.
+    from . import wardrobe
+    if BODY == "cc0":
+        made += wardrobe.fit_items(armature, body, gender)
     # Weapons ride the prop bones, as the official champions' do, so the moves' clips (whose
     # wrists stay human, 14 §3.3) hold them where their champions held theirs.
     from . import wrists
     wrists.rebind_weapons(armature, [o for o in bpy.data.objects if o.name.startswith(("part.weapon.", "part.offhand."))])
     mesh.GIRTH = None
+    if BODY == "cc0":
+        wardrobe.strip_source(body)
     unwrap(body, head_group="head")
     # The eyeballs carry their own coordinates, not the paint image's (22 §2.1).
     authored_head.eye_uvs(armature, body)

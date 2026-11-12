@@ -813,6 +813,97 @@ openings' climb stops there, so the briefs no longer thin to a strip, a gap, at 
 - **A bug fixed:** a sculpt stroke over the 1,000-weld cap was cut by weld id, which could drop a
   weld's mirror. It now keeps the strongest offsets, a pair together.
 
+### BW5 status (2026-11-12): the wardrobe pipeline, sewn garments, the QA harness
+
+**Items** live in `art/wardrobe/<slot>/<name>/` (`art/wardrobe/README.md`):
+- `item.ron` holds the id, slot, name, layer, accent and rigid flags;
+- `item.blend` holds one mesh, `item`, authored around the reference body (`body_male` in
+  `body_source.blend`);
+- an optional `build.py` makes it.
+
+**Fitting at build time** (`mftr_blender.wardrobe`), as §4.2 proposed, with one change. The
+bases don't share a topology after the neck's marriage and the underwear's cuts, so Surface
+Deform's same-topology binding doesn't apply. Instead:
+
+- each base body records every vertex's place on its source body before the fit (`src_co`);
+- an item vertex is bound to its nearest few faces (barycentric place, offset in each face's
+  frame) and carried, first onto the female source body for the feminine bases (it shares the
+  male's topology), then onto the base, from its source places to its fitted ones;
+- then pushed out to its layer's distance from the skin, and weighted from the body under it:
+  two biped bones, then the helpers (`body_rig.transfer`), so it follows the body sliders and
+  the sculpting.
+
+It runs after the heavy builds' mass is baked, so their cloth sits on their own bulk. In the
+base, an item is a catalog part flagged `covers`, with its `layer`.
+
+**At forge time** (`mftr_forge::wardrobe`):
+
+- **Coverage (§4.4):** the body triangles under a worn covering item are hidden, by geometry. A
+  vertex is covered when its outward ray meets the item within 12 cm, on an item face looking
+  the same way, so a tunic hides the torso it covers but not the inner arms beside it.
+- **Layers (§4.3):** for each pair worn together, the outer garment is pushed 6 mm clear of the
+  inner. The push is a smooth field, each vertex taking the strongest push within 5 cm, fading:
+  pushing single vertices folded faces over and opened holes. The inner garment's faces under the
+  outer are then hidden, as the body's are. A garment's lining (its inside near the openings,
+  marked by a dark occlusion alpha) is left out of the push, since it faces the wrong way.
+
+**M1: sewn garments** (`mftr_blender.sewing`). A pattern is data: flat panels (named outline
+points) and seams (outline stretches, sewn start to start). The build:
+
+1. Panels are meshed by a constrained Delaunay of their outlines and an inner grid (3.5 cm),
+   and set around the reference body.
+2. Seams become Blender cloth's sewing springs. The body collides. Gravity is off while the
+   seams close, then the cloth falls and drapes, over 120 frames.
+3. Every stitch's ends are merged at their mean. The trims (the faces near the open edges) go on
+   their own slot and color.
+4. A lining 4 mm in is added only within 7 cm of the openings: thickness where a look into a
+   neckline sees it, at about a third of a full solidify's cost.
+
+Each item's `build.py` runs the sim in Blender and writes its `item.blend`.
+
+| Item | Pattern | Triangles |
+|---|---|---|
+| `torso.linen_tunic` (over, accent trims) | front and back, shoulder and side seams, flaring to mid-thigh | 1,526 |
+| `legs.wool_trousers` (under) | four panels, outer and inner leg seams, middle front and back | 1,723 |
+
+**The QA harness (§4.8)**, `mftr-tools wardrobe check [art]`, puts every covering item, and
+each pair of them in layers, on every humanoid base, at neutral and at each body slider's ends:
+180 checks, about a second in release. Per check:
+
+- **poke:** skin poking through the outermost item (a shown body vertex whose inward ray meets
+  the item within 1.5 cm);
+- **gaps:** item vertices more than 3 cm off the body (drape counts, so this is information);
+- an outfit fails on more than 12 pokes. The command exits non-zero, so a large catalog stays
+  honest.
+
+**Today's harness, at neutral:**
+
+| | Trousers | Tunic | Both |
+|---|---|---|---|
+| Slim masculine | 5 | 13 | 13 |
+| Slim feminine | 1 | 33 | 32 |
+| Heavy masculine | 9 | 41 | 40 |
+| Heavy feminine | 2 | 80 | 76 |
+
+The trousers pass everywhere. **The tunic fails**, its pokes at the armholes, worst on the
+heavy feminine's bust and shoulders; the body sliders change the numbers little.
+
+**Checked:**
+- Captures of both items on all four bases, alone and together, in the creator (animating) and
+  in a practice match.
+- Tests: coverage hides the skin under an item and nothing else; the tunic is a covering part
+  of every base and hides the torso but not the head or feet; layered, the trousers under the
+  tunic go, and the trousers alone pass the harness.
+
+**Not yet:**
+- **Fix the tunic's armholes**, so it passes the harness. Then the harness can become a test.
+- **More items:** three per slot is the exit, so a sleeved shirt (panels in any plane, for the
+  sleeves), a skirt, a coat; armour and accessories modelled by hand.
+- **The old catalog** is still offered beside the new items. It retires as each slot fills.
+- **M5's simulated correctives** if the harness shows the slider ends need them. So far they
+  barely change its numbers.
+- **The small hole where the trousers' four seams meet at the crotch.**
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?
