@@ -36,29 +36,35 @@ ACCENT = (0.18, 0.52, 0.95)
 # hands. The heavy humanoid is the brute (Rook, Bastion, Cairn): low hips and short legs, the
 # neck sunk between the shoulders, broad and deep, long arms, huge hands, a head ~8% bigger than
 # the slim build's (smaller than its body's lead, but visibly bigger: 21 §8 #6).
+# The heads were drawn for the lofted block-out; on the realistic body (22 §1) they read big. The
+# owner's review (2026-11-12) set them by the head-size slider: -0.8 on the slim builds and -0.5
+# on the heavy ones (×0.8 and ×0.875). They are built at that size, so the jaw keeps its shape
+# (the slider shrinks the head bone, and the jaw's skin shared with the neck stays big).
 BUILDS = {
     "humanoid_slim": {
         "masculine": {"shape": {"heights": [(0.0, 0.0), (2.15, 2.15)], "x": 1.04, "y": 1.0, "scale": 0.98, "shoulder": 0.03,
                                 "hand": 1.3, "drop": 0.05},
-                      "girth": {"torso": (1.0, 1.0), "limb": (1.0, 1.0), "neck": (1.45, 1.4)}, "head": 1.36, "hands": 1.0},
+                      "girth": {"torso": (1.0, 1.0), "limb": (1.0, 1.0), "neck": (1.0, 1.0)}, "head": 1.36 * 0.8, "hands": 1.0},
         "feminine": {"shape": {"heights": [(0.0, 0.0), (2.15, 2.15)], "x": 0.96, "y": 0.98, "scale": 0.95, "shoulder": 0.0,
                                "hand": 1.2, "drop": 0.06},
-                     "girth": {"torso": (1.0, 1.0), "limb": (1.0, 1.0), "neck": (1.3, 1.25)}, "head": 1.3, "hands": 1.0},
+                     "girth": {"torso": (1.0, 1.0), "limb": (1.0, 1.0), "neck": (0.95, 0.95)}, "head": 1.3 * 0.8, "hands": 1.0},
     },
     "humanoid_heavy": {
         "masculine": {"shape": {"heights": [(0.0, 0.0), (0.03, 0.03), (0.09, 0.09), (0.54, 0.46), (1.00, 0.89), (1.12, 1.01),
                                             (1.26, 1.16), (1.40, 1.31), (1.56, 1.48), (1.64, 1.53), (1.88, 1.78), (2.15, 2.05)],
                                 "x": 1.24, "y": 1.2, "scale": 1.1, "shoulder": 0.08, "arm": 1.06, "hand": 1.55,
-                                "drop": 0.035},
-                      "girth": {"torso": (1.3, 1.28), "limb": (1.22, 1.22), "neck": (1.2, 1.15)}, "head": 1.47, "hands": 1.2,
-                      # Its own mass (22 §1.4), baked in: the body sliders' presets, mixed.
-                      "mass": {"body_muscle": 0.6, "body_shoulders": 0.6, "neck_thickness": 0.35, "body_belly": 0.25}},
+                                "drop": 0.075},
+                      "girth": {"torso": (1.12, 1.12), "limb": (1.22, 1.22), "neck": (1.0, 0.95)}, "head": 1.47 * 0.875, "hands": 1.2,
+                      # Its own mass (22 §1.4), baked in: the body sliders' presets, mixed. A
+                      # muscled brute, not a fat one (the owner's review, 2026-11-12): chest and
+                      # limbs, no gut, little slope from the neck.
+                      "mass": {"body_muscle": 0.8, "body_chest": 0.3, "body_shoulders": 0.35, "body_bulk": 0.1}},
         "feminine": {"shape": {"heights": [(0.0, 0.0), (0.03, 0.03), (0.09, 0.09), (0.54, 0.48), (1.00, 0.91), (1.12, 1.03),
                                            (1.26, 1.18), (1.40, 1.33), (1.56, 1.50), (1.64, 1.55), (1.88, 1.80), (2.15, 2.07)],
                                "x": 1.16, "y": 1.12, "scale": 1.06, "shoulder": 0.06, "arm": 1.04, "hand": 1.4,
-                               "drop": 0.045},
-                     "girth": {"torso": (1.2, 1.18), "limb": (1.16, 1.16), "neck": (1.15, 1.1)}, "head": 1.4, "hands": 1.1,
-                     "mass": {"body_muscle": 0.5, "body_hips": 0.5, "neck_thickness": 0.2, "body_chest": 0.3}},
+                               "drop": 0.07},
+                     "girth": {"torso": (1.1, 1.08), "limb": (1.16, 1.16), "neck": (0.97, 0.95)}, "head": 1.4 * 0.875, "hands": 1.1,
+                     "mass": {"body_muscle": 0.6, "body_hips": 0.45, "body_chest": 0.25, "body_shoulders": 0.15}},
     },
 }
 
@@ -182,7 +188,10 @@ def _cc0_body(armature, name, gender, build, head_part):
     me.color_attributes.active_color = me.color_attributes["Col"]
     me.color_attributes.render_color_index = me.color_attributes.active_color_index
     # The body's own neck, seated into the head's underside (22 §1.3).
-    cc0_body.marry_neck(flesh, n_body, armature.data.bones["head"].head_local)
+    cc0_body.marry_neck(flesh, n_body, armature.data.bones["head"].head_local,
+                        armature.data.bones["neck"].head_local)
+    # Mirror-exact, for the sculpting brushes' symmetry.
+    cc0_body.symmetrize(flesh)
     flesh.parent = armature
     mod = flesh.modifiers.new("Armature", "ARMATURE")
     mod.object = armature

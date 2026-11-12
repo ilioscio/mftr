@@ -247,6 +247,9 @@ TRIM = (0.30, 0.20, 0.12)
 # lines rather than the faces' steps. Each plane is (a point, its normal, the box of the body it
 # cuts: x half-width and z range), in the source's frame.
 BAND = 0.012   # the waistband's and the band top's hem width (m)
+# How deep the briefs are at the hips' sides, at least (m): the leg openings rise from the crotch
+# toward the sides and stop this far under the waistband's top.
+BRIEF_SIDE = 0.05
 # The band top's sides: out to just past the shoulder joint's line, where the arm leaves the
 # torso, so it wraps the bust's sides and stops at the armpit on one clean edge.
 BAND_SIDE = 0.005
@@ -257,7 +260,7 @@ def _cuts(j, sex):
     hip = j["hip_l"]
     waist, crotch = hip.z + 0.085, hip.z - 0.075
     box = (hip.x + 0.16, hip.z - 0.2, hip.z + 0.15)
-    out = [(Vector((0, 0, waist)), Vector((0, 0, 1)), box), (Vector((0, 0, waist - BAND)), Vector((0, 0, 1)), box)]
+    out = [(Vector((0, 0, z)), Vector((0, 0, 1)), box) for z in (waist, waist - BAND, waist - BRIEF_SIDE)]
     for s in (1, -1):
         # A leg opening: from the crotch up toward the hip's side, round the thigh.
         out.append((Vector((s * 0.025, 0, crotch)), Vector((-0.95 * s, 0, 1)).normalized(), box))
@@ -276,7 +279,8 @@ def _garment(c, j, sex):
     waist, crotch = hip.z + 0.085, hip.z - 0.075
     s = 1 if c.x >= 0 else -1
     above_leg = (c - Vector((s * 0.025, 0, crotch))).dot(Vector((-0.95 * s, 0, 1))) > 0
-    if above_leg and c.z < waist and abs(c.x) < hip.x + 0.11:
+    # The sides at least `BRIEF_SIDE` deep: the leg opening's climb stops there.
+    if (above_leg or c.z > waist - BRIEF_SIDE) and c.z < waist and abs(c.x) < hip.x + 0.11:
         return "trim" if c.z > waist - BAND else "under"
     if sex == "female":
         lo, hi = j["chest"].z + 0.015, j["chest"].z + 0.135
@@ -451,29 +455,56 @@ def _ground(obj, armature):
 
 
 
-def marry_neck(obj, n_body, joint, rise=0.012):
+# How far above the neck joint the throat is cut (the front of the plane `marry_neck` cuts on).
+NECK_FRONT = 0.035
+
+
+def marry_neck(obj, n_body, joint, neck, rise=0.008):
     """Marry the body (vertices below `n_body`) to the authored head (the rest), the source's
-    own neck kept as it was modelled: the source's head goes (every vertex the head's bone weighs
-    at half or more: its face, jaw and chin), and each vertex of the neck's top edge then goes
-    straight up to `rise` inside the head's underside, the edge capped inside. In front of the
-    head's `joint` a line straight up mustn't pass the chin (it would find the lips): a vertex
-    whose line does is drawn back toward the neck's middle until its line meets the chin. The neck's last ring
-    stretches into the head; nothing is added but the cap."""
+    own neck kept as it was modelled:
+
+    1. The source's head and the floor of its jaw go: the neck is cut on one plane, low at the
+       throat (`neck` is the neck joint, its base) and high at the back of the skull, so the
+       throat is a clean column (the jaw floor's remains read as a frilled collar).
+    2. Each vertex of the neck's top edge goes onto the nearest point of the authored head's
+       lower surface (below its joint, so never the lips), then `rise` inside it, toward the
+       skull's middle: the neck meets the head all round, with no gap at the sides.
+    3. The edge is capped inside the head.
+    """
     import bmesh
     from mathutils.bvhtree import BVHTree
     me = obj.data
     g = obj.vertex_groups["head"].index
+    g_neck = obj.vertex_groups["neck"].index
     bm = bmesh.new()
     bm.from_mesh(me)
     deform = bm.verts.layers.deform.verify()
     col = bm.verts.layers.float_color.get("Col")
     bm.verts.ensure_lookup_table()
-    head_v = [v for v in bm.verts if v.index >= n_body]
-    tree = BVHTree.FromPolygons([v.co.copy() for v in bm.verts],
-                                [[v.index for v in f.verts] for f in bm.faces if all(v.index >= n_body for v in f.verts)])
     body = {v for v in bm.verts if v.index < n_body}
-    gone = [v for v in body if v[deform].get(g, 0.0) >= 0.5]
-    bmesh.ops.delete(bm, geom=gone, context="VERTS")
+    # The head's lower surface: its faces below the joint (the jaw's underside, the chin's, the
+    # back of the skull's base).
+    lower = [f for f in bm.faces if all(v.index >= n_body for v in f.verts)
+             and f.calc_center_median().z < joint.z + 0.005]
+    tree = BVHTree.FromPolygons([v.co.copy() for v in bm.verts], [[v.index for v in f.verts] for f in lower])
+    # The cut: through (y_f, z_f) at the throat and (y_b, z_b) behind the skull's base.
+    # Never above just under the chin (a heavy build's short neck puts the chin low).
+    chin = min((v.co.z for v in bm.verts if v.index >= n_body and v.co.y < joint.y - 0.03), default=joint.z)
+    y_f, z_f = joint.y - 0.06, min(neck.z + NECK_FRONT, chin - 0.015)
+    y_b, z_b = joint.y + 0.06, joint.z + 0.03
+    p0 = Vector((0.0, y_f, z_f))
+    no = Vector((0.0, -(z_b - z_f), y_b - y_f)).normalized()
+    near = [f for f in bm.faces if all(v in body for v in f.verts)
+            and all(abs(v.co.x) < 0.2 and neck.z - 0.05 < v.co.z < joint.z + 0.2 for v in f.verts)]
+    geom = list({v for f in near for v in f.verts}) + list({e for f in near for e in f.edges}) + near
+    cut = bmesh.ops.bisect_plane(bm, geom=geom, dist=1e-5, plane_co=p0, plane_no=no)
+    body |= {x for x in cut["geom_cut"] if isinstance(x, bmesh.types.BMVert)}
+
+    def gone(v):
+        above = (v.co - p0).dot(no) > 1e-5 and abs(v.co.x) < 0.2 and v.co.z > neck.z - 0.05
+        return above or v[deform].get(g, 0.0) >= 0.5
+
+    bmesh.ops.delete(bm, geom=[v for v in body if v.is_valid and gone(v)], context="VERTS")
     _keep_neck(bm, body, joint.z - 0.12)
     # The neck's top edge: the body's open edges, but the color seams' (each point has a twin).
     places = {}
@@ -481,57 +512,64 @@ def marry_neck(obj, n_body, joint, rise=0.012):
         k = tuple(round(c, 5) for c in v.co)
         places[k] = places.get(k, 0) + 1
     edge = {v for e in bm.edges if e.is_boundary for v in e.verts
-            if v in body and places[tuple(round(c, 5) for c in v.co)] == 1}
+            if v in body and v.is_valid and places[tuple(round(c, 5) for c in v.co)] == 1}
     top = [v for v in edge if v.co.z > joint.z - 0.15]
-    if top:
-        axis = sum((v.co for v in top), Vector()) / len(top)
+    if not top:
+        bm.to_mesh(me)
+        bm.free()
+        return
+    inside = joint + Vector((0.0, 0.0, 0.06))
+    centre = sum((v.co for v in top), Vector()) / len(top)
+    ring = sorted(top, key=lambda v: math.atan2(v.co.y - centre.y, v.co.x - centre.x))
+    steps = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6)
 
-        def up(p):
-            hit, _n, _i, _d = tree.ray_cast(p + Vector((0, 0, 1e-4)), Vector((0.0, 0.0, 1.0)), 0.3)
-            return hit
+    def drawn(v, t):
+        return Vector((v.co.x + (centre.x - v.co.x) * t, v.co.y + (centre.y - v.co.y) * t, v.co.z))
 
-        ring = sorted(top, key=lambda v: math.atan2(v.co.y - axis.y, v.co.x - axis.x))
-        steps = (0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.85)
+    def up(p):
+        return tree.ray_cast(p, Vector((0.0, 0.0, 1.0)), 0.2)[0]
 
-        def at(v, t):
-            return Vector((v.co.x + (axis.x - v.co.x) * t, v.co.y + (axis.y - v.co.y) * t, v.co.z))
-
-        def ok(v, t):
-            p = at(v, t)
-            hit = up(p)
-            # Not past the chin in front (the lips), nor up under an ear at the sides.
-            if hit is not None and (p.y > joint.y or hit.z <= joint.z) and hit.z <= joint.z + 0.05:
-                return hit
-            return None
-
-        # How far in each point must go; then each takes the most of its neighbours' along the
-        # edge, so the edge is drawn in evenly (one point in, the next out, reads as teeth).
-        need = []
-        for v in ring:
-            need.append(next((t for t in steps if ok(v, t) is not None), steps[-1]))
-        n = len(ring)
-        even = [max(need[(i + d) % n] for d in (-2, -1, 0, 1, 2)) for i in range(n)]
-        for v, t in zip(ring, even):
-            hit = ok(v, t)
-            p = at(v, t)
-            v.co = Vector((p.x, p.y, max(v.co.z, (hit.z + rise) if hit is not None else joint.z)))
-
-        mid = bm.verts.new(axis + Vector((0, 0, rise)))
-        mid[deform][g] = 1.0
-        if col is not None:
-            mid[col] = ring[0][col]
-        skin = next((f.material_index for f in bm.faces if f.verts[0] in body), 0)
-        for i in range(len(ring)):
-            try:
-                f = bm.faces.new([ring[i], ring[(i + 1) % len(ring)], mid])
-            except ValueError:
-                continue
-            f.normal_update()
-            if f.normal.z < 0:
-                f.normal_flip()
-            f.material_index = skin
-            f.smooth = False
-    del head_v
+    # The front: straight up into the jaw's underside, so the throat rises as a column (the
+    # nearest point jumps between the chin's faces and pleats the strip). A point whose line
+    # misses (a thick neck stands forward of the chin) is drawn back toward the neck's middle
+    # until it meets the jaw, as far as its neighbours along the edge are, so the edge is even.
+    front = [v.co.y < centre.y for v in ring]
+    need = [next((t for t in steps if up(drawn(v, t)) is not None), None) if f else None
+            for v, f in zip(ring, front)]
+    n = len(ring)
+    for i, v in enumerate(ring):
+        loc = None
+        if front[i]:
+            near = [need[(i + d) % n] for d in (-2, -1, 0, 1, 2) if need[(i + d) % n] is not None]
+            if near:
+                t = max(near)
+                loc = up(drawn(v, t))
+                if loc is None:
+                    loc = up(drawn(v, need[i])) if need[i] is not None else None
+        if loc is None:
+            loc, _n, _i, _d = tree.find_nearest(v.co)
+        if loc is None:
+            continue
+        v.co = loc + (inside - loc).normalized() * rise
+        # Fully the head's at the seam, so it turns with it.
+        v[deform].clear()
+        v[deform][g] = 1.0
+    axis = sum((v.co for v in top), Vector()) / len(top)
+    mid = bm.verts.new(axis + Vector((0, 0, rise)))
+    mid[deform][g] = 1.0
+    if col is not None:
+        mid[col] = ring[0][col]
+    skin = next((f.material_index for f in bm.faces if f.verts[0] in body and f.is_valid), 0)
+    for i in range(len(ring)):
+        try:
+            f = bm.faces.new([ring[i], ring[(i + 1) % len(ring)], mid])
+        except ValueError:
+            continue
+        f.normal_update()
+        if f.normal.z < 0:
+            f.normal_flip()
+        f.material_index = skin
+        f.smooth = False
     bm.to_mesh(me)
     bm.free()
 
@@ -683,3 +721,40 @@ def bake_mass(armature, objects, mix):
                     kb.data[i].co += d
         for i, d in moved.items():
             me.vertices[i].co += d
+
+
+def symmetrize(obj, reach=0.008):
+    """Make the body mirror-exact across X: each vertex and the vertex nearest its mirror, when
+    each is the other's nearest within `reach`, go to the mean of their places (one mirrored);
+    a vertex on the middle line goes onto it. The projection onto the sculpt and the neck's
+    seating leave a few millimetres of drift, and the sculpting brushes' symmetry pairs welds
+    within 2 mm (`mftr_forge::sculpt`)."""
+    from mathutils.kdtree import KDTree
+    me = obj.data
+    vs = me.vertices
+    tree = KDTree(len(vs))
+    for v in vs:
+        tree.insert(v.co, v.index)
+    tree.balance()
+
+    def mate(v):
+        co, j, d = tree.find(Vector((-v.co.x, v.co.y, v.co.z)))
+        return j if d < reach else None
+
+    moved = 0
+    for v in vs:
+        if abs(v.co.x) < 1e-4:
+            continue
+        j = mate(v)
+        if j is None or j == v.index or mate(vs[j]) != v.index:
+            if abs(v.co.x) < 0.002:
+                v.co.x = 0.0
+            continue
+        if v.co.x < 0:
+            continue
+        w = vs[j]
+        mid = (v.co + Vector((-w.co.x, w.co.y, w.co.z))) / 2
+        v.co = mid
+        w.co = Vector((-mid.x, mid.y, mid.z))
+        moved += 1
+    return moved

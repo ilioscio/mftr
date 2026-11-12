@@ -256,8 +256,22 @@ pub fn stroke(
         .map(|(w, o)| (w, o.map(|x| (x * 1000.0).round() as i16)))
         .filter(|(_, o)| *o != [0, 0, 0])
         .collect();
+    if out.len() > MAX_WELDS {
+        // Over the cap: keep the strongest offsets, a weld and its mirror together (a pair has
+        // the same strength), so a symmetric stroke stays symmetric on a dense mesh.
+        let strength = |o: &[i16; 3]| o.iter().map(|x| (*x as i32).pow(2)).sum::<i32>();
+        let pair = |w: u32| w.min(welds.mirror[w as usize]);
+        out.sort_by(|a, b| strength(&b.1).cmp(&strength(&a.1)).then(pair(a.0).cmp(&pair(b.0))));
+        out.truncate(MAX_WELDS);
+        if symmetric {
+            let kept: std::collections::HashSet<u32> = out.iter().map(|(w, _)| *w).collect();
+            out.retain(|(w, _)| {
+                let m = welds.mirror[*w as usize];
+                m == *w || kept.contains(&m)
+            });
+        }
+    }
     out.sort_by_key(|(w, _)| *w);
-    out.truncate(MAX_WELDS);
     *offsets = out;
     true
 }

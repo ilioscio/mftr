@@ -882,13 +882,8 @@ mod tests {
                 .fold(f32::MIN, f32::max)
         };
         let nose = front(&plain);
-        // Aim at the nose's tip.
-        let tip_y = image::meshes_of(&plain, "body")
-            .iter()
-            .flat_map(|&i| &plain.meshes[i])
-            .flat_map(|p| p.positions.iter().filter(|v| (v[1] - head_y).abs() < 0.12))
-            .fold((f32::MIN, 0.0), |b, v| if v[2] > b.0 { (v[2], v[1]) } else { b })
-            .1;
+        // Aim at the nose's tip (its bone: the frontmost point near the head can be the lips).
+        let tip_y = world(&plain)[plain.node_by_name("face_nose_tip").unwrap()].0[1];
         for _ in 0..4 {
             assert!(sculpt::stroke(
                 &mut offsets,
@@ -1570,7 +1565,11 @@ mod tests {
         let nosed = c.forge("Nosed", &long_nose).unwrap();
         // Faces −Z in Blender, +Z in glTF: the nose tip reaches further toward +Z. On a rigged
         // face the slider moves the nose's bones (FR3), so where the skin puts the vertices.
-        let front = |m: &Model| face::skinned(m).iter().flatten().flatten().map(|v| v[2]).fold(f32::MIN, f32::max);
+        // The head's front only (the chest stands further forward than a smaller head's nose).
+        let neck = world(&plain.model)[plain.model.node_by_name("head").unwrap()].0[1];
+        let front = |m: &Model| {
+            face::skinned(m).iter().flatten().flatten().filter(|v| v[1] > neck).map(|v| v[2]).fold(f32::MIN, f32::max)
+        };
         let reach = front(&nosed.model) - front(&plain.model);
         assert!(reach > 0.01, "{reach}");
         let mut tall = Looks::default();

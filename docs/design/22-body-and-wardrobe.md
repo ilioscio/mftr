@@ -768,6 +768,48 @@ rest and with the chest slider at full on both slim bases; all bases validate.
   the neck's front edge showing.
 - The band top over the bust shows its cut slivers a little.
 
+### Second review (2026-11-12): the throat, head size, underwear, the heavy mass
+
+The owner's notes on the quality pass:
+- the throat read as a frilled collar on the masculine bodies, with a gap at the feminine's side;
+- the heads looked right only with Head size at -0.8 (slim) or -0.5 (heavy), and the slider
+  hardened the feminine jaw;
+- the underwear still had gaps;
+- the heavy builds' mass needed work.
+
+**The throat.**
+- `marry_neck` now cuts the source's neck on one plane, running from 3.5 cm above the neck joint
+  at the throat (never higher than just under the chin) to behind the skull's base. The source's
+  jaw floor, which made the frill, goes with the head.
+- The front of the neck's top edge rises straight up into the jaw's underside. A point whose
+  line misses the jaw is drawn back toward the neck's middle, as far as its neighbours are, so
+  the front edge stays even. The back and sides go to the nearest point of the head's lower
+  surface.
+- The seam's vertices are wholly the head's.
+- Neck girths are 1.0 or less: the realistic neck is thick already.
+
+**Head size**, built in rather than slid: the base heads are 0.8 of their old size on the slim
+builds and 0.875 on the heavy ones, the owner's -0.8 and -0.5. The slider shrank the head bone
+and left the jaw's skin, shared with the neck, big; building the head at that size keeps the
+face's proportions, so the jaw isn't hardened. Head size 0 is now the right head.
+
+**The briefs' sides** are at least 5 cm deep (`BRIEF_SIDE`, its own cut plane): the leg
+openings' climb stops there, so the briefs no longer thin to a strip, a gap, at the hips.
+
+**The heavy builds:**
+- shoulders lowered more (`drop` 7.5 and 7 cm);
+- the torso's girth tapered (1.12 and 1.1, from 1.3 and 1.2);
+- the masculine's mass mix is muscle, chest and shoulders, with little bulk and no belly: a
+  muscled brute, not a fat one;
+- the feminine's is muscle, hips, chest and a little shoulder.
+
+**Also:**
+- The body is made mirror-exact at the end of the build (`cc0_body.symmetrize`): the
+  projection and the neck's seating left a few millimetres of drift, past the brushes' 2 mm
+  mirror pairing.
+- **A bug fixed:** a sculpt stroke over the 1,000-weld cap was cut by weld id, which could drop a
+  weld's mirror. It now keeps the strongest offsets, a pair together.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?
