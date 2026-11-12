@@ -369,6 +369,79 @@ lofted tubes that are about to be replaced would be wasted.
 | **BW8 Creatures' wardrobes** | Reference bodies and adapters for the four creature builds | Items on every build |
 | **M1–M3** | §5's moonshots, alongside BW5 onward | Per proposal |
 
+### BW1 status (2026-11-12): eyes built, lid shapes not yet
+
+**The eyeballs.** Each is a smooth-shaded sphere on its own look bone (`eye_look_*`), with the
+back cut away. It sits 10.8 mm round its centre, just behind the lids' rim. **Departs from
+§2.1:** no new material slot. An eye vertex's `UV` (2 and up, past any paint UV) marks it and
+carries its place on the ball, its style and its iris size. Its `COLOR` carries the iris and
+the pupil. So the champion shader draws the eye in the game, the creator and the portraits
+alike, with no uniform and no buffer.
+
+**The shader** draws, per pixel:
+
+- the sclera, shadowed toward the corners;
+- the iris, with radial streaks, lighter round the pupil and a dark limbal ring;
+- a round or slit pupil, and a catchlight;
+- glowing (the signature hue) and blank styles.
+
+The eye is lit softly, never banded.
+
+**`looks.eyes`** (`mftr_forge::eyes`), written only when it differs from the default:
+
+| Setting | Range |
+|---|---|
+| Iris color | 16: naturals, then amber, gold, red, violet, white, teal |
+| Right eye | its own color (heterochromia), optional |
+| Iris size | 80–125% |
+| Pupil | 0–10 |
+| Style | round, slit, glow, blank |
+| Sclera | white, yellowed, dark |
+
+The skin tone leaves the eyes alone.
+
+**The lids** are shells: spherical bands round each eyeball on `lid_upper_*` and `lid_lower_*`.
+The upper shell rests over the iris's top, its margin darkened as a lash line. A blink turns it
+0.86 rad down to meet the lower, which rises 0.12 rad.
+
+**Socket walls** run from each opening's rim in behind the eyeball. Before them, a look past the
+ball at the corners saw through the head to the background. They are weighted on `head`, so
+the face rig smooths them with the skin.
+
+**Life** (`client/scripts/face_life.gd`) poses the six bones each frame:
+
+- saccades every 0.6–3 s;
+- a blink every 2–6 s (60 ms closing, 100 ms opening), sometimes double;
+- the upper lids following the eyes' pitch.
+
+In the creator the eyes find the camera. In a match they look ahead. `--creator-life
+BLINK,YAW,PITCH` holds a pose for captures.
+
+**The creator's Eyes panel** on the Face step: iris swatches (per eye with "Each eye its own
+color"), iris size and pupil sliders, style and sclera rows.
+
+**Checked:**
+
+- Captures:
+  - open, half-blink, closed, and a look up and to the side;
+  - three-quarter view;
+  - six settings across the four bases (green; heterochromia; a large blue iris; blank on dark;
+    amber slit on yellowed; glowing);
+  - a practice match with the HUD portrait.
+- All eight creator bases and the neo set validate.
+- Tests: the eyes' text round-trip and strict reader; `apply` writes each eye's iris and keeps
+  its place on the ball.
+
+**Cost:** about 520 more triangles than the old eyes (a bare slim masculine is 8,576). The
+forge test's bound is 9,000 until the new body resets the budget (§1.2).
+
+**Not yet:**
+
+- **Lid shapes** (§2.3): openness, tilt, inner corner, and the fold, monolid, hooded and
+  deep-set shapes.
+- **The owner's look.**
+- **Clips may key the lids** (§2.4), but no clip does yet.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

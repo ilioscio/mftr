@@ -9,7 +9,7 @@ use godot::prelude::*;
 use mftr_forge::face::{BoneSet, FaceSculpt, Frame, Sculpt};
 use mftr_forge::looks::{Gender, Looks, Proportions, SKIN_TONES};
 use mftr_forge::recipe::{self, Recipe};
-use mftr_forge::{body, face};
+use mftr_forge::{body, eyes, face};
 use mftr_sim::ChampionId;
 
 use crate::model::{MftrModel, catalog};
@@ -257,6 +257,65 @@ impl MftrCreator {
     }
 
     /// The skin tones, as colors.
+    /// The iris colors (22 §2.2), in `eyes::IRIS` order.
+    #[func]
+    fn eye_colors(&self) -> PackedColorArray {
+        eyes::IRIS.iter().map(|c| Color::from_rgb(c[0], c[1], c[2])).collect()
+    }
+
+    #[func]
+    fn eye_color_names(&self) -> PackedStringArray {
+        eyes::IRIS_NAMES.iter().map(|n| GString::from(*n)).collect()
+    }
+
+    /// Whether the base has eyes to set (the humanoids': eyeballs on look bones).
+    #[func]
+    fn has_eyes(&self) -> bool {
+        catalog(&self.art)
+            .and_then(|c| c.base(&self.recipe.looks.base_key()).map(|b| b.model.node_by_name("eye_look_l").is_some()))
+            .unwrap_or(false)
+    }
+
+    /// The eyes: `{iris, right (-1: the same), size 0–9, pupil 0–10, style, sclera}`, style
+    /// "round", "slit", "glow" or "blank", sclera "white", "yellowed" or "dark".
+    #[func]
+    fn eyes(&self) -> VarDictionary {
+        let e = self.recipe.looks.eyes.unwrap_or_default();
+        let mut d = VarDictionary::new();
+        d.set("iris", e.iris as i64);
+        d.set("right", e.right.map_or(-1, |r| r as i64));
+        d.set("size", e.size as i64);
+        d.set("pupil", e.pupil as i64);
+        d.set("style", &GString::from(e.style.key()).to_variant());
+        d.set("sclera", &GString::from(eyes::SCLERA[e.sclera as usize % eyes::SCLERA.len()]).to_variant());
+        d
+    }
+
+    /// Set one of `eyes`' keys (a number, or a style or sclera name).
+    #[func]
+    fn set_eye(&mut self, key: GString, value: Variant) {
+        let mut e = self.recipe.looks.eyes.unwrap_or_default();
+        let n = |max: u8| value.try_to::<i64>().ok().map(|v| v.clamp(0, max as i64) as u8);
+        let s = || value.try_to::<GString>().ok().map(|g| g.to_string());
+        match key.to_string().as_str() {
+            "iris" => e.iris = n(eyes::IRIS.len() as u8 - 1).unwrap_or(e.iris),
+            "right" => {
+                e.right = match value.try_to::<i64>() {
+                    Ok(v) if v >= 0 => Some(v.min(eyes::IRIS.len() as i64 - 1) as u8),
+                    _ => None,
+                }
+            }
+            "size" => e.size = n(eyes::SIZE_MAX).unwrap_or(e.size),
+            "pupil" => e.pupil = n(eyes::PUPIL_MAX).unwrap_or(e.pupil),
+            "style" => e.style = s().and_then(|k| eyes::Style::from_key(&k)).unwrap_or(e.style),
+            "sclera" => {
+                e.sclera = s().and_then(|k| eyes::SCLERA.iter().position(|x| *x == k)).map_or(e.sclera, |i| i as u8)
+            }
+            _ => {}
+        }
+        self.recipe.looks.eyes = (e != eyes::Eyes::default()).then_some(e);
+    }
+
     #[func]
     fn skin_tones(&self) -> PackedColorArray {
         SKIN_TONES.iter().map(|c| Color::from_rgb(c[0], c[1], c[2])).collect()

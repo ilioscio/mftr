@@ -23,6 +23,11 @@ FACE_RIG = [
     ("face_jaw_angle_l", "jaw"), ("face_jaw_angle_r", "jaw"), ("face_ear_l", "head"), ("face_ear_r", "head"),
 ]
 NAMES = {n for n, _ in FACE_RIG}
+# The eyes' life bones (22 §2.3–2.4): at each eyeball's centre, under its face bone. The client
+# turns them every frame (gaze, blinks); they are never sculpted. Matches mftr_pack::face::
+# LIFE_BONES.
+LIFE = [("eye_look_l", "face_eye_l"), ("eye_look_r", "face_eye_r"), ("lid_upper_l", "face_eye_l"),
+        ("lid_upper_r", "face_eye_r"), ("lid_lower_l", "face_eye_l"), ("lid_lower_r", "face_eye_r")]
 # Into the head from the surface, so a turned feature pivots inside it (m, before head scale).
 INSET = 0.012
 
@@ -90,6 +95,14 @@ def add_bones(armature, head, piv=None):
             b.tail = piv["face_chin"]
         else:
             b.tail = piv[name] + Vector((0, -0.02, 0))
+        b.roll = 0.0
+        b.use_deform = True
+        b.parent = eb[parent]
+        b.use_connect = False
+    for name, parent in LIFE:
+        b = eb.new(name)
+        b.head = piv[parent]
+        b.tail = piv[parent] + Vector((0, -0.02, 0))
         b.roll = 0.0
         b.use_deform = True
         b.parent = eb[parent]

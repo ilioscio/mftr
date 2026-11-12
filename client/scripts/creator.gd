@@ -14,6 +14,7 @@ signal test(path: String, champion: String)
 
 const DIR := "user://champions"
 const UI := preload("res://scripts/ui_theme.gd")
+const FaceLife := preload("res://scripts/face_life.gd")
 const SLOTS := ["skin", "cloth", "metal", "emissive", "accent", "accent_glow"]
 const TEAM := Color(0.3, 0.85, 0.8)
 ## (id, title, what it's for, built yet)
@@ -93,6 +94,10 @@ var _pivot: Node3D
 var _model_node: Node3D = null
 var _model: MftrModel = null
 var _animator = null
+## The preview's eyes (22 §2.4): they look at the camera and blink.
+var _life: FaceLife = null
+## A pose to hold them in for captures (`--creator-life`), or null.
+var _life_hold = null
 var _skeleton: Skeleton3D = null
 var _head_y := 1.62   # the preview's head height (m), for framing the face
 var _top_y := 1.9     # its height overall
@@ -502,6 +507,7 @@ func _show_step(id: String) -> void:
 		"face":
 			_sculpt_tools()
 			_face_shapes()
+			_eyes_panel()
 			var have: Array = Array(creator.sliders())
 			var listed := {}
 			for group in FACE_GROUPS:
@@ -894,6 +900,57 @@ func _pad_ignore_n(c: Control, m: int) -> MarginContainer:
 	return mc
 
 
+## The eyes (22 §2.2): the iris's color (and the right eye's, for heterochromia), its size, the
+## pupil's, the iris's kind and the sclera.
+func _eyes_panel() -> void:
+	if not creator.has_eyes():
+		return
+	var e: Dictionary = creator.eyes()
+	var colors: PackedColorArray = creator.eye_colors()
+	var names: PackedStringArray = creator.eye_color_names()
+	_section("Eyes")
+	var odd: bool = int(e.right) >= 0
+	for which in (["iris", "right"] if odd else ["iris"]):
+		if odd:
+			var l := Label.new()
+			l.text = "Left eye" if which == "iris" else "Right eye"
+			l.add_theme_color_override("font_color", UI.DIM)
+			_panel.add_child(l)
+		var row := HFlowContainer.new()
+		row.add_theme_constant_override("h_separation", 5)
+		row.add_theme_constant_override("v_separation", 5)
+		var now: int = int(e[which])
+		for i in colors.size():
+			var sw := _swatch(colors[i], i == now, func():
+				creator.set_eye(which, i)
+				_changed(true)
+				_show_step("face"), 30)
+			sw.tooltip_text = names[i]
+			row.add_child(sw)
+		_panel.add_child(row)
+	var odd_box := CheckBox.new()
+	odd_box.text = "Each eye its own color"
+	odd_box.button_pressed = odd
+	odd_box.toggled.connect(func(on):
+		creator.set_eye("right", int(e.iris) if on else -1)
+		_changed(true)
+		_show_step("face"))
+	_panel.add_child(odd_box)
+	# Size 0–9 (4 is natural), pupil 0–10 (5): the sliders' middle is the natural eye.
+	_slider("Iris size", (float(e.size) - 4.0) / (4.0 if int(e.size) < 4 else 5.0), func(v):
+		creator.set_eye("size", int(round(4.0 + v * (4.0 if v < 0.0 else 5.0)))), "small", "large")
+	_slider("Pupil", (float(e.pupil) - 5.0) / 5.0, func(v):
+		creator.set_eye("pupil", int(round(5.0 + v * 5.0))), "pinpoint", "wide")
+	_tool_row([["round", "Round"], ["slit", "Slit"], ["glow", "Glowing"], ["blank", "Blank"]], String(e.style), func(k):
+		creator.set_eye("style", k)
+		_changed(true)
+		_show_step("face"))
+	_tool_row([["white", "White"], ["yellowed", "Yellowed"], ["dark", "Dark"]], String(e.sclera), func(k):
+		creator.set_eye("sclera", k)
+		_changed(true)
+		_show_step("face"))
+
+
 ## A heading over a group of sliders, with air above it.
 func _section(text: String) -> void:
 	if _panel.get_child_count() > 0:
@@ -1072,6 +1129,17 @@ func _process(delta: float) -> void:
 			_rebuild()
 	if _animator != null and _skeleton != null and not _brushing():
 		_animator.drive(_skeleton, {}, 0.0, delta)
+	if _life != null and _skeleton != null and _camera != null and _model_node != null:
+		# The eyes find the camera: the creator's champion looks at the player.
+		var to_skeleton := _skeleton.global_transform.affine_inverse()
+		_life.tick(_skeleton, delta, to_skeleton * _camera.global_position)
+
+
+## Hold the eyes still for a capture (`--creator-life`): blink 0–1, yaw, pitch.
+func hold_eyes(pose: Vector3) -> void:
+	_life_hold = pose
+	if _life != null:
+		_life.fixed = pose
 
 
 ## Painting or sculpting on the model (CR5b, CR9): it holds still in its rest pose, where the
@@ -1284,6 +1352,11 @@ func _rebuild() -> void:
 	_update_status()
 	_skeleton = _model_node.get_node("Skeleton")
 	_animator = m.new_animator()
+	_life = FaceLife.new()
+	if not _life.setup(_skeleton):
+		_life = null
+	elif _life_hold != null:
+		_life.fixed = _life_hold
 	_hold_rest()
 	_pivot.rotation.y = _yaw
 	var head := _skeleton.find_bone("head")

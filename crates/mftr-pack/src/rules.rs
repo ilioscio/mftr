@@ -100,6 +100,7 @@ pub fn biped_bone_allowed(name: &str) -> bool {
         || SOCKETS.contains(&name)
         || BIPED_OPTIONAL.contains(&name)
         || crate::face::is_face_bone(name)
+        || crate::face::is_life_bone(name)
         || crate::body::is_body_bone(name)
         || is_extra_bone(name)
 }

@@ -514,6 +514,8 @@ def build(gender, name, build="humanoid_slim"):
     wrists.rebind_weapons(armature, [o for o in bpy.data.objects if o.name.startswith(("part.weapon.", "part.offhand."))])
     mesh.GIRTH = None
     unwrap(body, head_group="head")
+    # The eyeballs carry their own coordinates, not the paint image's (22 §2.1).
+    authored_head.eye_uvs(armature, body)
     for obj in [o for o in bpy.data.objects if o.name.startswith("part.")]:
         unwrap(obj)
     armature["mftr_build"] = name

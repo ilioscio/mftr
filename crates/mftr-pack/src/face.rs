@@ -36,6 +36,23 @@ pub const FACE_RIG: [(&str, &str); 24] = [
     ("face_ear_r", "head"),
 ];
 
+/// The eyes' life bones (22 §2.3–2.4): each eyeball turns on its look bone and each lid on its
+/// own, all at the eyeball's centre under `face_eye_*`. The client poses them every frame (gaze,
+/// blinks); they are never sculpted, and a clip may key them (an emote's squint).
+pub const LIFE_BONES: [(&str, &str); 6] = [
+    ("eye_look_l", "face_eye_l"),
+    ("eye_look_r", "face_eye_r"),
+    ("lid_upper_l", "face_eye_l"),
+    ("lid_upper_r", "face_eye_r"),
+    ("lid_lower_l", "face_eye_l"),
+    ("lid_lower_r", "face_eye_r"),
+];
+
+/// Whether `name` is one of the eyes' life bones.
+pub fn is_life_bone(name: &str) -> bool {
+    LIFE_BONES.iter().any(|(n, _)| *n == name)
+}
+
 /// Along any edge, no face bone's weight may change by more than this (21 §1.4: bigger jumps
 /// pinch).
 pub const MAX_WEIGHT_STEP: f32 = 0.35;

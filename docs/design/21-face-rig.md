@@ -1162,6 +1162,71 @@ FR3 already made the sliders presets on the bones. FR5 adds whole faces to start
 - **A thumbnail per shape card.**
 - **The feminine bases' faces read close to the masculine ones** (FR2's Real_FEMALE mix); shapes can't fix that, the head mix can.
 
+### FR6 status (2026-11-12): the mechanism built; the rest moves to the new body
+
+**The helpers.** `mftr_blender.body_rig` adds the 24 helpers of §9.1 to all four humanoid bases.
+§9.1 says "about 28"; its table names 24. Each helper is aligned with its parent: along the
+limb, or upright on the torso. They are rolled as the rig rolls its bones, so a right helper's
+frame is the left one's mirror and `BoneDelta::mirrored` holds.
+
+**How the body is weighted** (the face's core-and-falloff rule, §1.4):
+
+- **Limb helpers:** a window along the parent bone. It fades to nothing before each joint
+  (elbow, knee, hip, shoulder creases).
+- **Torso helpers:** a patch round a point on the surface, at a height and an angle round
+  the spine.
+- **Shares:** overlapping helpers split a vertex by falloff³.
+- **The step limit:** each helper's weight is *lowered*, never raised, until no edge rises
+  more than 0.32. **This departs from the face's smoothing:** smoothing flattened every peak on
+  the lofted torso's 16 sides.
+- **Results:** peaks are 0.9 on the limbs and 0.5–0.9 on the torso; the steepest edge is
+  0.30. The forearm and the upper calf got rings (+440 triangles), so their helpers fade inside
+  them.
+
+**Parts** take the helpers' weights from the four nearest body vertices. Only helpers allowed
+on the part's own bone count: a coat's hem by the calves doesn't follow the calf.
+
+**Pack rules** (`mftr_pack::body`): every helper present under its parent; a leaf; never keyed
+by a clip; within the weight-step limit. The bone cap rises from 80 to 100. Sculpt bones don't
+count toward the 64-bone target.
+
+**The forge.** `mftr_forge::face` now works on a `BoneSet`, the face's or the body's: the bake,
+`posed`, `bone_frames`, the drag, the presets reader, `compose`, and the RON and byte forms.
+`mftr_forge::body` adds:
+
+- `BodySculpt`, its limits (helpers move and grow, never turn) and its region names;
+- `looks.body`, baked after the face;
+- `settle_rigid` for parts flagged `rigid`: each piece moves with the body under it and takes
+  ±10% of its growth;
+- helpers stretched with their parent's proportion;
+- covered body triangles hidden by the bone that owns them, not by their first joint.
+
+**The editor.** `MftrCreator` runs one generic editor for the face and the body. The Body step
+opens on **Drag**, with hover highlight, symmetry, size across (Alt: width) and undo. **In
+motion** shows the sliders with the model animating. `--creator-body MODE:X,Y:X,Y[;…]` drives
+it for captures.
+
+**Checked:**
+
+- Region maps of the slim masculine base, front and back.
+- In game: the chest, belly, thigh, calf and arm regions light and grow.
+- Tests:
+  - the pack rules;
+  - the body's text and byte round-trips;
+  - the strict reader;
+  - a size drag grows a helper across, never along, and the other side follows;
+  - a forged body moves the calves and chest, holds the feet, knees, hands and head, leaves
+    the buffers alone, and the live pose equals the bake.
+
+**Moved to [22](22-body-and-wardrobe.md):** the owner asked for the body itself to be upgraded,
+the way the head was (22 §1). The last steps are:
+
+- tuning the other three bases (they carry the helpers now, untuned);
+- the seven body sliders as presets on the helpers (`art/creator/bodies/presets.txt` is empty);
+- `rigid` flags in the catalog.
+
+They wait for that body (22 BW3–BW4), where they'll be redone on real anatomy.
+
 ## 8. Reported defects in the creator (2026-11-09)
 
 The owner's test found the creator glitchy. These are logged here so the face work doesn't bury them. Most are independent of the face rig and should be fixed first, as their own slice (CR-fix):

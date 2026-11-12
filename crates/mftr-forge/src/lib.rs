@@ -13,6 +13,7 @@
 //! that the client draws and animates like any other. It is deterministic and has no Godot in it.
 
 pub mod body;
+pub mod eyes;
 pub mod face;
 pub mod image;
 pub mod libmoves;
@@ -226,6 +227,7 @@ impl Catalog {
             paint::fill(&mut model, target, from, paint::PALETTE[*color as usize % paint::PALETTE.len()]);
         }
         paint::glow(&mut model, looks.signature);
+        eyes::apply(&mut model, &looks.eyes.unwrap_or_default(), paint::signature(looks.signature));
         let worn: Vec<image::Image> =
             looks.images.iter().filter(|i| i.target == "body" || looks.outfit.contains(&i.target)).cloned().collect();
         image::apply(&mut model, &worn);
@@ -608,9 +610,10 @@ fn skin(model: &mut Model, tone: [f32; 3]) {
     let ratio = [tone[0] / looks::BASE_SKIN[0], tone[1] / looks::BASE_SKIN[1], tone[2] / looks::BASE_SKIN[2]];
     for prims in &mut model.meshes {
         for p in prims.iter_mut().filter(|p| p.material == Some(slot)) {
-            for c in &mut p.colors {
-                // The eyes' whites share the slot: leave near-white alone.
-                if c[0] > 0.9 && c[1] > 0.88 {
+            for (v, c) in p.colors.iter_mut().enumerate() {
+                // The eyes share the slot (their color is the iris, 22 §2.1), and older bases'
+                // eyes are near-white: leave both alone.
+                if (c[0] > 0.9 && c[1] > 0.88) || p.uvs.get(v).is_some_and(|u| u[0] >= eyes::UV_BASE - 0.01) {
                     continue;
                 }
                 for k in 0..3 {
@@ -1662,7 +1665,8 @@ mod tests {
         let hidden = plain.model.triangles() + part_tris as usize - dressed.model.triangles();
         assert!(hidden > 100, "the breastplate hides the undersuit beneath it: {hidden}");
         // Undressed, the catalog's other parts are gone.
-        assert!(plain.model.triangles() < 8000);
+        // Within the bare champion's budget (22 §1.2: ~7,000 once the new body lands).
+        assert!(plain.model.triangles() < 9000, "{}", plain.model.triangles());
         // One part per slot; a part from nowhere; the accent rule.
         l.outfit.push("torso.tunic".into());
         assert!(c.forge("X", &l).err().unwrap().contains("both go on"));

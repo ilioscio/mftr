@@ -123,7 +123,10 @@ pub fn regions(model: &Model, target: &str) -> Vec<[f32; 3]> {
             if p.material.is_some_and(|m| unpainted.contains(&m)) {
                 continue;
             }
-            for c in &p.colors {
+            for (v, c) in p.colors.iter().enumerate() {
+                if crate::eyes::is_eye(p, v) {
+                    continue;
+                }
                 let rgb = [c[0], c[1], c[2]];
                 if out.len() < 16 && !out.iter().any(|o| same(*o, rgb)) {
                     out.push(rgb);
@@ -145,7 +148,10 @@ pub fn fill(model: &mut Model, target: &str, from: [f32; 3], color: [f32; 3]) {
             if p.material.is_some_and(|m| unpainted.contains(&m)) {
                 continue;
             }
-            for c in &mut p.colors {
+            for (v, c) in p.colors.iter_mut().enumerate() {
+                if p.uvs.get(v).is_some_and(|u| u[0] >= crate::eyes::UV_BASE - 0.01) {
+                    continue;
+                }
                 if same([c[0], c[1], c[2]], from) {
                     c[0] = color[0];
                     c[1] = color[1];

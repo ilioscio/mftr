@@ -99,6 +99,7 @@ var corpses := []
 const MINION_LIFT := -0.45               # minion bodies sit at y 0.45 (the capsule's center)
 const MINION_SLOTS := ["skin", "cloth", "metal", "emissive", "accent", "accent_glow"]
 const MapView := preload("res://scripts/map_view.gd")
+const FaceLife := preload("res://scripts/face_life.gd")
 var use_models := true
 var hovered_body: Node3D = null
 const TURN_RATE := deg_to_rad(4500.0)    # 10 §3: a 180° turn in ~40 ms
@@ -274,6 +275,10 @@ func _ready() -> void:
 		elif args[i] == "--creator-random-face" and i + 1 < args.size():
 			# A random face from the shapes (FR5), seeded: captures of what Randomize gives.
 			_creator_random_face = int(args[i + 1])
+			i += 1
+		elif args[i] == "--creator-life" and i + 1 < args.size():
+			# The eyes held for a capture (22 §2.4): `BLINK,YAW,PITCH` (0–1, radians).
+			_creator_life = args[i + 1]
 			i += 1
 		elif args[i] == "--creator-body" and i + 1 < args.size():
 			# A part of the body dragged on the stage (FR6), as `--creator-feature`:
@@ -679,6 +684,7 @@ var _creator_brush := ""                 # `--creator-brush TOOL:X,Y`: …and pa
 var _creator_sculpt := ""                # `--creator-sculpt BRUSH:X,Y`: …or sculpt there (screenshots)
 var _creator_random_face := -1           # `--creator-random-face SEED`: …with a random face
 var _creator_feature := ""               # `--creator-feature MODE:X,Y:X,Y[:hold]`: …or drag a face feature
+var _creator_life := ""                  # `--creator-life BLINK,YAW,PITCH`: …with the eyes held
 var _creator_body := ""                  # `--creator-body MODE:X,Y:X,Y[:hold]`: …or a part of the body
 var _editor_map := ""                    # `--editor-map bridge|crossroads|FILE`: …on that map
 var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's reference image
@@ -1344,7 +1350,14 @@ func _attach_model(body: MeshInstance3D, team: Color, champion: String, pack: Mf
 		"yaw": NAN,
 		"last": Vector3.INF,
 		"speed": 0.0,
+		"life": _face_life(model.get_node("Skeleton")),
 	})
+
+
+## A forged champion's eyes look about and blink (22 §2.4); null for a model without eye bones.
+func _face_life(skeleton: Skeleton3D) -> FaceLife:
+	var life := FaceLife.new()
+	return life if life.setup(skeleton) else null
 
 
 ## Model or placeholder shapes (F3).
@@ -1414,6 +1427,8 @@ func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
 			_fire_effects(champ, e.substr(5), p, rig.yaw)
 		else:
 			_sfx_play(champ, [e + ".cast", "*.cast"], p + Vector3(0, 1.2, 0))
+	if rig.get("life") != null and not info.get("dead", false):
+		rig.life.tick(rig.skeleton, delta)
 
 
 func _flash(id: int) -> void:
@@ -6742,6 +6757,9 @@ func _open_creator() -> void:
 		var a := fp[1].split(",")
 		var b := fp[2].split(",")
 		screen.feature_at_fraction(fp[0], Vector2(float(a[0]), float(a[1])), Vector2(float(b[0]), float(b[1])), 8, fp.size() > 3 and fp[3] == "hold")
+	if _creator_life != "":
+		var lp := _creator_life.split(",")
+		screen.hold_eyes(Vector3(float(lp[0]), float(lp[1]) if lp.size() > 1 else 0.0, float(lp[2]) if lp.size() > 2 else 0.0))
 	if _creator_body != "":
 		await get_tree().create_timer(1.0).timeout
 		# Several drags, one after another: `size:…;move:…`.

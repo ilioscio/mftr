@@ -130,6 +130,8 @@ pub struct Looks {
     pub face: Option<crate::face::FaceSculpt>,
     /// The bone-driven body (21 §9, FR6), on a base with the helper bones.
     pub body: Option<crate::body::BodySculpt>,
+    /// The eyes (22 §2): None for the default (brown, round).
+    pub eyes: Option<crate::eyes::Eyes>,
     /// Brush strokes and decals (CR5b, D70): one paint image per target at most.
     pub images: Vec<crate::image::Image>,
     /// The signature hue (14 §4), 0–359 degrees: glowing parts, and the effects (CR6).
@@ -152,6 +154,7 @@ impl Default for Looks {
             sculpt: Vec::new(),
             face: None,
             body: None,
+            eyes: None,
             images: Vec::new(),
             signature: 200,
             moves: None,
@@ -307,6 +310,10 @@ pub fn read(v: Value, at: &str) -> Result<Looks, DataError> {
         Some((v, bat)) => Some(crate::body::read(v, &bat)?),
         None => None,
     };
+    let eyes = match f.take("eyes") {
+        Some((v, eat)) => Some(crate::eyes::read(v, &eat)?).filter(|e| *e != crate::eyes::Eyes::default()),
+        None => None,
+    };
     let mut sculpt: crate::sculpt::Offsets = Vec::new();
     if let Some((v, sat)) = f.take("sculpt") {
         let Value::List(None, items) = v else { return err(&sat, "expected a list of `(weld, x, y, z)` in mm") };
@@ -395,7 +402,22 @@ pub fn read(v: Value, at: &str) -> Result<Looks, DataError> {
         None => None,
     };
     f.done()?;
-    Ok(Looks { build, gender, shape, proportions, skin, outfit, paint, sculpt, face, body, images, signature, moves })
+    Ok(Looks {
+        build,
+        gender,
+        shape,
+        proportions,
+        skin,
+        outfit,
+        paint,
+        sculpt,
+        face,
+        body,
+        eyes,
+        images,
+        signature,
+        moves,
+    })
 }
 
 /// A champion file's looks, if it has any.
@@ -440,6 +462,9 @@ pub fn write(l: &Looks) -> String {
     }
     if let Some(face) = l.face.as_ref().filter(|f| !f.is_neutral()) {
         out += &format!("        face: {},\n", crate::face::write(face));
+    }
+    if let Some(eyes) = l.eyes.as_ref().filter(|e| **e != crate::eyes::Eyes::default()) {
+        out += &format!("        eyes: {},\n", crate::eyes::write(eyes));
     }
     if let Some(body) = l.body.as_ref().filter(|b| !b.is_neutral()) {
         out += &format!("        body: {},\n", crate::face::write(body));
