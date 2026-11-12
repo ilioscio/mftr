@@ -975,7 +975,7 @@ Recipes: `face.rig` known, only known bones, every value within its limits.
 | **FR3** Faces in recipes | `face.rs`: deltas, RON, binary, bake; migration from sliders (§2.7) | Round-trip tests; old recipes load; a face survives save, load and the wire byte-identical |
 | **FR4** The editor | `CharacterSculptController`, hover highlight, drag modes, symmetry, undo; the brushes on the new head | The owner sculpts a face by dragging features with no slider, and finds the highlight tells them what they will move |
 | **FR5** Presets | Sliders become presets on the bones (a small "Shapes" panel); Randomize picks presets | Randomize gives varied, good-looking faces |
-| **FR6** The body | §9 | Per §9 |
+| **FR6** The body | §9: the helpers, their weights and drag, the forge (built on the lofted bodies); the other bases and the slider presets move to the new body ([22](22-body-and-wardrobe.md) BW3–BW4) | Per §9 |
 
 ---
 

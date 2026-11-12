@@ -28,6 +28,7 @@ This is a living document. Each file covers one area. Record decisions in [DECIS
 | 19 | [Shopkeepers](19-shopkeepers.md) | A clickable shop in each base: four shopkeeper characters, their stalls, seasons, reactions and placement |
 | 20 | [Champion Creator](20-champion-creator.md) | Players (and we) make champions: builds, sculpted face and body sliders, clothes, paint, movesets, a priced balance budget, recipes built at load by `mftr-forge` |
 | 21 | [Face Rig](21-face-rig.md) | Bone-driven face sculpting: an authored ~1,100-vertex head on 24 face bones, drag-to-sculpt with region highlighting, faces baked into rest at load; the same for the body next |
+| 22 | [Body, Eyes and Wardrobe](22-body-and-wardrobe.md) | The quality upgrade: a CC0 artist-made body on one topology for all four humanoid bases, real eyes that blink and look, brows and lips as features, a wardrobe pipeline that fits every body, and generative tools reconsidered |
 | — | [Decisions & Open Questions](DECISIONS.md) | Decision log and unresolved questions |
 
 ### Reference analyses
