@@ -49,11 +49,14 @@ BUILDS = {
         "masculine": {"shape": {"heights": [(0.0, 0.0), (0.03, 0.03), (0.09, 0.09), (0.54, 0.46), (1.00, 0.89), (1.12, 1.01),
                                             (1.26, 1.16), (1.40, 1.31), (1.56, 1.48), (1.64, 1.53), (1.88, 1.78), (2.15, 2.05)],
                                 "x": 1.24, "y": 1.2, "scale": 1.1, "shoulder": 0.08, "arm": 1.06, "hand": 1.55},
-                      "girth": {"torso": (1.3, 1.28), "limb": (1.22, 1.22), "neck": (1.55, 1.5)}, "head": 1.47, "hands": 1.2},
+                      "girth": {"torso": (1.3, 1.28), "limb": (1.22, 1.22), "neck": (1.55, 1.5)}, "head": 1.47, "hands": 1.2,
+                      # Its own mass (22 §1.4), baked in: the body sliders' presets, mixed.
+                      "mass": {"body_muscle": 0.6, "body_shoulders": 0.6, "neck_thickness": 0.8, "body_belly": 0.25}},
         "feminine": {"shape": {"heights": [(0.0, 0.0), (0.03, 0.03), (0.09, 0.09), (0.54, 0.48), (1.00, 0.91), (1.12, 1.03),
                                            (1.26, 1.18), (1.40, 1.33), (1.56, 1.50), (1.64, 1.55), (1.88, 1.80), (2.15, 2.07)],
                                "x": 1.16, "y": 1.12, "scale": 1.06, "shoulder": 0.06, "arm": 1.04, "hand": 1.4},
-                     "girth": {"torso": (1.2, 1.18), "limb": (1.16, 1.16), "neck": (1.4, 1.35)}, "head": 1.4, "hands": 1.1},
+                     "girth": {"torso": (1.2, 1.18), "limb": (1.16, 1.16), "neck": (1.4, 1.35)}, "head": 1.4, "hands": 1.1,
+                     "mass": {"body_muscle": 0.5, "body_hips": 0.5, "neck_thickness": 0.5, "body_chest": 0.3}},
     },
 }
 
@@ -557,6 +560,11 @@ def build(gender, name, build="humanoid_slim"):
     from . import body_rig
     for obj in [o for o in bpy.data.objects if o.name.startswith("part.") and not o.name.startswith(("part.weapon.", "part.offhand."))]:
         body_rig.transfer(body, obj)
+    # The build's own mass (22 §1.4), into the body and the parts on it alike.
+    mass = BUILDS[build][gender].get("mass")
+    if mass and BODY == "cc0":
+        from . import cc0_body
+        cc0_body.bake_mass(armature, [body] + [o for o in bpy.data.objects if o.name.startswith("part.")], mass)
     # Weapons ride the prop bones, as the official champions' do, so the moves' clips (whose
     # wrists stay human, 14 §3.3) hold them where their champions held theirs.
     from . import wrists

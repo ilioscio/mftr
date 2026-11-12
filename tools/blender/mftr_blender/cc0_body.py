@@ -240,24 +240,41 @@ UNDER = (0.16, 0.16, 0.18)
 TRIM = (0.30, 0.20, 0.12)
 
 
-def _briefs(c, j):
-    """Whether a face centred at `c` (source) is the briefs': from the waistband down to leg
-    openings that rise from the crotch toward the hips' sides."""
+# The garments' edges are cut into the mesh along planes (bmesh's bisect), so they are clean
+# lines rather than the faces' steps. Each plane is (a point, its normal, the box of the body it
+# cuts: x half-width and z range), in the source's frame.
+BAND = 0.012   # the waistband's and the band top's hem width (m)
+
+
+def _cuts(j, sex):
+    """The garments' planes: [(point, normal, (half-width, z0, z1))]."""
     hip = j["hip_l"]
-    waist = hip.z + 0.085
-    crotch = hip.z - 0.075
-    rise = crotch + 0.95 * max(0.0, abs(c.x) - 0.025)
-    return rise < c.z < waist and abs(c.x) < hip.x + 0.11
+    waist, crotch = hip.z + 0.085, hip.z - 0.075
+    box = (hip.x + 0.16, hip.z - 0.2, hip.z + 0.15)
+    out = [(Vector((0, 0, waist)), Vector((0, 0, 1)), box), (Vector((0, 0, waist - BAND)), Vector((0, 0, 1)), box)]
+    for s in (1, -1):
+        # A leg opening: from the crotch up toward the hip's side, round the thigh.
+        out.append((Vector((s * 0.025, 0, crotch)), Vector((-0.95 * s, 0, 1)).normalized(), box))
+    if sex == "female":
+        lo, hi = j["chest"].z + 0.015, j["chest"].z + 0.135
+        chest = (j["shoulder_l"].x + 0.02, lo - 0.05, hi + 0.05)
+        out += [(Vector((0, 0, z)), Vector((0, 0, 1)), chest) for z in (lo, lo + BAND, hi)]
+    return out
 
 
-def _band(c, j, sex):
-    """Whether a face centred at `c` (source) is the band top's (feminine): round the chest from
-    under the bust to above it, the arms excluded."""
-    if sex != "female":
-        return False
-    sh = j["shoulder_l"]
-    lo, hi = j["chest"].z + 0.015, j["chest"].z + 0.135
-    return lo < c.z < hi and abs(c.x) < sh.x - 0.035
+def _garment(c, j, sex):
+    """What a face centred at `c` (source) is: "trim", "under" or None (skin)."""
+    hip = j["hip_l"]
+    waist, crotch = hip.z + 0.085, hip.z - 0.075
+    s = 1 if c.x >= 0 else -1
+    above_leg = (c - Vector((s * 0.025, 0, crotch))).dot(Vector((-0.95 * s, 0, 1))) > 0
+    if above_leg and c.z < waist and abs(c.x) < hip.x + 0.11:
+        return "trim" if c.z > waist - BAND else "under"
+    if sex == "female":
+        lo, hi = j["chest"].z + 0.015, j["chest"].z + 0.135
+        if lo < c.z < hi and abs(c.x) < j["shoulder_l"].x - 0.035:
+            return "trim" if c.z < lo + BAND else "under"
+    return None
 
 
 def make(armature, gender, build, girth=None):
@@ -289,22 +306,24 @@ def make(armature, gender, build, girth=None):
     from .creator import SKIN
     for v in bm.verts:
         v[col] = (*SKIN, 1.0)
-    clothed = []
+    # The garments' edges cut into the mesh, then each face is skin, cloth or its trim.
+    for co, no, (half, z0, z1) in _cuts(j, sex):
+        faces = [f for f in bm.faces if all(abs(v.co.x) < half and z0 < v.co.z < z1 for v in f.verts)]
+        geom = list({v for f in faces for v in f.verts}) + list({e for f in faces for e in f.edges}) + faces
+        bmesh.ops.bisect_plane(bm, geom=geom, dist=1e-5, plane_co=co, plane_no=no)
+    kind = {}
     for f in bm.faces:
-        c = f.calc_center_median()
         f.smooth = False
-        under = _briefs(c, j) or _band(c, j, sex)
-        f.material_index = cloth_i if under else skin_i
-        if under:
-            clothed.append(f)
-    # Each garment's edge (its trim) where its faces meet skin; the vertices it shares with the
-    # skin are split off, so the colors stay crisp.
-    edge = {e for f in clothed for e in f.edges if any(o.material_index == skin_i for o in e.link_faces)}
-    bmesh.ops.split_edges(bm, edges=list(edge))
-    trim = {v for e in edge for v in e.verts}
-    for f in clothed:
-        for v in f.verts:
-            v[col] = (*(TRIM if v in trim else UNDER), 1.0)
+        kind[f] = _garment(f.calc_center_median(), j, sex)
+        f.material_index = cloth_i if kind[f] else skin_i
+    # Split where the colors change (skin, cloth, trim), so each stays crisp.
+    edge = [e for e in bm.edges if len(e.link_faces) == 2 and kind[e.link_faces[0]] != kind[e.link_faces[1]]]
+    bmesh.ops.split_edges(bm, edges=edge)
+    for f in bm.faces:
+        k = _garment(f.calc_center_median(), j, sex)
+        if k:
+            for v in f.verts:
+                v[col] = (*(TRIM if k == "trim" else UNDER), 1.0)
     bm.to_mesh(me)
     bm.free()
     me.color_attributes.active_color = me.color_attributes["Col"]
@@ -389,11 +408,11 @@ def _ground(obj, armature):
 TAPER = 0.18
 
 
-def raise_neck(obj, n_body, cap, rise=0.012):
+def raise_neck(obj, n_body, cap, rise=0.02):
     """Carry the neck's top (the body's highest open loop: vertices below `n_body`) up into the
     authored head (the rest, closed underneath): two new rings over it, the top one where a line
     straight up from each vertex meets the head's underside, `rise` higher (inside the head, so
-    the face's sculpting keeps the joint covered), the middle one halfway. The top ring is the
+    the face's sculpting keeps the joint covered) and capped, the middle one halfway. The top ring is the
     head's, the middle one mostly the neck's: the neck turns as the head does. No higher than `cap`
     (the head's joint) and `rise`: a line past the chin would find the lips."""
     import bmesh
@@ -469,6 +488,93 @@ def raise_neck(obj, n_body, cap, rise=0.012):
             f.material_index = skin
             f.smooth = False
             made += 1
+    # The top ring capped (a fan to its middle): where the jaw's corner leaves it showing, it
+    # shows skin, not the inside of the neck.
+    mid = bm.verts.new(sum((v.co for v in tops), Vector()) / len(tops))
+    mid[deform][g_head] = 1.0
+    if col is not None:
+        mid[col] = tops[0][col]
+    for i in range(len(tops)):
+        try:
+            f = bm.faces.new([tops[i], tops[(i + 1) % len(tops)], mid])
+        except ValueError:
+            continue
+        f.normal_update()
+        if f.normal.z < 0:
+            f.normal_flip()
+        f.material_index = skin
+        f.smooth = False
+        made += 1
     bm.to_mesh(me)
     bm.free()
     return made
+
+
+# --- A build's own mass (22 §1.4) ------------------------------------------------------------
+
+PRESETS = os.path.normpath(os.path.join(HERE, "..", "..", "..", "art", "creator", "bodies", "presets.txt"))
+
+
+def read_presets(path=PRESETS):
+    """The body sliders' presets (`art/creator/bodies/presets.txt`, as `mftr_forge::body` reads
+    it): {id: {helper: {"t": [x, y, z], "s": [x, y, z]}}}, mirrors expanded."""
+    out, cur = {}, None
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("["):
+                cur = out.setdefault(line[1:line.index("]")].rstrip("+"), {})
+                continue
+            w = line.split()
+            bone, kind, v = w[0], w[1], [int(x) for x in w[2:5]]
+            cur.setdefault(bone, {})[kind] = v
+            if len(w) > 5 and w[5] == "mirror":
+                other = bone[:-2] + "_r"
+                cur.setdefault(other, {})[kind] = [-v[0], v[1], v[2]] if kind == "t" else list(v)
+    return out
+
+
+def bake_mass(armature, objects, mix):
+    """Bake a build's own mass into `objects` (the body and its parts): `mix` is {slider: value},
+    the body sliders' presets summed, carried through the helpers' weights as the forge carries
+    a sculpt (each helper scales about its head in its own frame, then moves). Every shape key
+    moves alike, so the morphs keep their deltas."""
+    presets = read_presets()
+    delta = {}
+    for sid, k in mix.items():
+        for bone, kinds in presets.get(sid, {}).items():
+            d = delta.setdefault(bone, {"t": [0.0] * 3, "s": [0.0] * 3})
+            for kind, v in kinds.items():
+                for i in range(3):
+                    d[kind][i] += v[i] * k
+    bones = armature.data.bones
+    maps = {}
+    for name, d in delta.items():
+        b = bones.get(name)
+        if b is None:
+            continue
+        m = b.matrix_local
+        inv = m.inverted()
+        scale = Matrix.Diagonal([2.0 ** (x / 1000.0) for x in d["s"]] + [1.0])
+        move = Matrix.Translation(Vector(d["t"]) / 10000.0)
+        maps[name] = m @ move @ scale @ inv
+    for obj in objects:
+        names = {g.index: g.name for g in obj.vertex_groups}
+        me = obj.data
+        moved = {}
+        for v in me.vertices:
+            acc = Vector()
+            for g in v.groups:
+                t = maps.get(names[g.group])
+                if t is not None and g.weight > 0:
+                    acc += ((t @ v.co) - v.co) * g.weight
+            if acc.length > 1e-7:
+                moved[v.index] = acc
+        if me.shape_keys:
+            for kb in me.shape_keys.key_blocks:
+                for i, d in moved.items():
+                    kb.data[i].co += d
+        for i, d in moved.items():
+            me.vertices[i].co += d

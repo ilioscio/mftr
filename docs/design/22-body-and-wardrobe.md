@@ -692,9 +692,24 @@ that painted the old undersuit's two still forge. The brows are region 2 now (th
   forward).
 - All eight bases and the neo set validate.
 
-**Not yet (as BW3 left them):** the heavy builds' own mass shape; the throat notch where the
-heavy masculine's head meets its shoulders; the underwear's jagged edges, which go to BW5 as
-wardrobe items with drawn edges; the sex blend as a slider, if the owner wants one (§1.4).
+**The gaps closed (2026-11-12), at the owner's call before BW5:**
+
+- **The heavy builds' own mass (§1.4)**, baked in: each heavy build has a mix of the body sliders'
+  presets in `creator.BUILDS` (`mass`). The masculine's is muscle, shoulders, a thick neck and a
+  little belly; the feminine's is muscle, hips, neck and chest. `cc0_body.bake_mass` carries it
+  through the helpers' weights, the forge's way, into the body and every part, and moves every
+  shape key alike. The shape is the presets' data, not code. The heavy masculine now reads as a
+  brute, the heavy feminine as strong and full.
+- **The throat notch:** the neck's top ring now sits 20 mm inside the head (it was 12) and is
+  capped with a fan, so where a jaw's corner leaves it showing, it shows skin.
+- **Clean underwear edges:** the garments' edges are cut into the mesh along planes (`_cuts`,
+  bmesh's bisect) before skinning: the waist, the leg openings rising from the crotch to the
+  hips, the band top's edges. Each face is then skin, cloth or trim by those planes, so a
+  waistband and the band top's hem are crisp 12 mm trims, and the leg openings are clean lines
+  front and back. About 220 triangles more.
+
+Bases are now 7,938 (masculine) and 8,284 (feminine) triangles. Left: the sex blend as a
+slider, if the owner wants one (§1.4).
 
 ## 7. Open questions for the owner
 

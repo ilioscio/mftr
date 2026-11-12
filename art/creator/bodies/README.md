@@ -29,6 +29,9 @@ sex (its parts' origins are the joints). They are the `PRIMITIVE` table in
    ratio to the shoulders'.
 5. **The feet** are squashed below the ankle so the soles end on the floor.
 6. **Underwear** is regions of the body itself, on the cloth slot: briefs on every base, a band
-   top on the feminine ones, each with a trim. They are the body's paint regions 0 and 1.
+   top on the feminine ones, each with a trim. Their edges are cut into the mesh along planes.
+   They are the body's paint regions 0 and 1.
+7. **The heavy builds' mass** is a mix of `presets.txt`'s sliders (`creator.BUILDS`' `mass`),
+   baked in through the helpers (`bake_mass`).
 
 `presets.txt` is the body sliders' presets on the helper bones (21 §9.2).
