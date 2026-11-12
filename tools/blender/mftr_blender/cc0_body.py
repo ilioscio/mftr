@@ -123,9 +123,12 @@ LIMBS = {
 
 
 def _source_bones(j):
-    """{bone: (head, tail)} on the source, both sides."""
+    """{bone: (head, tail)} on the source, both sides. The spine runs from the hips to
+    `spine_top` (where the rig's neck sits against its shoulders, `make` sets it), not to the
+    source's own neck joint: the rig's shoulders are 3 cm under its neck, the source's 12–15, and
+    mapping the source's neck onto the rig's lifted the shoulders into a shrug."""
     hips = (j["hip_l"] + j["hip_r"]) / 2
-    neck = j["neck"]
+    neck = j.get("spine_top", j["neck"])
     out = {name: (hips.lerp(neck, a), hips.lerp(neck, b)) for name, (a, b) in SPINE.items()}
     out["neck"] = (neck, j["head"])
     # The head's bone, though its mesh is gone: the top of the neck turns with the head.
@@ -183,7 +186,7 @@ def fit(obj, src, target, girth=None):
     gives (across, front-back) on top of the body's own scale). The torso widens by height,
     from the hips' ratio to the shoulders'."""
     sb, tb = src.data.bones, target.data.bones
-    height = tb["neck"].head_local.z / sb["neck"].head_local.z
+    height = tb["head"].head_local.z / sb["head"].head_local.z
     hip_ratio = tb["thigh_l"].head_local.x / sb["thigh_l"].head_local.x
     shoulder_ratio = tb["upperarm_l"].head_local.x / sb["upperarm_l"].head_local.x
     z0, z1 = sb["pelvis"].head_local.z, sb["upperarm_l"].head_local.z
@@ -244,6 +247,9 @@ TRIM = (0.30, 0.20, 0.12)
 # lines rather than the faces' steps. Each plane is (a point, its normal, the box of the body it
 # cuts: x half-width and z range), in the source's frame.
 BAND = 0.012   # the waistband's and the band top's hem width (m)
+# The band top's sides: out to just past the shoulder joint's line, where the arm leaves the
+# torso, so it wraps the bust's sides and stops at the armpit on one clean edge.
+BAND_SIDE = 0.005
 
 
 def _cuts(j, sex):
@@ -259,6 +265,8 @@ def _cuts(j, sex):
         lo, hi = j["chest"].z + 0.015, j["chest"].z + 0.135
         chest = (j["shoulder_l"].x + 0.02, lo - 0.05, hi + 0.05)
         out += [(Vector((0, 0, z)), Vector((0, 0, 1)), chest) for z in (lo, lo + BAND, hi)]
+        side = j["shoulder_l"].x + BAND_SIDE
+        out += [(Vector((s * side, 0, 0)), Vector((1, 0, 0)), chest) for s in (1, -1)]
     return out
 
 
@@ -272,7 +280,7 @@ def _garment(c, j, sex):
         return "trim" if c.z > waist - BAND else "under"
     if sex == "female":
         lo, hi = j["chest"].z + 0.015, j["chest"].z + 0.135
-        if lo < c.z < hi and abs(c.x) < j["shoulder_l"].x - 0.035:
+        if lo < c.z < hi and abs(c.x) < j["shoulder_l"].x + BAND_SIDE:
             return "trim" if c.z < lo + BAND else "under"
     return None
 
@@ -294,14 +302,12 @@ def make(armature, gender, build, girth=None):
     bm = bmesh.new()
     bm.from_mesh(me)
     col = bm.verts.layers.float_color.new("Col")
-    # The head goes, cut flat a little above the neck's joint (below the jaw); `raise_neck`
-    # carries the neck's top up into the authored head once they are one mesh.
-    cut = j["neck"].z + 0.025
-
-    def above(co):
-        return co.z > cut
-
-    bmesh.ops.delete(bm, geom=[v for v in bm.verts if above(v.co)], context="VERTS")
+    # The chest at twice the resolution, back on the full-detail surface (sculpting).
+    densify(bm, j, sex)
+    # The skull's top goes (above the eyes); the face, jaw and neck stay, to be fitted with the
+    # body; `marry_neck` then drops the head and seats the source's own neck in the authored one.
+    cut = j["head"].z + 0.07
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z > cut], context="VERTS")
     _keep_largest(bm)
     from .creator import SKIN
     for v in bm.verts:
@@ -327,13 +333,33 @@ def make(armature, gender, build, girth=None):
     bm.to_mesh(me)
     bm.free()
     me.color_attributes.active_color = me.color_attributes["Col"]
+    # The spine's top against the shoulders, as on the rig (see `_source_bones`).
+    rig_gap = armature.data.bones["neck"].head_local.z - armature.data.bones["upperarm_l"].head_local.z
+    scale = armature.data.bones["head"].head_local.z / j["head"].z
+    j["spine_top"] = Vector((0.0, j["neck"].y, j["shoulder_l"].z + rig_gap / scale))
     src = source_rig(obj, j)
+    _spine_off_clavicles(obj)
     _weld_weights(obj)
-    _limit(obj, 2)
+    # The fit with every bone's weight (cutting to two first steps the skin where a third
+    # drops out); the runtime's two-bone budget after.
     fit(obj, src, armature, girth)
+    _limit(obj, 2)
     bpy.data.objects.remove(src)
     _ground(obj, armature)
+    _triangulate(obj)
     return obj
+
+
+def _triangulate(obj):
+    """Split every face into triangles along its flatter diagonal (Blender's "beauty"), so a
+    curved quad doesn't fold the wrong way when the exporter splits it: on faceted skin a wrong
+    fold reads as a crinkle."""
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method="BEAUTY", ngon_method="BEAUTY")
+    bm.to_mesh(obj.data)
+    bm.free()
 
 
 def _keep_largest(bm):
@@ -356,6 +382,27 @@ def _keep_largest(bm):
     pieces.sort(key=len, reverse=True)
     import bmesh
     bmesh.ops.delete(bm, geom=[v for p in pieces[1:] for v in p], context="VERTS")
+
+
+def _spine_off_clavicles(obj, inner=0.03, outer=0.09):
+    """The automatic weights tie the skin by the spine to the clavicles; the rig's drop
+    (`rig.use_shape`'s `drop`) swings those down and folds it. Near the middle the clavicles'
+    weight goes to the chest, fading from all of it within `inner` to none past `outer`."""
+    groups = {g.name: g for g in obj.vertex_groups}
+    chest = groups.get("chest")
+    if chest is None:
+        return
+    clav = {groups[n].index for n in ("clavicle_l", "clavicle_r") if n in groups}
+    for v in obj.data.vertices:
+        t = max(0.0, min(1.0, (abs(v.co.x) - inner) / (outer - inner)))
+        keep = t * t * (3 - 2 * t)
+        moved = 0.0
+        for g in v.groups:
+            if g.group in clav and g.weight > 0:
+                moved += g.weight * (1.0 - keep)
+                g.weight *= keep
+        if moved > 0:
+            chest.add([v.index], moved, "ADD")
 
 
 def _weld_weights(obj):
@@ -404,110 +451,168 @@ def _ground(obj, armature):
 
 
 
-# How much the raised neck narrows toward its axis by the top ring.
-TAPER = 0.18
-
-
-def raise_neck(obj, n_body, cap, rise=0.02):
-    """Carry the neck's top (the body's highest open loop: vertices below `n_body`) up into the
-    authored head (the rest, closed underneath): two new rings over it, the top one where a line
-    straight up from each vertex meets the head's underside, `rise` higher (inside the head, so
-    the face's sculpting keeps the joint covered) and capped, the middle one halfway. The top ring is the
-    head's, the middle one mostly the neck's: the neck turns as the head does. No higher than `cap`
-    (the head's joint) and `rise`: a line past the chin would find the lips."""
+def marry_neck(obj, n_body, joint, rise=0.012):
+    """Marry the body (vertices below `n_body`) to the authored head (the rest), the source's
+    own neck kept as it was modelled: the source's head goes (every vertex the head's bone weighs
+    at half or more: its face, jaw and chin), and each vertex of the neck's top edge then goes
+    straight up to `rise` inside the head's underside, the edge capped inside. In front of the
+    head's `joint` a line straight up mustn't pass the chin (it would find the lips): a vertex
+    whose line does is drawn back toward the neck's middle until its line meets the chin. The neck's last ring
+    stretches into the head; nothing is added but the cap."""
     import bmesh
     from mathutils.bvhtree import BVHTree
     me = obj.data
+    g = obj.vertex_groups["head"].index
     bm = bmesh.new()
     bm.from_mesh(me)
-    bm.verts.ensure_lookup_table()
     deform = bm.verts.layers.deform.verify()
     col = bm.verts.layers.float_color.get("Col")
+    bm.verts.ensure_lookup_table()
+    head_v = [v for v in bm.verts if v.index >= n_body]
+    tree = BVHTree.FromPolygons([v.co.copy() for v in bm.verts],
+                                [[v.index for v in f.verts] for f in bm.faces if all(v.index >= n_body for v in f.verts)])
+    body = {v for v in bm.verts if v.index < n_body}
+    gone = [v for v in body if v[deform].get(g, 0.0) >= 0.5]
+    bmesh.ops.delete(bm, geom=gone, context="VERTS")
+    _keep_neck(bm, body, joint.z - 0.12)
+    # The neck's top edge: the body's open edges, but the color seams' (each point has a twin).
     places = {}
     for v in bm.verts:
         k = tuple(round(c, 5) for c in v.co)
         places[k] = places.get(k, 0) + 1
-    # The neck's top: the body's open edges with no twin (color seams are split, so open too),
-    # the highest piece of them.
-    edges = [e for e in bm.edges if e.is_boundary and all(v.index < n_body for v in e.verts)
-             and not all(places[tuple(round(c, 5) for c in v.co)] > 1 for v in e.verts)]
-    # The piece of them that holds the highest vertex, followed along its edges.
-    start = max((v for e in edges for v in e.verts), key=lambda v: v.co.z)
-    by_vert = {}
-    for e in edges:
-        for v in e.verts:
-            by_vert.setdefault(v, []).append(e)
-    loop, stack = {start}, [start]
-    while stack:
-        u = stack.pop()
-        for e in by_vert.get(u, []):
-            w = e.other_vert(u)
-            if w not in loop:
-                loop.add(w)
-                stack.append(w)
-    axis = sum((v.co for v in loop), Vector()) / len(loop)
-    ring = sorted(loop, key=lambda v: math.atan2(v.co.y - axis.y, v.co.x - axis.x))
-    head_faces = [f for f in bm.faces if all(v.index >= n_body for v in f.verts)]
-    tree = BVHTree.FromPolygons([v.co.copy() for v in bm.verts], [[v.index for v in f.verts] for f in head_faces])
-    groups = {g.name: g.index for g in obj.vertex_groups}
-    g_head, g_neck = groups["head"], groups["neck"]
-    skin = next((f.material_index for f in bm.faces if f.verts[0] in loop), 0)
-    mids, tops = [], []
-    for v in ring:
-        # Narrowing into the head (the cut's back edge lies out on the trapezius).
-        inner = Vector((axis.x + (v.co.x - axis.x) * (1 - TAPER), axis.y + (v.co.y - axis.y) * (1 - TAPER), v.co.z))
-        hit, _n, _i, _d = tree.ray_cast(inner + Vector((0, 0, 0.001)), Vector((0.0, 0.0, 1.0)), 0.25)
-        if hit is None:
-            hit, _n, _i, _d = tree.find_nearest(inner)
-        top = Vector((inner.x, inner.y, max(min(hit.z, cap), v.co.z) + rise))
-        mid = v.co.lerp(top, 0.5)
-        mid.x, mid.y = v.co.x + (inner.x - v.co.x) * 0.45, v.co.y + (inner.y - v.co.y) * 0.45
-        for p, wh in ((mid, 0.4), (top, 1.0)):
-            nv = bm.verts.new(p)
-            nv[deform][g_head] = wh
-            if wh < 1.0:
-                nv[deform][g_neck] = 1.0 - wh
-            if col is not None:
-                nv[col] = v[col]
-            (mids if wh < 1.0 else tops).append(nv)
-    made = 0
-    for a, b in ((ring, mids), (mids, tops)):
+    edge = {v for e in bm.edges if e.is_boundary for v in e.verts
+            if v in body and places[tuple(round(c, 5) for c in v.co)] == 1}
+    top = [v for v in edge if v.co.z > joint.z - 0.15]
+    if top:
+        axis = sum((v.co for v in top), Vector()) / len(top)
+
+        def up(p):
+            hit, _n, _i, _d = tree.ray_cast(p + Vector((0, 0, 1e-4)), Vector((0.0, 0.0, 1.0)), 0.3)
+            return hit
+
+        ring = sorted(top, key=lambda v: math.atan2(v.co.y - axis.y, v.co.x - axis.x))
+        steps = (0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.85)
+
+        def at(v, t):
+            return Vector((v.co.x + (axis.x - v.co.x) * t, v.co.y + (axis.y - v.co.y) * t, v.co.z))
+
+        def ok(v, t):
+            p = at(v, t)
+            hit = up(p)
+            # Not past the chin in front (the lips), nor up under an ear at the sides.
+            if hit is not None and (p.y > joint.y or hit.z <= joint.z) and hit.z <= joint.z + 0.05:
+                return hit
+            return None
+
+        # How far in each point must go; then each takes the most of its neighbours' along the
+        # edge, so the edge is drawn in evenly (one point in, the next out, reads as teeth).
+        need = []
+        for v in ring:
+            need.append(next((t for t in steps if ok(v, t) is not None), steps[-1]))
+        n = len(ring)
+        even = [max(need[(i + d) % n] for d in (-2, -1, 0, 1, 2)) for i in range(n)]
+        for v, t in zip(ring, even):
+            hit = ok(v, t)
+            p = at(v, t)
+            v.co = Vector((p.x, p.y, max(v.co.z, (hit.z + rise) if hit is not None else joint.z)))
+
+        mid = bm.verts.new(axis + Vector((0, 0, rise)))
+        mid[deform][g] = 1.0
+        if col is not None:
+            mid[col] = ring[0][col]
+        skin = next((f.material_index for f in bm.faces if f.verts[0] in body), 0)
         for i in range(len(ring)):
-            k = (i + 1) % len(ring)
-            quad = [a[i], a[k], b[k], b[i]]
-            if len({id(x) for x in quad}) < 4:
-                continue
             try:
-                f = bm.faces.new(quad)
+                f = bm.faces.new([ring[i], ring[(i + 1) % len(ring)], mid])
             except ValueError:
                 continue
             f.normal_update()
-            c = f.calc_center_median()
-            if f.normal.dot(Vector((c.x - axis.x, c.y - axis.y, 0.0))) < 0:
+            if f.normal.z < 0:
                 f.normal_flip()
             f.material_index = skin
             f.smooth = False
-            made += 1
-    # The top ring capped (a fan to its middle): where the jaw's corner leaves it showing, it
-    # shows skin, not the inside of the neck.
-    mid = bm.verts.new(sum((v.co for v in tops), Vector()) / len(tops))
-    mid[deform][g_head] = 1.0
-    if col is not None:
-        mid[col] = tops[0][col]
-    for i in range(len(tops)):
-        try:
-            f = bm.faces.new([tops[i], tops[(i + 1) % len(tops)], mid])
-        except ValueError:
-            continue
-        f.normal_update()
-        if f.normal.z < 0:
-            f.normal_flip()
-        f.material_index = skin
-        f.smooth = False
-        made += 1
+    del head_v
     bm.to_mesh(me)
     bm.free()
-    return made
+
+
+def _keep_neck(bm, body, above):
+    """Drop the small loose bits the head's removal left (an ear's island): pieces wholly
+    `above` a height by the head. The garments and their trims are pieces of their own (their
+    seams are split), lower down, and stay."""
+    import bmesh
+    alive = [v for v in body if v.is_valid]
+    seen, pieces = set(), []
+    for v in alive:
+        if v in seen:
+            continue
+        piece, stack = [], [v]
+        seen.add(v)
+        while stack:
+            u = stack.pop()
+            piece.append(u)
+            for e in u.link_edges:
+                w = e.other_vert(u)
+                if w not in seen and w in body:
+                    seen.add(w)
+                    stack.append(w)
+        pieces.append(piece)
+    bmesh.ops.delete(bm, geom=[v for p in pieces if len(p) < 40 and all(v.co.z > above for v in p) for v in p],
+                     context="VERTS")
+
+
+def _project(bm, tree, verts, reach=0.012):
+    """Each of `verts` along its own normal (either way, `reach` at most) onto the surface in
+    `tree`; one the ray misses stays."""
+    bm.normal_update()
+    moves = []
+    for v in verts:
+        n = v.normal
+        best = None
+        for d in (n, -n):
+            hit, _no, _i, dist = tree.ray_cast(v.co, d, reach)
+            if hit is not None and (best is None or dist < best[1]):
+                best = (hit, dist)
+        if best is not None:
+            moves.append((v, best[0]))
+    for v, p in moves:
+        v.co = p
+
+
+# The chest (and bust) is re-subdivided for sculpting: the faces between the belly and the
+# collarbones, in front and round the sides, the arms excluded.
+def densify(bm, j, sex):
+    """Subdivide the chest's faces of the reduced body `bm` once and set every new vertex on the
+    full-detail body's surface (`body_<sex>_hi`): the reduction's lost detail comes back where
+    sculpting the chest needs it."""
+    import bmesh
+    from mathutils.bvhtree import BVHTree
+    with bpy.data.libraries.load(SOURCE, link=False) as (_src, dst):
+        dst.meshes = [f"body_{sex}_hi"]
+    hi = dst.meshes[0]
+    hb = bmesh.new()
+    hb.from_mesh(hi)
+    tree = BVHTree.FromBMesh(hb)
+    sh = j["shoulder_l"]
+    z0, z1 = j["chest"].z - 0.06, sh.z - 0.02
+
+    def chest(f):
+        c = f.calc_center_median()
+        return z0 < c.z < z1 and abs(c.x) < sh.x - 0.01 and c.y < 0.04
+
+    # The whole body onto the sculpted surface first: the reduced mesh is a cage, its points
+    # standing off the surface the sculpt describes.
+    _project(bm, tree, bm.verts)
+    faces = [f for f in bm.faces if chest(f)]
+    edges = list({e for f in faces for e in f.edges})
+    old = set(bm.verts)
+    # Smooth subdivision (the new points follow the surface's curve), then each new point
+    # pushed along its own normal onto the full-detail surface, a few millimetres at most: a
+    # nearest-point snap jumps between faces and crinkles the skin.
+    bmesh.ops.subdivide_edges(bm, edges=edges, cuts=1, use_grid_fill=True, smooth=1.0)
+    _project(bm, tree, [v for v in bm.verts if v not in old])
+    hb.free()
+    bpy.data.meshes.remove(hi)
 
 
 # --- A build's own mass (22 §1.4) ------------------------------------------------------------

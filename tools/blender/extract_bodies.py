@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Extract the creator's body source (22 §1.1, BW3) from Blender Studio's Human Base Meshes bundle
 (CC0, v1.4.1): the realistic male and female bodies, un-subdivided twice, centred, in
-`art/creator/bodies/body_source.blend`; and each one's joints, from the bundle's "primitive"
+`art/creator/bodies/body_source.blend`, their base cages first fitted to the sculpt (with the
+sculpted surface at its first level as `body_<sex>_hi`); and each one's joints, from the bundle's "primitive"
 body of the same sex (a body cut into parts whose origins are its joints' pivots), printed as
 the `JOINTS` table of `mftr_blender.cc0_body`.
 
@@ -30,10 +31,31 @@ def main():
     bodies = []
     for sex in ("male", "female"):
         src = bpy.data.objects[f"GEO-body_{sex}_realistic"]
+        x0 = src.location.x
+        # The sculpted surface: the multires at its first level (about 42k vertices), the
+        # surface the reduced body is fitted to and its chest is projected onto
+        # (`cc0_body.densify`). Its vertices and faces only.
+        multi = next(m for m in src.modifiers if m.type == "MULTIRES")
+        multi.levels = 1
+        dg = bpy.context.evaluated_depsgraph_get()
+        ev = bpy.data.meshes.new_from_object(src.evaluated_get(dg))
+        hi_me = bpy.data.meshes.new(f"body_{sex}_hi")
+        hi_me.from_pydata([v.co.copy() for v in ev.vertices], [], [list(p.vertices) for p in ev.polygons])
+        bpy.data.meshes.remove(ev)
+        hi = bpy.data.objects.new(f"body_{sex}_hi", hi_me)
+        bpy.context.scene.collection.objects.link(hi)
+        bodies.append(hi)
+        # The base cage fitted to the sculpt (Blender's "Apply Base"): the multires base's own
+        # vertices sit off the sculpted surface, which made the reduced body lumpy.
+        for o in bpy.context.view_layer.objects:
+            o.select_set(False)
+        bpy.context.view_layer.objects.active = src
+        src.select_set(True)
+        bpy.ops.object.multires_base_apply(modifier=multi.name)
         me = src.data.copy()
         obj = bpy.data.objects.new(f"body_{sex}", me)
         bpy.context.scene.collection.objects.link(obj)
-        # The mesh is the multires base: un-subdivide it twice (21 §1.2's way for the head).
+        # Un-subdivided twice (21 §1.2's way for the head).
         mod = obj.modifiers.new("unsub", "DECIMATE")
         mod.decimate_type = "UNSUBDIV"
         mod.iterations = 2
@@ -43,7 +65,6 @@ def main():
         obj.data = reduced
         reduced.name = f"body_{sex}"
         # The mesh is centred on its own middle already; the bundle lays the objects out along X.
-        x0 = src.location.x
         obj.location = (0.0, 0.0, 0.0)
         bodies.append(obj)
         # The joints: the primitive body's part origins, from its pelvis's middle.

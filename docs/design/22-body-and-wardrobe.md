@@ -711,6 +711,63 @@ that painted the old undersuit's two still forge. The brows are region 2 now (th
 Bases are now 7,938 (masculine) and 8,284 (feminine) triangles. Left: the sex blend as a
 slider, if the owner wants one (§1.4).
 
+### Quality pass (2026-11-12): shoulders, the neck from the source, a sculptable chest
+
+The owner's review: the feminine shoulders looked pulled in; the neck's join was low quality;
+the reduction had cost the torso the polygons a chest needs.
+
+**Shoulders.** Two causes:
+- The fit mapped the source's neck joint (12–15 cm above its shoulders) onto the rig's, which
+  sits only 3 cm above them, so it lifted the shoulders into a shrug, worst on the feminine body.
+- The automatic weights tied the skin by the spine to the clavicles.
+
+Now:
+- The source's spine runs to a top set at the rig's own shoulder gap (`spine_top`).
+- The rig has a `drop` shape parameter that lowers the clavicles' tips and the arms: 5 cm slim
+  masculine, 6 feminine, 3.5 and 4.5 for the heavy builds.
+- Near the spine, the clavicles' weight goes to the chest (`_spine_off_clavicles`).
+
+The shoulders now slope from the neck as a real body's do.
+
+**The neck is the source's own.** The authored head replaces only the source's head:
+- the source keeps its neck and is fitted with it;
+- `marry_neck` drops every vertex the head bone weighs at half or more, so the face, jaw and chin go;
+- the neck's top edge is seated into the head's underside: each point goes up a line to 12 mm
+  inside it, drawn in toward the neck's middle where a line would pass the chin or reach up
+  under an ear, its neighbours along the edge drawn in evenly, and capped inside.
+
+The neck keeps the artist's throat, nape and tendons instead of a raised tube.
+
+**A sculptable chest.**
+- `body_source.blend` now holds each body's sculpted surface (the multires at its first level,
+  about 42k vertices) as `body_<sex>_hi`, and the reduced body is made from the cage after
+  Blender's "Apply Base" fits it to the sculpt.
+- `densify` projects every reduced vertex along its normal onto the sculpted surface, then
+  subdivides the chest and bust (from below the bust to under the collarbones, round the sides)
+  once, smoothly, projecting the new points too.
+- The fit uses every bone's weight, and the two-bone budget is applied after: cutting first made
+  the skin step and crumple where a third bone dropped out.
+- The body is triangulated along each quad's flatter diagonal, so curved quads don't fold the
+  wrong way on the faceted skin.
+
+The chest and bust carry about four times the faces they did, on the artist's surface.
+
+**Other changes:**
+- The band top's sides are cut on a vertical plane at the armpit.
+- The heavy builds' neck girth is lower (1.2 and 1.15, from 1.55 and 1.4), and their baked neck
+  thickness too, since the realistic neck is thick already.
+- Parts fade a helper that doesn't fit under four influences, rather than dropping it.
+
+Bases are 8,588–8,818 triangles.
+
+**Checked:** captures of all four bases; the necks front, three-quarter and back; the chest at
+rest and with the chest slider at full on both slim bases; all bases validate.
+
+**Left:**
+- A small notch under the heavy masculine's chin, where its wide jaw (the head's Ork mix) leaves
+  the neck's front edge showing.
+- The band top over the bust shows its cut slivers a little.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

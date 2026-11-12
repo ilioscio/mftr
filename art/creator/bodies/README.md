@@ -9,7 +9,10 @@ Studio's **Human Base Meshes** bundle v1.4.1, the same CC0 1.0 bundle as the hea
 **What was done to them** (`tools/blender/extract_bodies.py`, run on the bundle; the bundle
 itself, 49 MB, isn't committed):
 
-- un-subdivided twice: 3,201 vertices and 6,398 triangles each, the same topology for both;
+- the base cage fitted to the sculpt (Blender's "Apply Base"), then un-subdivided twice: 3,201
+  vertices and 6,398 triangles each, the same topology for both;
+- the sculpted surface itself at the multires's first level (about 42k vertices) as
+  `body_<sex>_hi`: the reduced body is projected onto it, and its chest re-subdivided onto it;
 - moved from the bundle's layout to the origin.
 
 The same script printed each body's joints, read from the bundle's "primitive" body of the same
@@ -18,8 +21,9 @@ sex (its parts' origins are the joints). They are the `PRIMITIVE` table in
 
 **How the bases use them** (`cc0_body.make`, from `creator.build_base`):
 
-1. **The head is cut away** a little above the neck's joint. The authored head goes on top, and
-   `raise_neck` carries the neck's top up inside it.
+1. **The head is replaced, the neck kept**: the source is fitted with its neck, then `marry_neck`
+   drops what the head bone weighs (its face and jaw) and seats the neck's top edge inside the
+   authored head.
 2. **The arms are corrected.** The male primitive's arms hang at another angle from the mesh's,
    so each arm's joints are turned onto the mesh's own arm.
 3. **Weights:** automatic weights from a skeleton on those joints, with the biped's bone names;

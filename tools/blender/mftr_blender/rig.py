@@ -97,6 +97,8 @@ def use_shape(name, scale=1.0, x=1.0, **extra):
 
     Heroic proportions (14 §2.2) add, as keywords or dict keys:
       shoulder  m  moves each arm outward (the clavicle's tip and everything below it)
+      drop      m  lowers it likewise: a realistic body's shoulders sit well under its neck
+                   (22 §1.3), the biped's only 3 cm
       arm          scales the upper arm and forearm about the shoulder
       hand         scales the hand, fingers, thumb and prop about the wrist
     Parts attached to arms should use (bone, t) points so they follow."""
@@ -152,10 +154,11 @@ def bone_table():
         return list(_table)
     table = _CENTER + _LEFT + [_mirror(b) for b in _LEFT] + _SOCKETS
     out = [(n, par, shaped(h), shaped(t), d, ax) for n, par, h, t, d, ax in table]
-    if _shape is None or not any(k in _shape for k in ("shoulder", "arm", "hand")):
+    if _shape is None or not any(k in _shape for k in ("shoulder", "drop", "arm", "hand")):
         return out
     pos = {n: (Vector(h), Vector(t)) for n, _, h, t, _, _ in out}
     dx = _shape.get("shoulder", 0.0)
+    dz = _shape.get("drop", 0.0)
     arm = _shape.get("arm", 1.0)
     hand = _shape.get("hand", 1.0)
 
@@ -163,7 +166,7 @@ def bone_table():
         s = pos[f"clavicle_{side}"][1]
         w = pos[f"hand_{side}"][0]
         out_dir = Vector((1.0 if side == "l" else -1.0, 0.0, 0.0))
-        s2 = s + out_dir * dx
+        s2 = s + out_dir * dx - Vector((0.0, 0.0, dz))
         w2 = s2 + (w - s) * arm
         if kind == "arm":
             return tuple(s2 + (Vector(p) - s) * arm)
@@ -173,7 +176,7 @@ def bone_table():
     for n, par, h, t, d, ax in out:
         part, _, side = n.rpartition("_")
         if n.startswith("clavicle_"):
-            t = tuple(Vector(t) + Vector((dx if side == "l" else -dx, 0, 0)))
+            t = tuple(Vector(t) + Vector((dx if side == "l" else -dx, 0, -dz)))
         elif part in _ARM and side in ("l", "r"):
             h, t = arm_point(h, side, "arm"), arm_point(t, side, "arm")
         elif part in _HAND and side in ("l", "r"):

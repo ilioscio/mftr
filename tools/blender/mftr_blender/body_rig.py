@@ -463,7 +463,9 @@ def limit_steps(obj, max_step=MAX_STEP, rounds=60):
             continue
         hs = sorted(((w[a][k], names[k]) for k in range(len(names)) if w[a][k] > 1e-3), reverse=True)
         room = 4 - len(others)
-        hs = hs[:room]
+        # The helper that doesn't fit is taken off the ones that do (no jump where it drops out).
+        cut = hs[room][0] if len(hs) > room else 0.0
+        hs = [(x - cut, nm) for x, nm in hs[:room] if x > cut]
         given = min(PEAK, sum(x for x, _ in hs))
         scale = given / max(sum(x for x, _ in hs), 1e-9)
         own_total = sum(x for _, x in others)
