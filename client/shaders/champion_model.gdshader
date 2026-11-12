@@ -43,11 +43,19 @@ varying flat int region;
 // the iris, its alpha the pupil's size. -1: not an eye.
 varying flat int eye_style;
 varying flat int eye_code;
+// A brow strip's vertex (22 §3.1): its UV is (10 + along the brow, 2 + across it), each 0-1.
+varying flat int brow;
+// A lip's vertex (22 §3.2): (12 + across the mouth, 3 + up), up -1 (the lower lip's border)
+// through 0 (where they meet) to 1 (the upper's). Shaded smooth.
+varying flat int lip;
 
 void vertex() {
 	region = int(round(UV2.x * 256.0)) - 1;
-	eye_style = UV.x >= 1.99 ? int(floor((UV.x - 2.0) * 0.5)) : -1;
-	eye_code = UV.x >= 1.99 ? int(floor(UV.y * 0.5)) : 0;
+	bool eye = UV.x >= 1.99 && UV.x < 9.99;
+	eye_style = eye ? int(floor((UV.x - 2.0) * 0.5)) : -1;
+	eye_code = eye ? int(floor(UV.y * 0.5)) : 0;
+	brow = UV.x >= 9.99 && UV.x < 11.99 ? 1 : 0;
+	lip = UV.x >= 11.99 && UV.x < 13.99 ? 1 : 0;
 }
 
 float eye_hash(float a) {
@@ -97,7 +105,7 @@ vec3 eye_color(vec2 e, vec3 iris, float pupil, int style, int code, out float gl
 void fragment() {
 	cloud_sun = cloud_shade((INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz);
 	// Faceted: one normal per triangle, from the derivatives of the view-space position.
-	if (eye_style < 0) {
+	if (eye_style < 0 && lip == 0) {
 		NORMAL = normalize(cross(dFdy(VERTEX), dFdx(VERTEX)));
 	}
 	if (eye_style >= 0) {
@@ -115,7 +123,26 @@ void fragment() {
 		}
 	} else {
 	vec3 c = COLOR.rgb;
-	if (has_paint && slot <= 2) {
+	if (brow == 1) {
+		// Hairs: fine strokes slanting up from the brow's start and lying flatter toward its tip,
+		// darker at the roots along its lower edge, the ends lighter.
+		float u = UV.x - 10.0;
+		float v = clamp(UV.y - 2.0, 0.0, 1.0);
+		float lean = mix(1.15, 0.3, u);
+		float along = u * 30.0 * cos(lean) + v * 3.2 * sin(lean) * (1.0 - 0.5 * u);
+		float stroke = 0.5 + 0.5 * sin((along + eye_hash(floor(along)) * 0.6) * 6.2832);
+		c *= mix(0.78, 1.18, stroke) * mix(0.82, 1.0, smoothstep(0.0, 0.45, v)) * mix(1.0, 1.12, smoothstep(0.6, 1.0, u));
+	} else if (lip == 1) {
+		// Darker where the lips meet, fullest in each lip's middle, a soft sheen on the lower.
+		float up = clamp(UV.y - 3.0, -1.0, 1.0);
+		float across = abs(UV.x - 12.5) * 2.0;
+		float a = abs(up);
+		c *= mix(0.55, 1.0, smoothstep(0.0, 0.35, a)) * mix(1.0, 0.9, smoothstep(0.75, 1.0, a));
+		c *= mix(1.0, 0.85, smoothstep(0.6, 1.0, across));
+		if (up < 0.0) {
+			c *= 1.0 + 0.14 * (1.0 - smoothstep(0.0, 0.5, abs(a - 0.5))) * (1.0 - smoothstep(0.0, 0.6, across));
+		}
+	} else if (has_paint && slot <= 2) {
 		vec4 p = texture(paint, UV);
 		c = mix(c, p.rgb, p.a);
 	}

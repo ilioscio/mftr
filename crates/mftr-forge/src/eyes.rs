@@ -108,9 +108,17 @@ impl Default for Eyes {
 pub const SIZE_MAX: u8 = 9;
 pub const PUPIL_MAX: u8 = 10;
 
+/// Where eye UVs end: the brows' start (`brows::UV_BASE`).
+pub const UV_END: f32 = 10.0;
+
 /// Whether vertex `v` of `p` is an eyeball's.
 pub fn is_eye(p: &Primitive, v: usize) -> bool {
-    p.uvs.get(v).is_some_and(|u| u[0] >= UV_BASE - 0.01)
+    p.uvs.get(v).is_some_and(|u| is_eye_uv(*u))
+}
+
+/// Whether a vertex with this UV is an eyeball's.
+pub fn is_eye_uv(u: [f32; 2]) -> bool {
+    u[0] >= UV_BASE - 0.01 && u[0] < UV_END - 0.01
 }
 
 /// Write `eyes` into every eyeball vertex of a forged `model`. `glow` is the signature color,

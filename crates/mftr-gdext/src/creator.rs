@@ -9,7 +9,7 @@ use godot::prelude::*;
 use mftr_forge::face::{BoneSet, FaceSculpt, Frame, Sculpt};
 use mftr_forge::looks::{Gender, Looks, Proportions, SKIN_TONES};
 use mftr_forge::recipe::{self, Recipe};
-use mftr_forge::{body, eyes, face};
+use mftr_forge::{body, brows, eyes, face, paint};
 use mftr_sim::ChampionId;
 
 use crate::model::{MftrModel, catalog};
@@ -314,6 +314,94 @@ impl MftrCreator {
             _ => {}
         }
         self.recipe.looks.eyes = (e != eyes::Eyes::default()).then_some(e);
+    }
+
+    /// Whether the base has brow strips to shape (the humanoids').
+    #[func]
+    fn has_brows(&self) -> bool {
+        catalog(&self.art)
+            .and_then(|c| c.base(&self.recipe.looks.base_key()).map(|b| brows::present(&b.model)))
+            .unwrap_or(false)
+    }
+
+    /// The brow styles' names, in order.
+    #[func]
+    fn brow_styles(&self) -> PackedStringArray {
+        brows::styles().iter().map(|s| GString::from(s.name.as_str())).collect()
+    }
+
+    /// The brow styles' lines (tooltips), in order.
+    #[func]
+    fn brow_style_notes(&self) -> PackedStringArray {
+        brows::styles().iter().map(|s| GString::from(s.about.as_str())).collect()
+    }
+
+    /// The brows: `{own: whether the right has its own shape, left: {style, thick, length, arch,
+    /// peak, tilt, gap, raise}, right: {…}}`, style an index into `brow_styles`, the rest 0–10.
+    #[func]
+    fn brows(&self) -> VarDictionary {
+        let b = self.recipe.looks.brows.unwrap_or_default();
+        let one = |w: &brows::Brow| {
+            let mut d = VarDictionary::new();
+            d.set("style", w.style as i64);
+            for k in brows::KEYS {
+                d.set(k, w.get(k).unwrap_or(5) as i64);
+            }
+            d
+        };
+        let mut d = VarDictionary::new();
+        d.set("own", b.right.is_some());
+        d.set("left", &one(&b.left).to_variant());
+        d.set("right", &one(&b.right()).to_variant());
+        d
+    }
+
+    /// Set `key` (`style` or one of the sizes) of the `side` brow ("left" or "right"); with the
+    /// brows alike, either sets both.
+    #[func]
+    fn set_brow(&mut self, side: GString, key: GString, value: i64) {
+        let mut b = self.recipe.looks.brows.unwrap_or_default();
+        let right = side == "right" && b.right.is_some();
+        let w = if right { b.right.as_mut().unwrap() } else { &mut b.left };
+        let key = key.to_string();
+        if key == "style" {
+            w.style = value.clamp(0, brows::styles().len() as i64 - 1) as u8;
+        } else {
+            w.set(&key, value.clamp(0, brows::MAX as i64) as u8);
+        }
+        self.recipe.looks.brows = (b != brows::Brows::default()).then_some(b);
+    }
+
+    /// Give the right brow its own shape (a copy of the left's), or make it the left's again.
+    #[func]
+    fn set_brows_own(&mut self, own: bool) {
+        let mut b = self.recipe.looks.brows.unwrap_or_default();
+        b.right = own.then_some(b.right());
+        self.recipe.looks.brows = (b != brows::Brows::default()).then_some(b);
+    }
+
+    /// The brows' color: a palette index, or -1 for the base's.
+    #[func]
+    fn brow_color(&self) -> i64 {
+        let Some(r) = self.brow_region() else { return -1 };
+        self.recipe
+            .looks
+            .paint
+            .iter()
+            .find(|(t, reg, _)| t == "body" && *reg as usize == r)
+            .map_or(-1, |(_, _, c)| *c as i64)
+    }
+
+    /// Color the brows (a palette index; below 0 back to the base's). It is the body's brow
+    /// region, as the Paint step fills it.
+    #[func]
+    fn set_brow_color(&mut self, color: i64) {
+        let Some(r) = self.brow_region() else { return };
+        let paint = &mut self.recipe.looks.paint;
+        paint.retain(|(t, reg, _)| !(t == "body" && *reg as usize == r));
+        if color >= 0 {
+            paint.push(("body".into(), r as u8, color.min(paint::PALETTE.len() as i64 - 1) as u8));
+        }
     }
 
     #[func]
@@ -1028,6 +1116,12 @@ fn aimed(model: &mftr_pack::glb::Model) -> Option<Arc<mftr_pack::glb::Model>> {
 }
 
 impl MftrCreator {
+    /// The base's brow paint region (22 §3.1), if it has brows.
+    fn brow_region(&self) -> Option<usize> {
+        catalog(&self.art)
+            .and_then(|c| c.base(&self.recipe.looks.base_key()).and_then(|b| brows::color_region(&b.model)))
+    }
+
     fn hover<S: Edited>(&mut self, origin: Vector3, dir: Vector3) -> i64 {
         let Some(last) = self.last.clone() else { return -1 };
         if S::editor(self).frames.is_none() {

@@ -437,7 +437,8 @@ def add_shape_keys(armature, body, fit=None):
     if rigged and fit is not None:
         from . import authored_head
         cos = [v.co.copy() for v in body.data.vertices]
-        for name, deltas in authored_head.lid_keys(armature, body, fit).items():
+        shapes = {**authored_head.lid_keys(armature, body, fit), **authored_head.lip_keys(body, fit)}
+        for name, deltas in shapes.items():
             key = body.shape_key_add(name=name, from_mix=False)
             for i, d in deltas.items():
                 key.data[i].co = cos[i] + d
@@ -526,6 +527,8 @@ def build(gender, name, build="humanoid_slim"):
     unwrap(body, head_group="head")
     # The eyeballs carry their own coordinates, not the paint image's (22 §2.1).
     authored_head.eye_uvs(armature, body)
+    authored_head.brow_uvs(body)
+    authored_head.lip_uvs(body)
     for obj in [o for o in bpy.data.objects if o.name.startswith("part.")]:
         unwrap(obj)
     armature["mftr_build"] = name

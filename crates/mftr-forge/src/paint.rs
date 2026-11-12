@@ -149,7 +149,7 @@ pub fn fill(model: &mut Model, target: &str, from: [f32; 3], color: [f32; 3]) {
                 continue;
             }
             for (v, c) in p.colors.iter_mut().enumerate() {
-                if p.uvs.get(v).is_some_and(|u| u[0] >= crate::eyes::UV_BASE - 0.01) {
+                if p.uvs.get(v).is_some_and(|u| crate::eyes::is_eye_uv(*u)) {
                     continue;
                 }
                 if same([c[0], c[1], c[2]], from) {

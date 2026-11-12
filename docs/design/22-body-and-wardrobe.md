@@ -509,6 +509,80 @@ millimetres against the opening's ellipse, like a modeler's proportional edit (`
 - The ancestry presets (§3.3) will set these sliders. The face shapes' reader then has to accept
   morph sliders too.
 
+### BW2 status (2026-11-12): brows and lips built
+
+**Brows are strips, not paint.** Each humanoid base carries a strip over each eye: 13 columns
+from over the nose to the temple and 4 rows across the brow line (72 triangles a brow), found on
+the head's surface by rays and lifted 0.6 mm off it. The strip is an envelope, wide and tall
+enough for any brow. `mftr_forge::brows` shapes it at forge time:
+
+- it slides the columns between the brow's start and its tip;
+- it sets the rows by the style's thickness and arch;
+- it stands the middle rows off the skin for the brow's volume.
+
+So the silhouette is real geometry, with no transparency, which suits old hardware. The champion
+shader draws the hairs: strokes leaning up at the start and lying flatter toward the tip, darker
+roots, lighter ends. The strip rides the face bones as the skin under it does, so the brow
+presets and drags carry it.
+
+- **Styles are data** (`art/creator/heads/brows.txt`): soft (the default), straight, arched,
+  angled, tapered, bushy, heavy, thin, plucked, unibrow (it runs in to meet its twin), scarred
+  (split by a cut) and none. Each is two seven-point profiles, thickness and arch.
+- **Per brow** (`looks.brows`, 0–10, 5 the style as drawn): thickness, length, arch, peak (toward
+  the nose or the temple), tilt, gap and height. **Each brow its own shape** gives the right one
+  its own settings, for asymmetry. Old recipes read the default.
+- **Color:** the brows stay the body's paint region 3, as recipes painted them before. The Brows
+  panel's swatches set that fill.
+- **Departs from §3.1:** no density slider. A sparse brow needs the skin's color behind the
+  strokes, which needs transparency or another color per vertex. The strokes' contrast stands in
+  for it.
+
+**Lips are the mouth's own loops.** The lips used to be a box of faces split from the skin, with
+blocky corners. Now:
+
+- The lips are the faces within two edges of the closed mouth's seam.
+- Each ring is set on one outline, its upper and lower lips meeting at the corners, on the
+  head's own surface. The source's corner loops run unevenly, and that forked the corners.
+- The mouth is 20% wider than the source's seam.
+- The lips are smooth-shaded, the one smooth skin on the faceted face.
+- The shader draws their gradient (`UV` = 12 + across, 3 + up): darker where they meet, fullest
+  in each lip's middle, a sheen on the lower lip.
+- The skin tone tints them, so darker skin has darker lips.
+
+The Mouth group gains three morphs; the skin within 7 mm of the lips follows their border:
+
+- **Upper lip**, thin to full (`lips_upper~`);
+- **Lower lip**, thin to full (`lips_lower~`);
+- **Cupid's bow** (`lips_bow+`).
+
+Width, overall fullness, height and the corners stay the bone presets (`mouth_*`). Asymmetry
+(a sneer, a scar's pull) is the Features drag with Symmetry off. **Departs from §3.2:** no new
+cupid's-bow bones. A morph gives the bow without changing the face rig's bone set and its saved
+forms.
+
+**Feature UVs:** eyes 2–10, brows 10–12, lips 12–14. `eyes::is_eye` now checks its own range.
+
+**Checked:**
+
+- Captures:
+  - every brow style; thick and tilted; asymmetric;
+  - the lips at default, thin, cupid's bow and full, front and three-quarter;
+  - an arched brow with a cupid's bow on the slim feminine base, heavy brows on the heavy
+    masculine (orc mix), tapered brows and full lips on the heavy feminine;
+  - the Brows panel;
+  - a practice match and its portrait.
+- Tests:
+  - the styles file's reader;
+  - the brows' text round-trip and strict reader;
+  - every style stays in its envelope, and each setting moves the brow its way;
+  - every base has strips, its brow region at index 3, and the lip sliders;
+  - a thicker brow reaches higher, and `brow_height` lifts the strips.
+
+**Not yet:**
+
+- Free sculpting (the brushes) doesn't move the brow strips; the face bones do.
+- The ancestry presets (§3.3) need the face shapes' reader to accept morph sliders.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

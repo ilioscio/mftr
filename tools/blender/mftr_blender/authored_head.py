@@ -59,10 +59,10 @@ REST_DROP = math.radians(14)
 # The default iris (brown) and pupil size (0–1), until the forge writes the recipe's.
 IRIS = (0.30, 0.18, 0.09)
 PUPIL = 0.5
-# Brows: a band over each eye; lips: round the mouth line.
-BROW = {"z": (EYE.z + 0.010, EYE.z + 0.021), "x": (0.011, 0.050)}
-LIPS = {"z": (-0.0525, -0.0375), "x": 0.024}
+# The closed mouth's line (source metres): the lips (22 §3.2) are the faces within `LIP_RINGS`
+# edges of its seam.
 MOUTH_Z = -0.0449
+LIP_RINGS = 2
 
 
 def _source_mesh(mix):
@@ -133,9 +133,7 @@ def build(bm, layers, groups, mats, head, mix, fit):
         if any(in_lid(c, s) for s in (1, -1)):
             # Once the lids are open, what's left round them (the crease loop's faces) is skin.
             return "skin" if opened else "lid"
-        if BROW["z"][0] < c.z < BROW["z"][1] and BROW["x"][0] < abs(c.x) < BROW["x"][1] and c.y < EYE.y + 0.01:
-            return "brow"
-        if LIPS["z"][0] < c.z < LIPS["z"][1] and abs(c.x) < LIPS["x"] and c.y < -0.045:
+        if f in lips:
             return "lips"
         return "skin"
 
@@ -145,12 +143,19 @@ def build(bm, layers, groups, mats, head, mix, fit):
     opened = True
     _shape_rims(src)
     _crease_loops(src)
-    # Brows and lips own their vertices (split from the skin), so their color stays crisp.
-    painted = [f for f in src.faces if region(f) in ("brow", "lips")]
-    edges = {e for f in painted for e in f.edges if any(region(o) not in ("brow", "lips") for o in e.link_faces)}
+    lips, lip_at = _lips(src)
+    # The lips own their vertices (split from the skin), so their color stays crisp. The brows
+    # are strips of their own (`_brow_strips`).
+    painted = [f for f in src.faces if region(f) == "lips"]
+    edges = {e for f in painted for e in f.edges if any(region(o) != "lips" for o in e.link_faces)}
     bmesh.ops.split_edges(src, edges=list(edges))
     src.faces.ensure_lookup_table()
-    colors = {"skin": head.skin, "brow": head.hair, "lips": head.lips}
+    colors = {"skin": head.skin, "lips": head.lips}
+    # Each lip vertex's place on the lips rides in two layers until `lip_uvs`: `lip_s` (1 +
+    # across the mouth, 0 off the lips) and `lip_v` (from the lower border, -1, through the
+    # line where they meet, 0, to the upper border, 1).
+    ls = bm.verts.layers.float.get("lip_s") or bm.verts.layers.float.new("lip_s")
+    lv = bm.verts.layers.float.get("lip_v") or bm.verts.layers.float.new("lip_v")
     out_v = {}
     for v in src.verts:
         nv = bm.verts.new(fit(v.co))
@@ -159,10 +164,15 @@ def build(bm, layers, groups, mats, head, mix, fit):
     for f in src.faces:
         r = region(f)
         nf = bm.faces.new([out_v[v] for v in f.verts])
-        nf.material_index = mats["cloth"] if r == "brow" else mats["skin"]
-        nf.smooth = False
+        nf.material_index = mats["skin"]
+        # The lips are smooth (their light rolls over them); the rest of the face is faceted.
+        nf.smooth = r == "lips"
         for v in f.verts:
             out_v[v][col] = (*colors[r], 1.0)
+            if r == "lips":
+                s, w = lip_at(v)
+                out_v[v][ls] = 1.0 + s
+                out_v[v][lv] = w
     # The lids' edges a little darker (the occlusion alpha): the upper's lash line, the lower's
     # waterline.
     for side in (1, -1):
@@ -170,16 +180,13 @@ def build(bm, layers, groups, mats, head, mix, fit):
         for v in src.verts:
             if (v.co - c).length < 0.02 and any(e.is_boundary for e in v.link_edges):
                 out_v[v][col] = (*head.skin, 0.4 if v.co.z > c.z + RIM["up"] * 0.2 else 0.7)
-    # The mouth line a little darker (the lips' meeting).
-    for v in src.verts:
-        if abs(v.co.z - MOUTH_Z) < 0.0018 and abs(v.co.x) < LIPS["x"] * 0.9 and v.co.y < -0.05:
-            out_v[v][col] = (*(c * 0.5 for c in head.lips), 1.0)
     # The sockets' walls (22 §2.3): from each opening's rim in behind the eyeball, so a look
     # past the ball at the corners finds flesh, never the inside of the head.
     for side in (1, -1):
         # On the head like the skin it hangs from: the face rig weights it with its neighbours.
         _socket_wall(src, bm, out_v, deform, col, mats, fit, Vector((side * EYE.x, EYE.y + EYEBALL_BACK, EYE.z)),
                      g, head.skin)
+    _brow_strips(src, bm, deform, col, mats, fit, g, head.hair)
     src.free()
     # The eyes (22 §2): an eyeball behind each opening, turning on its look bone, and an upper
     # and a lower lid that close over it on theirs. The iris is drawn by the shader from the
@@ -192,6 +199,303 @@ def build(bm, layers, groups, mats, head, mix, fit):
         for which in ("upper", "lower"):
             _lid(bm, deform, col, mats, fit, c, groups.get(f"lid_{which}_{sfx}", eye_g), which, head.skin)
     return fit
+
+
+# --- Brows (22 §3.1) ---------------------------------------------------------------------------
+# Each brow is a strip on the brow ridge: columns from over the nose (`BROW_X[0]`, so a unibrow
+# can meet its twin) out to the temple, rows across the brow line from below it to well above it.
+# That strip is an envelope: the forge (`mftr_forge::brows`) slides the columns between the
+# brow's start and its tip and sets the rows by the style's thickness and arch, so every style
+# and size is this one mesh. The strip lies a little off the skin and rides the face bones as
+# the skin under it does.
+BROW_X = (0.0005, 0.054)
+BROW_COLS = 13
+# Across the brow line (source metres): the rows' places in the envelope.
+BROW_ROWS = (-0.008, -0.0025, 0.0035, 0.011)
+BROW_LIFT = 0.0006
+
+
+def brow_line(x):
+    """The brow line's height at `x` (source metres from the middle): a low arc over the eye."""
+    t = max(0.0, min(1.0, (x - 0.010) / 0.044))
+    return EYE.z + 0.0118 + 0.0025 * math.sin(math.pi * t)
+
+
+def _brow_strips(src, bm, deform, col, mats, fit, group, hair):
+    """A brow strip over each eye on the source head `src` (its surface found by rays from the
+    front), on the cloth slot in the hair's color. Each vertex's place in the envelope rides in
+    two float layers, `brow_s` (1 + along, 0 off a brow) and `brow_t` (across, 0–1), until
+    `brow_uvs` writes them into its UV."""
+    from mathutils.bvhtree import BVHTree
+    tree = BVHTree.FromBMesh(src)
+    s_layer = bm.verts.layers.float.get("brow_s") or bm.verts.layers.float.new("brow_s")
+    t_layer = bm.verts.layers.float.get("brow_t") or bm.verts.layers.float.new("brow_t")
+    span = BROW_ROWS[-1] - BROW_ROWS[0]
+    for side in (1, -1):
+        grid = []
+        for i in range(BROW_COLS):
+            s = i / (BROW_COLS - 1)
+            x = BROW_X[0] + (BROW_X[1] - BROW_X[0]) * s
+            column = []
+            for dt in BROW_ROWS:
+                z = brow_line(x) + dt
+                hit, n, _, _ = tree.ray_cast(Vector((side * x, EYE.y - 0.1, z)), Vector((0.0, 1.0, 0.0)))
+                if hit is None:
+                    hit, n, _, _ = tree.find_nearest(Vector((side * x, EYE.y, z)))
+                n = n.normalized()
+                if n.y > 0:
+                    n = -n
+                v = bm.verts.new(fit(hit + n * BROW_LIFT))
+                v[deform][group] = 1.0
+                v[col] = (*hair, 1.0)
+                v[s_layer] = 1.0 + s
+                v[t_layer] = (dt - BROW_ROWS[0]) / span
+                column.append(v)
+            grid.append(column)
+        front = fit(Vector((side * 0.03, EYE.y - 0.2, EYE.z + 0.015)))
+        for i in range(BROW_COLS - 1):
+            for j in range(len(BROW_ROWS) - 1):
+                f = bm.faces.new([grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]])
+                f.normal_update()
+                if f.normal.dot(front - f.calc_center_median()) < 0:
+                    f.normal_flip()
+                f.material_index = mats["cloth"]
+                f.smooth = False
+
+
+BROW_UV_BASE = 10.0
+
+
+def brow_uvs(body):
+    """Write each brow vertex's place in its envelope into its UV, (10 + along, across), and
+    drop the layers that carried it (after `creator.unwrap`)."""
+    me = body.data
+    if "brow_s" not in me.attributes:
+        return 0
+    s = [d.value for d in me.attributes["brow_s"].data]
+    t = [d.value for d in me.attributes["brow_t"].data]
+    uv = me.uv_layers.active
+    n = 0
+    for poly in me.polygons:
+        for li in poly.loop_indices:
+            vi = me.loops[li].vertex_index
+            if s[vi] > 0.5:
+                # glTF flips v (1 - v): the forge reads `across` as it is.
+                uv.data[li].uv = (BROW_UV_BASE + min(0.999, s[vi] - 1.0), 1.0 - t[vi])
+                n += 1
+    me.attributes.remove(me.attributes["brow_s"])
+    me.attributes.remove(me.attributes["brow_t"])
+    return n
+
+
+# --- Lips (22 §3.2) -----------------------------------------------------------------------------
+
+def _lips(src):
+    """The lips of the source head `src`: the faces within `LIP_RINGS` edges of the closed
+    mouth's seam (the edge loop along the mouth line), so their border is an edge loop of the
+    source's, not a box. Returns (faces, at): `at(v)` gives a lip vertex's place on them, (across
+    the mouth 0–1, from the lower border -1 through the seam 0 to the upper border 1)."""
+    near = [e for e in src.edges
+            if all(abs(v.co.x) < 0.012 and abs(v.co.z - MOUTH_Z) < 0.004 and v.co.y < -0.04 for v in e.verts)]
+
+    def across(e):
+        d = e.verts[1].co - e.verts[0].co
+        return abs(d.x) > 2 * abs(d.z)
+
+    e0 = min((e for e in near if across(e)),
+             key=lambda e: abs(e.verts[0].co.x + e.verts[1].co.x) / 2 + abs((e.verts[0].co.z + e.verts[1].co.z) / 2 - MOUTH_Z))
+    seam = set(e0.verts)
+    for v0 in e0.verts:
+        for e in _walk(e0, v0):
+            seam |= set(e.verts)
+    dist = {v: 0 for v in seam}
+    ring = set(seam)
+    for d in range(1, LIP_RINGS + 1):
+        ring = {e.other_vert(v) for v in ring for e in v.link_edges} - dist.keys()
+        for v in ring:
+            dist[v] = d
+    faces = {f for f in src.faces if all(v in dist for v in f.verts)}
+    _shape_lips(src, seam, dist, faces)
+    # By place, so the copies the lips' split makes (`bmesh.ops.split_edges`) are found too.
+    rings = {tuple(round(c, 6) for c in v.co): d for v, d in dist.items()}
+    line = sorted((v.co.x, v.co.z) for v in seam)
+    half = max(abs(v.co.x) for f in faces for v in f.verts)
+
+    def seam_z(x):
+        if x <= line[0][0]:
+            return line[0][1]
+        for (x0, z0), (x1, z1) in zip(line, line[1:]):
+            if x <= x1:
+                return z0 + (z1 - z0) * (x - x0) / max(1e-9, x1 - x0)
+        return line[-1][1]
+
+    def at(v):
+        d = rings[tuple(round(c, 6) for c in v.co)]
+        side = 0.0 if d == 0 else (1.0 if v.co.z > seam_z(v.co.x) else -1.0)
+        return (min(0.999, max(0.0, 0.5 + v.co.x / (2 * half))), side * d / LIP_RINGS)
+
+    return faces, at
+
+
+LIP_WIDEN = 1.2
+
+
+def _shape_lips(src, seam, dist, faces):
+    """Set the lips on one outline: the source's rings run unevenly past the mouth's corners
+    (the upper lip's about 3 mm past the seam's end, the lower's short of it). Each ring of each
+    lip is drawn in across so its ends meet at the seam's end, then set at its share of the
+    lip's height over the seam (fullest in the middle, tapering to the corner), on the head's own
+    surface."""
+    from mathutils.bvhtree import BVHTree
+    tree = BVHTree.FromBMesh(src)
+    line = sorted((v.co.x, v.co.z) for v in seam)
+    ends = max(abs(x) for x, _ in line)
+    # The mouth a little wider than the source's seam: its corners `WIDEN` further out.
+    corner = ends * LIP_WIDEN
+
+    def source_z(x):
+        if x <= line[0][0]:
+            return line[0][1]
+        for (x0, z0), (x1, z1) in zip(line, line[1:]):
+            if x <= x1:
+                return z0 + (z1 - z0) * (x - x0) / max(1e-9, x1 - x0)
+        return line[-1][1]
+
+    def seam_z(x):
+        # The widened seam's height at x.
+        return source_z(x * ends / corner)
+
+    lip = {v for f in faces for v in f.verts if dist[v] > 0}
+    side = {v: 1 if v.co.z > source_z(v.co.x) else -1 for v in lip}
+    reach, height = {}, {1: 0.0, -1: 0.0}
+    for v in lip:
+        k = (dist[v], side[v])
+        reach[k] = max(reach.get(k, 0.0), abs(v.co.x))
+        if dist[v] == LIP_RINGS and abs(v.co.x) < 0.003:
+            height[side[v]] = max(height[side[v]], abs(v.co.z - source_z(v.co.x)))
+    moved = {}
+    for v in seam:
+        x = v.co.x * LIP_WIDEN
+        hit, _n, _i, _d = tree.ray_cast(Vector((x, v.co.y - 0.03, v.co.z)), Vector((0.0, 1.0, 0.0)))
+        moved[v] = Vector((x, hit.y if hit is not None else v.co.y, v.co.z))
+    for v in lip:
+        d, s = dist[v], side[v]
+        x = v.co.x * corner * (1.0 - 0.05 * d) / max(1e-9, reach[(d, s)])
+        t = min(1.0, abs(x) / corner)
+        z = seam_z(x) + s * height[s] * d / LIP_RINGS * (1.0 - t * t) ** (0.6 if s > 0 else 0.7)
+        hit, _n, _i, _d = tree.ray_cast(Vector((x, v.co.y - 0.03, z)), Vector((0.0, 1.0, 0.0)))
+        moved[v] = Vector((x, hit.y if hit is not None else v.co.y, z))
+    for v, p in moved.items():
+        v.co = p
+
+
+LIP_UV_BASE = 12.0
+
+
+def lip_uvs(body):
+    """Write each lip vertex's place into its UV, (12 + across, 3 + up), and drop the layers
+    that carried it (after `creator.unwrap`): the shader shades the lips from it."""
+    me = body.data
+    if "lip_s" not in me.attributes:
+        return 0
+    s = [d.value for d in me.attributes["lip_s"].data]
+    w = [d.value for d in me.attributes["lip_v"].data]
+    uv = me.uv_layers.active
+    n = 0
+    for poly in me.polygons:
+        for li in poly.loop_indices:
+            vi = me.loops[li].vertex_index
+            if s[vi] > 0.5:
+                # glTF flips v (1 - v): the shader reads 3 + up.
+                uv.data[li].uv = (LIP_UV_BASE + s[vi] - 1.0, 1.0 - (3.0 + w[vi]))
+                n += 1
+    me.attributes.remove(me.attributes["lip_s"])
+    me.attributes.remove(me.attributes["lip_v"])
+    return n
+
+
+# The lips' shapes (22 §3.2): each moves the lip vertices by (across in mm, forward in mm, up in
+# mm) from their place on the lips (x mm from the middle, up -1–1, the mouth's half-width in
+# mm); the skin within `LIP_SKIN` of the lips' border follows its nearest border vertex, fading.
+LIP_SKIN = 0.007
+
+
+def _lip_h(x, half):
+    return max(0.0, 1.0 - (x / half) ** 2) ** 0.6
+
+
+def _upper(x, up, half):
+    if up <= 0:
+        return (0.0, 0.0, 0.0)
+    h = _lip_h(x, half)
+    return (0.0, -1.6 * (0.4 * up + 0.6 * math.sin(math.pi * up)) * h, 1.1 * up * h)
+
+
+def _lower(x, up, half):
+    if up >= 0:
+        return (0.0, 0.0, 0.0)
+    a = -up
+    h = _lip_h(x, half)
+    return (0.0, -1.8 * (0.4 * a + 0.6 * math.sin(math.pi * a)) * h, -1.2 * a * h)
+
+
+def _bow(x, up, half):
+    """A cupid's bow: the upper border's two peaks rise and the dip between them deepens."""
+    if up <= 0:
+        return (0.0, 0.0, 0.0)
+    peaks = 1.0 - _sm(abs(abs(x) - 5.5) / 4.0)
+    dip = 1.0 - _sm(abs(x) / 3.0)
+    return (0.0, -0.3 * dip * up, (1.0 * peaks - 0.9 * dip) * up)
+
+
+LIP_SHAPES = [
+    ("lips_upper", "A full upper lip or a thin one", [("~", _upper)]),
+    ("lips_lower", "A full lower lip or a thin one", [("~", _lower)]),
+    ("lips_bow", "A marked cupid's bow", [("+", _bow)]),
+]
+
+
+def lip_keys(body, fit):
+    """The lip shapes (`LIP_SHAPES`) on the built `body` (before `lip_uvs`, while the lips'
+    layers are there), as {slider + suffix: {vertex: delta}} in armature space."""
+    me = body.data
+    if "lip_s" not in me.attributes:
+        return {}
+    s = [d.value for d in me.attributes["lip_s"].data]
+    w = [d.value for d in me.attributes["lip_v"].data]
+
+    def source(co):
+        return JOINT + (Vector(co) - fit.joint) / fit.s
+
+    lips = [i for i in range(len(me.vertices)) if s[i] > 0.5]
+    src = {i: source(me.vertices[i].co) for i in lips}
+    half = max(abs(p.x) for p in src.values()) * 1000
+    border = [i for i in lips if abs(abs(w[i]) - 1.0) < 1e-3]
+    skin = []
+    for v in me.vertices:
+        if s[v.index] > 0.5:
+            continue
+        p = source(v.co)
+        if abs(p.x) > half / 1000 + LIP_SKIN or abs(p.z - MOUTH_Z) > 0.02 or p.y > -0.03:
+            continue
+        b = min(border, key=lambda i: (src[i] - p).length)
+        d = (src[b] - p).length
+        if d < LIP_SKIN:
+            skin.append((v.index, b, 1.0 - _sm(d / LIP_SKIN)))
+    out = {}
+    for sid, _desc, ends in LIP_SHAPES:
+        for suffix, field in ends:
+            moved = {}
+            for i in lips:
+                d = field(src[i].x * 1000, w[i], half)
+                if any(d):
+                    moved[i] = Vector(d) / 1000.0 * fit.s
+            deltas = dict(moved)
+            for i, b, k in skin:
+                if b in moved:
+                    deltas[i] = moved[b] * k
+            out[sid + suffix] = deltas
+    return out
 
 
 def rim_z(x_out, upper):

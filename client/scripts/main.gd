@@ -260,6 +260,10 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--creator-step" and i + 1 < args.size():
 			_creator_step = args[i + 1]
+		elif args[i] == "--creator-scroll" and i + 1 < args.size():
+			# …its side panel scrolled this far (screenshots of the lower panels).
+			_creator_scroll = int(args[i + 1])
+			i += 1
 		elif args[i] == "--creator-zoom" and i + 1 < args.size():
 			# …and zoomed this much (past the wheel's 3, for close-ups of the eyes).
 			_creator_zoom = float(args[i + 1])
@@ -683,6 +687,7 @@ var _practice_leave := -1.0             # `--practice-leave S`: …and leave it 
 var _start_creator := false              # `--creator`: open the champion creator (20) at start
 var _creator_load := ""                  # `--creator-load FILE`: …with this champion file
 var _creator_yaw := INF                 # `--creator-yaw R`: …turned this far (screenshots)
+var _creator_scroll := 0                 # `--creator-scroll PX`: …its panel scrolled (screenshots)
 var _creator_zoom := 0.0                # `--creator-zoom Z`: …zoomed this much (screenshots)
 var _creator_step := ""                  # `--creator-step NAME`: …on this step (screenshots)
 var _creator_brush := ""                 # `--creator-brush TOOL:X,Y`: …and paint once there (screenshots)
@@ -6764,6 +6769,9 @@ func _open_creator() -> void:
 		var a := fp[1].split(",")
 		var b := fp[2].split(",")
 		screen.feature_at_fraction(fp[0], Vector2(float(a[0]), float(a[1])), Vector2(float(b[0]), float(b[1])), 8, fp.size() > 3 and fp[3] == "hold")
+	if _creator_scroll > 0:
+		await get_tree().create_timer(0.8).timeout
+		screen.scroll_panel(_creator_scroll)
 	if _creator_life != "":
 		var lp := _creator_life.split(",")
 		screen.hold_eyes(Vector3(float(lp[0]), float(lp[1]) if lp.size() > 1 else 0.0, float(lp[2]) if lp.size() > 2 else 0.0))

@@ -29,7 +29,7 @@ const STEPS := [
 	["balance", "8  Balance", "Every number has a price; every champion spends the same budget. Turn power and cooldowns, then fit.", true],
 	["name", "9  Name", "Name the champion and save it.", true],
 ]
-const FACE_PREFIXES := ["head", "face", "jaw", "chin", "cheek", "brow", "nose", "mouth", "eyes", "lids", "ears"]
+const FACE_PREFIXES := ["head", "face", "jaw", "chin", "cheek", "brow", "nose", "mouth", "lips", "eyes", "lids", "ears"]
 ## The Face step, feature by feature (20 §5.2): each slider as [id, name, its -1 end, its +1 end].
 ## A slider the base has that isn't listed lands under "More".
 const FACE_GROUPS := [
@@ -48,7 +48,9 @@ const FACE_GROUPS := [
 		["nose_tip", "Tip", "drooping", "upturned"]]],
 	["Cheeks", [["cheekbones", "Cheekbones", "flat", "high, sharp"], ["cheeks_hollow", "Fullness", "full", "gaunt"]]],
 	["Mouth", [["mouth_width", "Width", "small", "wide"], ["mouth_lips", "Lips", "thin", "full"],
-		["mouth_height", "Height", "low", "high"], ["mouth_corners", "Corners", "frown", "smile"]]],
+		["mouth_height", "Height", "low", "high"], ["mouth_corners", "Corners", "frown", "smile"],
+		["lips_upper", "Upper lip", "thin", "full"], ["lips_lower", "Lower lip", "thin", "full"],
+		["lips_bow", "Cupid's bow", "", "marked"]]],
 	["Jaw and chin", [["jaw_width", "Jaw width", "narrow", "wide, square"], ["jaw_corners", "Jaw corners", "tapered", "heavy"],
 		["chin_length", "Chin length", "short", "long"], ["chin_reach", "Chin", "receding", "jutting"]]],
 	["Ears", [["ears_size", "Size", "small", "big"], ["ears_point", "Points", "", "pointed"]]],
@@ -76,6 +78,10 @@ var _viewport: SubViewport
 # The Paint step's tool (CR5b): "fill" a region, or paint on the model with a "brush", a
 # "decal" or the "erase" brush; the brush color (a palette index), size (m) and decal.
 var _paint_tool := "fill"
+# Which brow the Brows panel shapes when each has its own (22 §3.1).
+var _brow_side := "left"
+# The side panel's scroll (`scroll_panel`, for captures).
+var _scroll: ScrollContainer
 var _brush_color := 18
 var _brush_size := 0.1
 var _decal := "star"
@@ -445,6 +451,7 @@ func _build_side() -> Control:
 	outer.add_child(_hint_label)
 	outer.add_child(HSeparator.new())
 	var scroll := ScrollContainer.new()
+	_scroll = scroll
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	outer.add_child(scroll)
@@ -512,6 +519,7 @@ func _show_step(id: String) -> void:
 			_sculpt_tools()
 			_face_shapes()
 			_eyes_panel()
+			_brows_panel()
 			var have: Array = Array(creator.sliders())
 			var listed := {}
 			for group in FACE_GROUPS:
@@ -953,6 +961,66 @@ func _eyes_panel() -> void:
 		creator.set_eye("sclera", k)
 		_changed(true)
 		_show_step("face"))
+
+
+## The Brows panel (22 §3.1): a style, a color, and the brow's sizes; each brow its own with the
+## box ticked.
+const BROW_SLIDERS := [["thick", "Thickness", "thin", "thick"], ["length", "Length", "short", "long"],
+	["arch", "Arch", "flat", "high"], ["peak", "Peak", "toward the nose", "toward the temple"],
+	["tilt", "Tilt", "tips down", "tips up"], ["gap", "Gap", "close", "apart"], ["raise", "Height", "low", "high"]]
+
+
+func _brows_panel() -> void:
+	if not creator.has_brows():
+		return
+	var b: Dictionary = creator.brows()
+	_section("Brows")
+	var own: bool = b.own
+	if own:
+		_tool_row([["left", "Left brow"], ["right", "Right brow"]], _brow_side, func(k):
+			_brow_side = k
+			_show_step("face"))
+	var side: String = _brow_side if own else "left"
+	var w: Dictionary = b[side]
+	var names: PackedStringArray = creator.brow_styles()
+	var styles: Array = []
+	for i in names.size():
+		styles.append([str(i), names[i]])
+	_tool_row(styles, str(int(w.style)), func(k):
+		creator.set_brow(side, "style", int(k))
+		_changed(true)
+		_show_step("face"))
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", 5)
+	row.add_theme_constant_override("v_separation", 5)
+	var pal: PackedColorArray = creator.palette()
+	var now: int = creator.brow_color()
+	for i in range(0, mini(24, pal.size())):
+		var sw := _swatch(pal[i], i == now, func():
+			creator.set_brow_color(i)
+			_changed(true)
+			_show_step("face"), 26)
+		row.add_child(sw)
+	_panel.add_child(row)
+	for s in BROW_SLIDERS:
+		var key: String = s[0]
+		_slider(s[1], (float(w[key]) - 5.0) / 5.0, func(v):
+			creator.set_brow(side, key, int(round(5.0 + v * 5.0))), s[2], s[3])
+	var own_box := CheckBox.new()
+	own_box.text = "Each brow its own shape"
+	own_box.button_pressed = own
+	own_box.toggled.connect(func(on):
+		creator.set_brows_own(on)
+		_brow_side = "left"
+		_changed(true)
+		_show_step("face"))
+	_panel.add_child(own_box)
+
+
+## Scroll the side panel this far down (captures: `--creator-scroll`).
+func scroll_panel(px: int) -> void:
+	if _scroll != null:
+		_scroll.scroll_vertical = px
 
 
 ## A heading over a group of sliders, with air above it.

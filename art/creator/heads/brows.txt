@@ -1,0 +1,58 @@
+# Brow styles (22 §3.1, BW2): what `looks.brows.style` names. The forge shapes each brow strip
+# of a humanoid base (mftr_forge::brows) by its style, then by the recipe's sizes.
+#
+# Format: `[id] Name: a line on it` starts a style; `joined` on a line of its own lets the brow
+# run in to meet its twin over the nose. Then two lines of seven values each, at even steps from
+# the brow's inner end (first) to its tip (last):
+#   thick  how heavy the brow is there, 1 being the default brow's (6.5 mm, top to bottom);
+#   arch   how far its middle line rises there, in mm (below 0 it falls).
+# The first style is the default. The creator lists them in this order.
+
+[soft] Soft: a gentle curve, full at the start
+thick 0.85 1.0 1.0 0.92 0.78 0.55 0.25
+arch 0 0.6 1.0 1.1 0.9 0.4 -0.4
+
+[straight] Straight: level and even
+thick 0.95 1.0 1.0 0.95 0.85 0.6 0.3
+arch 0 0.15 0.25 0.3 0.25 0.05 -0.3
+
+[arched] Arched: a high, round curve
+thick 0.75 0.9 0.9 0.85 0.7 0.5 0.2
+arch 0 0.9 1.7 2.2 1.9 0.9 -0.4
+
+[angled] Angled: rising to a peak, then a clean fall
+thick 0.8 0.95 0.95 0.9 0.75 0.5 0.2
+arch 0 0.7 1.4 2.3 1.5 0.3 -1.0
+
+[tapered] Tapered: heavy at the start, thinning to a point
+thick 1.2 1.15 1.0 0.8 0.55 0.32 0.12
+arch 0 0.5 0.9 1.1 0.9 0.4 -0.3
+
+[bushy] Bushy: thick and full the whole way
+thick 1.35 1.45 1.4 1.3 1.15 0.9 0.55
+arch 0 0.4 0.7 0.8 0.6 0.2 -0.4
+
+[heavy] Heavy: a low, dense ledge over the eyes
+thick 1.5 1.6 1.55 1.45 1.3 1.05 0.7
+arch -0.3 -0.1 0.1 0.1 0 -0.3 -0.7
+
+[thin] Thin: a fine line
+thick 0.45 0.5 0.5 0.45 0.38 0.28 0.12
+arch 0 0.7 1.3 1.6 1.4 0.7 -0.2
+
+[plucked] Plucked: thin and high
+thick 0.38 0.45 0.45 0.4 0.3 0.2 0.08
+arch 0 1.2 2.2 2.6 2.2 1.1 0
+
+[unibrow] Unibrow: one brow across the nose
+joined
+thick 0.7 1.0 1.0 0.95 0.85 0.6 0.3
+arch -0.6 0 0.3 0.4 0.3 0.1 -0.3
+
+[scarred] Scarred: split by an old cut
+thick 0.85 1.0 0.9 0 0.85 0.6 0.25
+arch 0 0.6 1.0 1.1 0.9 0.4 -0.4
+
+[none] None: no brows
+thick 0 0 0 0 0 0 0
+arch 0 0 0 0 0 0 0

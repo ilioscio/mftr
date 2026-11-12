@@ -13,6 +13,7 @@
 //! that the client draws and animates like any other. It is deterministic and has no Godot in it.
 
 pub mod body;
+pub mod brows;
 pub mod eyes;
 pub mod face;
 pub mod image;
@@ -214,6 +215,8 @@ impl Catalog {
         let mut model = base.model.clone();
         dress(&mut model, self.parts(&key), &looks.outfit)?;
         shape(&mut model, looks);
+        // The brows' strips (22 §3.1), in the base's bind pose like the morphs.
+        brows::apply(&mut model, &looks.brows.unwrap_or_default());
         if !looks.sculpt.is_empty() {
             let welds = self.welds(&key).ok_or(format!("no base `{key}`"))?;
             sculpt::apply(&mut model, &base.model, welds, &looks.sculpt);
@@ -613,7 +616,7 @@ fn skin(model: &mut Model, tone: [f32; 3]) {
             for (v, c) in p.colors.iter_mut().enumerate() {
                 // The eyes share the slot (their color is the iris, 22 §2.1), and older bases'
                 // eyes are near-white: leave both alone.
-                if (c[0] > 0.9 && c[1] > 0.88) || p.uvs.get(v).is_some_and(|u| u[0] >= eyes::UV_BASE - 0.01) {
+                if (c[0] > 0.9 && c[1] > 0.88) || p.uvs.get(v).is_some_and(|u| eyes::is_eye_uv(*u)) {
                     continue;
                 }
                 for k in 0..3 {
@@ -1546,9 +1549,12 @@ mod tests {
         let base = c.base("humanoid_slim_masculine").unwrap();
         assert_eq!(f.kind, "champion");
         assert!(f.library.clip("walk").is_some());
+        // Every vertex but the brows', which are shaped from their envelope (22 §3.1).
         for (a, b) in f.model.meshes.iter().flatten().zip(base.model.meshes.iter().flatten()) {
-            for (p, q) in a.positions.iter().zip(&b.positions) {
-                assert!((0..3).all(|k| (p[k] - q[k]).abs() < 1e-5), "{p:?} {q:?}");
+            for (v, (p, q)) in a.positions.iter().zip(&b.positions).enumerate() {
+                if !brows::is_brow(b, v) {
+                    assert!((0..3).all(|k| (p[k] - q[k]).abs() < 1e-5), "{p:?} {q:?}");
+                }
             }
         }
     }
@@ -1574,6 +1580,48 @@ mod tests {
         // The skeleton moved with it.
         let hb = |m: &Model| world(m)[m.node_by_name("head").unwrap()].0[1];
         assert!(hb(&t.model) / hb(&plain.model) > 1.2);
+    }
+
+    #[test]
+    fn brows_are_strips_that_follow_the_face_and_lips_have_their_shapes() {
+        // 22 §3: every humanoid base has brow strips and the lip sliders; the brows' color is
+        // still the body's fourth paint region, as recipes painted it before.
+        let c = catalog();
+        for key in
+            ["humanoid_slim_masculine", "humanoid_slim_feminine", "humanoid_heavy_masculine", "humanoid_heavy_feminine"]
+        {
+            let m = &c.base(key).unwrap().model;
+            assert!(brows::present(m), "{key}");
+            assert_eq!(brows::color_region(m), Some(3), "{key}");
+            for id in ["lips_upper", "lips_lower", "lips_bow"] {
+                assert!(c.sliders(key).iter().any(|s| s == id), "{key} lacks {id}");
+            }
+        }
+        let brow_top = |l: &Looks| {
+            let f = c.forge("B", l).unwrap();
+            let skinned = face::skinned(&f.model);
+            let mut top = f32::MIN;
+            for (mi, prims) in f.model.meshes.iter().enumerate() {
+                for (pi, p) in prims.iter().enumerate() {
+                    for (v, q) in skinned[mi][pi].iter().enumerate() {
+                        if brows::is_brow(p, v) {
+                            top = top.max(q[1]);
+                        }
+                    }
+                }
+            }
+            top
+        };
+        let plain = brow_top(&Looks::default());
+        // A thicker brow reaches higher; the brow bones carry the strips with them.
+        let thick = Looks {
+            brows: Some(brows::Brows { left: brows::Brow { thick: 10, ..Default::default() }, right: None }),
+            ..Looks::default()
+        };
+        assert!(brow_top(&thick) > plain + 0.001, "{} {plain}", brow_top(&thick));
+        let mut high = Looks::default();
+        high.set_slider("brow_height", 1.0);
+        assert!(brow_top(&high) > plain + 0.002, "{} {plain}", brow_top(&high));
     }
 
     #[test]
