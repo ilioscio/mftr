@@ -55,6 +55,6 @@
         (id: "offhand.lantern", slot: "offhand", name: "Lantern", hides: [], accent: false, triangles: 64),
         (id: "feet.wraps", slot: "feet", name: "Foot wraps", hides: ["foot_l", "foot_r", "toe_l", "toe_r"], accent: false, triangles: 120),
         (id: "legs.wool_trousers", slot: "legs", name: "Wool trousers", hides: [], accent: false, triangles: 1723, covers: true, layer: "under"),
-        (id: "torso.linen_tunic", slot: "torso", name: "Linen tunic", hides: [], accent: true, triangles: 1526, covers: true, layer: "over"),
+        (id: "torso.linen_tunic", slot: "torso", name: "Linen tunic", hides: [], accent: true, triangles: 1693, covers: true, layer: "over"),
     ],
 )

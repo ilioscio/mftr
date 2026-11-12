@@ -16,12 +16,13 @@ from mftr_blender import sewing  # noqa: E402
 
 
 def outline(neck_z):
-    """One panel, seen from the front (metres on the reference body: x across, z up)."""
+    """One panel, seen from the front (metres on the reference body: x across, z up). The armholes
+    are cut deep and the straps narrow, clear of the shoulders and the arms (the QA harness)."""
     return [
         ("hem_l", -0.27, 0.66), ("hem_r", 0.27, 0.66),
-        ("waist_r", 0.205, 0.95), ("under_r", 0.19, 1.15), ("arm_r", 0.165, 1.29), ("shoulder_r", 0.165, 1.405),
+        ("waist_r", 0.205, 0.95), ("under_r", 0.185, 1.09), ("arm_r", 0.145, 1.27), ("shoulder_r", 0.15, 1.41),
         ("neck_r", 0.075, 1.445), ("neck_c", 0.0, neck_z), ("neck_l", -0.075, 1.445),
-        ("shoulder_l", -0.165, 1.405), ("arm_l", -0.165, 1.29), ("under_l", -0.19, 1.15), ("waist_l", -0.205, 0.95),
+        ("shoulder_l", -0.15, 1.41), ("arm_l", -0.145, 1.27), ("under_l", -0.185, 1.09), ("waist_l", -0.205, 0.95),
     ]
 
 

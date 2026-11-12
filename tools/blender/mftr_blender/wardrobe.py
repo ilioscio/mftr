@@ -265,6 +265,8 @@ def fit_items(armature, body, gender):
         mod.object = armature
         # The helpers' weights too: the item follows the body sliders and the sculpting.
         body_rig.transfer(body, obj)
+        # A sim's mesh is irregular: smooth its helper weights longer, under the step limit.
+        body_rig.limit_steps(obj, max_step=0.28, rounds=240)
         parts.transfer_shape_keys(body, obj)
         made.append((info["id"], info["slot"], info["name"], [], bool(info["accent"]), mesh.triangle_count(obj), 0,
                      {"covers": True, "rigid": bool(info["rigid"]), "layer": info["layer"]}))

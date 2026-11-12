@@ -863,7 +863,7 @@ Each item's `build.py` runs the sim in Blender and writes its `item.blend`.
 
 | Item | Pattern | Triangles |
 |---|---|---|
-| `torso.linen_tunic` (over, accent trims) | front and back, shoulder and side seams, flaring to mid-thigh | 1,526 |
+| `torso.linen_tunic` (over, accent trims) | front and back, shoulder and side seams, flaring to mid-thigh | 1,693 |
 | `legs.wool_trousers` (under) | four panels, outer and inner leg seams, middle front and back | 1,723 |
 
 **The QA harness (§4.8)**, `mftr-tools wardrobe check [art]`, puts every covering item, and
@@ -876,17 +876,22 @@ each pair of them in layers, on every humanoid base, at neutral and at each body
 - an outfit fails on more than 12 pokes. The command exits non-zero, so a large catalog stays
   honest.
 
-**Today's harness, at neutral:**
+**Today's harness, at neutral** (pokes; 12 or fewer passes):
 
 | | Trousers | Tunic | Both |
 |---|---|---|---|
-| Slim masculine | 5 | 13 | 13 |
-| Slim feminine | 1 | 33 | 32 |
-| Heavy masculine | 9 | 41 | 40 |
-| Heavy feminine | 2 | 80 | 76 |
+| Slim masculine | 5 | 9 | 7 |
+| Slim feminine | 1 | 17 | 9 |
+| Heavy masculine | 9 | 24 | 23 |
+| Heavy feminine | 2 | 66 | 63 |
 
-The trousers pass everywhere. **The tunic fails**, its pokes at the armholes, worst on the
-heavy feminine's bust and shoulders; the body sliders change the numbers little.
+The harness found the tunic's first cut too tight round the arms, so its armholes were cut deeper
+and its straps narrower, which took the slim masculine under the line. The trousers pass
+everywhere. The tunic's pokes on the other three bases are at the armholes, more on the
+right: the sim drapes the two sides a little differently. A thin spike at its right shoulder
+seam is a weld artifact, and a cluster at chin height on the heavy feminine is likely that
+spike's reach. The body sliders change the numbers little. 86 of the 180 checks fail, nearly all
+the tunic's.
 
 **Checked:**
 - Captures of both items on all four bases, alone and together, in the creator (animating) and
@@ -896,7 +901,9 @@ heavy feminine's bust and shoulders; the body sliders change the numbers little.
   tunic go, and the trousers alone pass the harness.
 
 **Not yet:**
-- **Fix the tunic's armholes**, so it passes the harness. Then the harness can become a test.
+- **The tunic passing the harness:** the shoulder seam's spike (a stitch group welding vertices
+  that aren't neighbours), a symmetric drape (simulate one half and mirror it), and the heavy
+  feminine's armholes. Then the harness can become a test.
 - **More items:** three per slot is the exit, so a sleeved shirt (panels in any plane, for the
   sleeves), a skirt, a coat; armour and accessories modelled by hand.
 - **The old catalog** is still offered beside the new items. It retires as each slot fills.

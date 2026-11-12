@@ -44,7 +44,7 @@ geometry (`mftr_forge::wardrobe`).
 
 | Item | How | Triangles |
 |---|---|---|
-| `torso.linen_tunic` | Sewn: front and back panels, shoulder and side seams | 1,526 |
+| `torso.linen_tunic` | Sewn: front and back panels, shoulder and side seams | 1,693 |
 | `legs.wool_trousers` | Sewn: four panels, outer and inner leg seams, middle front and back | 1,723 |
 
 Check them all, on every base at every body slider's ends:
