@@ -193,6 +193,11 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
     them.
   - **Size:** 48 px at 1080 lines and 100 % HUD scale, growing with the HUD's scale (custom
     cursors are drawn in screen pixels).
+  - **On a champion too:** the same gauntlet is the creator's `arms.gauntlets` (both hands,
+    1,350–1,410 triangles). There it is fitted by construction: the glove is the hand's own
+    surface lifted 2.5 mm with the hand's weights, steel on the back and fingers, leather on the
+    palm, under the cursor's cuff and back plate (`gauntlet.game_part`). It replaces the
+    block-out, under the same id.
 - **Augment icons** are generated: a glyph for the augment's mechanic (or a stat augment's main
   stat) on a backdrop in its tier's colors. They show in the draft, above the HUD, in the
   breakdown and in tooltips.

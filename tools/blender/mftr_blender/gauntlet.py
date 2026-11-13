@@ -132,11 +132,12 @@ def _frame(a, up):
     return b, a, n
 
 
-def _shell(start, end, up, r0, r1, arc, thick, n_arc=9, ridge=0.0, flare=0.0, tip=0.0, rings=4):
+def _shell(start, end, up, r0, r1, arc, thick, n_arc=9, ridge=0.0, flare=0.0, tip=0.0, rings=4, solid=True):
     """A lame: a curved plate along `start`→`end`, an arc of `arc` degrees round the line
     centred on `up` (the back of the finger), radius `r0` to `r1`, `thick` deep, a raised
     `ridge` down its middle and its far edge flared out by `flare`; with `tip`, it runs on that
-    far and closes to a point (a claw's)."""
+    far and closes to a point (a claw's). Not `solid`, only its outer face (the game's: its
+    underside never shows)."""
     b, a, n = _frame(end - start, up)
     length = (end - start).length
     verts, faces = [], []
@@ -165,12 +166,14 @@ def _shell(start, end, up, r0, r1, arc, thick, n_arc=9, ridge=0.0, flare=0.0, ti
         verts.append(p)
         inner.append([len(verts)] * n_arc)
         verts.append(p - n * thick)
-    for rows, flip in ((outer, False), (inner, True)):
+    for rows, flip in ((outer, False), (inner, True)) if solid else ((outer, False),):
         for r in range(len(rows) - 1):
             for k in range(n_arc - 1):
                 q = list(dict.fromkeys([rows[r][k], rows[r][k + 1], rows[r + 1][k + 1], rows[r + 1][k]]))
                 if len(q) >= 3:
                     faces.append(q[::-1] if flip else q)
+    if not solid:
+        return verts, faces
     # The edges' thickness: along each side, and round the near (and far) end.
     for r in range(len(outer) - 1):
         for k in (0, n_arc - 1):
@@ -184,8 +187,8 @@ def _shell(start, end, up, r0, r1, arc, thick, n_arc=9, ridge=0.0, flare=0.0, ti
     return verts, faces
 
 
-def _tube(start, end, up, r0, r1, sides=8):
-    """A closed tube (leather under the plates), its ends domed."""
+def _tube(start, end, up, r0, r1, sides=8, caps=True):
+    """A tube (leather under the plates), its ends domed (with `caps`)."""
     b, a, n = _frame(end - start, up)
     verts, faces, rows = [], [], []
     for t, r in ((0.0, r0), (1.0, r1)):
@@ -199,7 +202,7 @@ def _tube(start, end, up, r0, r1, sides=8):
     for k in range(sides):
         k1 = (k + 1) % sides
         faces.append([rows[0][k], rows[0][k1], rows[1][k1], rows[1][k]])
-    for row, c, r, sgn in ((rows[0], start, r0, -1), (rows[1], end, r1, 1)):
+    for row, c, r, sgn in ((rows[0], start, r0, -1), (rows[1], end, r1, 1)) if caps else ():
         p = len(verts)
         verts.append(c + a * (sgn * r * 0.8))
         for k in range(sides):
@@ -232,7 +235,17 @@ CUFF_LENGTH = 0.065
 CUFF_FLARE = 1.5
 
 
-def _cuff(hand):
+# Levels of detail: the cursor's render, close up, and the game's, on a champion (05 §5's
+# budgets): each plate's arc and its rings, the leather's sides, the cuff's sides and rings,
+# the trims' sides and their tubes', the back plate's grid, and whether the plates have their
+# underside and edges (the game's don't: they never show).
+LOD = {
+    "cursor": {"arc": 9, "rings": 4, "tube": 8, "cuff": (18, 6), "ring": (18, 6), "plate": (9, 6), "solid": True},
+    "game": {"arc": 5, "rings": 3, "tube": 5, "cuff": (12, 3), "ring": (10, 3), "plate": (5, 4), "solid": False},
+}
+
+
+def _cuff(hand, lod):
     """The cuff: a bell round the wrist and the forearm, flaring to its open end, its rim rolled
     and gilt, a gilt band near the wrist."""
     pts = hand.forearm or [Vector((0.0, -0.05, 0.0))]
@@ -241,7 +254,7 @@ def _cuff(hand):
     cz = sum(p.z for p in near) / len(near)
     rx = max(abs(p.x - cx) for p in near) * 1.12 + 0.004
     rz = max(abs(p.z - cz) for p in near) * 1.12 + 0.004
-    sides, rings = 18, 6
+    sides, rings = lod["cuff"]
     verts, faces, outer, inner = [], [], [], []
     for r in range(rings):
         t = r / (rings - 1)
@@ -271,20 +284,20 @@ def _cuff(hand):
             faces.append(q[::-1] if flip else q)
     out = [Piece(verts, faces, "steel", "forearm")]
     axis, up = Vector((0, -1, 0)), Vector((0, 0, 1))
-    rim = _ring(Vector((cx, 0.012 - CUFF_LENGTH, cz)), axis, up, rx * CUFF_FLARE, rz * CUFF_FLARE, 0.0042)
+    rim = _ring(Vector((cx, 0.012 - CUFF_LENGTH, cz)), axis, up, rx * CUFF_FLARE, rz * CUFF_FLARE, 0.0042, *lod["ring"])
     out.append(Piece(*rim, "gold", "forearm"))
-    band = _ring(Vector((cx, -0.004, cz)), axis, up, rx * 1.03, rz * 1.03, 0.0032)
+    band = _ring(Vector((cx, -0.004, cz)), axis, up, rx * 1.03, rz * 1.03, 0.0032, *lod["ring"])
     out.append(Piece(*band, "gold", "forearm"))
     return out
 
 
-def _back_plate(hand):
+def _back_plate(hand, lod):
     """The plate over the back of the hand: from the wrist to the knuckles, across the hand,
     following its surface 5 mm off, rolled down at its sides, a ridge down its middle."""
     xs = [p.x for p in hand.knuckles]
     x0, x1 = min(xs) - 0.012, max(xs) + 0.014
     y0, y1 = 0.004, min(p.y for p in hand.knuckles) - 0.004
-    cols, rows = 9, 6
+    cols, rows = lod["plate"]
     grid, verts, faces = [], [], []
     for r in range(rows):
         y = y0 + (y1 - y0) * r / (rows - 1)
@@ -306,6 +319,11 @@ def _back_plate(hand):
             for c in range(1, cols - 1):
                 verts[grid[r][c]].z = (zs[c - 1] + 2 * zs[c] + zs[c + 1]) / 4
     n0 = len(verts)
+    if not lod["solid"]:
+        for r in range(rows - 1):
+            for c in range(cols - 1):
+                faces.append([grid[r][c], grid[r][c + 1], grid[r + 1][c + 1], grid[r + 1][c]])
+        return Piece(verts, faces, "steel", "hand")
     for i in range(n0):
         verts.append(verts[i] - Vector((0, 0, 0.0025)))
     for r in range(rows - 1):
@@ -321,11 +339,12 @@ def _back_plate(hand):
     return Piece(verts, faces, "steel", "hand")
 
 
-def build(hand):
-    """Every piece of the gauntlet on `hand`, at rest."""
+def build(hand, detail="cursor"):
+    """Every piece of the gauntlet on `hand`, at rest, at a level of detail (`LOD`)."""
+    lod = LOD[detail]
     up = Vector((0, 0, 1))
-    pieces = _cuff(hand)
-    pieces.append(_back_plate(hand))
+    pieces = _cuff(hand, lod)
+    pieces.append(_back_plate(hand, lod))
     # The palm's leather: the hand's own surface, behind the knuckles.
     ky = min(p.y for p in hand.knuckles) + 0.004
     lv, lf = [], []
@@ -350,18 +369,21 @@ def build(hand):
             d = p1 - p0
             last = s == segs - 1
             # Leather under the plates, a little past each joint.
-            pieces.append(Piece(*_tube(p0 - d * 0.08, p1 + d * 0.04, fup, r * 0.92, r * 0.85), "leather", (f.name, s)))
+            tube = _tube(p0 - d * 0.08, p1 + d * 0.04, fup, r * 0.92, r * 0.85, lod["tube"], caps=lod["solid"] or last)
+            pieces.append(Piece(*tube, "leather", (f.name, s)))
             start = p0 - d * (0.12 if s else 0.05)
             end = p1 + (d * 0.02 if last else d * 0.10)
             sv, sf = _shell(start, end, fup, r + 0.0028, (r + 0.0018) * (0.9 if last else 1.0), 250, 0.0018,
-                            ridge=0.0011, flare=0.0 if last else 0.0012, tip=r * 1.6 if last else 0.0)
+                            n_arc=lod["arc"], ridge=0.0011, flare=0.0 if last else 0.0012, tip=r * 1.6 if last else 0.0,
+                            rings=lod["rings"], solid=lod["solid"])
             pieces.append(Piece(sv, sf, "steel", (f.name, s)))
         if not thumb:
             # A knuckle plate over the finger's root, on the hand.
             k = f.joints[0]
             a = (f.joints[1] - f.joints[0]).normalized()
             r = f.radius[0] * 1.6 + 0.004
-            kv, kf = _shell(k - a * 0.011, k + a * 0.012, up, r, r * 0.95, 190, 0.002, ridge=0.002, flare=0.001)
+            kv, kf = _shell(k - a * 0.011, k + a * 0.012, up, r, r * 0.95, 190, 0.002, n_arc=lod["arc"], ridge=0.002,
+                            flare=0.001, rings=lod["rings"], solid=lod["solid"])
             pieces.append(Piece(kv, kf, "steel", "hand"))
     return pieces
 
@@ -441,3 +463,121 @@ def to_object(name, pieces, posed=None, materials=None):
         for p in me.polygons:
             p.material_index = attr[p.index].value
     return obj
+
+
+# --- The game's part --------------------------------------------------------------------------
+
+# The part's colors (its paint regions): steel, gilt trim, leather.
+COLORS = {"steel": (0.62, 0.64, 0.68), "gold": (0.80, 0.60, 0.24), "leather": (0.17, 0.10, 0.06)}
+
+
+# How far the game's glove stands off the skin (m).
+GLOVE = 0.0025
+
+
+def game_part(armature, body, pid="arms.gauntlets"):
+    """The gauntlets as the base's catalog part `pid`, a pair, fitted to each hand by
+    construction:
+
+    - **the glove** is the hand's own surface lifted `GLOVE` off the skin, with the hand's own
+      weights, so it follows every finger as the hand does: steel on the back and the fingers,
+      leather on the palm;
+    - **the cuff** (gilt at its rim and the wrist) and **the back plate** ride on it, built as
+      the cursor's are (the game's detail): the cuff on the forearm, half on the hand at the
+      wrist, the plate on the hand.
+
+    Steel and gilt are on the `metal` slot, leather on `cloth`. Returns its `made` entry (as
+    `parts.build_parts`')."""
+    from . import body_rig, mesh, parts
+    bm = bmesh.new()
+    deform = bm.verts.layers.deform.verify()
+    col = bm.verts.layers.float_color.new("Col")
+    groups = {}
+
+    def group(name):
+        if name not in groups:
+            groups[name] = len(groups)
+        return groups[name]
+
+    slots = mesh.MATERIAL_SLOTS
+    helpers = set(body_rig.NAMES)
+    me = body.data
+    names = {g.index: g.name for g in body.vertex_groups}
+    for side in ("r", "l"):
+        hand = Hand(armature, body, side)
+        back = hand.frame.col[2].normalized()  # the back of the hand, in the rig's frame
+        # The glove.
+        made = {}
+        for i in hand.verts:
+            v = me.vertices[i]
+            nv = bm.verts.new(v.co + v.normal * GLOVE)
+            for g in v.groups:
+                n = names[g.group]
+                if g.weight > 0.0 and n not in helpers:
+                    nv[deform][group(n)] = g.weight
+            made[i] = nv
+        for p in me.polygons:
+            if not all(i in made for i in p.vertices):
+                continue
+            try:
+                face = bm.faces.new([made[i] for i in p.vertices])
+            except ValueError:
+                continue
+            palm = p.normal.dot(back) < -0.35
+            kind = "leather" if palm else "steel"
+            face.material_index = slots.index("cloth" if palm else "metal")
+            face.smooth = False
+            for v in face.verts:
+                v[col] = (*COLORS[kind], 1.0)
+        # The cuff and the back plate.
+        lod = LOD["game"]
+        for pc in _cuff(hand, lod) + [_back_plate(hand, lod)]:
+            vs = []
+            for v in pc.verts:
+                nv = bm.verts.new(hand.to_rig(v))
+                if pc.seg == "forearm":
+                    t = min(max((v.y + 0.02) / 0.03, 0.0), 1.0)
+                    w = [(f"forearm_{side}", 1.0 - 0.5 * t), (f"hand_{side}", 0.5 * t)]
+                else:
+                    w = [(f"hand_{side}", 1.0)]
+                for n, x in w:
+                    if x > 0.0:
+                        nv[deform][group(n)] = x
+                nv[col] = (*COLORS[pc.kind], 1.0)
+                vs.append(nv)
+            faces = []
+            for f in pc.faces:
+                try:
+                    faces.append(bm.faces.new([vs[i] for i in f]))
+                except ValueError:
+                    continue
+            for face in faces:
+                face.material_index = slots.index("metal")
+                face.smooth = False
+            if pc.seg == "forearm":
+                # Closed solids: outward.
+                bmesh.ops.recalc_face_normals(bm, faces=faces)
+            else:
+                # The plate, one-sided: facing out of the back of the hand.
+                for face in faces:
+                    face.normal_update()
+                    if face.normal.dot(back) < 0:
+                        face.normal_flip()
+    out = bpy.data.meshes.new(f"part.{pid}")
+    bm.to_mesh(out)
+    bm.free()
+    obj = bpy.data.objects.new(f"part.{pid}", out)
+    bpy.context.scene.collection.objects.link(obj)
+    for name in sorted(groups, key=groups.get):
+        obj.vertex_groups.new(name=name)
+    for sl in slots:
+        out.materials.append(mesh.material(sl))
+    out.color_attributes.active_color = out.color_attributes["Col"]
+    out.color_attributes.render_color_index = out.color_attributes.active_color_index
+    obj.parent = armature
+    mod = obj.modifiers.new("Armature", "ARMATURE")
+    mod.object = armature
+    body_rig.transfer(body, obj)
+    n = parts.transfer_shape_keys(body, obj)
+    return (pid, "arms", "Gauntlets", [], False, mesh.triangle_count(obj), n,
+            {"covers": True, "rigid": True, "layer": "armor"})

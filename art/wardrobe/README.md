@@ -92,6 +92,13 @@ longer too, with the same mesh, as the morph targets `hair_length-` and `hair_le
 To try a pattern without rebuilding a base, grow it on a saved base `.blend` with
 `mftr_blender.grooming.Head` and `grow`.
 
+## Built on the hand
+
+`arms.gauntlets` has no folder here. It is built on each base's own hands
+(`mftr_blender.gauntlet.game_part`), the same steel gauntlet the cursor is rendered from
+(05 §6). The glove is the hand's surface lifted off the skin with the hand's weights; the
+cuff and the back plate ride on it.
+
 ## Checking
 
 Check them all, on every base at every body slider's ends:
