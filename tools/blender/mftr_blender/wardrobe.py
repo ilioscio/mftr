@@ -233,10 +233,10 @@ def _push_out(obj, body, offset, reach=0.05, arms=True):
 
 
 # The most `_clear_peaks` moves any item vertex (m).
-PEAK_CAP = 0.025
+PEAK_CAP = 0.05
 
 
-def _clear_peaks(obj, body, offset, rounds=4, arms=True):
+def _clear_peaks(obj, body, offset, rounds=8, arms=True):
     """From the body's side: a body vertex at or past the item's surface (a bust's tip, a
     shoulder's point, under the middle of one of the item's big faces, where no item vertex is
     near it) pushes that face's vertices out along the face's normal until it's `offset` under

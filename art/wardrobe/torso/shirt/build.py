@@ -24,18 +24,31 @@ def body(neck_z):
     ]
 
 
-# A sleeve half, drawn flat out from its shoulder (x from the armhole), then turned down along the
-# arm, which hangs about 50 degrees below level.
-SLEEVE = [("top", 0.0, 1.405), ("cuff_top", 0.22, 1.40), ("cuff_under", 0.22, 1.30), ("pit", 0.0, 1.17)]
+# A sleeve half, drawn along the reference arm (the CC0 male's, `cc0_body.PRIMITIVE`): from its
+# armhole (the body panel's shoulder and underarm points) out along the arm's line from the
+# shoulder joint toward the wrist, its cuff a band round the arm 24 cm down. The front half and
+# the back half are sewn over and under the arm.
+import math  # noqa: E402
+
+SHOULDER = (0.215, 1.296)
+WRIST = (0.469, 0.956)
+LENGTH, RADIUS = 0.24, 0.055
 
 
 def sleeve(side, y, front):
     s = -1 if side == "l" else 1  # the body panel names its -x side `_l`
-    outline = [(n, s * (0.20 + x), z) for n, x, z in SLEEVE]
-    if s < 0:
+    dx, dz = WRIST[0] - SHOULDER[0], WRIST[1] - SHOULDER[1]
+    n = math.hypot(dx, dz)
+    d = (dx / n, dz / n)
+    up = (-d[1], d[0])  # across the arm, toward the top
+    cx, cz = SHOULDER[0] + d[0] * LENGTH, SHOULDER[1] + d[1] * LENGTH
+    pts = [("top", 0.20, 1.405), ("cuff_top", cx + up[0] * RADIUS, cz + up[1] * RADIUS),
+           ("cuff_under", cx - up[0] * RADIUS, cz - up[1] * RADIUS), ("pit", 0.205, 1.17)]
+    outline = [(name, s * x, z) for name, x, z in pts]
+    # Counter-clockwise seen from the front: the right-hand (+x) sleeve runs top, pit, cuffs.
+    if s > 0:
         outline = list(reversed(outline))
-    return sewing.Panel(f"sleeve_{side}_{'f' if front else 'b'}", outline, y=y, front=front,
-                        turn=((s * 0.20, 1.40), -s * 48))
+    return sewing.Panel(f"sleeve_{side}_{'f' if front else 'b'}", outline, y=y, front=front)
 
 
 panels = [sewing.Panel("front", body(1.38), y=-0.17, front=True), sewing.Panel("back", body(1.44), y=0.15, front=False)]

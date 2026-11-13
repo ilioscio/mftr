@@ -1704,12 +1704,7 @@ mod tests {
         let c = catalog();
         let rows = wardrobe::check_bodies(&c, false);
         assert!(rows.len() >= 12, "{}", rows.len());
-        // Known, and in doc 22 (BW5): the shirt's sleeves, simulated on the slim arms, are too
-        // narrow for the heavy masculine's; the sleeves want their own fit per build.
-        let known = |r: &wardrobe::Check| {
-            r.base == "humanoid_heavy_masculine" && r.outfit.iter().any(|o| o == "torso.sleeved_shirt")
-        };
-        for r in rows.iter().filter(|r| !known(r)) {
+        for r in &rows {
             assert!(r.fit.poke <= wardrobe::POKE_MAX, "{} {:?}: {:?}", r.base, r.outfit, r.fit);
         }
     }

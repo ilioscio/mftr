@@ -46,9 +46,9 @@ geometry (`mftr_forge::wardrobe`).
 |---|---|---|---|
 | `torso.linen_tunic` | torso, over | sewn: front and back, mirrored | 1,651 |
 | `legs.wool_trousers` | legs, under | sewn: four panels, crotch extension | 1,619 |
-| `torso.sleeved_shirt` | torso, over | sewn: front, back, turned sleeves | 2,214 |
+| `torso.sleeved_shirt` | torso, over | sewn: front, back, sleeves along the arm | 2,078 |
 | `waist.wrap_skirt` | waist, over | sewn: front and back, flared | 1,688 |
-| `back.long_coat` | back, armor | sewn: back and two open fronts | 3,175 |
+| `back.long_coat` | back, armor | sewn: back and two open fronts, mirrored | 3,300 |
 
 Check them all, on every base at every body slider's ends:
 

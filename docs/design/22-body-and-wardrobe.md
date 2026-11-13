@@ -919,9 +919,9 @@ the tunic's.
 |---|---|---|---|
 | Linen tunic | torso, over | front and back, mirrored half | 1,651 |
 | Wool trousers | legs, under | four panels with a tailor's crotch extension | 1,619 |
-| Sleeved shirt | torso, over | front, back, two sleeves of two halves each, turned along the arm | 2,214 |
+| Sleeved shirt | torso, over | front, back, two sleeves of two halves each, drawn along the arm | 2,078 |
 | Wrap skirt | waist, over | front and back, flared to the knee | 1,688 |
-| Long coat | back, armor | back and two open front panels, below the knee | 3,175 |
+| Long coat | back, armor | back and two open front panels, below the knee, mirrored half | 3,300 |
 
 **Sewing** (`mftr_blender.sewing`):
 - panels can be turned about a pivot (sleeves);
@@ -960,6 +960,21 @@ At the body sliders' far ends 46 checks miss narrowly, M5's to correct.
 **Release:** `scripts/package-client.sh` ships `art/creator/*/export` (its own check fails on
 any export folder it doesn't list); the Nix package's source includes the five art files the
 forge embeds.
+
+### BW5 third pass (2026-11-12): sleeves along the arm, all items passing at rest
+
+- **The shirt's sleeves** are drawn along the reference arm's own line (from the shoulder joint
+  toward the wrist, a band 24 cm down), not turned about a guessed pivot. They hang with the arm,
+  with cuffs, instead of standing out puffed.
+- **The peak push** goes up to 5 cm over eight rounds. With it acting only on body points
+  directly under a face, it can safely reach the heavy masculine's deltoids under the sleeve
+  caps.
+- **The coat** is one simulated half, mirrored: the sim's spike at one waist is gone.
+
+**The harness:** every item and layered pair passes at neutral on all four bases, and the test
+has no exceptions now. 14 of the 720 checks miss narrowly at the body sliders' far ends.
+
+**Left:** a small slit under each sleeve where its two halves meet the body.
 
 ## 7. Open questions for the owner
 
