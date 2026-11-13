@@ -177,10 +177,31 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
   the screen at 1080p, 1440p and 4K, and text stays sharp. The world isn't scaled: it always
   renders at the window's full resolution, and so do the pixel particles' blocks and the map
   editor's Actual view. Windows under 1080 lines still shrink the bottom panel, down to 0.7.
-- **The cursor** is a steel gauntlet drawn as SVG, pointing like the classic hand cursor: the
-  index finger up, the other three curled beside it, the thumb wrapped around the front (palm
-  side), only its edge showing at the left: red plates over an enemy that can be attacked, teal over an ally, a red
-  reticle while an attack-move waits for its click.
+- **The cursor** is a steel gauntlet in the genre's tradition, pointing up and to the left. It
+  is rendered in Blender from the in-game hand (`art/ui/cursor/build.py`), not drawn:
+  - **The gauntlet** (`mftr_blender.gauntlet`): a flared cuff with gilt trim, a back plate,
+    knuckle plates and a lame for each finger joint, with leather between. It is built on the
+    slim masculine base's right hand and posed as the owner's own hand showed it: a right hand
+    seen from its back, the index pointing up and to the left, the other fingers closed in a fist
+    (their knuckles along the top), the thumb straight alongside the index, aimed the same way
+    (as the owner's second photo showed: it keeps the back of the gauntlet clean). The back of the hand is
+    found from the thumb, not assumed, so the hand is never mirrored.
+  - **The render** (`mftr_blender.cursor_render`): polished steel under a bright sky and a key
+    light from the upper left. Each state is reduced from 4× its size, then given a dark outline
+    all round, so it reads on snow, grass and stone alike, and a light edge on its lit sides.
+  - **The click** is the fingertip. Its point is projected into each image (`hotspots.gd`), so
+    the click lands where the finger points, to the pixel.
+  - **The states:** steel, red plates over an enemy that can be attacked, teal over an ally, a
+    bag of coins beside it over our shop, and a steel reticle with red enamel while an
+    attack-move waits for its click. They share the pose, so the fingertip never moves between
+    them.
+  - **Size:** 48 px at 1080 lines and 100 % HUD scale, growing with the HUD's scale (custom
+    cursors are drawn in screen pixels).
+  - **On a champion too:** the same gauntlet is the creator's `arms.gauntlets` (both hands,
+    1,350–1,410 triangles). There it is fitted by construction: the glove is the hand's own
+    surface lifted 2.5 mm with the hand's weights, steel on the back and fingers, leather on the
+    palm, under the cursor's cuff and back plate (`gauntlet.game_part`). It replaces the
+    block-out, under the same id.
 - **Augment icons** are generated: a glyph for the augment's mechanic (or a stat augment's main
   stat) on a backdrop in its tier's colors. They show in the draft, above the HUD, in the
   breakdown and in tooltips.

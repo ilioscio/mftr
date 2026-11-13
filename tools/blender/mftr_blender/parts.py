@@ -196,9 +196,7 @@ def catalog(head):
         loft("forearm_l", P("forearm_l", 0.35), P("forearm_l", 0.95), 8, [(0, 0.075, 0.075), (1, 0.068, 0.068)], "cloth", LEATHER))
         + pair(loft("forearm_l", P("forearm_l", 0.55), P("forearm_l", 0.65), 8, [(0, 0.08, 0.08), (1, 0.08, 0.08)], "accent", ACCENT)),
         accent=True)
-    add("arms.gauntlets", "arms", "Gauntlets", pair(
-        loft("forearm_l", P("forearm_l", 0.5), P("forearm_l", 1.0), 8, [(0, 0.07, 0.07), (1, 0.085, 0.085)], "metal", IRON))
-        + pair(loft("hand_l", P("hand_l", 0.0), P("hand_l", 1.0), 6, [(0, 0.05, 0.035), (1, 0.055, 0.03)], "metal", IRON)))
+    # The gauntlets are built on each base's own hands (`gauntlet.game_part`), as the cursor is.
     # Waist.
     add("waist.belt", "waist", "Belt and pouch", [
         loft("pelvis", P("pelvis", 0.55), P("pelvis", 0.85), 16, [(0, 0.2, 0.15), (1, 0.2, 0.15)], "cloth", LEATHER_DARK),

@@ -581,6 +581,9 @@ def build(gender, name, build="humanoid_slim"):
     if BODY == "cc0":
         from . import grooming
         made += grooming.groom_all(armature, body, fit)
+        # The steel gauntlets, built on this base's own hands (the cursor's, 05 §6).
+        from . import gauntlet
+        made.append(gauntlet.game_part(armature, body))
     # The wardrobe's items (22 §4, BW5), fitted from the reference body onto the finished body:
     # after its mass, so a heavy build's cloth sits on its own bulk, not grown from the slim's.
     from . import wardrobe

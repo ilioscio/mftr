@@ -336,7 +336,7 @@ func _ready() -> void:
 			get_tree().quit()
 			return
 		elif args[i] == "--dump-cursors" and i + 1 < args.size():
-			for state in ["default", "enemy", "ally", "attack"]:
+			for state in GameCursor.STATES:
 				GameCursor._make(state)[0].save_png("%s/cursor_%s.png" % [args[i + 1], state])
 			print("MFTR: cursors saved to ", args[i + 1])
 			get_tree().quit()
@@ -1041,6 +1041,8 @@ func _apply_hud_scale() -> void:
 	var k: float = screen * settings.hud_scale / 100.0
 	if absf(win.content_scale_factor - k) > 1e-3:
 		win.content_scale_factor = k
+	# Custom cursors are drawn in screen pixels: the cursor grows with the HUD.
+	GameCursor.set_scale(k)
 
 
 ## The Graphics settings, applied when they change: the window, anti-aliasing and render scale
