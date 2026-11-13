@@ -1,0 +1,9 @@
+// A hairstyle (22 §7 item 5, BH1): drawn up to a knot on the crown, groomed by physics (groom.py).
+(
+    id: "hair.topknot",
+    slot: "hair",
+    name: "Topknot",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

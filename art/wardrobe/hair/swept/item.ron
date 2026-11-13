@@ -1,0 +1,9 @@
+// A hairstyle (22 §7 item 5, BH1): parted on one side and swept across, groomed by physics (groom.py).
+(
+    id: "hair.swept",
+    slot: "hair",
+    name: "Swept",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

@@ -1,0 +1,9 @@
+// A hairstyle (22 §7 item 5, BH1): long, parted in the middle, to the shoulder blades, groomed by physics (groom.py).
+(
+    id: "hair.long",
+    slot: "hair",
+    name: "Long hair",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

@@ -1,0 +1,9 @@
+// A hairstyle (22 §7 item 5, BH1): drawn to two ties behind the ears, braided tails over the shoulders, groomed by physics (groom.py).
+(
+    id: "hair.braids",
+    slot: "hair",
+    name: "Braids",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

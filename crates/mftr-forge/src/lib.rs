@@ -413,6 +413,22 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
             model.nodes.iter().filter(|n| !n.name.starts_with("part.")).filter_map(|n| n.mesh).collect();
         wardrobe::hide_covered(model, &body, &covering);
     }
+    // Hair hides under headwear (22 §7 item 5).
+    let meshes_in = |model: &Model, slot: &str| -> Vec<usize> {
+        model
+            .nodes
+            .iter()
+            .filter(|n| {
+                n.name.strip_prefix("part.").is_some_and(|id| worn.iter().any(|p| p.slot == slot && p.id == id))
+            })
+            .filter_map(|n| n.mesh)
+            .collect()
+    };
+    let (hair, headwear) = (meshes_in(model, "hair"), meshes_in(model, "head"));
+    if let (false, false, Some(h)) = (hair.is_empty(), headwear.is_empty(), model.node_by_name("head")) {
+        let j = world(model)[h].0;
+        wardrobe::hide_hair(model, &hair, &headwear, [j[0], j[1] + wardrobe::SKULL, j[2]]);
+    }
     // Layered items worn together: each outer one clear of each inner one (22 §4.3).
     let mesh_of = |id: &str| model.nodes.iter().find(|n| n.name.strip_prefix("part.") == Some(id)).and_then(|n| n.mesh);
     let rank = |p: &Part| wardrobe::LAYERS.iter().position(|l| *l == p.layer);
@@ -1730,6 +1746,48 @@ mod tests {
             one.nodes.iter().filter(|n| !n.name.starts_with("part.")).filter_map(|n| n.mesh).collect();
         let fit = wardrobe::fit(&one, &pos, &body, &[mesh(&one, "legs.wool_trousers")]);
         assert!(fit.poke <= wardrobe::POKE_MAX, "{fit:?}");
+    }
+
+    #[test]
+    fn every_base_grows_the_hairstyles_and_hides_them_under_headwear() {
+        // 22 §7 item 5: the hairstyles are grown on every humanoid base, with the strands'
+        // coordinates the shader draws; under a helmet the hair it covers goes and long hair
+        // falling below it stays.
+        let c = catalog();
+        let styles = [
+            "hair.buzz",
+            "hair.short",
+            "hair.swept",
+            "hair.long",
+            "hair.ponytail",
+            "hair.topknot",
+            "hair.mohawk",
+            "hair.braids",
+            "hair.locs",
+            "hair.coils",
+        ];
+        for key in
+            ["humanoid_slim_masculine", "humanoid_slim_feminine", "humanoid_heavy_masculine", "humanoid_heavy_feminine"]
+        {
+            for id in styles {
+                let part = c.parts(key).iter().find(|p| p.id == id).unwrap_or_else(|| panic!("{key} lacks {id}"));
+                assert_eq!(part.slot, "hair", "{key} {id}");
+                assert!((200..=2_500).contains(&part.triangles), "{key} {id}: {} triangles", part.triangles);
+            }
+        }
+        let mesh = |m: &Model, id: &str| m.nodes.iter().find(|n| n.name == format!("part.{id}")).unwrap().mesh.unwrap();
+        let tris = |m: &Model, id: &str| m.meshes[mesh(m, id)].iter().map(|p| p.indices.len() / 3).sum::<usize>();
+        let bare = c.forge("A", &Looks { outfit: vec!["hair.long".into()], ..Looks::default() }).unwrap().model;
+        assert!(
+            bare.meshes[mesh(&bare, "hair.long")].iter().flat_map(|p| &p.uvs).all(|uv| (13.99..15.99).contains(&uv[0]))
+        );
+        let helmed = c
+            .forge("B", &Looks { outfit: vec!["hair.long".into(), "head.helmet".into()], ..Looks::default() })
+            .unwrap()
+            .model;
+        let (a, b) = (tris(&bare, "hair.long"), tris(&helmed, "hair.long"));
+        assert!(b < a * 3 / 4, "the helmet hides the hair under it: {b} of {a}");
+        assert!(b > a / 4, "the long hair below the helmet stays: {b} of {a}");
     }
 
     #[test]

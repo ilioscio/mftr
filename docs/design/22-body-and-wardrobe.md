@@ -372,6 +372,8 @@ lofted tubes that are about to be replaced would be wasted.
 | **BW3 The body** | The CC0 body reduced, fitted, weighted; underwear regions; the helpers re-weighted; slim masculine first | The owner signs front, ¾ and side captures, bare and in underwear |
 | **BW4 Four bases** | Sex blend and heavy shape; the body sliders as presets on the helpers (FR6 step 4) | All four bases; old recipes load |
 | **BW5 Wardrobe pipeline** | Item format, fitting, layers, push-out, coverage masks, the QA harness; the old catalog retired as new items land | Three items per slot pass the harness on all four bases |
+| **BH1 Hair** | Hairstyles groomed by physics on every base (§7 item 5's answers); strands in the shader; hair hidden under headwear | Ten styles on all four bases; captures |
+| **BH2 Hair controls** | A length control; beards and moustaches on the same system; the shared hair, brow and beard color with a separate hair color | Captures of each length and beard |
 | **BW6 Motion** | Spring-bone chains for cloth and hair | A cape, a skirt and braids in a run cycle |
 | **BW7 Weapons** | The weapon classes, rebuilt, with weight classes and their clips | Each class in a captured attack |
 | **BW8 Creatures' wardrobes** | Reference bodies and adapters for the four creature builds | Items on every build |
@@ -975,6 +977,70 @@ forge embeds.
 has no exceptions now. 14 of the 720 checks miss narrowly at the body sliders' far ends.
 
 **Left:** a small slit under each sleeve where its two halves meet the body.
+
+### BH1 status (2026-11-12): ten hairstyles, groomed by physics
+
+The owner's answers (§7 item 5) asked for shaped hair meshes. Blender's CC0 bundle has no hair,
+and shapes made by code alone stay out (D77), so hair is made the way garments are sewn (M1): a
+style is a **grooming pattern**, and physics does the shaping (`mftr_blender.grooming`,
+`art/wardrobe/hair/<style>/groom.py`).
+
+**The pattern:**
+- **A cap:** the scalp above a hairline. The hairline is drawn once on the source head (the
+  forehead, the temples, the sideburns, round the ears, the nape). The cap is lifted off the skin
+  by the style's volume, thin at its edge, and the edge is cut along the hairline itself, not round
+  the skin's faces.
+- **Locks:** they root on the scalp at a spacing, or at given points. Each pattern sets the locks'
+  length (by where they root), width, thickness, the way they're combed, and their stiffness.
+- **Ties:** locks can be drawn to a tie and held there (a ponytail, a topknot, braids), with a
+  band round it.
+
+**Grown on each base, at build time:**
+1. Each lock is combed from its root along its flow, over the skin.
+2. Blender's cloth simulation drops it under gravity onto that base's own head and shoulders,
+   with its root and its tie held.
+3. The settled ribbon gives the lock its body: a lens or a round across, tapering to the tip, or
+   a braid's plait.
+
+The cap and the locks carry the strands' coordinates (UV 14–16), which the champion shader draws
+as strands, darker at the roots and lighter at the tips, like the brows' hairs. The hair takes
+the head skin's weights, face bones included, so it follows the sculpt. A lock that reaches the
+neck and back takes the body's weights there, without face bones (21 §1.5).
+
+**The styles:**
+
+| Style | Triangles (slim masculine) |
+|---|---|
+| Buzz cut | 385 |
+| Short | 1,276 |
+| Swept | 1,485 |
+| Long | 1,836 |
+| Ponytail | 1,781 |
+| Topknot | 1,647 |
+| Crest (mohawk) | 1,088 |
+| Braids | 1,730 |
+| Locs | 1,716 |
+| Coils | 1,284 |
+
+The old block-out hair parts are gone. The new styles keep their ids (`hair.short`, `hair.long`,
+`hair.ponytail`, `hair.topknot`, `hair.mohawk`, `hair.braids`), so recipes still load.
+
+**Under headwear** (the owner's call: hair hides under a helmet), the forge hides the hair a
+headwear part covers (`wardrobe::hide_hair`). A hair vertex is covered when the line from the
+skull's middle out through it meets the headwear. So a helmet hides the hair under it and any
+that would poke through, while long hair falling below it stays. A hood with a neck hides a
+ponytail whole.
+
+**Left for BH2:**
+- the length control;
+- beards and moustaches on the same system;
+- the shared color with a separate hair color;
+- a dwarf crest.
+
+**Left for the look:**
+- the heavy builds' braids kink where they meet the bigger shoulders;
+- coils read as knots more than as a rounded mass;
+- the short style's back is still a little ragged.
 
 ## 7. Open questions for the owner
 

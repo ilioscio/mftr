@@ -1,0 +1,9 @@
+// A hairstyle (22 §7 item 5, BH1): cropped close to the skull, groomed by physics (groom.py).
+(
+    id: "hair.buzz",
+    slot: "hair",
+    name: "Buzz cut",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

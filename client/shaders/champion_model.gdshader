@@ -48,6 +48,9 @@ varying flat int brow;
 // A lip's vertex (22 §3.2): (12 + across the mouth, 3 + up), up -1 (the lower lip's border)
 // through 0 (where they meet) to 1 (the upper's). Shaded smooth.
 varying flat int lip;
+// A hair vertex (22 §7 item 5, `mftr_blender.grooming`): (14 + along the lock, 0 at the root to 1
+// at the tip, 4 + across it, in strands' units: 12 strands to one).
+varying flat int hair;
 
 void vertex() {
 	region = int(round(UV2.x * 256.0)) - 1;
@@ -56,6 +59,7 @@ void vertex() {
 	eye_code = eye ? int(floor(UV.y * 0.5)) : 0;
 	brow = UV.x >= 9.99 && UV.x < 11.99 ? 1 : 0;
 	lip = UV.x >= 11.99 && UV.x < 13.99 ? 1 : 0;
+	hair = UV.x >= 13.99 && UV.x < 15.99 ? 1 : 0;
 }
 
 float eye_hash(float a) {
@@ -142,6 +146,16 @@ void fragment() {
 		if (up < 0.0) {
 			c *= 1.0 + 0.14 * (1.0 - smoothstep(0.0, 0.5, abs(a - 0.5))) * (1.0 - smoothstep(0.0, 0.6, across));
 		}
+	} else if (hair == 1) {
+		// Strands along the lock, wavering a little, each a shade of its own; darker at the
+		// roots, lighter toward the tips.
+		float along = clamp(UV.x - 14.0, 0.0, 1.0);
+		float across = UV.y - 4.0;
+		float s = across * 12.0 + 0.3 * sin(along * 7.0 + across * 5.0);
+		float stroke = smoothstep(0.15, 0.85, 0.5 + 0.5 * sin(s * 6.2832));
+		float shade = eye_hash(floor(s + 0.5));
+		c *= mix(0.86, 1.08, stroke) * mix(0.84, 1.1, shade);
+		c *= mix(0.78, 1.0, smoothstep(0.0, 0.3, along)) * mix(1.0, 1.12, smoothstep(0.6, 1.0, along));
 	} else if (has_paint && slot <= 2) {
 		vec4 p = texture(paint, UV);
 		c = mix(c, p.rgb, p.a);

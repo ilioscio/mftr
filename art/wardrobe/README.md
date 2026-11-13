@@ -50,6 +50,34 @@ geometry (`mftr_forge::wardrobe`).
 | `waist.wrap_skirt` | waist, over | sewn: front and back, flared | 1,688 |
 | `back.long_coat` | back, armor | sewn: back and two open fronts, mirrored | 3,300 |
 
+## Hair
+
+`hair/<style>/` holds a hairstyle (22 §7 item 5, BH1): `item.ron` (`slot: "hair"`) and
+`groom.py`, its **grooming pattern** (`mftr_blender.grooming`): a cap above the hairline,
+locks (where they root, how long, which way they're combed, how stiff), and ties. There is no
+`item.blend`: each base grows its own hair when it is built. The locks are combed over that
+base's head, Blender's cloth simulation drops them onto its head and shoulders, and they are
+given their body. Places are in the source head's frame (`art/creator/heads`), so one pattern
+fits every head.
+
+| Style | Pattern |
+|---|---|
+| `hair.buzz` | the cap alone, 3.5 mm |
+| `hair.short` | short locks combed back, lying on the skull |
+| `hair.swept` | parted on the left, the top swept across |
+| `hair.long` | parted in the middle, past the shoulders |
+| `hair.ponytail` | drawn to a tie behind the crown, a round tail |
+| `hair.topknot` | drawn to a tie on the crown, a coiled knot |
+| `hair.mohawk` | a standing crest, the sides shaved |
+| `hair.braids` | drawn to two ties behind the ears, plaited tails |
+| `hair.locs` | round, even locks to the shoulders |
+| `hair.coils` | a deep cap with knots of coils |
+
+To try a pattern without rebuilding a base, grow it on a saved base `.blend` with
+`mftr_blender.grooming.Head` and `grow`.
+
+## Checking
+
 Check them all, on every base at every body slider's ends:
 
 ```

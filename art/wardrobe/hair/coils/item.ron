@@ -1,0 +1,9 @@
+// A hairstyle (22 §7 item 5, BH1): a rounded crown of tight coils, groomed by physics (groom.py).
+(
+    id: "hair.coils",
+    slot: "hair",
+    name: "Coils",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)
