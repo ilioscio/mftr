@@ -918,6 +918,15 @@ the tunic's.
 3. ~~**D77** (§5): which moonshots to start?~~ Answered: M1 now, M5 likely, the rest later.
    M4's license stance waits for M4.
 4. **Ancestry presets** (§3.3): the list, and who reviews them for respect and accuracy?
-5. **Hair** is the big missing piece. The owner will answer its design questions after the
-   lids, brows, lips and the new body. It will lean on BW6's spring chains, the brows' strand
-   shading (§3.1) and the wardrobe's fitting (§4.2).
+5. ~~**Hair**: how?~~ Answered 2026-11-12:
+   - **Method:** shaped hair meshes worn on the head, spring bones on the long locks, braids and
+     ponytails (BW6), strands drawn by the shader as on the brows; no transparency.
+   - **Styles:** about twelve to start: shaved, buzz, short, swept, long, ponytail, topknot,
+     braids, locs, coils and afro (their own shapes, not recolored straight hair), a mohawk, a
+     dwarf crest. **A length control** where it suits the style.
+   - **Beards and moustaches:** the same system (full, goatee, braided dwarf beard; stubble
+     shaded on the skin).
+   - **Color:** hair, brows and beard share one color, with an option to color the hair apart
+     (and two-tone tips).
+   - **Helmets:** the hair hides under a helmet. If that reads badly, flattened versions of
+     each style for headgear come next.
