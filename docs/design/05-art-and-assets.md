@@ -181,7 +181,10 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
   is rendered in Blender from the in-game hand (`art/ui/cursor/build.py`), not drawn:
   - **The gauntlet** (`mftr_blender.gauntlet`): a flared cuff with gilt trim, a back plate,
     knuckle plates and a lame for each finger joint, with leather between. It is built on the
-    slim masculine base's right hand and posed pointing, the index straight and the rest curled.
+    slim masculine base's right hand and posed as the owner's own hand showed it: a right hand
+    seen from its back, the index pointing up and to the left, the other fingers closed in a fist
+    (their knuckles along the top), the thumb tucked under the palm. The back of the hand is
+    found from the thumb, not assumed, so the hand is never mirrored.
   - **The render** (`mftr_blender.cursor_render`): polished steel under a bright sky and a key
     light from the upper left. Each state is reduced from 4× its size, then given a dark outline
     all round, so it reads on snow, grass and stone alike, and a light edge on its lit sides.

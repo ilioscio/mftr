@@ -3,9 +3,11 @@
 
 **The hand** is the humanoid base's own right hand (`Hand`, from a built base's `.blend`): its
 wrist, the way its fingers point, the back of the hand, the palm's breadth and depth, read from
-the mesh and the bones; the fingers laid out across the knuckles in a hand's proportions. Everything is placed in the **hand's frame**: the wrist at the
-origin, +Y along the hand toward the fingertips, +Z out of the back of the hand, +X across it
-toward the thumb.
+the mesh and the bones; the fingers laid out across the knuckles in a hand's proportions.
+Everything is placed in the **hand's frame**, a right-handed one: the wrist at the origin, +Y
+along the hand toward the fingertips, +Z out of the back of the hand, +X across it (toward the
+little finger on a right hand, the thumb on a left). The back of the hand is found from the
+thumb, not assumed: on a right hand it is the fingers' way crossed with the thumb's.
 
 **The gauntlet** is pieces of plate and leather, each riding one segment of the hand: the flared
 cuff and the back plate on the hand, a knuckle plate and three lames on each finger (the last
@@ -39,14 +41,15 @@ class Hand:
         hand, fingers, thumb = bones[f"hand_{side}"], bones[f"fingers_{side}"], bones[f"thumb_{side}"]
         wrist = hand.head_local.copy()
         y = (fingers.tail_local - hand.head_local).normalized()
-        # The back of the hand looks out from the body (the bundle's A pose hangs the palms
-        # toward the thighs).
-        out = Vector((-1.0 if side == "r" else 1.0, 0.0, 0.0))
-        z = (out - y * out.dot(y)).normalized()
+        # The thumb's side, square to the hand; the back of the hand from it (a right hand seen
+        # from its back, fingers up, has its thumb on the left).
+        t = thumb.head_local - wrist
+        t = (t - y * t.dot(y)).normalized()
+        z = y.cross(t) if side == "r" else t.cross(y)
         x = y.cross(z)
-        # +X toward the thumb: flip the frame's handedness if not.
-        if (thumb.head_local - wrist).dot(x) < 0:
-            x = -x
+        self.side = side
+        # Which way +X is from the thumb: -1 on a right hand (the thumb at -X), +1 on a left.
+        self.thumb_x = 1.0 if t.dot(x) > 0 else -1.0
         self.frame = Matrix((x, y, z)).transposed()  # columns: the axes, in the rig's frame
         self.wrist = wrist
         to_local = self.frame.transposed()
@@ -83,26 +86,33 @@ class Hand:
         width = xb - xa
         zc = (za + zb) / 2 + (zb - za) * 0.1
         r = width / 8 * 0.98
+        tx = self.thumb_x
         self.fingers = []
         for k, (name, share, splay) in enumerate(SPREAD):
-            x = xa + width * (k + 0.5) / 4
+            # Little finger to index, toward the thumb.
+            u = (k + 0.5) / 4
+            x = (xa + width * u) if tx > 0 else (xb - width * u)
             root = Vector((x, ky - 0.004 - (0.006 if name in ("little", "index") else 0.0), zc))
-            d = Vector((math.sin(math.radians(splay)), math.cos(math.radians(splay)), 0.0))
+            d = Vector((tx * math.sin(math.radians(splay)), math.cos(math.radians(splay)), 0.0))
             tip = root + d * reach * share
             joints = [root.lerp(tip, s) for s in PHALANGES]
             k_r = 0.86 if name == "little" else 1.0
-            self.fingers.append(Finger(name, joints, [r * k_r, r * k_r * 0.9, r * k_r * 0.8], Vector((1, 0, 0))))
+            self.fingers.append(Finger(name, joints, [r * k_r, r * k_r * 0.9, r * k_r * 0.8], _curl_axis(d)))
         # The thumb along its bone, a little past its tail (the bone stops short of the tip).
-        h, t = self.to_local(thumb.head_local), self.to_local(thumb.tail_local)
-        d = (t - h) * 1.1
-        a = d.normalized()
-        self.thumb = Finger("thumb", [h, h + d * 0.55, h + d], [r * 1.2, r * 1.05],
-                            a.cross(Vector((0, 0, 1))).normalized())
+        h, tt = self.to_local(thumb.head_local), self.to_local(thumb.tail_local)
+        d = (tt - h) * 1.1
+        self.thumb = Finger("thumb", [h, h + d * 0.55, h + d], [r * 1.2, r * 1.05], _curl_axis(d))
         # The knuckles' line.
         self.knuckles = [f.joints[0] for f in self.fingers]
 
     def finger(self, name):
         return next(f for f in self.fingers + [self.thumb] if f.name == name)
+
+
+def _curl_axis(d):
+    """The axis a finger along `d` curls about, toward the palm (-Z), turning by a positive
+    angle."""
+    return d.normalized().cross(Vector((0, 0, -1))).normalized()
 
 
 # The joints along a finger, as shares of its length from the knuckle (the phalanges'
@@ -360,7 +370,7 @@ def build(hand, detail="cursor"):
         if thumb:
             # The thumb's back looks out from the hand's side and up.
             a = (f.joints[-1] - f.joints[0]).normalized()
-            s = Vector((0.6, 0, 1))
+            s = Vector((0.6 * hand.thumb_x, 0, 1))
             fup = (s - a * s.dot(a)).normalized()
         segs = len(f.joints) - 1
         for s in range(segs):
@@ -388,7 +398,7 @@ def build(hand, detail="cursor"):
     return pieces
 
 
-def tip(hand, bends):
+def tip(hand, bends, thumb=None):
     """Where the index finger's point is with the hand posed by `bends` (the hand's frame)."""
     f = hand.finger("index")
     r = f.radius[-1] * 1.05 + 0.002
@@ -397,40 +407,53 @@ def tip(hand, bends):
     up = Vector((0, 0, 1))
     n = (up - a * up.dot(a)).normalized()
     p = f.joints[-1] + d * 0.02 + a * (r * 1.6) + n * (r + 0.0018) * 0.9 * 0.25
-    angles = bends.get("index", (0, 0, 0))
-    for k in range(len(f.joints) - 2, -1, -1):
-        p = _turn(p, f.joints[k], f.bend, -angles[k])
-    return p
+    return _posed(hand, "index", len(f.joints) - 2, [p], bends, thumb or THUMB)[0]
 
 
 # --- Posing ------------------------------------------------------------------------------------
 
-# The cursor's pose: each finger's joints' bend toward the palm (degrees), the thumb's too.
-POINTING = {"index": (4, 2, 0), "middle": (82, 95, 55), "ring": (86, 98, 55), "little": (88, 96, 55),
-            "thumb": (35, 40)}
-# The thumb also swings in across the palm, about the hand's length (degrees).
-THUMB_SWING = 38
+# The cursor's pose, a right hand pointing (as the owner showed it): each finger's joints' curl
+# toward the palm (degrees): the index straight, the others closed in a fist, so only their
+# knuckles show from the back; the thumb's two joints.
+POINTING = {"index": (2, 0, 0), "middle": (92, 100, 70), "ring": (95, 100, 70), "little": (98, 100, 70),
+            "thumb": (25, 35)}
+# The thumb is tucked under the palm before it curls: swung down under it (about the hand's
+# length) and in toward the fingers (about the back of the hand's axis), degrees.
+THUMB = {"under": 50, "across": 30}
 
 
 def _turn(p, at, axis, deg):
     return at + Quaternion(axis, math.radians(deg)) @ (p - at)
 
 
-def pose(hand, pieces, bends, swing=THUMB_SWING):
-    """The pieces' vertices with the hand posed: each finger's joints bent by `bends`, the thumb
-    swung in by `swing`. Returns a list of vertex lists, piece by piece."""
+def _posed(hand, name, s, vs, bends, thumb):
+    """`vs` on segment `s` of finger `name`, posed: its joints curled (the far ones first), and
+    the thumb tucked under the palm."""
+    f = hand.finger(name)
+    angles = bends.get(name, (0,) * (len(f.joints) - 1))
+    for k in range(s, -1, -1):
+        vs = [_turn(v, f.joints[k], f.bend, angles[k]) for v in vs]
+    if name == "thumb":
+        root = f.joints[0]
+        # Under the palm: the thumb's side of the hand turns down (toward -Z).
+        under = Vector((0, hand.thumb_x, 0))
+        vs = [_turn(v, root, under, thumb["under"]) for v in vs]
+        # In toward the fingers: about the back of the hand's axis, the thumb's side toward the
+        # middle of the palm.
+        across = Vector((0, 0, hand.thumb_x))
+        vs = [_turn(v, root, across, thumb["across"]) for v in vs]
+    return vs
+
+
+def pose(hand, pieces, bends, thumb=None):
+    """The pieces' vertices with the hand posed by `bends` (and the thumb tucked by `thumb`, as
+    `THUMB`). Returns a list of vertex lists, piece by piece."""
+    thumb = thumb or THUMB
     out = []
     for pc in pieces:
         vs = [v.copy() for v in pc.verts]
         if isinstance(pc.seg, tuple):
-            name, s = pc.seg
-            f = hand.finger(name)
-            angles = bends.get(name, (0,) * (len(f.joints) - 1))
-            for k in range(s, -1, -1):
-                deg = angles[k] if name == "thumb" else -angles[k]
-                vs = [_turn(v, f.joints[k], f.bend, deg) for v in vs]
-            if name == "thumb":
-                vs = [_turn(v, f.joints[0], Vector((0, 1, 0)), -swing) for v in vs]
+            vs = _posed(hand, pc.seg[0], pc.seg[1], vs, bends, thumb)
         out.append(vs)
     return out
 

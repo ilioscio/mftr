@@ -4,9 +4,9 @@ extends RefCounted
 
 const SIZE := 128
 const AT := {
-	"default": Vector2(33.4, 5.3),
-	"enemy": Vector2(33.4, 5.3),
-	"ally": Vector2(33.4, 5.3),
-	"shop": Vector2(33.4, 5.3),
+	"default": Vector2(6.3, 11.5),
+	"enemy": Vector2(6.3, 11.5),
+	"ally": Vector2(6.3, 11.5),
+	"shop": Vector2(6.3, 11.5),
 	"attack": Vector2(64.0, 64.0),
 }

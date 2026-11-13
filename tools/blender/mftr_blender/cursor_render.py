@@ -41,8 +41,8 @@ OUTLINE_COLOR = (0.105, 0.078, 0.055)
 EDGE = 1.6
 # How the hand lies on screen: the pointing finger turned this far left of straight up
 # (degrees), and the hand rolled this far about its length, the thumb side away (degrees).
-POINT = 40.0
-ROLL = -18.0
+POINT = 35.0
+ROLL = -10.0
 # The fingertip's place in the master (px from the top left).
 TIP = (5.0, 5.0)
 
