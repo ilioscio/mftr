@@ -17,16 +17,24 @@ from mftr_blender import sewing  # noqa: E402
 # One leg's panel, the character's left (+x), seen from the front: the inner leg seam from the
 # crotch to the hem, the outer from the hem up the hip to the waist, the middle seam down.
 # The waist is cut a little under the body's, so the cloth's tension holds them up; the hips
-# close, as an under layer should be, so an over layer lies smooth on them.
-LEFT = [
-    ("hem_in", 0.07, 0.12), ("hem_out", 0.265, 0.12), ("knee_out", 0.255, 0.47), ("hip_out", 0.245, 0.84),
-    ("waist_out", 0.185, 1.00), ("waist_c", 0.0, 1.01), ("crotch", 0.0, 0.80),
-]
+# close, as an under layer should be, so an over layer lies smooth on them. The crotch extends past
+# the middle (a little at the front, more at the back, as a tailor's pattern does): the fabric
+# that passes between the legs, where four seams meet.
+def leg(crotch_x, crotch_z, waist_z):
+    return [
+        ("hem_in", 0.07, 0.12), ("hem_out", 0.265, 0.12), ("knee_out", 0.255, 0.47), ("hip_out", 0.245, 0.84),
+        ("waist_out", 0.185, waist_z), ("waist_c", 0.0, waist_z + 0.01), ("seat", -0.004, 0.88),
+        ("crotch", crotch_x, crotch_z),
+    ]
+
+
+FRONT = leg(-0.035, 0.80, 1.00)
+BACK = leg(-0.07, 0.79, 1.03)
 panels = [
-    sewing.Panel("front_l", LEFT, y=-0.16, front=True),
-    sewing.Panel("front_r", sewing.mirrored(LEFT), y=-0.16, front=True),
-    sewing.Panel("back_l", LEFT, y=0.17, front=False),
-    sewing.Panel("back_r", sewing.mirrored(LEFT), y=0.17, front=False),
+    sewing.Panel("front_l", FRONT, y=-0.16, front=True),
+    sewing.Panel("front_r", sewing.mirrored(FRONT), y=-0.16, front=True),
+    sewing.Panel("back_l", BACK, y=0.17, front=False),
+    sewing.Panel("back_r", sewing.mirrored(BACK), y=0.17, front=False),
 ]
 seams = []
 for side in ("l", "r"):
@@ -35,5 +43,5 @@ for side in ("l", "r"):
 seams.append((("front_l", "waist_c", "crotch"), ("front_r", "waist_c", "crotch")))
 seams.append((("back_l", "waist_c", "crotch"), ("back_r", "waist_c", "crotch")))
 garment = sewing.Garment(panels, seams, budget=1400, cloth=(0.30, 0.27, 0.24), trim_color=(0.20, 0.15, 0.11),
-                         trim_slot="cloth", trim=0.025)
+                         trim_slot="cloth", trim=0.025, mirror=None)
 sewing.build(garment, os.path.join(HERE, "item.blend"))

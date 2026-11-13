@@ -28,18 +28,24 @@ class Panel:
     """A flat panel: `outline`, [(name or None, x, z)] in order round it (counter-clockwise seen
     from the front), standing in the plane y = `y`, facing -y (`front`) or +y."""
 
-    def __init__(self, name, outline, y, front=True):
+    def __init__(self, name, outline, y, front=True, turn=None):
         self.name, self.outline, self.y, self.front = name, outline, y, front
+        # Optional: (pivot (x, z), angle in degrees about the y axis), so a sleeve hangs along
+        # the arm rather than in the body's plane.
+        self.turn = turn
 
 
 class Garment:
     def __init__(self, panels, seams, spacing=0.035, trim=0.03, budget=900, thickness=0.004,
                  cloth=(0.46, 0.42, 0.34), trim_color=(0.30, 0.20, 0.12), trim_slot="accent", frames=120,
-                 lining=0.07):
+                 lining=0.07, mirror="-x"):
         self.panels, self.seams = panels, seams
         self.spacing, self.trim, self.budget, self.thickness = spacing, trim, budget, thickness
         self.cloth, self.trim_color, self.trim_slot, self.frames = cloth, trim_color, trim_slot, frames
         self.lining = lining
+        # A symmetric garment keeps one simulated half, mirrored (`-x` or `+x`; None to keep the
+        # sim as it is): the sim drapes the two sides a little differently.
+        self.mirror = mirror
 
 
 def _resample(points, step):
@@ -80,8 +86,16 @@ def _panel_mesh(bm, panel, step):
     edges = [(i, (i + 1) % len(pts)) for i in range(len(pts))]
     vo, _eo, fo, _o1, _o2, _o3 = delaunay_2d_cdt(verts, edges, [], 2, 1e-6)
     made = []
+    if panel.turn:
+        (px, pz), deg = panel.turn
+        a = math.radians(deg)
+        ca, sa = math.cos(a), math.sin(a)
     for p in vo:
-        made.append(bm.verts.new((p.x, panel.y, p.y)))
+        x, z = p.x, p.y
+        if panel.turn:
+            dx, dz = x - px, z - pz
+            x, z = px + dx * ca - dz * sa, pz + dx * sa + dz * ca
+        made.append(bm.verts.new((x, panel.y, z)))
     index = {}
     for i, p in enumerate(vo):
         index[(round(p.x, 6), round(p.y, 6))] = made[i]
@@ -233,6 +247,10 @@ def simulate(garment, body):
                 target[bm.verts[i]] = bm.verts[r]
     bmesh.ops.weld_verts(bm, targetmap=target)
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=garment.spacing * 0.2)
+    _fill_holes(bm)
+    if garment.mirror:
+        _mirror(bm, garment.mirror)
+        _fill_holes(bm)
     loose = [e for e in bm.edges if not e.link_faces]
     bmesh.ops.delete(bm, geom=loose, context="EDGES")
     bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
@@ -240,6 +258,44 @@ def simulate(garment, body):
     bm.to_mesh(out)
     bm.free()
     return res
+
+
+def _fill_holes(bm, longest=0.15):
+    """Fill the small holes where seams meet (a crotch, a mirror line's slit): open loops shorter
+    than `longest` round. A garment's openings (a neckline, a hem) are far longer."""
+    left = {e for e in bm.edges if e.is_boundary}
+    small = []
+    while left:
+        e = left.pop()
+        loop, stack = {e}, [e]
+        while stack:
+            x = stack.pop()
+            for v in x.verts:
+                for y in v.link_edges:
+                    if y in left:
+                        left.discard(y)
+                        loop.add(y)
+                        stack.append(y)
+        if sum(x.calc_length() for x in loop) < longest:
+            small.extend(loop)
+    if small:
+        bmesh.ops.holes_fill(bm, edges=small, sides=0)
+
+
+def _mirror(bm, keep):
+    """Keep the `keep` half (`-x` or `+x`) of the garment and mirror it onto the other, welded
+    down the middle."""
+    from mathutils import Matrix
+    sign = -1.0 if keep == "-x" else 1.0
+    geom = bm.verts[:] + bm.edges[:] + bm.faces[:]
+    bmesh.ops.bisect_plane(bm, geom=geom, dist=1e-6, plane_co=(0.0, 0.0, 0.0), plane_no=(-sign, 0.0, 0.0),
+                           clear_outer=True)
+    for v in bm.verts:
+        if abs(v.co.x) < 1e-5:
+            v.co.x = 0.0
+    half = bm.verts[:] + bm.edges[:] + bm.faces[:]
+    bmesh.ops.mirror(bm, geom=half, matrix=Matrix.Identity(4), merge_dist=1e-4, axis="X")
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
 
 
 def finish(obj, garment):

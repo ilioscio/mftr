@@ -20,9 +20,9 @@ def outline(neck_z):
     are cut deep and the straps narrow, clear of the shoulders and the arms (the QA harness)."""
     return [
         ("hem_l", -0.27, 0.66), ("hem_r", 0.27, 0.66),
-        ("waist_r", 0.205, 0.95), ("under_r", 0.185, 1.09), ("arm_r", 0.145, 1.27), ("shoulder_r", 0.15, 1.41),
-        ("neck_r", 0.075, 1.445), ("neck_c", 0.0, neck_z), ("neck_l", -0.075, 1.445),
-        ("shoulder_l", -0.15, 1.41), ("arm_l", -0.145, 1.27), ("under_l", -0.185, 1.09), ("waist_l", -0.205, 0.95),
+        ("waist_r", 0.205, 0.95), ("under_r", 0.185, 1.09), ("arm_r", 0.14, 1.27), ("shoulder_r", 0.14, 1.41),
+        ("neck_r", 0.088, 1.44), ("neck_c", 0.0, neck_z), ("neck_l", -0.088, 1.44),
+        ("shoulder_l", -0.14, 1.41), ("arm_l", -0.14, 1.27), ("under_l", -0.185, 1.09), ("waist_l", -0.205, 0.95),
     ]
 
 

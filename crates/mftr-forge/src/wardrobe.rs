@@ -240,6 +240,10 @@ pub fn hide_covered(model: &mut Model, body: &[usize], items: &[usize]) {
 /// of an earlier one. Accessories and parts without a layer aren't pushed.
 pub const LAYERS: [&str; 3] = ["under", "over", "armor"];
 
+/// The deepest an outer garment's vertex may sit inside an inner one and still be pushed out (m):
+/// past it, the vertex isn't over that garment at all.
+pub const MAX_PUSH: f32 = 0.02;
+
 /// How far an outer layer stands clear of the inner one it covers (m).
 pub const LAYER_GAP: f32 = 0.006;
 
@@ -383,7 +387,8 @@ fn clear(model: &mut Model, fixed: &[usize], moving: &[usize], reach: f32, side:
     let mut pushes: Vec<(V3, V3)> = Vec::new();
     for &mi in outer {
         for p in model.meshes[mi].iter() {
-            for v in p.positions.iter() {
+            let own = normals(p);
+            for (v, vn) in p.positions.iter().zip(&own) {
                 let c = v.map(|x| (x / grid.cell).floor() as i32);
                 let mut best: Option<(f32, V3, V3)> = None;
                 let mut seen = std::collections::HashSet::new();
@@ -405,9 +410,14 @@ fn clear(model: &mut Model, fixed: &[usize], moving: &[usize], reach: f32, side:
                     }
                 }
                 if let Some((_, q, n)) = best {
-                    // Along the fixed surface's normal, toward the side wanted.
+                    // Along the fixed surface's normal, toward the side wanted; only by a face
+                    // looking the way this vertex does (a coat beside the legs isn't inside the
+                    // trousers' far side), and never far.
                     let n = [n[0] * side, n[1] * side, n[2] * side];
                     let s = dot(sub(*v, q), n);
+                    if dot(n, *vn) < 0.3 || s < -MAX_PUSH {
+                        continue;
+                    }
                     if s < LAYER_GAP {
                         pushes.push((*v, [n[0] * (LAYER_GAP - s), n[1] * (LAYER_GAP - s), n[2] * (LAYER_GAP - s)]));
                     }
@@ -422,8 +432,8 @@ fn clear(model: &mut Model, fixed: &[usize], moving: &[usize], reach: f32, side:
 /// skinned positions (`face::skinned`):
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Fit {
-    /// Body vertices still shown (not hidden under the item) whose outward ray meets the item
-    /// *from inside it* within `REACH`, but which stand outside it: skin through cloth.
+    /// Body vertices still shown (not hidden under the item) with the item's outside (not its
+    /// lining) less than 1.5 cm in under them: skin through cloth.
     pub poke: usize,
     /// Item vertices farther than `GAP` from any body vertex: cloth floating off the body.
     pub gaps: usize,
@@ -436,7 +446,11 @@ pub fn poke_points(model: &Model, pos: &[Vec<Vec<V3>>], body: &[usize], item: &[
         .iter()
         .flat_map(|&mi| {
             model.meshes[mi].iter().zip(&pos[mi]).flat_map(|(p, q)| {
-                p.indices.chunks(3).map(move |t| [q[t[0] as usize], q[t[1] as usize], q[t[2] as usize]])
+                // The garment's outside only: skin over its lining can't be seen.
+                p.indices
+                    .chunks(3)
+                    .filter(|t| !t.iter().all(|&i| p.colors.get(i as usize).is_some_and(|c| c[3] <= LINING)))
+                    .map(move |t| [q[t[0] as usize], q[t[1] as usize], q[t[2] as usize]])
             })
         })
         .collect();
@@ -467,7 +481,11 @@ pub fn fit(model: &Model, pos: &[Vec<Vec<V3>>], body: &[usize], item: &[usize]) 
         .iter()
         .flat_map(|&mi| {
             model.meshes[mi].iter().zip(&pos[mi]).flat_map(|(p, q)| {
-                p.indices.chunks(3).map(move |t| [q[t[0] as usize], q[t[1] as usize], q[t[2] as usize]])
+                // The garment's outside only: skin over its lining can't be seen.
+                p.indices
+                    .chunks(3)
+                    .filter(|t| !t.iter().all(|&i| p.colors.get(i as usize).is_some_and(|c| c[3] <= LINING)))
+                    .map(move |t| [q[t[0] as usize], q[t[1] as usize], q[t[2] as usize]])
             })
         })
         .collect();
@@ -546,8 +564,14 @@ pub const POKE_MAX: usize = 12;
 /// humanoid base, at neutral and at each body slider's ends. Its numbers are `Fit`'s for the
 /// outermost item worn; an outfit fails on more than `POKE_MAX` vertices poking through.
 pub fn check(c: &crate::Catalog) -> Vec<Check> {
+    check_bodies(c, true)
+}
+
+/// `check`, at neutral only when `sliders` is false (the quick form the tests run).
+pub fn check_bodies(c: &crate::Catalog, sliders: bool) -> Vec<Check> {
     use crate::looks::{Gender, Looks};
     let mut out = Vec::new();
+    let sliders_too = sliders;
     let sliders: Vec<String> = crate::body::presets().iter().map(|p| p.id.clone()).collect();
     for (build, gendered) in crate::looks::BUILDS {
         if !gendered || !build.starts_with("humanoid") {
@@ -570,7 +594,7 @@ pub fn check(c: &crate::Catalog) -> Vec<Check> {
             for outfit in outfits {
                 let ids: Vec<String> = outfit.iter().map(|p| p.id.clone()).collect();
                 let mut bodies = vec![("neutral".to_string(), Vec::new())];
-                for s in &sliders {
+                for s in sliders.iter().filter(|_| sliders_too) {
                     for v in [-1.0f32, 1.0] {
                         bodies.push((format!("{s} {v:+}"), vec![(s.clone(), v)]));
                     }

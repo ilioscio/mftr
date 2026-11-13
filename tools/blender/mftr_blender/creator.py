@@ -580,7 +580,7 @@ def build(gender, name, build="humanoid_slim"):
     # after its mass, so a heavy build's cloth sits on its own bulk, not grown from the slim's.
     from . import wardrobe
     if BODY == "cc0":
-        made += wardrobe.fit_items(armature, body, gender)
+        made += wardrobe.fit_items(armature, body, gender, room=1.8 if mass else 1.0)
     # Weapons ride the prop bones, as the official champions' do, so the moves' clips (whose
     # wrists stay human, 14 §3.3) hold them where their champions held theirs.
     from . import wrists

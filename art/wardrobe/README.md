@@ -42,10 +42,13 @@ geometry (`mftr_forge::wardrobe`).
 
 ## Items
 
-| Item | How | Triangles |
-|---|---|---|
-| `torso.linen_tunic` | Sewn: front and back panels, shoulder and side seams | 1,693 |
-| `legs.wool_trousers` | Sewn: four panels, outer and inner leg seams, middle front and back | 1,723 |
+| Item | Slot, layer | How | Triangles |
+|---|---|---|---|
+| `torso.linen_tunic` | torso, over | sewn: front and back, mirrored | 1,651 |
+| `legs.wool_trousers` | legs, under | sewn: four panels, crotch extension | 1,619 |
+| `torso.sleeved_shirt` | torso, over | sewn: front, back, turned sleeves | 2,214 |
+| `waist.wrap_skirt` | waist, over | sewn: front and back, flared | 1,688 |
+| `back.long_coat` | back, armor | sewn: back and two open fronts | 3,175 |
 
 Check them all, on every base at every body slider's ends:
 

@@ -1698,6 +1698,23 @@ mod tests {
     }
 
     #[test]
+    fn every_wardrobe_item_passes_the_harness_at_neutral() {
+        // 22 §4.8: on every humanoid base at rest, no item or layered pair lets the skin poke
+        // through. (The body sliders' far ends are the QA harness's report, M5's to correct.)
+        let c = catalog();
+        let rows = wardrobe::check_bodies(&c, false);
+        assert!(rows.len() >= 12, "{}", rows.len());
+        // Known, and in doc 22 (BW5): the shirt's sleeves, simulated on the slim arms, are too
+        // narrow for the heavy masculine's; the sleeves want their own fit per build.
+        let known = |r: &wardrobe::Check| {
+            r.base == "humanoid_heavy_masculine" && r.outfit.iter().any(|o| o == "torso.sleeved_shirt")
+        };
+        for r in rows.iter().filter(|r| !known(r)) {
+            assert!(r.fit.poke <= wardrobe::POKE_MAX, "{} {:?}: {:?}", r.base, r.outfit, r.fit);
+        }
+    }
+
+    #[test]
     fn layered_items_lie_one_over_the_other() {
         // 22 §4.3: worn together, the over layer (the tunic) is pushed clear of the under layer
         // (the trousers), and the trousers under it go; the trousers alone pass the harness.

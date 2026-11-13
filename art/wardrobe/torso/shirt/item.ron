@@ -1,0 +1,9 @@
+// A wardrobe item (22 §4, BW5): a sewn shirt with short sleeves, simulated (build.py, M1).
+(
+    id: "torso.sleeved_shirt",
+    slot: "torso",
+    name: "Sleeved shirt",
+    layer: "over",
+    accent: true,
+    rigid: false,
+)

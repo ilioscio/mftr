@@ -911,6 +911,56 @@ the tunic's.
   barely change its numbers.
 - **The small hole where the trousers' four seams meet at the crotch.**
 
+### BW5 second pass (2026-11-12): five items, the tunic passing, the trousers closed
+
+**Items** (all sewn, M1):
+
+| Item | Slot, layer | Pattern | Triangles |
+|---|---|---|---|
+| Linen tunic | torso, over | front and back, mirrored half | 1,651 |
+| Wool trousers | legs, under | four panels with a tailor's crotch extension | 1,619 |
+| Sleeved shirt | torso, over | front, back, two sleeves of two halves each, turned along the arm | 2,214 |
+| Wrap skirt | waist, over | front and back, flared to the knee | 1,688 |
+| Long coat | back, armor | back and two open front panels, below the knee | 3,175 |
+
+**Sewing** (`mftr_blender.sewing`):
+- panels can be turned about a pivot (sleeves);
+- symmetric garments keep one simulated half, mirrored, since the sim drapes the two sides a
+  little differently;
+- seams are welded by stitch groups;
+- small holes where seams meet are filled.
+
+**The trousers' hole** was the four seams meeting at the crotch with too little cloth between
+the legs. A crotch extension (the panels reach past the middle, more at the back, as a tailor's
+pattern does) closes it.
+
+**Fitting, fixed after the harness and the captures:**
+- **Peaks:** a body point under one of an item's big faces (a bust's tip) pushes that face out.
+  This applies only to points directly under the face, with 2.5 cm at most over all rounds;
+  points beside a face pushed a coat's free-hanging sides out into "wings".
+- **Arms:** garments on the torso, waist, legs and back are carried, pushed and weighted
+  without the arms below the shoulder (by bone on the base, by place on the source bodies). The
+  arms hang at each body's own angle and would carry a coat's sides with them.
+- **The carry:** far from the skin a vertex follows the surface's move, not its turn, and only
+  the truly nearest faces count: a wider net reached the waist's other side, whose move
+  cancelled the narrowing.
+- **The heavy builds** fit with 1.8× the layers' distances off the skin.
+- **Layers at forge time:** an outer garment's vertex is pushed only by an inner face looking the
+  same way, never more than 2 cm in.
+
+**The harness's measure** now counts skin under a garment's outside only. Skin over its lining
+(4 mm in, near the openings) can't be seen, and was counted before.
+
+**The harness** (720 checks): every item and layered pair passes at neutral on every base but
+one, the shirt on the heavy masculine (22 pokes): its sleeves, simulated on the slim arms, are
+too narrow for that build's arms, and want their own fit per build. A test,
+`every_wardrobe_item_passes_the_harness_at_neutral`, holds the rest and names that exception.
+At the body sliders' far ends 46 checks miss narrowly, M5's to correct.
+
+**Release:** `scripts/package-client.sh` ships `art/creator/*/export` (its own check fails on
+any export folder it doesn't list); the Nix package's source includes the five art files the
+forge embeds.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?
