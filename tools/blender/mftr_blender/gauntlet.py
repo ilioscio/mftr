@@ -98,9 +98,9 @@ class Hand:
             joints = [root.lerp(tip, s) for s in PHALANGES]
             k_r = 0.86 if name == "little" else 1.0
             self.fingers.append(Finger(name, joints, [r * k_r, r * k_r * 0.9, r * k_r * 0.8], _curl_axis(d)))
-        # The thumb along its bone, a little past its tail (the bone stops short of the tip).
+        # The thumb along its bone, past its tail (the bone stops short of the tip).
         h, tt = self.to_local(thumb.head_local), self.to_local(thumb.tail_local)
-        d = (tt - h) * 1.1
+        d = (tt - h) * THUMB_REACH
         self.thumb = Finger("thumb", [h, h + d * 0.55, h + d], [r * 1.2, r * 1.05], _curl_axis(d))
         # The knuckles' line.
         self.knuckles = [f.joints[0] for f in self.fingers]
@@ -120,6 +120,8 @@ def _curl_axis(d):
 PHALANGES = (0.0, 0.47, 0.76, 1.0)
 # Little finger to index: each one's length (a share of the fingers bone's reach) and splay
 # (degrees, + toward the thumb).
+# The thumb's length, times its bone's (the bone stops at the second joint's middle).
+THUMB_REACH = 1.3
 SPREAD = (("little", 0.78, -5.0), ("ring", 0.95, -1.5), ("middle", 1.0, 1.0), ("index", 0.92, 3.5))
 
 
@@ -387,14 +389,14 @@ def build(hand, detail="cursor"):
                             n_arc=lod["arc"], ridge=0.0011, flare=0.0 if last else 0.0012, tip=r * 1.6 if last else 0.0,
                             rings=lod["rings"], solid=lod["solid"])
             pieces.append(Piece(sv, sf, "steel", (f.name, s)))
-        if not thumb:
-            # A knuckle plate over the finger's root, on the hand.
-            k = f.joints[0]
-            a = (f.joints[1] - f.joints[0]).normalized()
-            r = f.radius[0] * 1.6 + 0.004
-            kv, kf = _shell(k - a * 0.011, k + a * 0.012, up, r, r * 0.95, 190, 0.002, n_arc=lod["arc"], ridge=0.002,
-                            flare=0.001, rings=lod["rings"], solid=lod["solid"])
-            pieces.append(Piece(kv, kf, "steel", "hand"))
+        # A knuckle plate over the finger's root, on the hand; the thumb's rides the thumb and
+        # closes its lame's open root.
+        k = f.joints[0]
+        a = (f.joints[1] - f.joints[0]).normalized()
+        r = f.radius[0] * (1.25 if thumb else 1.6) + 0.004
+        kv, kf = _shell(k - a * 0.011, k + a * 0.012, fup, r, r * 0.95, 300 if thumb else 190, 0.002, n_arc=lod["arc"],
+                        ridge=0.002, flare=0.001, rings=lod["rings"], solid=lod["solid"])
+        pieces.append(Piece(kv, kf, "steel", (f.name, 0) if thumb else "hand"))
     return pieces
 
 
@@ -416,10 +418,10 @@ def tip(hand, bends, thumb=None):
 # toward the palm (degrees): the index straight, the others closed in a fist, so only their
 # knuckles show from the back; the thumb's two joints.
 POINTING = {"index": (2, 0, 0), "middle": (92, 100, 70), "ring": (95, 100, 70), "little": (98, 100, 70),
-            "thumb": (25, 35)}
+            "thumb": (6, 10)}
 # The thumb is tucked under the palm before it curls: swung down under it (about the hand's
 # length) and in toward the fingers (about the back of the hand's axis), degrees.
-THUMB = {"under": 50, "across": 30}
+THUMB = {"under": 18, "across": 36}
 
 
 def _turn(p, at, axis, deg):

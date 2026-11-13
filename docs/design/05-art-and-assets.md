@@ -183,7 +183,8 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
     knuckle plates and a lame for each finger joint, with leather between. It is built on the
     slim masculine base's right hand and posed as the owner's own hand showed it: a right hand
     seen from its back, the index pointing up and to the left, the other fingers closed in a fist
-    (their knuckles along the top), the thumb tucked under the palm. The back of the hand is
+    (their knuckles along the top), the thumb straight alongside the index, aimed the same way
+    (as the owner's second photo showed: it keeps the back of the gauntlet clean). The back of the hand is
     found from the thumb, not assumed, so the hand is never mirrored.
   - **The render** (`mftr_blender.cursor_render`): polished steel under a bright sky and a key
     light from the upper left. Each state is reduced from 4× its size, then given a dark outline
