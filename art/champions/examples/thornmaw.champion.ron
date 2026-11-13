@@ -1,0 +1,54 @@
+// Thornmaw: an example champion of the beast build (CR10, 20 §3), made through the creator's
+// recipe API (`mftr-forge`'s print_thornmaw test). A rage-fuelled hunter: a ricocheting spine it
+// spits (a howl), a roar that heals it, a pounce, and a slam that heaves the ground up.
+Champion(
+    format: 0,
+    looks: (
+        build: "beast",
+        shape: (head_snout: 0.6, jaw_heavy: 0.8, ears_size: -0.4, body_bulk: 0.5, body_chest: 0.6, body_tail: -0.3),
+        skin: 2,
+        outfit: ["shoulders.collar", "head.horns"],
+        paint: [("body", 0, 5), ("body", 1, 6)],
+        signature: 30,
+        moves: (attack: "rook.attack", q: "wren.q", w: "rook.w", e: "wren.e", r: "bastion.r"),
+    ),
+    name: "Thornmaw",
+    class: Bruiser,
+    stats: (max_health: 650, health_regen: 1.7, armor: 33, magic_resist: 32, attack_damage: 68, move_speed: 340),
+    growth: (max_health: 102, health_regen: 0.08, armor: 4.5, magic_resist: 1.6, attack_damage: 3.8),
+    attack: (range: 175, attack_speed: 0.7, windup_fraction: 0.28),
+    passive: Sunder(per_stack: 0.04, stacks: 5, ms: 5000),
+    resource: Rage(max: 100, regen: 10, costs: [20, 30, 30, 60]),
+    abilities: [
+        (
+            name: "Ricochet",
+            cooldown_ms: 5000,
+            effect: Line(windup_ms: 250, speed: 1800, radius: 40, range: 950, damage: (kind: Physical, base: 30, ad_ratio: 0.9)),
+            reaction: Poke,
+            per_rank: (damage: 30, cooldown_ms: 400),
+            transforms: [Multishot, Echo, Wide],
+        ),
+        (
+            name: "Second Wind",
+            cooldown_ms: 14000,
+            effect: Support(heal: 40, heal_missing: 0.12),
+            reaction: None,
+            per_rank: (damage: 20, cooldown_ms: 1000),
+        ),
+        (
+            name: "Pounce",
+            cooldown_ms: 10000,
+            effect: Lunge(range: 450, speed: 1600, damage: (kind: Physical, base: 40, ad_ratio: 0.5)),
+            reaction: None,
+            per_rank: (damage: 25, cooldown_ms: 800),
+        ),
+        (
+            name: "Upheaval",
+            cooldown_ms: 80000,
+            effect: Area(windup_ms: 250, range: 650, radius: 250, delay_ms: 1150, damage: (kind: Magic, base: 150, ap_ratio: 0.6), cc: Knockup(ms: 1000)),
+            reaction: HardCc,
+            per_rank: (damage: 100, cooldown_ms: 15000),
+            transforms: [Echo, Wide],
+        ),
+    ],
+)

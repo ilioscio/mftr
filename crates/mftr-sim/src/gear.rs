@@ -307,7 +307,7 @@ impl Hitter {
             return Hitter::plain(u.id, u.kind);
         }
         let s = &u.stats;
-        let p = items::passives(&u.state.progress.items);
+        let p = of(u);
         let fx = &u.state.fx;
         Hitter {
             id: u.id,
@@ -371,7 +371,7 @@ pub fn mitigate(u: &Unit, by: &Hitter, raw: f32, kind: DamageKind, attack: bool,
         DamageKind::True => amount,
     };
     if u.kind == UnitKind::Champion {
-        let p = items::passives(&u.state.progress.items);
+        let p = of(u);
         if attack && let Some((Passive::AttackCut(c), _)) = p.find(|p| matches!(p, Passive::AttackCut(_))) {
             amount *= 1.0 - c;
         }
@@ -384,7 +384,7 @@ pub fn mitigate(u: &Unit, by: &Hitter, raw: f32, kind: DamageKind, attack: bool,
 
 /// A crit's damage multiplier from `crit_damage` (bonus) against `target` (CritCut).
 pub fn crit_multiplier(crit_damage: f32, target: &Unit) -> f32 {
-    let cut = match items::passives(&target.state.progress.items).find(|p| matches!(p, Passive::CritCut(_))) {
+    let cut = match of(target).find(|p| matches!(p, Passive::CritCut(_))) {
         Some((Passive::CritCut(c), _)) if target.kind == UnitKind::Champion => c,
         _ => 0.0,
     };
@@ -468,9 +468,14 @@ pub fn bonus_armor(u: &Unit) -> f32 {
     (u.stats.armor - base).max(0.0)
 }
 
-/// The counted passives of a unit's inventory (none for non-champions).
+/// The counted passives of a unit: its inventory's and its champion's own (none for
+/// non-champions).
 pub fn of(u: &Unit) -> Passives {
-    if u.kind == UnitKind::Champion { items::passives(&u.state.progress.items) } else { Passives::NONE }
+    if u.kind != UnitKind::Champion {
+        return Passives::NONE;
+    }
+    let innate = u.champion.map_or(Passive::None, |c| c.def().passive);
+    items::passives_with(&u.state.progress.items, innate)
 }
 
 fn ms(v: u64) -> SimDuration {

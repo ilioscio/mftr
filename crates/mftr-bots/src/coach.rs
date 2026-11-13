@@ -426,7 +426,7 @@ impl Coach {
                     let (mut us, them) = b.engagement(at, 1600.0, Some(memory));
                     for m in &helpers {
                         if let Some(u) = Self::unit(b, m) {
-                            us.add(&fight::power(u, now, true, |s| u.state.can_cast(now, s)), 1.0);
+                            us.add(&fight::power(u, now, true, |s| u.can_cast(now, s)), 1.0);
                         }
                     }
                     if fight::outcome(&us, &them) < -0.3
@@ -609,7 +609,7 @@ impl Coach {
             }
             // Our side: the ganker plus allies in the lane; theirs: who's seen near, plus missing.
             let (mut us, mut them) = b.engagement(e.state.pos, 1300.0, Some(memory));
-            us.add(&fight::power(me, b.now, true, |s| me.state.can_cast(b.now, s)), 1.0);
+            us.add(&fight::power(me, b.now, true, |s| me.can_cast(b.now, s)), 1.0);
             let ally_there = members.iter().any(|a| {
                 a.player != m.player
                     && b.unit(a.unit).is_some_and(|u| u.state.alive() && u.state.pos.distance(e.state.pos) < 1500.0)
@@ -657,7 +657,7 @@ impl Coach {
             if let Some(u) = b.unit(m.unit).filter(|u| u.state.alive()) {
                 let d = u.state.pos.distance(center);
                 if (1600.0..2800.0).contains(&d) {
-                    us.add(&fight::power(u, now, true, |s| u.state.can_cast(now, s)), 0.8);
+                    us.add(&fight::power(u, now, true, |s| u.can_cast(now, s)), 0.8);
                 }
             }
         }
@@ -811,7 +811,7 @@ impl Coach {
                 let mut us = us;
                 for (i, _) in near.iter().take(count) {
                     if let Some(u) = b.unit(members[*i].unit) {
-                        us.add(&fight::power(u, now, true, |s| u.state.can_cast(now, s)), 1.0);
+                        us.add(&fight::power(u, now, true, |s| u.can_cast(now, s)), 1.0);
                     }
                 }
                 if fight::outcome(&us, &them) < -0.45 {

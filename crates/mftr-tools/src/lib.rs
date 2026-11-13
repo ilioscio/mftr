@@ -3,6 +3,7 @@
 pub mod bot;
 pub mod botmatch;
 pub mod itembalance;
+pub mod league;
 pub mod loadtest;
 pub mod mapsvg;
 pub mod netlab;

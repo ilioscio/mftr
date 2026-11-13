@@ -21,8 +21,10 @@ pub const MAX_LIFETIME: f32 = 1.5;
 pub const MAX_RAIN_LIFETIME: f32 = 4.0;
 
 /// Particle kits (any phase but `projectile`).
-pub const PARTICLE_KITS: &[&str] =
-    &["flare", "burst", "ring", "dust", "trail", "slash", "flash", "crack", "pillar", "shock", "rocks", "rain"];
+pub const PARTICLE_KITS: &[&str] = &[
+    "flare", "burst", "ring", "dust", "trail", "slash", "flash", "crack", "pillar", "shock", "rocks", "rain", "vortex",
+    "embers", "shards", "smoke", "motes",
+];
 /// Projectile styles (the `projectile` phase): they decorate and color the gameplay-sized body;
 /// its sheath keeps the team's color (14 §4.4).
 pub const PROJECTILE_KITS: &[&str] =

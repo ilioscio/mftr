@@ -9,13 +9,14 @@ use mftr_sim::jungle::MonsterKind;
 pub const FPS: u32 = 30;
 
 // Caps (10 §2, §7.2, §9).
-/// Doubled by D59 (14): room for silhouette detail, sculpted hands and heads.
-pub const TRIANGLES_TARGET: (usize, usize) = (5000, 8000);
+/// Doubled by D59 (14): room for silhouette detail, sculpted hands and heads. The top raised by
+/// D76 (21 §5): the authored head (~2,500 triangles) for the face rig.
+pub const TRIANGLES_TARGET: (usize, usize) = (5000, 10_000);
 /// Lane minions (A5): many on screen at once, so lighter. ×1.5 by D60 (15 §2).
 pub const MINION_TRIANGLES_TARGET: (usize, usize) = (900, 3900);
 /// Jungle monsters (16): a camp's few on screen at once; the buff monsters at the top.
 pub const MONSTER_TRIANGLES_TARGET: (usize, usize) = (1200, 7000);
-pub const TRIANGLES_MAX: usize = 12_000;
+pub const TRIANGLES_MAX: usize = 14_000;
 /// Map props (structures, trees, rocks): static, one `root` bone, no clips. A structure is the
 /// most detailed thing on screen, so its cap is higher; scenery is drawn many times over. ×1.5
 /// by D60 (15 §2).
@@ -23,8 +24,11 @@ pub const PROP_TRIANGLES_TARGET: (usize, usize) = (20, 12_000);
 pub const PROP_TRIANGLES_MAX: usize = 18_000;
 /// A prop's bones: `root`, plus up to this many `part_<name>` bones for pieces that move.
 pub const PROP_PARTS_MAX: usize = 8;
+/// Bones a rig aims for, the face's and the body's sculpt bones aside (21 §1.3, §9.1: a creator
+/// base carries 24 of each, which no clip keys).
 pub const BONES_TARGET: usize = 64;
-pub const BONES_MAX: usize = 80;
+/// Every bone, sculpt bones included: the biped's 34, 16 extras, 24 face and 24 body bones fit.
+pub const BONES_MAX: usize = 100;
 pub const INFLUENCES_TARGET: usize = 2;
 /// `accent` is the team color; `accent_glow` is the team color, glowing (A5: minions' eyes and
 /// orbs). Neither counts toward the four other slots.
@@ -32,6 +36,20 @@ pub const MATERIAL_SLOTS: &[&str] = &["skin", "cloth", "metal", "emissive", "acc
 pub const MAX_NON_ACCENT_SLOTS: usize = 4;
 /// Mesh + animations (400 KB + 600 KB, 10 §9).
 pub const MODEL_BYTES_BUDGET: usize = 1000 * 1024;
+/// A champion creator base (CR2): its mesh and every slider's two morph targets, shared by every
+/// champion of its build and gender (20 §11.4). Raised from 2 MB for the paint UVs (CR5b), whose
+/// seams split vertices and with them every morph target's deltas; then to 4 MB for the sculpted
+/// creator heads (their faces in the skull, 36 sides). A slider whose ends mirror each other
+/// ships one signed target (`<id>~`), which keeps the face editor's 28 sliders inside it. Bases
+/// ship with the game and never cross the network (customs send recipes, 20 §11.2).
+pub const BASE_BYTES_BUDGET: usize = 4_000_000;
+/// The clips a creature base brings (CR10): its stance and the clips Q W E R are taken from by
+/// their moves' shapes (`mftr_forge::moves::own_clip_for`).
+pub const REQUIRED_CREATURE_BASE: &[&str] =
+    &["idle", "run", "attack_1", "death", "howl", "slam", "pounce", "dash_start", "dash_travel", "dash_land"];
+/// The move clips a creature base may add, one per shape, each in the build's own way (a
+/// serpent spits its bolt, a machine fires it): without one, the shape plays `howl` or `slam`.
+pub const CREATURE_MOVE_CLIPS: &[&str] = &["bolt", "beam", "nova", "guard", "empower", "blink"];
 pub const MAX_CLIP_FRAMES: u32 = 12 * FPS;
 /// Root motion tolerance (10 §8.4): clips play in place, the sim moves the unit.
 pub const ROOT_XZ_TOLERANCE_M: f32 = 0.01;
@@ -81,6 +99,9 @@ pub fn biped_bone_allowed(name: &str) -> bool {
         || BIPED_OTHER.contains(&name)
         || SOCKETS.contains(&name)
         || BIPED_OPTIONAL.contains(&name)
+        || crate::face::is_face_bone(name)
+        || crate::face::is_life_bone(name)
+        || crate::body::is_body_bone(name)
         || is_extra_bone(name)
 }
 
@@ -237,6 +258,9 @@ pub fn required_markers(clip: &str, looping: bool) -> Vec<&'static str> {
     let base = clip.split('_').next().unwrap_or(clip);
     let fires = clip.starts_with("attack")
         || clip == "cast_utility"
+        || ["howl", "slam", "pounce", "dash_start"].contains(&clip)
+        || CREATURE_MOVE_CLIPS.contains(&clip)
+        || (clip.starts_with("move_") && !clip.ends_with("_travel") && !clip.ends_with("_land"))
         || is_slot(clip)
         || (is_slot(base) && (clip.ends_with("_start") || clip[2..].bytes().all(|b| b.is_ascii_digit())));
     if fires {

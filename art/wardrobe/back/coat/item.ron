@@ -1,0 +1,10 @@
+// A wardrobe item (22 §4, BW5): a sewn long coat, open at the front, simulated (build.py, M1).
+// Its own slot, `back`, so it is worn over a shirt or a tunic (one part a slot).
+(
+    id: "back.long_coat",
+    slot: "back",
+    name: "Long coat",
+    layer: "armor",
+    accent: true,
+    rigid: false,
+)

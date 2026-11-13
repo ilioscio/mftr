@@ -164,7 +164,7 @@ impl<'w> Board<'w> {
     pub fn engagement(&self, at: Vec2, radius: f32, memory: Option<&Memory>) -> (Side, Side) {
         let (mut us, mut them) = (Side::default(), Side::default());
         for a in self.allies.iter().filter(|a| a.state.alive() && a.state.pos.distance(at) <= radius) {
-            us.add(&fight::power(a, self.now, true, |slot| a.state.can_cast(self.now, slot)), 1.0);
+            us.add(&fight::power(a, self.now, true, |slot| a.can_cast(self.now, slot)), 1.0);
         }
         for (id, p) in &self.enemy_power {
             if self.unit(*id).is_some_and(|e| e.state.pos.distance(at) <= radius) {

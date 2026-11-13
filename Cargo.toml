@@ -9,10 +9,11 @@ members = [
     "crates/mftr-gdext",
     "crates/mftr-pack",
     "crates/mftr-bots",
+    "crates/mftr-forge",
 ]
 
 [workspace.package]
-version = "0.19.0"
+version = "0.20.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 rust-version = "1.88"
@@ -24,6 +25,7 @@ mftr-client = { path = "crates/mftr-client" }
 mftr-server = { path = "crates/mftr-server" }
 mftr-pack = { path = "crates/mftr-pack" }
 mftr-bots = { path = "crates/mftr-bots" }
+mftr-forge = { path = "crates/mftr-forge" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

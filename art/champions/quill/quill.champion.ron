@@ -1,0 +1,61 @@
+// Quill as a recipe (20 §12): the official kit, looks on the slim humanoid build.
+// A gangly stargazer: a wide pointed hat, brass goggles, a long navy coat, an orrery staff.
+// The kit is a copy of crates/mftr-sim/champions/quill.ron (a test checks they match); the
+// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// Quill: Artillery mage.
+// Artillery mage: long-range poke from behind the line, a slowing field, a hop back, and a
+// channeled lance of starlight that burns the first enemy in its path.
+// Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability
+// numbers are rank 1, and `per_rank` adds to them each rank (M2 slice 2). Durations are in
+// milliseconds. The format is in `crates/mftr-sim/src/data.rs`.
+Champion(
+    format: 0,
+    looks: (
+        build: "humanoid_slim",
+        gender: Feminine,
+        shape: (nose_length: 0.3, face_length: 0.3, eyes_size: 0.2),
+        proportions: (height: 0.3, arms: 0.3, legs: 0.2),
+        skin: 0,
+        outfit: ["head.wide_hat", "face.goggles", "torso.coat", "feet.boots", "weapon.staff"],
+        paint: [("head.wide_hat", 0, 45), ("torso.coat", 0, 46)],
+        signature: 240,
+        moves: (attack: "quill.attack", q: "quill.q", w: "quill.w", e: "quill.e", r: "quill.r"),
+    ),
+    name: "Quill",
+    class: Artillery,
+    stats: (max_health: 540, health_regen: 1.3, armor: 20, magic_resist: 30, attack_damage: 48, ability_power: 70, move_speed: 325),
+    growth: (max_health: 86, health_regen: 0.08, armor: 3.9, magic_resist: 1.3, attack_damage: 2.6),
+    attack: (range: 550, attack_speed: 0.62, windup_fraction: 0.22, bolt_speed: 1500),
+    abilities: [
+        (
+            name: "Arc Shot",
+            cooldown_ms: 5000,
+            effect: Area(windup_ms: 250, range: 1300, radius: 120, delay_ms: 800, damage: (kind: Magic, base: 60, ap_ratio: 0.5)),
+            reaction: Poke,
+            per_rank: (damage: 30, cooldown_ms: 400),
+            transforms: [Echo, Wide],
+        ),
+        (
+            name: "Static Field",
+            cooldown_ms: 12000,
+            effect: Area(windup_ms: 250, range: 900, radius: 220, delay_ms: 600, damage: (kind: Magic, base: 40, ap_ratio: 0.3), cc: Slow(pct: 35, ms: 1500)),
+            reaction: None,
+            per_rank: (damage: 20, cooldown_ms: 800),
+            transforms: [Echo, Wide],
+        ),
+        (
+            name: "Recoil",
+            cooldown_ms: 12000,
+            effect: Dash(range: 300, speed: 1200),
+            reaction: None,
+            per_rank: (cooldown_ms: 1000),
+        ),
+        (
+            name: "Starfall Lance",
+            cooldown_ms: 80000,
+            effect: Beam(windup_ms: 850, range: 1800, radius: 70, duration_ms: 1500, every_ms: 250, damage: (kind: Magic, base: 280, ap_ratio: 1.1)),
+            reaction: Burst,
+            per_rank: (damage: 140, cooldown_ms: 15000),
+        ),
+    ],
+)

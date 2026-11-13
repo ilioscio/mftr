@@ -1,0 +1,9 @@
+// A wardrobe item (22 §4, BW5): sewn wool trousers, simulated (build.py, M1).
+(
+    id: "legs.wool_trousers",
+    slot: "legs",
+    name: "Wool trousers",
+    layer: "under",
+    accent: false,
+    rigid: false,
+)

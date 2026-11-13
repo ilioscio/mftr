@@ -654,6 +654,70 @@ mod tests {
         assert_eq!(teams.len(), 2, "the spectator sees both teams' champions");
     }
 
+    /// CR1d: a server started with a champion file. A real client session is told the server's
+    /// roster before it may join, fetches the file over a lossy link, checks and registers it,
+    /// says hello again, goes through champion select and plays the custom champion (predicted
+    /// like any other). The server's recording carries the file and re-simulates exactly.
+    #[test]
+    fn custom_champion_end_to_end() {
+        let grumble = include_str!("../../../art/champions/examples/grumble.champion.ron").to_string();
+        let customs = mftr_server::customs::Customs::load(vec![grumble]).unwrap();
+        let cfg = ServerConfig {
+            seed: 4,
+            bots: 10,
+            lobby: true,
+            record: true,
+            scenario: Scenario::Aram,
+            customs,
+            champions: mftr_server::customs::ChampionPolicy::Customs,
+            ..Default::default()
+        };
+        let mut server = ServerCore::new(cfg, 0.0);
+        let mut session = ClientSession::new();
+        let (mut up, mut down) = (SimLink::new(LinkProfile::TYPICAL, 7), SimLink::new(LinkProfile::TYPICAL, 8));
+        let (mut t, mut next_hello, mut readied, mut fetching) = (0.0, 0.0, false, false);
+        while t < 14.0 {
+            while let Some(p) = up.recv(t) {
+                for (_, bytes) in server.handle_packet(1, &p, t) {
+                    down.send(bytes, t);
+                }
+            }
+            if t >= server.next_tick_due() {
+                for (_, bytes) in server.step(t) {
+                    down.send(bytes, t);
+                }
+            }
+            while let Some(p) = down.recv(t) {
+                session.handle_packet(&p, t);
+            }
+            session.update(t);
+            fetching |= session.roster_progress() < 1.0;
+            if session.phase() == Phase::Lobby && !readied {
+                up.send(session.lobby_packet(mftr_net::msg::LobbyAction::Ready(true)), t);
+                readied = true;
+            }
+            if matches!(session.phase(), Phase::Connecting | Phase::Lobby) && t >= next_hello {
+                up.send(session.hello_packet(t), t);
+                next_hello = t + 0.05;
+            }
+            if session.phase() == Phase::Playing && session.should_send(t) {
+                up.send(session.input_packet(t), t);
+            }
+            t += 0.001;
+        }
+        assert!(fetching, "the client fetched the roster");
+        assert_eq!(session.roster_error(), None);
+        assert_eq!(session.phase(), Phase::Playing, "the match started");
+        assert_eq!(session.champion().def().name, "Grumble");
+        assert!(!session.champion().is_official());
+        let text = server.game().replay().to_text();
+        assert!(text.contains("champion-begin") && text.contains("Grumble"));
+        let replay = mftr_server::game::Replay::from_text(&text).unwrap();
+        let check = replay.verify();
+        assert!(check.hashes_checked >= 1, "{check:?}");
+        assert_eq!(check.mismatch, None);
+    }
+
     /// After a Base falls, the same client session goes back to champion select (no
     /// reconnect), rerolls, and plays the next match with its new champion. A spectator stays
     /// connected through it all.

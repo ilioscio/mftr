@@ -1,0 +1,9 @@
+// A wardrobe item (22 §4, BW5): a sewn linen tunic, simulated (build.py, M1).
+(
+    id: "torso.linen_tunic",
+    slot: "torso",
+    name: "Linen tunic",
+    layer: "over",
+    accent: true,
+    rigid: false,
+)

@@ -1,0 +1,50 @@
+// Stormwarden: made in the champion creator (20). Durations are in milliseconds.
+Champion(
+    format: 0,
+    looks: (
+        build: "humanoid_heavy",
+        gender: Masculine,
+        shape: (jaw_width: 0.7, brow_ridge: 0.8, brow_angle: 0.6, nose_width: 0.4, head_crown: -0.3),
+        skin: 2,
+        outfit: ["weapon.maul", "shoulders.pauldrons", "torso.tunic", "feet.boots"],
+        signature: 205,
+        moves: (attack: "rook.attack", q: "lib.chain_hook", w: "lib.battle_cry", e: "lib.leap_strike", r: "lib.meteor_call"),
+    ),
+    name: "Stormwarden",
+    class: Tank,
+    stats: (max_health: 650, health_regen: 1.7, armor: 33, magic_resist: 32, attack_damage: 68, move_speed: 340),
+    growth: (max_health: 102, health_regen: 0.08, armor: 4.5, magic_resist: 1.6, attack_damage: 3.8),
+    attack: (range: 175, attack_speed: 0.7, windup_fraction: 0.28),
+    passive: Cleave(melee: 0.35, ranged: 0.15, radius: 300),
+    resource: Rage(max: 100, regen: 10, costs: [20, 30, 30, 60]),
+    abilities: [
+        (
+            name: "Chain Hook",
+            cooldown_ms: 15000,
+            effect: Line(windup_ms: 400, speed: 1500, radius: 60, range: 850, damage: (kind: Physical, base: 70, ad_ratio: 0.6), cc: Pull(to: 150)),
+            reaction: HardCc,
+            per_rank: (damage: 35, cooldown_ms: 1000),
+        ),
+        (
+            name: "Battle Cry",
+            cooldown_ms: 13000,
+            effect: Support(shield: 120, duration_ms: 3000),
+            reaction: None,
+            per_rank: (damage: 30, cooldown_ms: 1000),
+        ),
+        (
+            name: "Leap Strike",
+            cooldown_ms: 11000,
+            effect: Dash(range: 550, speed: 1100),
+            reaction: None,
+            per_rank: (cooldown_ms: 800),
+        ),
+        (
+            name: "Meteor Call",
+            cooldown_ms: 90000,
+            effect: Area(windup_ms: 600, range: 900, radius: 280, delay_ms: 900, damage: (kind: Magic, base: 170, ap_ratio: 0.7), cc: Knockup(ms: 750)),
+            reaction: HardCc,
+            per_rank: (damage: 100, cooldown_ms: 15000),
+        ),
+    ],
+)

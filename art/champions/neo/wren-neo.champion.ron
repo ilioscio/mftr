@@ -1,0 +1,64 @@
+// Wren-neo: Wren rebuilt in the champion creator, to play next to the hand-made Wren (20 §12).
+// Generated from art/champions/wren/wren.champion.ron with the name changed (a test keeps them in step);
+// load the whole set with `mftr-server --champion-dir art/champions/neo --champions both`.
+// A small, quick birdman: a feathered crest, a russet tunic, a capelet of feathers.
+// The kit is a copy of crates/mftr-sim/champions/wren.ron (a test checks they match); the
+// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// Wren: Skirmisher: mobile ranged physical damage.
+// Skirmisher: a quick poke, slowing caltrops, a pounce onto a target, and a wide volley of
+// arrows.
+// Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability
+// numbers are rank 1, and `per_rank` adds to them each rank (M2 slice 2). Durations are in
+// milliseconds. The format is in `crates/mftr-sim/src/data.rs`.
+Champion(
+    format: 0,
+    looks: (
+        build: "humanoid_slim",
+        gender: Masculine,
+        shape: (nose_reach: 0.6, nose_hook: 0.6, eyes_size: 0.4, chin_reach: -0.4),
+        proportions: (height: -0.3, legs: 0.2),
+        skin: 3,
+        outfit: ["hair.mohawk", "torso.tunic", "back.cape", "arms.bracers", "feet.boots", "waist.belt"],
+        paint: [("hair.mohawk", 0, 33), ("torso.tunic", 0, 27), ("back.cape", 0, 12)],
+        signature: 85,
+        moves: (attack: "wren.attack", q: "wren.q", w: "wren.w", e: "wren.e", r: "wren.r"),
+    ),
+    name: "Wren-neo",
+    class: Skirmisher,
+    stats: (max_health: 600, health_regen: 1.4, armor: 27, magic_resist: 30, attack_damage: 62, move_speed: 335),
+    growth: (max_health: 94, health_regen: 0.08, armor: 4.3, magic_resist: 1.3, attack_damage: 3.3),
+    attack: (range: 500, attack_speed: 0.75, windup_fraction: 0.2, bolt_speed: 2000),
+    abilities: [
+        (
+            name: "Ricochet",
+            cooldown_ms: 5000,
+            effect: Line(windup_ms: 250, speed: 1800, radius: 40, range: 950, damage: (kind: Physical, base: 30, ad_ratio: 0.9)),
+            reaction: Poke,
+            per_rank: (damage: 30, cooldown_ms: 400),
+            transforms: [Multishot, Echo, Wide],
+        ),
+        (
+            name: "Caltrops",
+            cooldown_ms: 12000,
+            effect: Area(windup_ms: 200, range: 700, radius: 180, delay_ms: 400, damage: (kind: Physical, base: 30, ad_ratio: 0.4), cc: Slow(pct: 45, ms: 2000)),
+            reaction: None,
+            per_rank: (damage: 20, cooldown_ms: 800),
+            transforms: [Echo, Wide],
+        ),
+        (
+            name: "Pounce",
+            cooldown_ms: 10000,
+            effect: Lunge(range: 450, speed: 1600, damage: (kind: Physical, base: 40, ad_ratio: 0.5)),
+            reaction: None,
+            per_rank: (damage: 25, cooldown_ms: 800),
+        ),
+        (
+            name: "Hail of Arrows",
+            cooldown_ms: 60000,
+            effect: Area(windup_ms: 250, range: 1000, radius: 280, delay_ms: 1250, damage: (kind: Physical, base: 80, ad_ratio: 0.6), cc: Slow(pct: 30, ms: 1000), pulses: (count: 5, every_ms: 500, share: 0.25, cc: Slow(pct: 30, ms: 600))),
+            reaction: Burst,
+            per_rank: (damage: 80, cooldown_ms: 10000),
+            transforms: [Echo, Wide],
+        ),
+    ],
+)

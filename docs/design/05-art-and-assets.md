@@ -37,6 +37,8 @@ These rules apply to every asset, including future skins and mods.
 ### Texture policy
 Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlases, SDF icon/glyph atlases, the few UI images that must be bitmaps. Anything else needs a **texture budget review** in the PR, with the size impact reported by CI.
 
+**Exception (D70): paint images.** Champion-creator parts may carry a hand-painted image: palette-indexed (16 colors from the shared palette), 64×64 or 128×128, nearest-filtered, stored in the champion's recipe ([20 §11.1](20-champion-creator.md#111-the-recipe)). Nothing else gains textures.
+
 ## 3. Map construction
 
 - Authored as **vector data** in `maps-src/`: lane splines, wall and brush polygons, river path, height control points.
@@ -113,6 +115,11 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 | `shock` | `fire`, `detonate`, `land` | A ring expanding from the center to the **gameplay radius** over its lifetime |
 | `rocks` | `detonate`, `land`, `fire` | Stones dropped from above across the radius, landing with a bounce |
 | `rain` | `detonate` | A volley that keeps falling across the area for its lifetime (up to 4 s): streaks of arrows, each a short line of pixels |
+| `vortex` | `release`, `fire`, `start` | Power drawn in: a helix of pixels rising round the point and tightening |
+| `embers` | any | Sparks lifting off and drifting, cooling through the ramp |
+| `shards` | `impact`, `detonate`, `fire` | Crystals bursting out and up, then falling hard |
+| `smoke` | `start`, `fire`, `detonate` | Puffs that swell and rise slowly and hang (a smoke bomb, a vanishing) |
+| `motes` | `fire`, `impact` | Glimmers hovering about the point, drifting and shrinking (blessings, heals) |
 | any particle kit | `travel` | Streamed off a dashing champion every step until the dash lands, so a quarter-second dash leaves a visible path |
 | `plain`, `cracks`, `rocks`, `frost`, `flames`, `bones`, `stars`, `arrows`, `sigil`, `shadow` | `telegraph` | The *inside* of a delayed area's ground indicator, in the champion's colors (its outline keeps the team's): cracks that spread, rock shadows that grow, frost, flames, strewn bones, stars, arrowheads, a turning sigil, a pool of shadow |
 

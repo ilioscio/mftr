@@ -6,7 +6,7 @@
 //!   mftr-tools bot --server HOST:PORT [--queue MODE[-coop]] [--profile NAME] [--seconds S] [--seed N] [--duel] [--champion NAME]
 //!
 //!   mftr-tools blind-report FILE.tsv...
-//!   mftr-tools pack validate FILE.glb|DIR...
+//!   mftr-tools pack validate FILE.glb|FILE.champion.ron|DIR...
 //!   mftr-tools sfx build [sounds.ron|DIR...]   (default: art)
 //!   mftr-tools map svg open|arena|bridge|crossroads|FILE.mftrmap   (an SVG of the layout, on stdout)
 //!   mftr-tools release-key FILE        (a new release key: private half into FILE, public half printed)
@@ -107,6 +107,13 @@ fn main() {
                 get(flag).map(|t| mftr_server::Tier::by_name(&t).unwrap_or_else(|| panic!("unknown tier {t}")))
             };
             let both = tier("--tier").unwrap_or(mftr_server::Tier::Veteran);
+            // CR1b: champion files join the roster before `--team` names are looked up.
+            for path in get("--champion-file").iter().flat_map(|p| p.split(',')) {
+                if let Err(e) = mftr_pack::champion::load_file(std::path::Path::new(path.trim())) {
+                    eprintln!("{e}");
+                    std::process::exit(2);
+                }
+            }
             let team: Vec<_> = get("--team")
                 .map(|names| {
                     names
@@ -134,6 +141,20 @@ fn main() {
             if !mftr_tools::botmatch::run(&cfg) {
                 std::process::exit(1);
             }
+        }
+        Some("league") => {
+            // CR7 (20 §9.3): random champions within the budget, in bot matches.
+            let cfg = mftr_tools::league::LeagueConfig {
+                champions: num("--champions", 20.0) as usize,
+                matches: num("--matches", 20.0) as usize,
+                minutes: num("--minutes", 25.0),
+                seed: num("--seed", 1.0) as u64,
+                log: get("--log"),
+                match_seed: get("--match-seed").and_then(|s| s.parse().ok()),
+                calibrate: num("--calibrate", 0.0) as usize,
+                calibrate_matches: num("--calibrate-matches", 100.0) as usize,
+            };
+            mftr_tools::league::run(&cfg);
         }
         Some("loadtest") => {
             // 13 §8: many matches in one hub, in process; what a server spends per match.
@@ -264,12 +285,16 @@ fn main() {
                 }
             }
             if files.is_empty() {
-                eprintln!("usage: mftr-tools pack validate FILE.glb|DIR...");
+                eprintln!("usage: mftr-tools pack validate FILE.glb|FILE.champion.ron|DIR...");
                 std::process::exit(2);
             }
             let mut errors = 0;
             for f in &files {
-                let report = mftr_pack::validate_file(f);
+                let report = if mftr_pack::champion::is_champion_file(f) {
+                    mftr_pack::champion::validate_file(f)
+                } else {
+                    mftr_pack::validate_file(f)
+                };
                 println!("{}", f.display());
                 for line in &report.summary {
                     println!("  {line}");
@@ -281,6 +306,40 @@ fn main() {
                 errors += report.errors();
             }
             if errors > 0 {
+                std::process::exit(1);
+            }
+        }
+        Some("wardrobe") if args.get(1).map(String::as_str) == Some("check") => {
+            // The wardrobe's QA harness (22 §4.8): every item, and each layered pair, on every
+            // humanoid base at neutral and at each body slider's ends. Exits non-zero when one
+            // has skin poking through.
+            let art = std::path::PathBuf::from(args.get(2).map(String::as_str).unwrap_or("art"));
+            let c = match mftr_forge::Catalog::load(&art) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            };
+            let rows = mftr_forge::wardrobe::check(&c);
+            let mut failed = 0;
+            println!("{:<26} {:<44} {:<22} {:>5} {:>5} {:>6}", "base", "outfit", "body", "poke", "gaps", "verts");
+            for r in &rows {
+                let bad = r.fit.poke > mftr_forge::wardrobe::POKE_MAX;
+                failed += bad as usize;
+                println!(
+                    "{:<26} {:<44} {:<22} {:>5} {:>5} {:>6}{}",
+                    r.base,
+                    r.outfit.join(" + "),
+                    r.body,
+                    r.fit.poke,
+                    r.fit.gaps,
+                    r.fit.item_vertices,
+                    if bad { "  FAIL" } else { "" }
+                );
+            }
+            println!("{} checks, {failed} failed", rows.len());
+            if failed > 0 {
                 std::process::exit(1);
             }
         }
@@ -334,9 +393,9 @@ fn main() {
             );
             eprintln!("       mftr-tools blind-report FILE.tsv...");
             eprintln!(
-                "       mftr-tools botmatch [--horde|--mayhem|--hyper|--classic] [--team NAME,...] [--seed N] [--seeds N] [--minutes N] [--items] [--shuffle-builds] [--tier|--blue|--red recruit|veteran|elite|nightmare|legacy]"
+                "       mftr-tools botmatch [--horde|--mayhem|--hyper|--classic] [--champion-file FILE.champion.ron,...] [--team NAME,...] [--seed N] [--seeds N] [--minutes N] [--items] [--shuffle-builds] [--tier|--blue|--red recruit|veteran|elite|nightmare|legacy]"
             );
-            eprintln!("       mftr-tools pack validate FILE.glb|DIR...");
+            eprintln!("       mftr-tools pack validate FILE.glb|FILE.champion.ron|DIR...");
             eprintln!("       mftr-tools sfx build [sounds.ron|DIR...]");
             eprintln!("       mftr-tools map svg open|arena|bridge|crossroads");
             eprintln!("       mftr-tools release-key FILE");
@@ -353,7 +412,7 @@ fn collect_glbs(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
     for p in entries {
         if p.is_dir() {
             collect_glbs(&p, out);
-        } else if p.extension().is_some_and(|e| e == "glb") {
+        } else if p.extension().is_some_and(|e| e == "glb") || mftr_pack::champion::is_champion_file(&p) {
             out.push(p);
         }
     }

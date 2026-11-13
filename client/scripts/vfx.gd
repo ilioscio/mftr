@@ -42,6 +42,14 @@ const KITS := {
 	# across it for `lifetime` seconds (14 §4.3).
 	"rocks": { "count": 14, "size": 0.26, "speed": 9.0, "lifetime": 0.45 },
 	"rain": { "count": 6, "size": 0.07, "speed": 16.0, "lifetime": 2.0 },
+	# Moods (20 §8.3, the creator's moves): power drawn in on a rising helix, sparks drifting up
+	# off something hot, crystals that shatter and fall, smoke that swells and hangs, glimmers
+	# that hover.
+	"vortex": { "count": 28, "size": 0.08, "speed": 2.4, "lifetime": 0.5 },
+	"embers": { "count": 16, "size": 0.06, "speed": 1.2, "lifetime": 1.0 },
+	"shards": { "count": 12, "size": 0.12, "speed": 5.0, "lifetime": 0.6 },
+	"smoke": { "count": 10, "size": 0.30, "speed": 0.8, "lifetime": 1.2 },
+	"motes": { "count": 14, "size": 0.07, "speed": 0.4, "lifetime": 1.2 },
 }
 
 var _mm: MultiMesh
@@ -187,6 +195,46 @@ func play(spec: Dictionary, pos: Vector3, dir := Vector3.ZERO, radius := 0.0) ->
 		"rain":
 			# The volley keeps falling for `lifetime` seconds (stepped in `_step`).
 			_rains.append({"pos": Vector3(pos.x, 0.0, pos.z), "radius": radius if radius > 0.0 else 1.5, "left": life, "spec": spec})
+		"vortex":
+			# A helix rising round `pos`, each pixel born a little later and higher, moving along
+			# it and in: power being drawn together.
+			var r := radius if radius > 0.0 else 0.9
+			var turns := 2.0
+			for i in n:
+				var t := float(i) / float(maxi(n - 1, 1))
+				var a := TAU * turns * t + _rng.randf_range(-0.15, 0.15)
+				var out := Vector3(cos(a), 0.0, sin(a))
+				var tangent := Vector3(-sin(a), 0.0, cos(a))
+				var rr := r * (1.0 - 0.55 * t)
+				var p := Vector3(pos.x, 0.1 + 1.6 * t, pos.z) + out * rr
+				_emit(p, tangent * speed - out * speed * 0.35 + Vector3(0, 0.6, 0), life * (0.5 + 0.5 * t), size * (1.2 - 0.5 * t), ramp, 0.0, -0.4, 1.0)
+		"embers":
+			# Sparks lifting off and drifting, flickering through the ramp as they cool.
+			for i in n:
+				var a := _rng.randf() * TAU
+				var d := sqrt(_rng.randf()) * 0.6
+				var p := Vector3(pos.x + cos(a) * d, _rng.randf_range(0.2, 1.1), pos.z + sin(a) * d)
+				var v := Vector3(_rng.randf_range(-0.4, 0.4), speed * _rng.randf_range(0.5, 1.0), _rng.randf_range(-0.4, 0.4))
+				_emit(p, v, life * _rng.randf_range(0.6, 1.0), size * _rng.randf_range(0.7, 1.2), ramp, -0.6, -0.5, 0.96)
+		"shards":
+			# Crystals bursting out and up, then falling hard.
+			for i in n:
+				var d := _rand_dir(1.0)
+				_emit(pos, d * speed * _rng.randf_range(0.6, 1.0), life * _rng.randf_range(0.7, 1.0), size * _rng.randf_range(0.8, 1.6), ramp, 14.0, -0.3, 0.97)
+		"smoke":
+			# Puffs that swell and rise slowly, hiding what is in them.
+			var r := radius if radius > 0.0 else 0.8
+			for i in n:
+				var a := _rng.randf() * TAU
+				var d := sqrt(_rng.randf()) * r * 0.7
+				var p := Vector3(pos.x + cos(a) * d, _rng.randf_range(0.2, 1.2), pos.z + sin(a) * d)
+				var v := Vector3(cos(a) * speed * 0.3, speed * 0.4, sin(a) * speed * 0.3)
+				_emit(p, v, life * _rng.randf_range(0.7, 1.0), size * _rng.randf_range(0.8, 1.2), ramp, -0.2, 1.4, 0.88)
+		"motes":
+			# Glimmers hovering about `pos`, drifting slowly, fading as they shrink.
+			for i in n:
+				var p := pos + Vector3(_rng.randf_range(-0.6, 0.6), _rng.randf_range(0.3, 1.6), _rng.randf_range(-0.6, 0.6))
+				_emit(p, _rand_dir(0.3) * speed, life * _rng.randf_range(0.6, 1.0), size, ramp, -0.1, -0.6, 0.97)
 		"shock":
 			# A ring that expands from the center to `radius` (the gameplay radius) over its life.
 			var r := radius if radius > 0.0 else 1.2 * size / float(KITS.shock.size)

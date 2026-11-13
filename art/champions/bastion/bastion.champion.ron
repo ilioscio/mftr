@@ -1,0 +1,61 @@
+// Bastion as a recipe (CR8, 20 §12): the official kit, looks on the heavy humanoid build.
+// A stone guardian: a block of a helm, boulder shoulders above it and boulder fists.
+// The kit is a copy of crates/mftr-sim/champions/bastion.ron (a test checks they match); the
+// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// Bastion: Tank / engage (melee).
+// Tank / engage: a pull to start fights, a slowing stomp, a self shield, and a big delayed
+// knock-up to lock a group down.
+// Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability
+// numbers are rank 1, and `per_rank` adds to them each rank (M2 slice 2). Durations are in
+// milliseconds. The format is in `crates/mftr-sim/src/data.rs`.
+Champion(
+    format: 0,
+    looks: (
+        build: "humanoid_heavy",
+        gender: Masculine,
+        shape: (body_bulk: 0.8, body_shoulders: 1, body_chest: 0.2, body_muscle: 0.8, neck_thickness: 1),
+        proportions: (height: 0.3, legs: -0.6, arms: 0.6, hands: 0.8),
+        skin: 14,
+        outfit: ["head.great_helm", "shoulders.boulders", "arms.stone_fists", "torso.breastplate", "waist.tassets"],
+        paint: [("body", 0, 3), ("body", 1, 5), ("head.great_helm", 0, 2), ("torso.breastplate", 0, 3), ("waist.tassets", 0, 4)],
+        signature: 195,
+        moves: (attack: "bastion.attack", q: "bastion.q", w: "bastion.w", e: "bastion.e", r: "bastion.r"),
+    ),
+    name: "Bastion",
+    class: Tank,
+    stats: (max_health: 680, health_regen: 1.8, armor: 36, magic_resist: 32, attack_damage: 62, move_speed: 335),
+    growth: (max_health: 110, health_regen: 0.08, armor: 4.8, magic_resist: 1.8, attack_damage: 3.5),
+    attack: (range: 150, attack_speed: 0.65, windup_fraction: 0.3),
+    abilities: [
+        (
+            name: "Grapple",
+            cooldown_ms: 14000,
+            effect: Line(windup_ms: 350, speed: 1500, radius: 60, range: 900, damage: (kind: Magic, base: 80, ap_ratio: 0.5), cc: Pull(to: 150)),
+            reaction: HardCc,
+            per_rank: (damage: 40, cooldown_ms: 1000),
+            transforms: [Wide],
+        ),
+        (
+            name: "Bulwark",
+            cooldown_ms: 12000,
+            effect: Support(shield: 140, duration_ms: 3000),
+            reaction: None,
+            per_rank: (damage: 30, cooldown_ms: 1000),
+        ),
+        (
+            name: "Tremor",
+            cooldown_ms: 8000,
+            effect: Area(windup_ms: 250, radius: 300, damage: (kind: Magic, base: 60, ap_ratio: 0.4), cc: Slow(pct: 40, ms: 1500)),
+            reaction: None,
+            per_rank: (damage: 30, cooldown_ms: 500),
+        ),
+        (
+            name: "Upheaval",
+            cooldown_ms: 80000,
+            effect: Area(windup_ms: 250, range: 650, radius: 250, delay_ms: 1150, damage: (kind: Magic, base: 150, ap_ratio: 0.6), cc: Knockup(ms: 1000)),
+            reaction: HardCc,
+            per_rank: (damage: 100, cooldown_ms: 15000),
+            transforms: [Echo, Wide],
+        ),
+    ],
+)

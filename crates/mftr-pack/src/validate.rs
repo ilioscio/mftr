@@ -90,6 +90,15 @@ pub fn validate_model(model: &Model, glb_len: usize, side: &Sidecar) -> Report {
     ));
     check_header(&mut r, side);
     check_mesh(&mut r, model, glb_len, &side.kind);
+    check_targets(&mut r, model, &side.kind);
+    // The face rig (21 §6), on a creator base that has one.
+    for p in crate::face::problems(model) {
+        r.err(p);
+    }
+    // The body's helper bones (21 §9), likewise.
+    for p in crate::body::problems(model) {
+        r.err(p);
+    }
     if side.kind == "prop" {
         check_prop(&mut r, model);
         return r;
@@ -101,6 +110,54 @@ pub fn validate_model(model: &Model, glb_len: usize, side: &Sidecar) -> Report {
     };
     check_clips(&mut r, model, side, &joints);
     r
+}
+
+/// Morph targets (CR2): only a champion creator base has them, as slider pairs `<id>+` and
+/// `<id>-`, one signed target `<id>~` for a slider whose ends mirror each other, or a lone
+/// `<id>+` for a one-sided slider (an epicanthic fold: below 0 does nothing); ids made of `a–z`,
+/// `0–9` and `_`.
+fn check_targets(r: &mut Report, m: &Model, kind: &str) {
+    let names: Vec<&String> = m.target_names.iter().flatten().collect();
+    if kind != "base" {
+        if m.meshes.iter().flatten().any(|p| !p.targets.is_empty()) {
+            r.err("morph targets are for champion creator bases only");
+        }
+        // Textureless outside the creator's paint images (D70, 05 §2).
+        if m.meshes.iter().flatten().any(|p| !p.uvs.is_empty()) {
+            r.err("UVs (TEXCOORD_0) are for champion creator bases only");
+        }
+        return;
+    }
+    if names.is_empty() {
+        r.err("a creator base needs its sliders as morph targets");
+    }
+    for n in &names {
+        let Some(id) = n.strip_suffix('+').or_else(|| n.strip_suffix('-')).or_else(|| n.strip_suffix('~')) else {
+            r.err(format!("morph target `{n}`: a slider's `+`, `-` or `~`"));
+            continue;
+        };
+        if id.is_empty()
+            || id.len() > 32
+            || !id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        {
+            r.err(format!("morph target `{n}`: slider ids are a–z, 0–9 and _"));
+        }
+        if n.ends_with('~') {
+            if names.iter().any(|x| **x == format!("{id}+") || **x == format!("{id}-")) {
+                r.err(format!("slider `{id}` is both signed (`~`) and a pair"));
+            }
+            continue;
+        }
+        // A `-` needs its `+`; a lone `+` is one-sided.
+        if n.ends_with('-') && !names.iter().any(|x| **x == format!("{id}+")) {
+            r.err(format!("slider `{id}` has no `{id}+`"));
+        }
+    }
+    let mut ids: Vec<&str> = names.iter().map(|n| n.trim_end_matches(['+', '-', '~'])).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let parts = m.nodes.iter().filter(|n| is_part_node(&n.name) && n.mesh.is_some()).count();
+    r.summary.push(format!("{} sliders, {parts} catalog parts", ids.len()));
 }
 
 /// A map prop (structures, trees, rocks): one skinned mesh on a `root` bone (and optional
@@ -129,9 +186,12 @@ fn check_prop(r: &mut Report, m: &Model) {
 }
 
 fn check_header(r: &mut Report, side: &Sidecar) {
-    if !matches!(side.kind.as_str(), "champion" | "library" | "minion" | "monster" | "shopkeeper" | "rig" | "prop") {
+    if !matches!(
+        side.kind.as_str(),
+        "champion" | "library" | "minion" | "monster" | "shopkeeper" | "rig" | "prop" | "base"
+    ) {
         r.err(format!(
-            "sidecar kind `{}` must be champion, library, minion, monster, shopkeeper, rig or prop",
+            "sidecar kind `{}` must be champion, library, minion, monster, shopkeeper, rig, prop or base",
             side.kind
         ));
     }
@@ -154,10 +214,13 @@ fn check_header(r: &mut Report, side: &Sidecar) {
         let keys: Vec<&str> = mftr_sim::jungle::MonsterKind::ALL.iter().map(|m| m.key()).collect();
         r.err(format!("monster `{}` must be one of {}", side.id, keys.join(", ")));
     }
-    // `creature` (16 §3): monsters only, so far.
-    let creature_ok = side.archetype == "creature" && side.kind == "monster";
+    // `creature` (16 §3): monsters, and the creator's beast build (CR10).
+    let creature_ok = side.archetype == "creature" && (side.kind == "monster" || side.kind == "base");
     if side.archetype != "biped" && !creature_ok {
-        r.err(format!("archetype `{}`: `biped`, or `creature` for a monster (10 §7.1, 16 §3)", side.archetype));
+        r.err(format!(
+            "archetype `{}`: `biped`, or `creature` for a monster or a creator base (10 §7.1, 16 §3)",
+            side.archetype
+        ));
     }
     if side.rig_version != 1 {
         r.err(format!("{} rig version {} is unknown (expected 1)", side.archetype, side.rig_version));
@@ -167,8 +230,24 @@ fn check_header(r: &mut Report, side: &Sidecar) {
     }
 }
 
+/// A creator base's catalog parts (CR4): meshes on nodes named `part.<slot>.<id>`.
+pub fn is_part_node(name: &str) -> bool {
+    name.starts_with("part.")
+}
+
+/// Triangles outside a base's catalog parts (the body the forge always keeps).
+fn body_triangles(m: &Model) -> usize {
+    m.nodes
+        .iter()
+        .filter(|n| !is_part_node(&n.name))
+        .filter_map(|n| n.mesh)
+        .map(|mi| m.meshes[mi].iter().map(|p| p.triangles).sum::<usize>())
+        .sum()
+}
+
 fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
-    let tris = m.triangles();
+    // A base's parts are a catalog to pick from, not worn at once: the budget is the body's.
+    let tris = if kind == "base" { body_triangles(m) } else { m.triangles() };
     let prop = kind == "prop";
     let target = match kind {
         "minion" => rules::MINION_TRIANGLES_TARGET,
@@ -189,8 +268,9 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
     } else if tris < target.0 || tris > target.1 {
         r.warn(format!("{tris} triangles, outside the {}–{} target", target.0, target.1));
     }
-    if bytes > rules::MODEL_BYTES_BUDGET {
-        r.warn(format!("{bytes} bytes, over the {} byte mesh + animation budget", rules::MODEL_BYTES_BUDGET));
+    let budget = if kind == "base" { rules::BASE_BYTES_BUDGET } else { rules::MODEL_BYTES_BUDGET };
+    if bytes > budget {
+        r.warn(format!("{bytes} bytes, over the {budget} byte mesh + animation budget"));
     }
 
     // Material slots (10 §2).
@@ -213,6 +293,11 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
     }
 
     let mut over_target = 0usize;
+    // A face vertex may blend its head with up to three face bones (21 §1.4), and a body
+    // vertex its bone with up to three helpers (21 §9.2): not counted.
+    let sculpt_bone = |n: &str| crate::face::is_face_bone(n) || crate::body::is_body_bone(n);
+    let face_joint: Vec<bool> =
+        m.skins.first().map_or(Vec::new(), |j| j.iter().map(|&n| sculpt_bone(&m.nodes[n].name)).collect());
     for (mi, prims) in m.meshes.iter().enumerate() {
         for p in prims {
             if !p.has_color {
@@ -221,9 +306,12 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
             if p.material.is_none() {
                 r.err(format!("mesh {mi}: a primitive has no material slot"));
             }
-            for w in &p.weights {
+            for (vi, w) in p.weights.iter().enumerate() {
                 let used = w.iter().filter(|&&x| x > 1e-3).count();
-                if used > rules::INFLUENCES_TARGET {
+                let face = p.joints.get(vi).is_some_and(|j| {
+                    (0..4).any(|k| w[k] > 1e-3 && face_joint.get(j[k] as usize).copied().unwrap_or(false))
+                });
+                if used > rules::INFLUENCES_TARGET && !face {
                     over_target += 1;
                 }
                 let sum: f32 = w.iter().sum();
@@ -262,17 +350,20 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
 
 /// Returns the skin's joint node indices (empty if the skin is unusable).
 fn check_skeleton(r: &mut Report, m: &Model) -> Vec<usize> {
-    let skinned: Vec<_> = m.nodes.iter().filter(|n| n.skin.is_some() && n.mesh.is_some()).collect();
+    // A creator base's catalog parts are skinned meshes of their own on the same skin.
+    let skinned: Vec<_> =
+        m.nodes.iter().filter(|n| n.skin.is_some() && n.mesh.is_some() && !is_part_node(&n.name)).collect();
     if m.skins.len() != 1 || skinned.len() != 1 {
         r.err(format!("expected one skinned mesh and one skin, found {} and {}", skinned.len(), m.skins.len()));
         return Vec::new();
     }
     let joints = m.skins[0].clone();
     let names: Vec<&str> = joints.iter().map(|&j| m.nodes[j].name.as_str()).collect();
+    let animated = names.iter().filter(|n| !crate::face::is_face_bone(n) && !crate::body::is_body_bone(n)).count();
     if names.len() > rules::BONES_MAX {
         r.err(format!("{} bones, over the {} cap", names.len(), rules::BONES_MAX));
-    } else if names.len() > rules::BONES_TARGET {
-        r.warn(format!("{} bones, over the {} target", names.len(), rules::BONES_TARGET));
+    } else if animated > rules::BONES_TARGET {
+        r.warn(format!("{animated} bones, over the {} target", rules::BONES_TARGET));
     }
     for n in &names {
         if !rules::biped_bone_allowed(n) {
@@ -312,7 +403,8 @@ fn check_skeleton(r: &mut Report, m: &Model) -> Vec<usize> {
 /// A `creature` skeleton (16 §3): free names (lowercase snake case), `root`, a `head` and the
 /// chest and overhead sockets; facing +Z (the head ahead of the root) and left on +X.
 fn check_creature_skeleton(r: &mut Report, m: &Model) -> Vec<usize> {
-    let skinned = m.nodes.iter().filter(|n| n.skin.is_some() && n.mesh.is_some()).count();
+    // A creator base's catalog parts are skinned meshes of their own on the same skin.
+    let skinned = m.nodes.iter().filter(|n| n.skin.is_some() && n.mesh.is_some() && !is_part_node(&n.name)).count();
     if m.skins.len() != 1 || skinned != 1 {
         r.err(format!("expected one skinned mesh and one skin, found {skinned} and {}", m.skins.len()));
         return Vec::new();
@@ -375,6 +467,10 @@ fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
                     r.warn(format!("`{}` is not a champion in mftr-sim: kit clips and fire times not checked", side.id))
                 }
             }
+        }
+        // A build with its own move library (CR10: a beast) carries its clips on its base.
+        "base" if side.archetype == "creature" => {
+            required.extend(rules::REQUIRED_CREATURE_BASE.iter().map(|s| s.to_string()))
         }
         _ => {
             if !names.is_empty() {
@@ -514,5 +610,25 @@ fn check_clips(r: &mut Report, m: &Model, side: &Sidecar, joints: &[usize]) {
         if !names.contains(&c.name.as_str()) {
             r.err(format!("sidecar lists clip `{}`, which the model lacks", c.name));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn targets(names: &[&str]) -> Vec<String> {
+        let m = Model { target_names: vec![names.iter().map(|s| s.to_string()).collect()], ..Default::default() };
+        let mut r = Report::default();
+        check_targets(&mut r, &m, "base");
+        r.findings.into_iter().map(|f| f.msg).collect()
+    }
+
+    #[test]
+    fn sliders_are_pairs_one_signed_target_or_one_sided() {
+        assert!(targets(&["jaw_width+", "jaw_width-", "eyes_tilt~", "lids_fold+"]).is_empty());
+        assert!(targets(&["jaw_width-"]).iter().any(|m| m.contains("has no `jaw_width+`")));
+        assert!(targets(&["eyes_tilt~", "eyes_tilt+", "eyes_tilt-"]).iter().any(|m| m.contains("both signed")));
+        assert!(targets(&["eyes_tilt"]).iter().any(|m| m.contains("`+`, `-` or `~`")));
     }
 }

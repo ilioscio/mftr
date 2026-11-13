@@ -1,45 +1,107 @@
-//! Placeholder champions (original working names and kits, 09 §1): the M1 Duel Sandbox's
-//! skillshot mage and marksman, M2 slice 4's tank, bruiser, enchanter and assassin, which
-//! bring melee attacks, slows, knock-ups, a pull, ally heals and shields, and targeted dashes,
-//! and M3 slice 5's artillery mage, warden, battlemage and skirmisher.
-//! All numbers are *(start)* values.
+//! Champions as data (CR1, D8, D73): stats, a basic attack and four abilities, read from
+//! champion files ([`crate::data`]). The official ten are `champions/<id>.ron`, embedded at
+//! build time; the champion creator's recipes carry the same kit (20 §11).
+//!
+//! A [`ChampionId`] is a handle into a process-wide **registry** of champion definitions. The
+//! official ten always hold ids 0–9, in the order of [`ChampionId::ALL`], so the wire and
+//! replays see the same numbers as before. Any other definition is added with
+//! [`ChampionId::register`], which returns the same id for the same definition, so a recipe
+//! read twice is one champion. Definitions are never removed: the registry is append-only and
+//! capped ([`REGISTRY_CAPACITY`]).
 //!
 //! Stats are level-1 values that grow with level (02 §1); ability numbers are rank-1 values that
 //! grow with rank (M2 slice 2). Sandboxes play everything at level 1, rank 1.
 
-use crate::ability::{
-    Ability, BARRIER, BLINK, Beam, Blink, Cc, Damage, DamageKind, Dash, DelayedArea, Effect, LineSkillshot, Lunge,
-    Pulses, RankScaling, ReactionClass, Support, Transforms,
-};
-use crate::combat::stat_at_level;
-use crate::time::SimDuration;
-use crate::veil::VeilSpec;
+use std::fmt;
+use std::sync::{Mutex, Once, OnceLock};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ChampionId {
-    /// Skillshot mage.
-    Ember = 0,
-    /// Marksman.
-    Vesper = 1,
-    /// Tank / engage (melee).
-    Bastion = 2,
-    /// Bruiser (melee).
-    Rook = 3,
-    /// Enchanter.
-    Lumen = 4,
-    /// Assassin (melee).
-    Shade = 5,
-    /// Artillery mage.
-    Quill = 6,
-    /// Warden: tank and protector (melee).
-    Cairn = 7,
-    /// Battlemage: short-range sustained magic.
-    Marrow = 8,
-    /// Skirmisher: mobile ranged physical damage.
-    Wren = 9,
+use crate::ability::{Ability, BARRIER, BLINK};
+use crate::combat::stat_at_level;
+use crate::data;
+use crate::time::SimDuration;
+
+/// A champion: an index into the registry. The official ten are named constants.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ChampionId(u16);
+
+/// How many distinct champion definitions one process can hold.
+pub const REGISTRY_CAPACITY: usize = 4096;
+
+/// The official champions' files, in id order.
+const OFFICIAL: [&str; 10] = [
+    include_str!("../champions/ember.ron"),
+    include_str!("../champions/vesper.ron"),
+    include_str!("../champions/bastion.ron"),
+    include_str!("../champions/rook.ron"),
+    include_str!("../champions/lumen.ron"),
+    include_str!("../champions/shade.ron"),
+    include_str!("../champions/quill.ron"),
+    include_str!("../champions/cairn.ron"),
+    include_str!("../champions/marrow.ron"),
+    include_str!("../champions/wren.ron"),
+];
+
+static SLOTS: [OnceLock<&'static ChampionDef>; REGISTRY_CAPACITY] = [const { OnceLock::new() }; REGISTRY_CAPACITY];
+/// How many slots are taken; held while adding one.
+static TAKEN: Mutex<usize> = Mutex::new(0);
+static OFFICIAL_LOADED: Once = Once::new();
+
+/// The official champions are read the first time any champion is looked up. They are part of
+/// the build, so a broken file is a bug that tests catch, not something to recover from.
+fn load_official() {
+    OFFICIAL_LOADED.call_once(|| {
+        for (i, text) in OFFICIAL.iter().enumerate() {
+            let def = data::read_champion(text).unwrap_or_else(|e| panic!("official champion {i}: {e}"));
+            let id = add(def).expect("the registry holds the official champions");
+            assert_eq!(id.0 as usize, i, "official champions take ids 0–9");
+        }
+    });
 }
 
+/// Add `def`, or find it if it's there already.
+fn add(def: ChampionDef) -> Option<ChampionId> {
+    let mut taken = TAKEN.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(i) = (0..*taken).find(|&i| SLOTS[i].get().is_some_and(|d| **d == def)) {
+        return Some(ChampionId(i as u16));
+    }
+    if *taken >= REGISTRY_CAPACITY {
+        return None;
+    }
+    let i = *taken;
+    let leaked: &'static ChampionDef = Box::leak(Box::new(def));
+    let _ = SLOTS[i].set(leaked);
+    *taken += 1;
+    Some(ChampionId(i as u16))
+}
+
+/// The registry is full ([`REGISTRY_CAPACITY`] distinct champions).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RegistryFull;
+
+#[allow(non_upper_case_globals)]
 impl ChampionId {
+    /// Skillshot mage.
+    pub const Ember: ChampionId = ChampionId(0);
+    /// Marksman.
+    pub const Vesper: ChampionId = ChampionId(1);
+    /// Tank / engage (melee).
+    pub const Bastion: ChampionId = ChampionId(2);
+    /// Bruiser (melee).
+    pub const Rook: ChampionId = ChampionId(3);
+    /// Enchanter.
+    pub const Lumen: ChampionId = ChampionId(4);
+    /// Assassin (melee).
+    pub const Shade: ChampionId = ChampionId(5);
+    /// Artillery mage.
+    pub const Quill: ChampionId = ChampionId(6);
+    /// Warden: tank and protector (melee).
+    pub const Cairn: ChampionId = ChampionId(7);
+    /// Battlemage: short-range sustained magic.
+    pub const Marrow: ChampionId = ChampionId(8);
+    /// Skirmisher: mobile ranged physical damage.
+    pub const Wren: ChampionId = ChampionId(9);
+
+    /// The official roster, in id order.
     pub const ALL: [ChampionId; 10] = [
         ChampionId::Ember,
         ChampionId::Vesper,
@@ -53,27 +115,49 @@ impl ChampionId {
         ChampionId::Wren,
     ];
 
+    /// The registry index.
+    pub const fn index(self) -> u16 {
+        self.0
+    }
+
+    /// An official champion from its wire number. Other champions don't travel as numbers:
+    /// their ids differ from process to process (CR1 brings a match roster for them).
     pub fn from_u8(v: u8) -> Option<Self> {
         Self::ALL.get(v as usize).copied()
     }
 
+    /// Whether this is one of the official ten.
+    pub fn is_official(self) -> bool {
+        (self.0 as usize) < Self::ALL.len()
+    }
+
+    /// The first registered champion with this name (official ones first), ignoring case.
     pub fn by_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|c| c.def().name.eq_ignore_ascii_case(name))
+        load_official();
+        let taken = *TAKEN.lock().unwrap_or_else(|e| e.into_inner());
+        (0..taken).map(|i| ChampionId(i as u16)).find(|c| c.def().name.eq_ignore_ascii_case(name))
+    }
+
+    /// Every registered champion, the official ten first.
+    pub fn registered() -> Vec<ChampionId> {
+        load_official();
+        let taken = *TAKEN.lock().unwrap_or_else(|e| e.into_inner());
+        (0..taken).map(|i| ChampionId(i as u16)).collect()
+    }
+
+    /// Add a champion definition (a recipe's kit) and return its id: the existing one if the
+    /// same definition is registered already.
+    pub fn register(def: ChampionDef) -> Result<ChampionId, RegistryFull> {
+        load_official();
+        add(def).ok_or(RegistryFull)
     }
 
     pub fn def(self) -> &'static ChampionDef {
-        match self {
-            ChampionId::Ember => &EMBER,
-            ChampionId::Vesper => &VESPER,
-            ChampionId::Bastion => &BASTION,
-            ChampionId::Rook => &ROOK,
-            ChampionId::Lumen => &LUMEN,
-            ChampionId::Shade => &SHADE,
-            ChampionId::Quill => &QUILL,
-            ChampionId::Cairn => &CAIRN,
-            ChampionId::Marrow => &MARROW,
-            ChampionId::Wren => &WREN,
-        }
+        load_official();
+        SLOTS
+            .get(self.0 as usize)
+            .and_then(|s| s.get())
+            .unwrap_or_else(|| panic!("champion {} isn't registered", self.0))
     }
 
     /// Ability in `slot` (0–3 = Q W E R, 4 = D Blink, 5 = F Barrier).
@@ -83,6 +167,17 @@ impl ChampionId {
             4 => Some(BLINK),
             5 => Some(BARRIER),
             _ => None,
+        }
+    }
+}
+
+/// Prints the champion's name, as the old enum's variants did (logs, reports, test output).
+impl fmt::Debug for ChampionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match SLOTS.get(self.0 as usize).and_then(|s| s.get()) {
+            Some(d) => f.write_str(d.name),
+            None if (self.0 as usize) < Self::ALL.len() => f.write_str(self.def().name),
+            None => write!(f, "ChampionId({})", self.0),
         }
     }
 }
@@ -170,15 +265,132 @@ impl AttackSpec {
     }
 }
 
+/// What a champion is in a fight (01 §9's classes): the bots play it and shop for it by its
+/// class (17 §2), and its file says which it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Class {
+    Mage,
+    Marksman,
+    Tank,
+    Bruiser,
+    Enchanter,
+    Assassin,
+    Artillery,
+    Warden,
+    Battlemage,
+    Skirmisher,
+}
+
+impl Class {
+    pub const ALL: [Class; 10] = [
+        Class::Mage,
+        Class::Marksman,
+        Class::Tank,
+        Class::Bruiser,
+        Class::Enchanter,
+        Class::Assassin,
+        Class::Artillery,
+        Class::Warden,
+        Class::Battlemage,
+        Class::Skirmisher,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Class::Mage => "Mage",
+            Class::Marksman => "Marksman",
+            Class::Tank => "Tank",
+            Class::Bruiser => "Bruiser",
+            Class::Enchanter => "Enchanter",
+            Class::Assassin => "Assassin",
+            Class::Artillery => "Artillery",
+            Class::Warden => "Warden",
+            Class::Battlemage => "Battlemage",
+            Class::Skirmisher => "Skirmisher",
+        }
+    }
+
+    pub fn by_name(name: &str) -> Option<Class> {
+        Class::ALL.into_iter().find(|c| c.name() == name)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChampionDef {
     pub name: &'static str,
+    pub class: Class,
     /// Level 1.
     pub stats: Stats,
     /// Added per level on the 02 §1 curve (move speed doesn't grow).
     pub growth: Stats,
     pub attack: AttackSpec,
     pub abilities: [Ability; 4],
+    /// What the abilities cost (01 §9, 20 §8.1). `Resource::NONE` (costless) for the official
+    /// ten for now.
+    pub resource: Resource,
+    /// The champion's own passive (01 §9, 20 §8.1): one of the items' unique passives (18 §4),
+    /// innate. `Passive::None` for the official ten for now. Unique as items' are: an item of the
+    /// same kind counts instead only if it's stronger.
+    pub passive: crate::items::Passive,
+}
+
+/// A kit's resource (01 §9, 20 §8.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResourceKind {
+    /// Costless.
+    None,
+    /// A pool that grows with level and refills slowly (and at the fountain).
+    Mana,
+    /// A small pool that refills fast.
+    Energy,
+    /// Starts empty, builds on basic attacks that land (`regen` a hit), drains out of use.
+    Rage,
+    /// Abilities cost health; no pool.
+    Health,
+}
+
+/// The resource, its pool and each ability's cost (Q W E R). In the unit's state,
+/// `UnitState::resource` is what's been **spent** of a mana or energy pool (0 is full, so a
+/// costless unit's state is unchanged) or the rage built up.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Resource {
+    pub kind: ResourceKind,
+    /// The pool at level 1 (mana grows 8% of it a level; energy and rage don't).
+    pub max: f32,
+    /// A second (mana, energy), or a basic attack that lands (rage).
+    pub regen: f32,
+    pub costs: [f32; 4],
+}
+
+/// Rage drains this much a second.
+pub const RAGE_DECAY: f32 = 4.0;
+
+impl Resource {
+    pub const NONE: Resource = Resource { kind: ResourceKind::None, max: 0.0, regen: 0.0, costs: [0.0; 4] };
+
+    /// The pool at `level`.
+    pub fn max_at(&self, level: u8) -> f32 {
+        match self.kind {
+            ResourceKind::Mana => self.max * (1.0 + 0.08 * (level.max(1) - 1) as f32),
+            _ => self.max,
+        }
+    }
+
+    /// What there is to spend now: `state` is `UnitState::resource`, `health` the unit's.
+    pub fn available(&self, state: f32, health: f32, level: u8) -> f32 {
+        match self.kind {
+            ResourceKind::None => f32::INFINITY,
+            ResourceKind::Mana | ResourceKind::Energy => (self.max_at(level) - state).max(0.0),
+            ResourceKind::Rage => state,
+            // Never down to zero by a cast.
+            ResourceKind::Health => (health - 1.0).max(0.0),
+        }
+    }
+
+    /// The cost of `slot` (Q W E R; utility spells are free).
+    pub fn cost(&self, slot: u8) -> f32 {
+        if self.kind == ResourceKind::None { 0.0 } else { self.costs.get(slot as usize).copied().unwrap_or(0.0) }
+    }
 }
 
 impl ChampionDef {
@@ -205,695 +417,9 @@ pub fn max_rank(slot: u8, level: u8) -> u8 {
     if slot == 3 { (level.saturating_sub(1) / 5).min(3) } else { level.div_ceil(2).min(5) }
 }
 
-const fn growth(health: f32, armor: f32, magic_resist: f32, attack_damage: f32) -> Stats {
-    Stats {
-        max_health: health,
-        health_regen: 0.08,
-        armor,
-        magic_resist,
-        attack_damage,
-        ability_power: 0.0,
-        move_speed: 0.0,
-        ..Stats::NONE
-    }
-}
-
-const fn ranks(damage: f32, cooldown_ms: u64) -> RankScaling {
-    RankScaling { damage, cooldown: SimDuration::from_millis(cooldown_ms) }
-}
-
-const fn ms(v: u64) -> SimDuration {
-    SimDuration::from_millis(v)
-}
-
-pub const EMBER: ChampionDef = ChampionDef {
-    name: "Ember",
-    stats: Stats {
-        max_health: 600.0,
-        health_regen: 1.5,
-        armor: 22.0,
-        magic_resist: 30.0,
-        attack_damage: 50.0,
-        ability_power: 80.0,
-        move_speed: 325.0,
-        ..Stats::NONE
-    },
-    growth: growth(90.0, 4.2, 1.3, 3.0),
-    attack: AttackSpec { range: 525.0, attack_speed: 0.65, windup_fraction: 0.2, bolt_speed: 1600.0 },
-    abilities: [
-        Ability {
-            name: "Ember Lance",
-            cooldown: ms(4000),
-            effect: Effect::Line(LineSkillshot {
-                windup: ms(250),
-                speed: 1600.0,
-                radius: 35.0,
-                range: 1100.0,
-                damage: Damage { kind: DamageKind::Magic, base: 70.0, ad_ratio: 0.0, ap_ratio: 0.6 },
-                cc: Cc::None,
-            }),
-            reaction: ReactionClass::Burst,
-            per_rank: ranks(40.0, 500),
-            transforms: Transforms::LINE,
-        },
-        Ability {
-            name: "Cinder Bloom",
-            cooldown: ms(9000),
-            effect: Effect::Area(DelayedArea {
-                windup: ms(250),
-                range: 900.0,
-                radius: 160.0,
-                delay: ms(850),
-                damage: Damage { kind: DamageKind::Magic, base: 90.0, ad_ratio: 0.0, ap_ratio: 0.7 },
-                cc: Cc::None,
-                pulses: Pulses::NONE,
-            }),
-            reaction: ReactionClass::Burst,
-            per_rank: ranks(40.0, 500),
-            transforms: Transforms::AREA,
-        },
-        Ability {
-            name: "Flicker",
-            cooldown: ms(14_000),
-            effect: Effect::Blink(Blink { range: 350.0 }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(0.0, 1000),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Binding Sigil",
-            cooldown: ms(20_000),
-            effect: Effect::Line(LineSkillshot {
-                windup: ms(300),
-                speed: 1300.0,
-                radius: 60.0,
-                range: 1150.0,
-                damage: Damage { kind: DamageKind::Magic, base: 100.0, ad_ratio: 0.0, ap_ratio: 0.5 },
-                cc: Cc::Stun(ms(1250)),
-            }),
-            reaction: ReactionClass::HardCc,
-            per_rank: ranks(80.0, 3000),
-            transforms: Transforms::LINE,
-        },
-    ],
-};
-
-pub const VESPER: ChampionDef = ChampionDef {
-    name: "Vesper",
-    stats: Stats {
-        max_health: 620.0,
-        health_regen: 1.4,
-        armor: 28.0,
-        magic_resist: 30.0,
-        attack_damage: 61.0,
-        ability_power: 0.0,
-        move_speed: 325.0,
-        ..Stats::NONE
-    },
-    growth: growth(96.0, 4.4, 1.3, 3.2),
-    attack: AttackSpec { range: 525.0, attack_speed: 0.8, windup_fraction: 0.18, bolt_speed: 2200.0 },
-    abilities: [
-        Ability {
-            name: "Longshot",
-            cooldown: ms(5000),
-            effect: Effect::Line(LineSkillshot {
-                windup: ms(250),
-                speed: 2000.0,
-                radius: 30.0,
-                range: 1150.0,
-                damage: Damage { kind: DamageKind::Physical, base: 40.0, ad_ratio: 0.9, ap_ratio: 0.0 },
-                cc: Cc::None,
-            }),
-            reaction: ReactionClass::Poke,
-            per_rank: ranks(35.0, 400),
-            transforms: Transforms::LINE,
-        },
-        Ability {
-            name: "Shrapnel Charge",
-            cooldown: ms(10_000),
-            effect: Effect::Area(DelayedArea {
-                windup: ms(250),
-                range: 850.0,
-                radius: 200.0,
-                delay: ms(1000),
-                damage: Damage { kind: DamageKind::Physical, base: 50.0, ad_ratio: 0.8, ap_ratio: 0.0 },
-                cc: Cc::None,
-                pulses: Pulses::NONE,
-            }),
-            reaction: ReactionClass::Burst,
-            per_rank: ranks(30.0, 600),
-            transforms: Transforms::AREA,
-        },
-        Ability {
-            name: "Tumble",
-            cooldown: ms(9000),
-            effect: Effect::Dash(Dash { range: 325.0, speed: 1000.0, veil: VeilSpec::NONE }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(0.0, 600),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Snare Net",
-            cooldown: ms(20_000),
-            effect: Effect::Line(LineSkillshot {
-                windup: ms(250),
-                speed: 1200.0,
-                radius: 70.0,
-                range: 1000.0,
-                damage: Damage { kind: DamageKind::Physical, base: 60.0, ad_ratio: 0.5, ap_ratio: 0.0 },
-                cc: Cc::Root(ms(1500)),
-            }),
-            reaction: ReactionClass::HardCc,
-            per_rank: ranks(60.0, 2000),
-            transforms: Transforms::LINE,
-        },
-    ],
-};
-
-const fn magic(base: f32, ap_ratio: f32) -> Damage {
-    Damage { kind: DamageKind::Magic, base, ad_ratio: 0.0, ap_ratio }
-}
-
-const fn physical(base: f32, ad_ratio: f32) -> Damage {
-    Damage { kind: DamageKind::Physical, base, ad_ratio, ap_ratio: 0.0 }
-}
-
-const fn slow(pct: u8, duration_ms: u64) -> Cc {
-    Cc::Slow { pct, duration: ms(duration_ms) }
-}
-
-const fn stats(health: f32, regen: f32, armor: f32, magic_resist: f32, ad: f32, ap: f32, speed: f32) -> Stats {
-    Stats {
-        max_health: health,
-        health_regen: regen,
-        armor,
-        magic_resist,
-        attack_damage: ad,
-        ability_power: ap,
-        move_speed: speed,
-        ..Stats::NONE
-    }
-}
-
-/// A melee basic attack: lands at the end of the windup.
-const fn melee(range: f32, attack_speed: f32, windup_fraction: f32) -> AttackSpec {
-    AttackSpec { range, attack_speed, windup_fraction, bolt_speed: 0.0 }
-}
-
-/// A self-centered area: `range` 0, no delay after the windup.
-const fn nova(windup_ms: u64, radius: f32, damage: Damage, cc: Cc) -> Effect {
-    Effect::Area(DelayedArea {
-        windup: ms(windup_ms),
-        range: 0.0,
-        radius,
-        delay: ms(0),
-        damage,
-        cc,
-        pulses: Pulses::NONE,
-    })
-}
-
-const NO_SUPPORT: Support =
-    Support { range: 0.0, heal: 0.0, heal_ap: 0.0, heal_missing: 0.0, shield: 0.0, shield_ap: 0.0, duration: ms(0) };
-
-/// Tank / engage: a pull to start fights, a slowing stomp, a self shield, and a big delayed
-/// knock-up to lock a group down.
-pub const BASTION: ChampionDef = ChampionDef {
-    name: "Bastion",
-    stats: stats(680.0, 1.8, 36.0, 32.0, 62.0, 0.0, 335.0),
-    growth: growth(110.0, 4.8, 1.8, 3.5),
-    attack: melee(150.0, 0.65, 0.3),
-    abilities: [
-        Ability {
-            name: "Grapple",
-            cooldown: ms(14_000),
-            effect: Effect::Line(LineSkillshot {
-                windup: ms(350),
-                speed: 1500.0,
-                radius: 60.0,
-                range: 900.0,
-                damage: magic(80.0, 0.5),
-                cc: Cc::Pull(150),
-            }),
-            reaction: ReactionClass::HardCc,
-            per_rank: ranks(40.0, 1000),
-            transforms: Transforms::WIDE,
-        },
-        Ability {
-            name: "Bulwark",
-            cooldown: ms(12_000),
-            effect: Effect::Support(Support { shield: 140.0, duration: ms(3000), ..NO_SUPPORT }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(30.0, 1000),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Tremor",
-            cooldown: ms(8000),
-            effect: nova(250, 300.0, magic(60.0, 0.4), slow(40, 1500)),
-            reaction: ReactionClass::None,
-            per_rank: ranks(30.0, 500),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Upheaval",
-            cooldown: ms(80_000),
-            effect: Effect::Area(DelayedArea {
-                windup: ms(250),
-                range: 650.0,
-                radius: 250.0,
-                delay: ms(1150),
-                damage: magic(150.0, 0.6),
-                cc: Cc::Knockup(ms(1000)),
-                pulses: Pulses::NONE,
-            }),
-            reaction: ReactionClass::HardCc,
-            per_rank: ranks(100.0, 15_000),
-            transforms: Transforms::AREA,
-        },
-    ],
-};
-
-/// Bruiser: a cleave, a missing-health heal, a slowing lunge, and a slowing shockwave.
-pub const ROOK: ChampionDef = ChampionDef {
-    name: "Rook",
-    stats: stats(650.0, 1.7, 33.0, 32.0, 68.0, 0.0, 340.0),
-    growth: growth(102.0, 4.5, 1.6, 3.8),
-    attack: melee(175.0, 0.7, 0.28),
-    abilities: [
-        Ability {
-            name: "Cleave",
-            cooldown: ms(6000),
-            effect: nova(200, 275.0, physical(40.0, 1.0), Cc::None),
-            reaction: ReactionClass::None,
-            per_rank: ranks(25.0, 500),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Second Wind",
-            cooldown: ms(14_000),
-            effect: Effect::Support(Support { heal: 40.0, heal_missing: 0.12, ..NO_SUPPORT }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(20.0, 1000),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Lunge",
-            cooldown: ms(10_000),
-            effect: Effect::Lunge(Lunge {
-                range: 550.0,
-                speed: 1500.0,
-                damage: physical(50.0, 0.6),
-                cc: slow(30, 1000),
-            }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(30.0, 800),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Shockwave",
-            cooldown: ms(60_000),
-            effect: Effect::Line(LineSkillshot {
-                windup: ms(450),
-                speed: 1400.0,
-                radius: 90.0,
-                range: 700.0,
-                damage: physical(150.0, 0.8),
-                cc: slow(50, 1500),
-            }),
-            reaction: ReactionClass::Burst,
-            per_rank: ranks(100.0, 10_000),
-            transforms: Transforms::LINE,
-        },
-    ],
-};
-
-/// Enchanter: heals and shields allies, a slowing poke, and a delayed rooting halo.
-pub const LUMEN: ChampionDef = ChampionDef {
-    name: "Lumen",
-    stats: stats(560.0, 1.3, 22.0, 30.0, 48.0, 60.0, 330.0),
-    growth: growth(88.0, 4.0, 1.3, 2.6),
-    attack: AttackSpec { range: 550.0, attack_speed: 0.65, windup_fraction: 0.2, bolt_speed: 1500.0 },
-    abilities: [
-        Ability {
-            name: "Mending Light",
-            cooldown: ms(10_000),
-            effect: Effect::Support(Support { range: 700.0, heal: 70.0, heal_ap: 0.35, ..NO_SUPPORT }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(25.0, 800),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Aegis",
-            cooldown: ms(12_000),
-            effect: Effect::Support(Support {
-                range: 700.0,
-                shield: 80.0,
-                shield_ap: 0.4,
-                duration: ms(2500),
-                ..NO_SUPPORT
-            }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(30.0, 800),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Lull",
-            cooldown: ms(8000),
-            effect: Effect::Line(LineSkillshot {
-                windup: ms(250),
-                speed: 1600.0,
-                radius: 55.0,
-                range: 900.0,
-                damage: magic(50.0, 0.4),
-                cc: slow(40, 2000),
-            }),
-            reaction: ReactionClass::Poke,
-            per_rank: ranks(30.0, 500),
-            transforms: Transforms::LINE,
-        },
-        Ability {
-            name: "Binding Halo",
-            cooldown: ms(70_000),
-            effect: Effect::Area(DelayedArea {
-                windup: ms(250),
-                range: 800.0,
-                radius: 200.0,
-                delay: ms(1000),
-                damage: magic(120.0, 0.5),
-                cc: Cc::Root(ms(1250)),
-                pulses: Pulses::NONE,
-            }),
-            reaction: ReactionClass::HardCc,
-            per_rank: ranks(80.0, 10_000),
-            transforms: Transforms::AREA,
-        },
-    ],
-};
-
-/// Assassin: a lunge in, a slowing fan of blades, a quick dash out, and a lunging execution.
-pub const SHADE: ChampionDef = ChampionDef {
-    name: "Shade",
-    stats: stats(590.0, 1.5, 28.0, 32.0, 70.0, 0.0, 345.0),
-    growth: growth(95.0, 4.3, 1.5, 3.9),
-    attack: melee(125.0, 0.72, 0.25),
-    abilities: [
-        Ability {
-            name: "Shadow Step",
-            cooldown: ms(9000),
-            effect: Effect::Lunge(Lunge { range: 600.0, speed: 1800.0, damage: physical(60.0, 0.8), cc: Cc::None }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(30.0, 800),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Fan of Blades",
-            cooldown: ms(7000),
-            effect: nova(150, 275.0, physical(50.0, 0.6), slow(25, 1000)),
-            reaction: ReactionClass::None,
-            per_rank: ranks(25.0, 500),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Veil Step",
-            cooldown: ms(12_000),
-            // Dash, then a cloud where Shade lands: hidden inside it while it lasts.
-            effect: Effect::Dash(Dash {
-                range: 400.0,
-                speed: 1400.0,
-                veil: VeilSpec { radius: 300.0, duration: ms(5000) },
-            }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(0.0, 1000),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Execution",
-            cooldown: ms(60_000),
-            effect: Effect::Lunge(Lunge { range: 500.0, speed: 2000.0, damage: physical(150.0, 1.2), cc: Cc::None }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(100.0, 10_000),
-            transforms: Transforms::NONE,
-        },
-    ],
-};
-
-/// A delayed ground area at `range` (0: centered on the caster).
-const fn area(windup_ms: u64, range: f32, radius: f32, delay_ms: u64, damage: Damage, cc: Cc) -> Effect {
-    Effect::Area(DelayedArea {
-        windup: ms(windup_ms),
-        range,
-        radius,
-        delay: ms(delay_ms),
-        damage,
-        cc,
-        pulses: Pulses::NONE,
-    })
-}
-
-const fn line(windup_ms: u64, speed: f32, radius: f32, range: f32, damage: Damage, cc: Cc) -> Effect {
-    Effect::Line(LineSkillshot { windup: ms(windup_ms), speed, radius, range, damage, cc })
-}
-
-/// Artillery mage: long-range poke from behind the line, a slowing field, a hop back, and a
-/// channeled lance of starlight that burns the first enemy in its path.
-pub const QUILL: ChampionDef = ChampionDef {
-    name: "Quill",
-    stats: stats(540.0, 1.3, 20.0, 30.0, 48.0, 70.0, 325.0),
-    growth: growth(86.0, 3.9, 1.3, 2.6),
-    attack: AttackSpec { range: 550.0, attack_speed: 0.62, windup_fraction: 0.22, bolt_speed: 1500.0 },
-    abilities: [
-        Ability {
-            name: "Arc Shot",
-            cooldown: ms(5000),
-            effect: area(250, 1300.0, 120.0, 800, magic(60.0, 0.5), Cc::None),
-            reaction: ReactionClass::Poke,
-            per_rank: ranks(30.0, 400),
-            transforms: Transforms::AREA,
-        },
-        Ability {
-            name: "Static Field",
-            cooldown: ms(12_000),
-            effect: area(250, 900.0, 220.0, 600, magic(40.0, 0.3), slow(35, 1500)),
-            reaction: ReactionClass::None,
-            per_rank: ranks(20.0, 800),
-            transforms: Transforms::AREA,
-        },
-        Ability {
-            name: "Recoil",
-            cooldown: ms(12_000),
-            effect: Effect::Dash(Dash { range: 300.0, speed: 1200.0, veil: VeilSpec::NONE }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(0.0, 1000),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Starfall Lance",
-            cooldown: ms(80_000),
-            // A 0.85 s aim everyone sees, then 1.5 s of beam: seven strikes on whatever enemy
-            // is first in its path. Stuns, knock-ups and pulls cut it short.
-            effect: Effect::Beam(Beam {
-                windup: ms(850),
-                range: 1800.0,
-                radius: 70.0,
-                duration: ms(1500),
-                every: ms(250),
-                damage: magic(280.0, 1.1),
-                cc: Cc::None,
-            }),
-            reaction: ReactionClass::Burst,
-            per_rank: ranks(140.0, 15_000),
-            transforms: Transforms::NONE,
-        },
-    ],
-};
-
-/// Warden: slows to peel, a shield for an ally, a delayed root, and a delayed knock-up around
-/// itself to hold a choke.
-pub const CAIRN: ChampionDef = ChampionDef {
-    name: "Cairn",
-    stats: stats(660.0, 1.8, 34.0, 34.0, 58.0, 20.0, 335.0),
-    growth: growth(106.0, 4.7, 1.9, 3.2),
-    attack: melee(150.0, 0.62, 0.3),
-    abilities: [
-        Ability {
-            name: "Stone Lash",
-            cooldown: ms(7000),
-            effect: line(250, 1500.0, 50.0, 800.0, magic(60.0, 0.4), slow(40, 1500)),
-            reaction: ReactionClass::Poke,
-            per_rank: ranks(30.0, 500),
-            transforms: Transforms::LINE,
-        },
-        Ability {
-            name: "Shelter",
-            cooldown: ms(12_000),
-            effect: Effect::Support(Support {
-                range: 700.0,
-                shield: 100.0,
-                shield_ap: 0.3,
-                duration: ms(2500),
-                ..NO_SUPPORT
-            }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(30.0, 800),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Rockfall",
-            cooldown: ms(14_000),
-            effect: area(250, 750.0, 180.0, 1000, magic(50.0, 0.4), Cc::Root(ms(1000))),
-            reaction: ReactionClass::HardCc,
-            per_rank: ranks(30.0, 1000),
-            transforms: Transforms::AREA,
-        },
-        Ability {
-            name: "Monolith",
-            cooldown: ms(80_000),
-            effect: area(250, 0.0, 325.0, 1350, magic(140.0, 0.5), Cc::Knockup(ms(1000))),
-            reaction: ReactionClass::HardCc,
-            per_rank: ranks(80.0, 15_000),
-            transforms: Transforms::AREA,
-        },
-    ],
-};
-
-/// Battlemage: a draining nova to fight in close, a rooting skillshot, a self heal, and a large
-/// slowing area to win extended fights.
-pub const MARROW: ChampionDef = ChampionDef {
-    name: "Marrow",
-    stats: stats(610.0, 1.6, 26.0, 32.0, 52.0, 60.0, 335.0),
-    growth: growth(98.0, 4.3, 1.5, 2.8),
-    attack: AttackSpec { range: 475.0, attack_speed: 0.65, windup_fraction: 0.22, bolt_speed: 1500.0 },
-    abilities: [
-        Ability {
-            name: "Siphon",
-            cooldown: ms(5000),
-            effect: nova(200, 300.0, magic(50.0, 0.45), Cc::None),
-            reaction: ReactionClass::None,
-            per_rank: ranks(25.0, 400),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Grasping Bones",
-            cooldown: ms(11_000),
-            effect: line(300, 1300.0, 60.0, 850.0, magic(70.0, 0.5), Cc::Root(ms(1000))),
-            reaction: ReactionClass::HardCc,
-            per_rank: ranks(35.0, 800),
-            transforms: Transforms::LINE,
-        },
-        Ability {
-            name: "Grave Pact",
-            cooldown: ms(14_000),
-            effect: Effect::Support(Support { heal: 50.0, heal_ap: 0.3, ..NO_SUPPORT }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(25.0, 1000),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Ossuary",
-            cooldown: ms(70_000),
-            effect: area(250, 600.0, 300.0, 1300, magic(180.0, 0.7), slow(50, 2000)),
-            reaction: ReactionClass::Burst,
-            per_rank: ranks(100.0, 10_000),
-            transforms: Transforms::AREA,
-        },
-    ],
-};
-
-/// Skirmisher: a quick poke, slowing caltrops, a pounce onto a target, and a wide volley of
-/// arrows.
-pub const WREN: ChampionDef = ChampionDef {
-    name: "Wren",
-    stats: stats(600.0, 1.4, 27.0, 30.0, 62.0, 0.0, 335.0),
-    growth: growth(94.0, 4.3, 1.3, 3.3),
-    attack: AttackSpec { range: 500.0, attack_speed: 0.75, windup_fraction: 0.2, bolt_speed: 2000.0 },
-    abilities: [
-        Ability {
-            name: "Ricochet",
-            cooldown: ms(5000),
-            effect: line(250, 1800.0, 40.0, 950.0, physical(30.0, 0.9), Cc::None),
-            reaction: ReactionClass::Poke,
-            per_rank: ranks(30.0, 400),
-            transforms: Transforms::LINE,
-        },
-        Ability {
-            name: "Caltrops",
-            cooldown: ms(12_000),
-            effect: area(200, 700.0, 180.0, 400, physical(30.0, 0.4), slow(45, 2000)),
-            reaction: ReactionClass::None,
-            per_rank: ranks(20.0, 800),
-            transforms: Transforms::AREA,
-        },
-        Ability {
-            name: "Pounce",
-            cooldown: ms(10_000),
-            effect: Effect::Lunge(Lunge { range: 450.0, speed: 1600.0, damage: physical(40.0, 0.5), cc: Cc::None }),
-            reaction: ReactionClass::None,
-            per_rank: ranks(25.0, 800),
-            transforms: Transforms::NONE,
-        },
-        Ability {
-            name: "Hail of Arrows",
-            cooldown: ms(60_000),
-            // The volley lands, then keeps falling for 2.5 s: five more strikes, each a quarter
-            // of the landing's damage, slowing whoever stays inside.
-            effect: Effect::Area(DelayedArea {
-                windup: ms(250),
-                range: 1000.0,
-                radius: 280.0,
-                delay: ms(1250),
-                damage: physical(80.0, 0.6),
-                cc: slow(30, 1000),
-                pulses: Pulses { count: 5, every: ms(500), share: 0.25, cc: slow(30, 600) },
-            }),
-            reaction: ReactionClass::Burst,
-            per_rank: ranks(80.0, 10_000),
-            transforms: Transforms::AREA,
-        },
-    ],
-};
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// D10 (03a §8): every dodge-intended ability gives a centered target enough time to react
-    /// and walk out at its class distance (linear) or before detonation (areas).
-    #[test]
-    fn every_kit_passes_the_reaction_budget() {
-        for c in ChampionId::ALL {
-            for a in c.def().abilities {
-                let Some(frac) = a.reaction.range_fraction() else { continue };
-                let (have, need) = match a.effect {
-                    Effect::Line(s) => (s.reaction_time(frac * s.range), s.reaction_needed()),
-                    Effect::Area(s) => (s.reaction_time(), s.reaction_needed()),
-                    Effect::Beam(s) => (s.reaction_time(), s.reaction_needed()),
-                    _ => panic!("{}: only skillshots and areas are dodge-intended", a.name),
-                };
-                assert!(have >= need, "{} {}: {have:.3} s < {need:.3} s", c.def().name, a.name);
-            }
-        }
-    }
-
-    #[test]
-    fn hard_cc_abilities_are_classed_hard_cc() {
-        for c in ChampionId::ALL {
-            for a in c.def().abilities {
-                let cc = match a.effect {
-                    Effect::Line(s) => s.cc,
-                    // Self-centered novas are melee-range tools, not skillshots.
-                    Effect::Area(s) if s.range > 0.0 => s.cc,
-                    Effect::Beam(s) => s.cc,
-                    Effect::Lunge(l) => {
-                        assert!(!l.cc.is_hard(), "{}: point-and-click hard CC isn't dodgeable", a.name);
-                        continue;
-                    }
-                    _ => continue,
-                };
-                assert_eq!(cc.is_hard(), a.reaction == ReactionClass::HardCc, "{}", a.name);
-            }
-        }
-    }
 
     /// Ten archetypes (M2's six, M3's four), each with a distinct kit.
     #[test]
@@ -909,11 +435,60 @@ mod tests {
 
     #[test]
     fn attack_timers_are_exact_subticks() {
-        let a = VESPER.attack;
+        let a = ChampionId::Vesper.def().attack;
         assert_eq!(a.period().0, 2400); // 1 / 0.8 s
         assert_eq!(a.windup().0, 432); // 18% of it
         assert_eq!(ChampionId::by_name("ember"), Some(ChampionId::Ember));
         assert_eq!(ChampionId::from_u8(1), Some(ChampionId::Vesper));
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    /// A champion that isn't one of the ten: Rook's kit under another name, slower.
+    fn custom(name: &'static str) -> ChampionDef {
+        let mut d = *ChampionId::Rook.def();
+        d.name = name;
+        d.stats.move_speed = 300.0;
+        d
+    }
+
+    #[test]
+    fn the_official_ten_hold_ids_0_to_9() {
+        for (i, c) in ChampionId::ALL.into_iter().enumerate() {
+            assert_eq!(c.index() as usize, i);
+            assert!(c.is_official());
+            assert_eq!(format!("{c:?}"), c.def().name);
+        }
+        assert_eq!(ChampionId::from_u8(10), None);
+    }
+
+    #[test]
+    fn registering_a_champion_twice_gives_one_id() {
+        let a = ChampionId::register(custom("Registry Test A")).unwrap();
+        assert!(!a.is_official());
+        assert_eq!(ChampionId::register(custom("Registry Test A")), Ok(a));
+        let b = ChampionId::register(custom("Registry Test B")).unwrap();
+        assert_ne!(a, b);
+        assert_eq!(ChampionId::by_name("registry test a"), Some(a));
+        assert_eq!(a.def().stats.move_speed, 300.0);
+        assert_eq!(format!("{a:?}"), "Registry Test A");
+        // An official definition registers as itself.
+        assert_eq!(ChampionId::register(*ChampionId::Wren.def()), Ok(ChampionId::Wren));
+    }
+
+    #[test]
+    fn a_registered_champion_plays() {
+        use crate::math::Vec2;
+        use crate::world::{PlayerId, Team, World};
+        let id = ChampionId::register(custom("Registry Test Player")).unwrap();
+        let mut w = World::new(1);
+        let unit = w.spawn_champion(PlayerId(0), Team::Blue, id, Vec2::new(1000.0, 1000.0));
+        let u = w.unit(unit).unwrap();
+        assert_eq!(u.champion, Some(id));
+        assert_eq!(u.stats.move_speed, 300.0);
     }
 }
 
@@ -928,10 +503,11 @@ mod rank_tests {
             (max_rank(3, 5), max_rank(3, 6), max_rank(3, 11), max_rank(3, 16), max_rank(3, 18)),
             (0, 1, 2, 3, 3)
         );
-        assert_eq!(EMBER.stats_at(1), EMBER.stats);
-        let l18 = VESPER.stats_at(18);
+        let ember = ChampionId::Ember.def();
+        assert_eq!(ember.stats_at(1), ember.stats);
+        let l18 = ChampionId::Vesper.def().stats_at(18);
         assert!((l18.max_health - (620.0 + 96.0 * 17.0)).abs() < 1e-3);
-        let q = EMBER.abilities[0];
+        let q = ember.abilities[0];
         assert_eq!(q.cooldown_at(5).0, q.cooldown.0 - 4 * SimDuration::from_millis(500).0);
         assert_eq!(q.bonus_damage_at(3), 80.0);
     }

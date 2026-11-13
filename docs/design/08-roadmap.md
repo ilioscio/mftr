@@ -13,15 +13,16 @@ Everything through M3 is built, along with the tracks beside it, but no mileston
 | M2 ARAM | ✅ slices 1–6 | Ten humans finish a match on a community-hosted server (the release workflow has now run on every tag through v0.18.2) |
 | M3 Mayhem | ✅ slices 1–6, stress exit met | Playtesters rate Mayhem fun |
 | A Characters & animation | ✅ all ten, rebuilt by C | The owner's approval of the concepts; the blind side-by-side |
-| M4 Crossroads | Slices 1–4 ✅; 7 and most of 8 built by other tracks (D64, D62) | Slice 5 (epic objectives, waits on E5), slice 6 (Draft with bans and roles), roster 10 → 16–20 |
+| M4 Crossroads | Slices 1–4 ✅; 7 and most of 8 built by other tracks (D64, D62) | Slice 5 (epic objectives, waits on E5), slice 6 (Draft with bans and roles), roster 10 → 16–20 (made in the creator, waits on CR, D72) |
 | E Map editor | Slices 1–4 and 6 ✅ | Slice 5: the owner's Classic map |
 | S, I, Horde, updates (U) | ✅ | — |
 | K Shopkeepers | Built (slices 1–5) | The owner's review in game |
 | V Colorblind mode | Not started | Everything |
+| CR Champion creator | Designed ([20](20-champion-creator.md), D68–D73); slices 1–10 ✅ (champions as data; forged models; the creator and Test; clothes; paint; moves, passives and resources; the budget; six builds; free sculpting) | art passes on the new builds; refit prices; the owner's call on the official models |
 | C, P, J, B | ✅ built | The owner's review; D53, D54 and D59–D65 are still Proposed |
 | M5 Community, M6 Federation | Not started | Everything |
 
-**Next to build:** E5 (once the owner's map is exported), then M4 slice 5, slice 6 and the roster. **Next to run:** the M1 blind playtest and an M2/M3 community match, now that testers update themselves (U).
+**Next to build:** the champion creator (CR, from CR1: champions as data), ahead of the roster, which is now made in it (D72). Beside it: E5 (once the owner's map is exported), then M4 slices 5 and 6. **Next to run:** the M1 blind playtest and an M2/M3 community match, now that testers update themselves (U).
 
 ## M0 — Foundations
 **Goal:** the skeleton every later milestone builds on.
@@ -768,7 +769,7 @@ Classic's champion select is a free pick since S slice 3 (any champion no human 
 Bots v2 (below) plays roles: a coach assigns lanes and the jungler, bots gank, rotate to sieges and defenses, ward by persona, and buy by role. **Not yet:** vision denial, and a check that the rhythm (laning → skirmish → teamfight) shows in telemetry, which is the M4 exit.
 
 ### Roster (2026-11-04): 10 of 16–20
-Vesper, Rook, Ember, Bastion, Lumen, Shade, Quill, Cairn, Marrow, Wren. No champion added since A slice 14. Front-line kits are the next champion work (17 §15).
+Vesper, Rook, Ember, Bastion, Lumen, Shade, Quill, Cairn, Marrow, Wren. No champion added since A slice 14. Front-line kits are the next champion work (17 §15). **2026-11-07:** new champions wait for the champion creator (CR, D72); the ten are rebuilt in it as recipes (D68).
 
 ## E — Map editor (before M4 slice 5)
 The map editor of [12](12-map-editor.md) (D56): the official 5v5 map is drawn with it, and
@@ -1228,10 +1229,501 @@ health bars, the minimap and effects. A colorblind mode recolors all of them fro
 with presets for protanopia, deuteranopia and tritanopia, and checks that every place a team is
 told by color also has a shape or a mark that says it.
 
+## CR — Champion creator (next, ahead of the roster)
+
+Players make their own champions, and the official roster is made the same way
+([20](20-champion-creator.md), D68–D72): a build, a gender, a face and a body from sculpted
+sliders and free sculpting, clothes from a catalog, painted by hand, a kit from a move library,
+numbers within a priced budget, a name, and a **Test** button into a practice room. A champion
+becomes a **recipe** (a few KB of choices) that a new crate, `mftr-forge`, builds into a model
+and a kit at load. The first version supports the slim and heavy humanoid builds (both on
+`biped`).
+
+**Exit:** the ten official champions are recipes and the owner prefers them to the hand-made
+ones; a new player makes a recognizable famous figure in under 20 minutes (playtest); a match of
+ten customs loads and runs within 05 §8–9's budgets.
+
+### CR slices (in order of dependency)
+1. **Data-driven champions** (D73), in four steps:
+   - **1a** champion files and the registry: the ten kits are `crates/mftr-sim/champions/<id>.ron`,
+     read by the sim's own strict reader; `ChampionId` is a handle into a registry that any
+     definition can join. Exit: every champion plays from data with the golden hashes unchanged.
+   - **1b** recipes v0 in `mftr-pack`: a champion pack that is only a kit, validated, registered
+     and playable from the command line (`--champion-file`).
+   - **1c** per-champion code to data: the bots' archetype and shop logic, item build paths and
+     the client's effect names come from the kit (a class and tags), not from a `match` on the
+     ten. Until then a non-official champion borrows the closest official one's (`stand_in`).
+   - **1d** customs on the wire: the match's roster travels in the Welcome (champion files and
+     their hashes), the server pushes them, the host setting `champions = official | customs |
+     both`, replays record the roster. Exit: a match with a custom champion, predicted exactly,
+     replays to the same hashes.
+2. **`mftr-forge`:** mesh, skeleton, colors and animation from a recipe; slim humanoid base
+   meshes (both genders) and the first 20 sliders; base mesh, morph, part and move exports in the
+   Blender add-on; the client draws forged champions.
+3. **The creator shell:** the step flow, preview stage, save, load and presets; the build,
+   gender, face and body editors; Test into the practice room (20 §10).
+4. **Clothes:** the first ~60 parts, fitting, body masks, conflicts, cloth chains, budget meters.
+5. **Paint:** palette-indexed paint images (D70), fill, brush, decals, the signature color.
+6. **Moveset:** the humanoid move library from the ten kits (~50 moves), passives, resources,
+   the VFX and SFX catalogs, tuning in the preview, runtime IK fix-ups.
+7. **Balance:** the price table priced by hit probability, the random league, Auto-fit and caps
+   (D71); the ten official recipes fit the budget.
+8. **Heavy humanoid:** base meshes, sliders, parts and moves; Rook, Bastion and Cairn rebuilt.
+9. **Free sculpting:** brushes, envelopes, sculpt bindings for parts.
+10. **More builds**, one slice each: beast, serpentoid, spectre, machine.
+
+### CR status (2026-11-07): designed
+The design is [20](20-champion-creator.md). A parametric face pass on the ten champions (a
+`Face` with jaw, cheekbone, brow, nose, eye and mouth knobs in `head.py`) was tried first and
+dropped: procedural faces still looked programmer-made, and the creator's sculpted sliders
+replace the shared head anyway.
+
+### CR slice 1a status (2026-11-07): ✅ done
+- **Champion files:** the ten kits are `crates/mftr-sim/champions/<id>.ron` (inside the crate, so
+  the Nix build, which only sees `crates/`, embeds them), generated once from the old Rust
+  constants and checked by a write → read round trip. Durations are whole milliseconds, numbers
+  read with Rust's own parser, so every value is bit-identical.
+- **The reader** (`mftr-sim/src/data.rs`): a strict, dependency-free (D15) reader and writer for
+  the RON subset champion files use: unknown, duplicate and missing fields fail with their path
+  (`abilities[2].effect.radius`), numbers must be finite and ≥ 0, durations ≤ 10 min, names 1–32
+  bytes; input (64 KB), nesting and list lengths are capped first. Claim can't be a champion
+  ability.
+- **The registry:** `ChampionId` is a `u16` handle; the official ten keep ids 0–9 (named
+  constants, so `ChampionId::Rook` still reads and matches), any other definition joins with
+  `ChampionId::register` (the same definition gets the same id; 4,096 at most), and `Debug`
+  prints names as before. Only official champions have a wire number until 1d.
+- **Stand-ins:** the bots' archetypes and item build paths `match` on the ten; a non-official
+  champion borrows the official one whose kit is closest in kind (`ChampionId::stand_in`) until
+  1c makes them data.
+- **Checks:** golden hashes unchanged; registry tests (a registered champion spawns and plays);
+  reader strictness tests.
+
+### CR slice 1b status (2026-11-07): ✅ done
+- **Champion files** (`<id>.champion.ron`, `mftr_pack::champion`): read by the strict reader,
+  then checked against `mftr_sim::limits` (20 §9.4): D10's reaction budget, D36 (hard CC only on
+  dodgeable shapes, and hard-CC skillshots classed `HardCc`), D44 (transformers only on lines and
+  areas), unique ability names, and *(start)* bounds on every number (stats and growth, attack,
+  cooldowns and rank steps, windups, speeds, sizes, damage and ratios, CC, heals, shields,
+  veils, pulses, beams). The official ten pass; the old per-kit tests became this check.
+- **Tools:** `mftr-tools pack validate` takes champion files (and finds them in folders);
+  `mftr-tools botmatch --champion-file FILE,... --team NAME,...` registers them first.
+- **Example:** `art/champions/examples/grumble.champion.ron` (a troll brute: slam, roar, boulder,
+  trample). In a 12-minute ARAM bot match he went 13/10/21 on a bruiser build borrowed from Rook,
+  and the replay re-simulated with all 72 hashes matching.
+
+### CR slice 1c status (2026-11-07): ✅ done
+- **Classes:** every champion file names its `class` (01 §9's ten: Mage, Marksman, Tank,
+  Bruiser, Enchanter, Assassin, Artillery, Warden, Battlemage, Skirmisher). The bots' archetype
+  is the class, and item build paths are per class (the artillery mage shops like the mage, the
+  warden like the tank). Those were the only places that branched on the ten; everything else
+  (the bots' fight model, the client's effect names) already read the kit. `stand_in` is gone.
+  Bot matches and golden hashes are unchanged.
+
+### CR slice 1d status (2026-11-07): ✅ done (protocol 31)
+- **Wire numbers** (`mftr_net::champions`): the official ten are 0–9 everywhere; a server's custom
+  champions 10–30 in its roster's order. Each side maps them to its own registry ids (a
+  process-wide table: a server sets it at start, a client once it has loaded the roster).
+- **The roster handshake:** a server started with `--champion-file FILE...` answers any Hello
+  whose `roster` hash isn't its own with `Roster` (each file's hash and length); the client fetches
+  the files with `MapRequest` (now any file the server offers), checks them with the same reader
+  and limits as `mftr-pack`, registers them and says hello again. Files fetched once are cached
+  for the process. Drivers needed no change: while fetching, `hello_packet` sends the next
+  request. Pre-join replies now carry their own packet sequence (the client dropped repeated
+  sequence 0 as duplicates).
+- **Host setting:** `--champions official|customs|both` (default `official`, `both` once files
+  are given); champion select draws from the pool, and Classic's picks must come from it.
+- **Replays** carry their champion files (`champion-begin` … `champion-end`, before the joins
+  that name them) and read names with spaces.
+- **Check:** `custom_champion_end_to_end` (netlab): over a lossy link a real client session
+  fetches Grumble, goes through champion select, plays him predicted, and the server's replay
+  re-simulates with every hash matching.
+
+### CR slice 2 status (2026-11-07): ✅ done (block-out sliders)
+- **The catalog:** `art/creator/humanoid_slim/` builds a base per gender
+  (`mftr_blender.creator`): the template's lofted body as an undersuit (no armor, the team
+  accent kept, limbs ×1.3 and torso ×1.1 for 14 §2.2's heroic proportions), sculpted hands, the
+  shared head, and **23 sliders** as shape keys, each a `+` and a `-` extreme: head width, face
+  length, jaw width, chin length and reach, cheekbones, hollow cheeks, brow ridge, nose length,
+  reach, width and hook, mouth width, eye size, ear size and point; body bulk, belly, chest,
+  hips, shoulders, muscle, neck. The extremes are **block-outs** (scripted grab-brush strokes and
+  region scales, D49) for an artist to re-sculpt; the ids are the contract. Exported as packs of
+  kind `base` (5,482 triangles, ~1 MB each with dense morph targets).
+- **`mftr-pack`:** reads morph targets (positions only, ≤ 128, names from `targetNames`) and
+  allows them only in `base` packs, whose targets must come in `<id>+`/`<id>-` pairs; bases get
+  their own 2 MB budget. The exporter keeps morph targets for bases.
+- **`mftr-forge`** (new crate): reads a champion file's `looks` (build, gender, `shape` slider
+  values, `proportions`, `skin` tone; strict, through the sim's reader, whose value API is now
+  public), blends the base's morph targets, scales the skeleton (limbs and spine stretch toward
+  their child, head and hands scale whole, height scales all; the pelvis lifts so longer legs
+  stand on the ground; the mesh rides its bones), recolors skin from 16 tones, and attaches the
+  shared clip library (translation tracks scaled with the body). The result is an ordinary
+  `Loaded` pack. Deterministic; 7 tests.
+- **The client:** `--champion-file FILE` registers a champion file locally (the creator will
+  too); champion files from a server's roster are remembered by name; a champion without its
+  own pack is forged from its file's looks (`MftrModel.forge`), else the template. Grumble now
+  has looks (troll green, a heavy brow and jaw, pointed ears, a belly, long arms, big hands) and
+  stands beside Rook in `--lineup`.
+- **Next for the bases:** an artist pass on the sliders; the heavy humanoid build (CR8).
+
+### CR slice 3 status (2026-11-07): ✅ done (the shell)
+- **The screen** (`client/scripts/creator.gd`, from the start menu's *Champion creator* or
+  `--creator`): the nine steps down the left (those not built yet dimmed and saying which slice
+  brings them), a live 3D preview in the middle (drag or Q/E turns it, the wheel zooms; face steps
+  frame the head from its own bone, others the whole body), the step's controls on the right.
+  Build and gender; the face's and body's sliders; the six proportions; 16 skin tones; the kit
+  (an official champion's, borrowed whole until the moveset step, CR6); the name. Randomize (gentle,
+  sometimes bold), Reset shape, New, Load, Save (Ctrl+S), and what still stops a save.
+- **`MftrCreator`** (Rust, `mftr-gdext`): the champion being made, a `mftr_forge::recipe::Recipe`
+  (name, kit, looks), written to and read from a champion file with the kit's numbers and its
+  `looks`; saving registers it, so it can be played at once. Previews are forged on change
+  (60 ms after the last slider move).
+- **Test** (20 §10): saves, then starts a **practice server in the client's own process**
+  (`mftr_server::local::LocalServer`: a free port on 127.0.0.1, a fresh key pinned in the address)
+  running the Duel Sandbox with one bot and the champion file, and joins it as that champion. Esc
+  leaves, stops the server and reopens the creator on the same file. The damage meter and dummies
+  of 20 §10 come later.
+- **Files:** champions save to `user://champions/<name>.champion.ron`; `--creator-load FILE` and
+  `--creator-step NAME` open the screen on them (for screenshots).
+
+### CR slice 4 status (2026-11-07): ✅ done (33 block-out parts)
+- **The parts** (`mftr_blender.parts`): 33 to start, in 12 slots: hair (short, ponytail,
+  topknot, crest), head (hood, helmet, wide hat, circlet, horns), face (mask, goggles), torso
+  (tunic, robe, breastplate, long coat), shoulders (pauldrons, mantle, fur collar), arms
+  (bracers, gauntlets), waist (belt and pouch, strip skirt), legs (greaves), feet (tall boots),
+  back (cape, quiver), weapon (sword, staff, maul, dagger), offhand (shield, bow, orb). Each is
+  its own skinned mesh (`part.<slot>.<id>`) in its base's export, built on the base's bones and
+  head (hair and head shells come from the head's own surface), and **carries the body's sliders**
+  (shape keys transferred from the three nearest body vertices), so a helmet widens with the
+  head. Block-outs (D49) in neutral colors. `<base>.parts.ron` lists each part's slot, name, the
+  body bones it hides and whether it shows the team accent.
+- **The validator:** a base's parts are a catalog, not worn at once, so its triangle target is
+  the body's; it may have several skinned meshes on its one skin.
+- **The forge:** a recipe's `looks.outfit` names the parts worn, one per slot. The forge keeps
+  the body and those parts, drops the rest of the catalog, hides the body's triangles under the
+  parts that cover them (a breastplate's undersuit), refuses an outfit that covers the team accent
+  without showing it (20 §7.2) or that passes the 12,000-triangle cap.
+- **The creator:** the Clothes step (a picker per slot, each part's triangles) and a triangle
+  meter under the preview. Grumble wears a fur collar, a strip skirt, bracers, boots and a maul.
+- **Left for later:** cloth chains on capes and coats (14 §3.5), and weapons held in a grip
+  (they hang at the rest pose until the moveset's clips hold them, CR6).
+
+### CR slice 5a status (2026-11-07): ✅ done (fill painting; brush and decals are 5b)
+- **Regions:** the body and every part are made of a few flat colors (a tunic's cloth, its
+  sash); each distinct color outside skin, the team accent and what glows is a paint region,
+  numbered in the order it first appears (`mftr_forge::paint`).
+- **Fills:** `looks.paint` lists `(target, region, color)`: `"body"` or a worn part's id, the
+  region, an index in the shared **64-color palette** (D70: eight families of eight, dark enough
+  for the arena's sun, metals included). The forge fills the region keeping each vertex's
+  occlusion; fills on parts taken off go with them.
+- **The signature hue** (`looks.signature`, 0–359°, 14 §4): what glows takes it, keeping its
+  brightness; effects take it in CR6.
+- **The creator:** the Paint step: pick the body or a worn part, its region swatches, the palette,
+  the signature hue, Clear paint.
+- **CR5b, left:** brush strokes and decals need paint images (D70): UVs on bases and parts through
+  the exporter, the reader and the forge, a paint image per part in the recipe, and the shader
+  sampling it.
+
+### CR slice 6 status (2026-11-07): ✅ done (the move library from the ten kits)
+- **The move library** (`mftr_forge::moves`): the ten champions' attacks and abilities, **50
+  moves** (`rook.attack`, `ember.q` …). A move brings its animation clips, its effects and sounds
+  (from its champion's pack, loaded with the catalog), the shape and numbers of its ability, and
+  the weapon class it is animated with (bow, heavy, blades, staff, crossbow, unarmed).
+- **Rules:** attacks go on the attack; abilities on any of Q W E R, but ultimates only on R and R
+  only takes ultimates (their numbers are an ultimate's).
+- **The recipe:** `looks.moves` (`attack`, `q` … `r`); the forge takes each slot's clips renamed
+  for it (`ember.w` on Q plays as `q`; a dash's `_start`/`_travel`/`_land` set follows), the
+  **stance** (idle, run, walk, death, recall, emotes, fidgets) from the attack's champion, the
+  library's CC poses and utility casts for the rest. Effects are renamed the same way and
+  **recolored in the signature hue** (colored ramp entries take its hue; whites and greys stay);
+  sounds follow their moves.
+- **The creator:** the Moveset step: a picker per slot (the moves that fit it) and "take a whole
+  kit". Picking a move copies its numbers into the kit (the attack's spec and class, or the
+  ability), for the balance step to tune; picking an attack equips the weapon its clips hold.
+- **Weapons in a grip:** the catalog's sword, staff, maul and dagger are now laid along the hand
+  like the official weapons, so a move's clips aim them as they aim the original's. Grumble leans
+  on his maul at rest and swings it like Rook.
+- **Next:** more moves made for the creator (not only the ten kits'), and per-move tuning of the
+  speed curve in the preview (20 §8.4).
+
+### CR slice 7 status (2026-11-07): ✅ built (the price model is a first fit)
+- **The price** (`mftr_sim::balance`, D71): a kit is priced by what it's expected to do at a
+  mid-game reference (level 9, basic abilities rank 3, ultimates rank 2, typical item stats):
+  durability (effective health), the basic attack's damage per second, move speed, and each
+  ability's damage, crowd control, mobility and protection **per second of cooldown, times the
+  chance it lands** (a deterministic version of the bots' model, D62: a skillshot at 70% of its
+  range against an average champion reacting in 0.25 s; point-and-click always lands; novas need
+  the target close). The weights are a least-squares fit pulling the official ten toward 100,
+  regularized toward hand-set ones: they land at 96–108 (Quill 80).
+- **The budget:** 100 points, refused over 110 (10%), wherever a champion file is checked
+  (`mftr-pack`, the server's custom champions, the client's roster). Auto-fit scales power down,
+  cooldowns up and the body a little until it fits.
+- **The creator:** the Balance step: the price and its parts, a power and a cooldown knob per
+  slot (against the move's own numbers), health, armor, magic resist and move speed (against the
+  stance champion's), Auto-fit. A patchwork kit usually starts over budget; picking an attack now
+  brings its champion's body stats too.
+- **The random league** (`mftr-tools league --champions N --matches M --minutes T`): random legal
+  champions (random moves, random tuning, fitted to the budget) in ARAM bot matches with random
+  lineups; each one's price and win rate (decided matches only), and how each part of the price
+  correlates with winning (positive: priced too cheap). The first runs are too small to refit
+  the weights from; the refit is the next step.
+- **The first league** (20 random champions, 40 ARAM matches of up to 40 min, all decided):
+  win rates spread 23–82% on 13–25 games each, which is mostly noise at that size (±11%), and 6
+  of 20 inside 45–55%. Two signs held across both runs: mobility priced too dear (r −0.31,
+  −0.40) and protection too cheap (+0.34, +0.24), so mobility went from 0.062 to 0.052 points
+  and protection from 0.34 to 0.38 (the official ten still price 80–107). Speed and control
+  flipped between runs and were left. **Next:** a league of a few hundred matches (an overnight
+  run) before any further refit; bots that use dashes better may move mobility back.
+- **The long league** (2026-11-08: 24 champions with passives and resources, 160 ARAM matches,
+  148 decided, about 62 games each, ±6%): win rates 24–69%, 5 of 24 inside 45–55%. The basic
+  attack was priced too cheap again (r +0.31, as in the first run), so its weight went from 0.19
+  to 0.21 (the ten now price 81–110); speed (+0.43) and protection (−0.12) flipped sign between
+  runs and were left. **The 45–55% target isn't met.** The spread is wider than the noise, so
+  what decides these matches isn't all in the price: likely the bots (they play every kit with
+  one fight model, D62, and don't use costs or passives on purpose), and combinations the price
+  adds up but play multiplies (heals with shields, CC chains). Next: per-move bot hints, and a
+  league per build and per resource to find which parts the price misses.
+- **Fair leagues and a regression refit** (2026-11-08): league champions are now fitted *to* the
+  budget from either side (`balance::fit_to`; before, Auto-fit only came down, and cheap ones
+  of 74–83 points won 61–69%), bots ask `Unit::can_cast` (costs included; they had kept
+  planning casts they couldn't pay), and `mftr-tools league --log` + `tools/league_fit.py` fit a
+  logistic regression of the winner on the two teams' price parts. Three logged leagues of 200
+  matches (about 80 games a champion: ±5.6 points of noise each):
+
+  | League | Weights | RMS from 50% | Inside 45–55% |
+  |---|---|---|---|
+  | 1 | before | 16.9 | 7 of 24 |
+  | 2 | refit 1 (damage up, durability and attack down) | 12.7 | 8 of 24 |
+  | 3 | refit 2 (a half step back on damage, protection) | 13.8 | 8 of 24 |
+
+  The spread came down from 17 to about 13 points and stopped there. **The 45–55% target is
+  still not met** (noise alone would leave about two thirds inside it). The regression's
+  verdicts flip between leagues (the attack: too dear, too dear, then too cheap), so the seven
+  summed parts can't say what decides these matches: single moves and how they combine (the
+  league's best, 87%, paired two blinks with Shade's veil, which bots can't see through), and
+  how one bot fight model (D62) plays them. **Next:** a per-move adjustment fitted from many
+  logged leagues (each move's indicator on each team, a few hundred matches per round), and
+  bots that use veils, blinks and costs as a player would. Weights now: durability 0.0185,
+  attack 0.161, speed 0.358, damage 0.292, control 122, mobility 0.0595, protection 0.406; the
+  official ten price 79–110, mean 100.
+- **Why no price meets the target in bot leagues** (2026-11-08, four more experiments):
+  1. **Per-move pricing doesn't generalize:** a per-move model fitted on two leagues predicts
+     the third *worse* than a coin flip (held-out log-loss 0.80 against 0.693) at every
+     strength of regularization but the one that zeroes it (`tools/league_moves.py` now runs
+     this check first and refuses to suggest a table that fails it).
+  2. **Yet champions' strength is real:** the same 24 champions replayed in fresh matches
+     (`--match-seed`) repeat their win rates, r = 0.85; 12.5 points of the spread repeat.
+  3. **A bug found and fixed:** some kits can't reach the budget inside the limits, and
+     `fit_to` left them off it (one at 114.6 points won 87%); the league now draws such kits
+     again, so every champion prices 98–100.
+  4. **Calibration by simulation (`--calibrate N`) doesn't converge:** tuning each champion's
+     power to its measured win rate (up to −25%/+30% a round, three rounds) left the spread at
+     12–13 points (6 of 24 inside 45–55%): champions scaled *up* to 116–122 points still lost
+     (24%, 30%), ones scaled *down* to 64–77 still won (61–69%).
+
+  So in bot leagues a champion's strength lives in **how the bots play its combination of
+  moves**, not in its numbers: neither a price nor its power moves it much. **The CR7 exit
+  (45–55%) can't be met from the creator's side**; it needs the bots (D62's one fight model) to
+  play every combination well (veils, blinks, heals on allies, ultimates' timing), measured
+  again with these tools: `mftr-tools league --log P --calibrate N --match-seed S`,
+  `tools/league_fit.py`, `tools/league_moves.py`. That is bot work for the M4 track.
+- **A first pass at that bot work** (2026-11-08): the league now prints how much of its cooldown
+  each move is used. Bots used long-range moves at 40–80% of what their cooldowns allow but
+  close-range and mobility ones barely (Flicker 6%, Tumble 7%, Cleave and Siphon 14%, Lunge and
+  Pounce 19%). Bots now dash or blink into reach and step into a ready nova's radius in fights,
+  and ask `Unit::can_cast` everywhere: Flicker rose to 19%, Tumble out of the bottom, novas
+  barely (14% → 17%). **The spread didn't move** (13.1 points, 7 of 24 inside 45–55%, against
+  12.2 for the same roster before). Which kits win under the bots is deeper than which moves
+  they press: how a kit's parts serve one fight model (where it stands, whom it picks, when it
+  commits). The exit as written (every generated champion 45–55% in bot leagues) is a target
+  for the bots as much as for the price; the owner may want to restate it (a spread to stay
+  under, or a playtest with people) rather than chase it through bot AI.
+- **The class follows the kit** (2026-11-08): bots read a champion's class to know where to
+  stand and when to commit, and a creator kit took it from its attack's champion (a tank's kit
+  on a marksman's attack played from the back). `balance::infer_class` reads it from the whole
+  kit instead (the attack's reach, where its points go, heals for allies), matching all ten
+  official classes; recipes and the league use it. **The spread didn't narrow** (14.6 points,
+  6 of 24 inside, against 13.1 and 7 of 24 for the same roster and matches): not the cause
+  either.
+
+### CR slice 8 status (2026-11-07): ✅ built (Rook, Bastion and Cairn as recipes, awaiting the owner)
+- **The heavy humanoid** (`art/creator/humanoid_heavy/`, both genders): the brute's skeleton
+  (Rook's heights: low hips, short legs, the neck sunk between the shoulders, long arms, huge
+  hands) and a **girth** per build (`mftr_blender.creator.BUILDS`, `mesh.GIRTH`): torso, limbs and
+  neck thicker by 16–40%, and every catalog part on them thickened and pushed out to match, so
+  one part list fits both builds. Same 23 sliders, same 40 parts; the creator offers both builds
+  by name (Slim humanoid, Heavy humanoid).
+- **Heavy gear** in the catalog (every base has it): a great helm (a block with a visor slit
+  glowing in the signature hue), slab pauldrons, stone shoulders, stone fists, plate tassets, a
+  tower shield, a great axe.
+- **Rook, Bastion and Cairn as recipes:** `art/champions/<id>/<id>.champion.ron`, the official
+  kit (a test checks it matches `crates/mftr-sim/champions/<id>.ron` exactly) with looks on the
+  heavy build, its own moves, paint and signature. They forge, animate and pass the pack
+  validator; the hand-made models stay what the game shows until the owner prefers these
+  (20 §14's track exit). Looks are a first pass: Cairn's antlers are the catalog's horns, and
+  Bastion's ice crystals and chain have no parts yet.
+- **Retargeting by rest** (found here): moves copied local rotations raw, but Bastion's rig hangs
+  his neck down from the chest where the bases' stand up (180° apart), so his moves bent any other
+  body's head into its chest. Clips now move between rigs corrected by each bone's rest
+  (`key → C(parent)⁻¹ · key · C(bone)`), which also fixes the 5–7° rest differences of the other
+  rigs. A test holds Bastion's idle on a base to his own pose.
+- **Next:** the owner's look at the three (art pass on the heavy parts: antlers, ice, a chain);
+  then CR5b (brush and decals) and CR9 (free sculpting).
+
+### The official ten as recipes (2026-11-08): ✅ all ten, awaiting the owner
+- Ember, Vesper, Lumen, Shade, Quill, Marrow and Wren join Rook, Bastion and Cairn as
+  `art/champions/<id>/<id>.champion.ron`: their official kits (a test checks each matches the
+  sim's exactly and forges with every clip it needs), looks on the slim humanoid build after
+  their hand-made designs (gender, outfit, paint, signature hue, moves). They are first passes
+  from the catalog's parts: Ember's burning hair is a crest, Lumen's halo a circlet, Wren's
+  crossbow missing (the catalog has none yet).
+- **The track exit** (20 §14) asks that the owner prefer them to the hand-made models before the
+  game shows them; until then the hand-made ones stay.
+- **Side by side** (2026-11-08, the owner's request): `art/champions/neo/` holds the ten as
+  `Rook-neo`, `Ember-neo` … (generated from the recipes with the name changed; a test keeps them
+  in step), so they play next to the hand-made ones on any server that loads them:
+  `mftr-server --champion-dir art/champions/neo --champions both` (the new `--champion-dir`
+  loads every champion file in a folder). The client's `--champion NAME` now waits for a
+  server's custom champions to arrive before resolving the name (`--champion rook-neo`).
+
+### CR slice 10b status (2026-11-08): ✅ the serpentoid, the floating spectre, the rolling machine
+- **Three builds** on `creature` skeletons of their own (`art/creator/<build>/build.py`, sharing
+  `mftr_blender.builds`: a build is its bone table, body, sliders, parts and clips; the helper
+  makes the base, the shape keys, the parts, the UVs and the export, and sets the skeleton so
+  the body stands on the ground):
+  - **Serpentoid** (`serpent`): a spine chain rearing up from a coil, a hood that flares; it
+    slithers. Sliders: head, hood, jaw, bulk, tail, neck. Parts: horns, a crown, a collar,
+    dorsal spines, belly plates.
+  - **Floating spectre** (`spectre`): a hooded wraith over a trailing wisp, long clawed arms; it
+    hovers and glides. Sliders: head, hood, bulk, shoulders, arms, tail. Parts: a crown, a bone
+    mask, chains, a soul lantern, bracers.
+  - **Rolling machine** (`machine`): a boiler on one drive wheel that turns a full turn a stride,
+    jointed arms with clamps, a sensor head. Sliders: head, bulk, chest, wheel, arms. Parts: an
+    antenna, shoulder plates, a smokestack, a boiler plate, a drill arm.
+- Each carries the move library's clips (howl, slam, pounce, the dash set) and its stance, so any
+  kit plays on it; a test forges every build with a mixed kit and every slider at full.
+- **The exit** (a champion of each plays a match): Venomcoil (serpentoid, mana), Hollow Warden
+  (spectre, mana) and Gearback (machine, energy) in `art/champions/examples/`, each through the
+  practice match: moving, fighting, casting.
+- **The art pass** (2026-11-08): the path lofts of these builds get **detail**
+  (`mesh.PATH_DETAIL`: each segment split through a Catmull-Rom curve of its points and radii,
+  half again as many sides, so silhouettes round out; hand-made champions build as before), and
+  each build got real detail: the beast a mane, flank tufts and claws; the serpent rows of
+  dorsal scales and flank keels; the spectre robe folds, a tattered hem and ribs; the machine
+  treads, rivets, pipes, tanks and pistons. All four bodies are now inside the 5–8k target
+  (beast 7.3k, serpent 7.5k, spectre 6.7k, machine 5.6k) with no validator warnings.
+- **Left:** the serpent's hood is still a flat flap; the creator's camera frames every build as
+  it frames a humanoid; a polish pass by hand in Blender (D49) will always beat a generator.
+
+### CR slice 10a status (2026-11-08): ✅ the four-legged beast
+- **The build** (`art/creator/beast/`, no genders yet): a champion-sized beast on the jungle
+  hounds' `creature` skeleton (16 §3), with the sockets champions' effects need at the mouth;
+  9 sliders of its own (head size, snout, brow, jaw, ears; bulk, chest, legs, tail), 5 parts
+  (horns, a spiked collar, barding, a saddle, a cape), UVs for paint, the team accent as a band
+  round the chest and eyes in the signature hue.
+- **Its own move library:** a base may carry clips (kind `base`, archetype `creature`, which the
+  validator now allows for bases): idle, a fidget, walk, run, two attacks, recall, death,
+  flinch, a stun loop, and the clips abilities take **by their shape**
+  (`moves::own_clip_for`): projectiles, beams and buffs a howl, areas a slam, lunges a pounce,
+  dashes the dash set. So any kit's moves animate on a beast: the numbers from the move, the
+  motion from the build. Effects and sounds come from the moves as for anyone.
+- **The forge:** a base with its own clips skips the biped library and retargeting; proportions
+  know a beast's legs (hind legs are legs, forelegs arms). Sculpting, paint and parts work as
+  on the humanoids.
+- **The exit** (20 §14, a champion of it plays a full match): Thornmaw
+  (`art/champions/examples/thornmaw.champion.ron`, rage, a sunder passive, Wren's ricochet and
+  pounce, Rook's heal, Bastion's upheaval) plays the practice match: moves, fights and casts.
+- **Left:** a feminine/masculine variant; the creator's camera framing for a long body; bots
+  play it as any kit. (Its triangle count was brought into the target by CR10b's art pass.)
+
+### CR slice 9 status (2026-11-07): ✅ done (free sculpting)
+- **The sculpt** (`mftr_forge::sculpt`, 20 §5.3): sparse offsets on the base's **welds** (one
+  place on the surface: a vertex's copies split by colors and UVs move together), in whole
+  millimetres, applied after the sliders and before the proportions. In the champion file:
+  `sculpt: [(weld, x, y, z), ...]`, at most 1,000 welds (the parser's lists went to 1,024 items).
+  Bounded: no weld moves more than 12 cm from where the sliders put it.
+- **Brushes:** push, pull, grab (along the mouse's drag), inflate (each weld along its own normal),
+  smooth (toward its neighbours) and flatten (toward the plane where it was touched), with a
+  smooth falloff over the radius, **mirrored by default** (each weld's mirror across X is found
+  when the base is loaded; welds on the middle line stay on it). The brushes touch the body only,
+  as the forged preview shows it.
+- **Parts follow:** each part vertex moves as its three nearest welds at rest do (fully within
+  10 cm of the body, fading to nothing at 25 cm: a hat's brim follows less, a sword's tip not at
+  all). A new catalog part, a beard, to show it.
+- **The creator:** Face and Body steps carry the brush row (Sliders, Push, Pull, Grab, Inflate,
+  Smooth, Flat), size, strength, symmetry and "Undo all sculpting"; the model holds its rest
+  pose while sculpting. `--creator-sculpt BRUSH:X,Y` strokes for screenshots.
+- **The exit** (20 §14: a nose and a jaw past the sliders' range, with a hat and a beard
+  following): a test pulls the nose 3 cm past the nose-reach slider's +1, swells the skull with
+  the hat's cone moving with it, and swells the jaw with the beard following.
+- **Left:** weld ids are tied to a base's export (re-exporting a base with other geometry would
+  move old sculpts: a base's version will have to be part of the recipe once bases change after
+  release); sculpting under clothes (their triangles are hidden) and on the in-match pose.
+
+### CR slice 5b status (2026-11-07): ✅ done (brush, decals, eraser)
+- **UVs through the pipeline:** the creator bases and their parts are unwrapped in Blender
+  (`creator.unwrap`: smart projection; the body's head gets a corner of its own, about three
+  times the density, since faces are what's painted most) and exported as TEXCOORD_0, for kind
+  `base` only (`mftr-pack` refuses UVs anywhere else: the game stays textureless, D70). The base
+  budget went from 2 to 3.5 MB: seams split vertices and their morph deltas (the bases are
+  2.8–2.9 MB); bases never cross the network.
+- **Paint images** (`mftr_forge::image`, D70): one per target, 128×128 for the body and 64×64
+  for a part, each pixel unpainted or one of up to 15 palette colors. In the champion file:
+  `images: [("target", [palette indices], ["hex row", ...])]`, rows trimmed of trailing zeros
+  (the parser's lists went from 64 to 128 items for the rows). The forge puts each on its
+  target's primitives; the champion shader draws it over the vertex colors (nearest, not on the
+  team accent or what glows); the game draws customs' paint as the creator does.
+- **Strokes are painted on the model:** a stroke covers every texel whose place on the surface
+  lies within its radius of where the ray hit (the texels rasterized from the UVs at the forged
+  shape), so strokes cross seams and never bleed into another island. Tools: brush, eraser, and
+  six decals (ring, diamond, cross, chevron, star, stripes) stamped in the surface's frame.
+- **The creator:** the Paint step's Fill, Brush, Decal and Erase tools, a size slider and the
+  decal picker; while brushing, the model holds its rest pose, left-click paints and right-drag
+  turns it. `--creator-brush decal:X,Y:COLOR` strokes once for screenshots. Grumble wears war
+  paint (a chevron on the chest, stripes across the eyes).
+- **Left:** the texel density is PS1-coarse on parts (about 2 cm a texel on a tunic); an artist's
+  UV layout would spend it better. Painting on the in-match model's pose, and symmetry, later.
+
+### Face rig (FR) and creator fixes (2026-11-09): planned
+
+The owner tested the creator (2026-11-09) and found it glitchy, with expected features broken or missing. Eleven reports are listed in [21 §8](21-face-rig.md#8-reported-defects-in-the-creator-2026-11-09):
+
+- a missing `machine_masculine` base;
+- skin tone and paint not working on creature builds;
+- no way back from Test, and Test not showing the creator's model;
+- head sizes that ignore the build;
+- a feminine slim chest at the neck;
+- boots and greaves that don't follow leg sizes;
+- coloring and painting that break;
+- a save that won't load;
+- an amateur look overall.
+
+They come first, as their own slice, checked in the running game with captures.
+
+The face moves to bones ([21](21-face-rig.md), D76), with an authored head and drag-to-sculpt features with highlighting. Free sculpting stays. Its slices are FR1–FR6 (21 §7); the body follows the same way (21 §9).
+
+### CR6 follow-up (2026-11-07): passives ✅; resources not yet
+- **Passives** (D74): a champion file's `passive:` is one of nine of the items' unique passives
+  with its own numbers (`mftr_sim::data`, bounded in `limits`, priced in `balance`: 2–5 points at
+  the catalog's numbers). The sim counts it with the inventory's (`gear::of`), as source
+  `items::INNATE` (the death recap says "Passive"; the item damage logs leave it out). The
+  creator's Moveset step picks one from `mftr_forge::passives` (Arcane strikes, Third blow,
+  Spellblade, Cleave, Fleet, Sunder, Thorns, Last stand, Second wind) or none; the random league
+  gives its champions one. Grumble, the example, regenerates out of harm. The official ten have
+  none yet.
+- **Resources** ✅ (2026-11-08, D75): `resource: Mana(max, regen, costs: [Q, W, E, R])`, `Energy`,
+  `Rage` (regen per hit that lands), `Health(costs)` or none, in the sim (a cast that can't pay
+  doesn't start; regeneration, rage drain, the fountain refills mana and energy), on the wire
+  (protocol 32: one bit when nothing's spent), in the HUD (a bar under the health), in the price
+  (a thirsty kit is cheaper, down to 70% of its abilities' worth; health costs come out of
+  durability), in the creator's Moveset step (four presets) and the random league. Unit state
+  keeps mana *spent* (0 is full), so costless kits keep their exact state and hashes: the
+  official ten stay costless until the owner says otherwise. Grumble runs on rage. Bots don't
+  plan around costs yet: a cast they can't pay is simply refused.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.
-- Mod and content pipeline (community champions, skins within readability rules, custom modes): server-pushed packs with signatures, the trust prompt, cache and blocklist ([11](11-content-packs-and-mods.md), D51).
+- Mod and content pipeline (community champions as creator recipes, community catalog packs, skins within readability rules, custom modes): server-pushed packs with signatures, the trust prompt, cache and blocklist ([11](11-content-packs-and-mods.md), D51, [20 §13](20-champion-creator.md#13-hosting-trust-and-moderation)).
 - Localization framework.
 
 ## M6 — Federation

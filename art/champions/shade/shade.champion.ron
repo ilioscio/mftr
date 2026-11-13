@@ -1,0 +1,58 @@
+// Shade as a recipe (20 §12): the official kit, looks on the slim humanoid build.
+// A lean assassin: a tall hood, a mask, a long dark coat, knives along his forearms.
+// The kit is a copy of crates/mftr-sim/champions/shade.ron (a test checks they match); the
+// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// Shade: Assassin (melee).
+// Assassin: a lunge in, a slowing fan of blades, a quick dash out, and a lunging execution.
+// Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability
+// numbers are rank 1, and `per_rank` adds to them each rank (M2 slice 2). Durations are in
+// milliseconds. The format is in `crates/mftr-sim/src/data.rs`.
+Champion(
+    format: 0,
+    looks: (
+        build: "humanoid_slim",
+        gender: Masculine,
+        shape: (cheeks_hollow: 0.5, jaw_width: -0.2),
+        proportions: (arms: 0.2, height: 0.1),
+        skin: 2,
+        outfit: ["head.hood", "face.mask", "torso.coat", "arms.bracers", "feet.boots", "weapon.dagger"],
+        paint: [("head.hood", 0, 51), ("torso.coat", 0, 6), ("face.mask", 0, 7)],
+        signature: 275,
+        moves: (attack: "shade.attack", q: "shade.q", w: "shade.w", e: "shade.e", r: "shade.r"),
+    ),
+    name: "Shade",
+    class: Assassin,
+    stats: (max_health: 590, health_regen: 1.5, armor: 28, magic_resist: 32, attack_damage: 70, move_speed: 345),
+    growth: (max_health: 95, health_regen: 0.08, armor: 4.3, magic_resist: 1.5, attack_damage: 3.9),
+    attack: (range: 125, attack_speed: 0.72, windup_fraction: 0.25),
+    abilities: [
+        (
+            name: "Shadow Step",
+            cooldown_ms: 9000,
+            effect: Lunge(range: 600, speed: 1800, damage: (kind: Physical, base: 60, ad_ratio: 0.8)),
+            reaction: None,
+            per_rank: (damage: 30, cooldown_ms: 800),
+        ),
+        (
+            name: "Fan of Blades",
+            cooldown_ms: 7000,
+            effect: Area(windup_ms: 150, radius: 275, damage: (kind: Physical, base: 50, ad_ratio: 0.6), cc: Slow(pct: 25, ms: 1000)),
+            reaction: None,
+            per_rank: (damage: 25, cooldown_ms: 500),
+        ),
+        (
+            name: "Veil Step",
+            cooldown_ms: 12000,
+            effect: Dash(range: 400, speed: 1400, veil: (radius: 300, duration_ms: 5000)),
+            reaction: None,
+            per_rank: (cooldown_ms: 1000),
+        ),
+        (
+            name: "Execution",
+            cooldown_ms: 60000,
+            effect: Lunge(range: 500, speed: 2000, damage: (kind: Physical, base: 150, ad_ratio: 1.2)),
+            reaction: None,
+            per_rank: (damage: 100, cooldown_ms: 10000),
+        ),
+    ],
+)

@@ -5,6 +5,7 @@
 //! Usage: mftr-server [--bind 0.0.0.0:7777] [--key FILE] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,...]
 //!                    [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR]
 //!                    [--bot-tier recruit|veteran|elite|nightmare]
+//!                    [--champion-file FILE.champion.ron]... [--champion-dir DIR] [--champions official|customs|both]
 //!        mftr-server --scenario NAME [--bots N] [--lobby] [--max-players N] [--map FILE.mftrmap] [...]
 //!        mftr-server [--key FILE] --fingerprint
 //!
@@ -30,6 +31,10 @@
 //! scenario alone, for development: `--bots N` adds server bots (they count toward
 //! `--max-players`), `--lobby` holds champion select first. Spectators can watch bots alone
 //! there: a match starts for them, and runs while anyone watches.
+//!
+//! `--champion-file FILE` (up to 21) adds a custom champion (20, CR1d): checked like a pack and
+//! sent to players before they join. `--champions` says which champions matches draw from:
+//! `official`, `customs` or `both` (the default once any file is given).
 
 use mftr_net::secure::{Fingerprint, Identity, Received, SecureServer};
 use mftr_server::hub::{self, HOSTED_MODES, ModeOffer};
@@ -40,7 +45,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,horde,...] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR] [--bot-tier recruit|veteran|elite|nightmare]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|horde|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]\n       mftr-server --version";
+const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,horde,...] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR] [--bot-tier recruit|veteran|elite|nightmare] [--champion-file FILE.champion.ron]... [--champion-dir DIR] [--champions official|customs|both]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|horde|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]\n       mftr-server --version";
 /// Instances running at once, by default.
 const MAX_MATCHES: usize = 32;
 
@@ -119,6 +124,7 @@ fn main() -> std::io::Result<()> {
     let mut scenario: Option<Scenario> = None;
     let mut modes: Option<Vec<ModeOffer>> = None;
     let mut maps: Vec<hub::HostedMap> = Vec::new();
+    let mut champion_files: Vec<String> = Vec::new();
     let mut max_matches = MAX_MATCHES;
     let mut workers: Option<usize> = None;
     let (mut bots, mut lobby, mut max_players) = (None, false, None);
@@ -161,6 +167,28 @@ fn main() -> std::io::Result<()> {
                 );
             }
             "--map" => maps.push(read_map(&args.next().expect("--map needs a file"))),
+            "--champion-file" => {
+                let path = args.next().expect("--champion-file needs a file");
+                champion_files.push(std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}")));
+            }
+            "--champion-dir" => {
+                // Every `*.champion.ron` in a folder (art/champions/neo: the official ten rebuilt).
+                let dir = args.next().expect("--champion-dir needs a folder");
+                let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+                    .unwrap_or_else(|e| panic!("{dir}: {e}"))
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| p.to_string_lossy().ends_with(".champion.ron"))
+                    .collect();
+                paths.sort();
+                for p in paths {
+                    champion_files.push(std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display())));
+                }
+            }
+            "--champions" => {
+                let name = args.next().expect("--champions needs official, customs or both");
+                base.champions = mftr_server::customs::ChampionPolicy::by_name(&name)
+                    .unwrap_or_else(|| panic!("--champions {name}: official, customs or both\n{USAGE}"));
+            }
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return Ok(());
@@ -211,6 +239,11 @@ fn main() -> std::io::Result<()> {
     };
     if let Some(dir) = &replay_dir {
         std::fs::create_dir_all(dir)?;
+    }
+    // Custom champions (CR1d): checked like packs, offered by `--champions`.
+    base.customs = mftr_server::customs::Customs::load(champion_files).unwrap_or_else(|e| panic!("{e}"));
+    if !base.customs.is_empty() && base.champions == mftr_server::customs::ChampionPolicy::Official {
+        base.champions = mftr_server::customs::ChampionPolicy::Both;
     }
 
     let (identity, created) = Identity::load_or_create(&key_path, "server key")?;

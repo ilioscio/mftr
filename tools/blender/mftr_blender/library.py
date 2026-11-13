@@ -73,6 +73,59 @@ def _clip(arm, name, frames, keys, loop=False, layer="full", bones=None, markers
     return act
 
 
+def _shaped(u, ease):
+    """How far between two keys at `u` (0–1), by how the first leaves (`clips.EASES`)."""
+    if ease == "hold":
+        return 0.0
+    if ease == "snap":
+        return u
+    if ease == "whip":
+        return u * u * u
+    if ease == "settle":
+        return 1.0 - (1.0 - u) ** 3
+    return u * u * (3.0 - 2.0 * u)
+
+
+def _mix(a, b, k):
+    """Two poses (bone -> (rx, ry, rz) degrees) or loc maps blended; a bone missing on one side
+    is at rest there."""
+    out = {}
+    for n in set(a) | set(b):
+        va, vb = a.get(n, (0.0, 0.0, 0.0)), b.get(n, (0.0, 0.0, 0.0))
+        out[n] = tuple(x + (y - x) * k for x, y in zip(va, vb))
+    return out
+
+
+def dense(keys, frames, overlay=None, step=2):
+    """Key poses sampled every `step` frames with their easing (`_shaped`), each sample plus
+    `overlay(frame)` -> (pose, locs) added on top: motion that never stops between the keys
+    (a serpent's body wave, a spectre's trailing wisps, a machine's hum), which plain keys can't
+    carry without losing their easing. Keys are (frame, pose, locs[, ease]) with euler poses;
+    returns keys for `_clip` (linear between samples)."""
+    keys = [tuple(k) + ("ease",) * (4 - len(k)) for k in keys]
+    out = []
+    frames_at = sorted(set(list(range(0, frames + 1, step)) + [k[0] for k in keys]))
+    for f in frames_at:
+        i = max(j for j, k in enumerate(keys) if k[0] <= f)
+        f0, p0, l0, e0 = keys[i]
+        if i + 1 < len(keys):
+            f1, p1, l1, _ = keys[i + 1]
+            k = _shaped((f - f0) / max(1, f1 - f0), e0)
+        else:
+            p1, l1, k = p0, l0, 0.0
+        pose = _mix(p0, p1, k)
+        locs = _mix(l0 or {}, l1 or {}, k)
+        if overlay is not None:
+            op, ol = overlay(f)
+            pose = {n: tuple(x + y for x, y in zip(pose.get(n, (0.0, 0.0, 0.0)), op.get(n, (0.0, 0.0, 0.0))))
+                    for n in set(pose) | set(op)}
+            locs = {n: tuple(x + y for x, y in zip(locs.get(n, (0.0, 0.0, 0.0)), (ol or {}).get(n, (0.0, 0.0, 0.0))))
+                    for n in set(locs) | set(ol or {})}
+        # Linear between samples: the keys' easing (holds included) is already in them.
+        out.append((f, pose, locs or None, "snap"))
+    return out
+
+
 def gait(frames, stride, contact=0.45, lift=0.22, bob=0.04, lean=8.0, twist=8.0, width=None, step=2,
          upper=None, crouch=0.0, toe_off=20.0):
     """Keys for an in-place locomotion loop with planted feet (14 §3.6): each foot is an IK

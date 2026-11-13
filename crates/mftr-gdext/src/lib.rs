@@ -21,9 +21,11 @@ use mftr_sim::{ChampionId, Team, UnitId, UnitKind, Vec2};
 use std::net::UdpSocket;
 use std::time::Instant;
 
+mod creator;
 mod itemtext;
 mod maps;
 mod model;
+mod practice;
 mod release;
 
 struct MftrExtension;
@@ -51,6 +53,8 @@ pub struct MatchClient {
     next_hello: f64,
     last_error: GString,
     champion_request: Option<ChampionId>,
+    /// A requested champion's name not known yet (a server's custom one).
+    champion_name: Option<String>,
     /// Reconnect token and spectate wish for the next connection.
     resume: u64,
     spectate: bool,
@@ -138,6 +142,7 @@ impl INode for MatchClient {
             next_hello: 0.0,
             last_error: GString::new(),
             champion_request: None,
+            champion_name: None,
             resume: 0,
             spectate: false,
             links: None,
@@ -191,6 +196,7 @@ impl MatchClient {
                 self.key_conflict = None;
                 self.session = ClientSession::new();
                 self.session.set_champion_request(self.champion_request);
+                self.session.set_champion_name(self.champion_name.clone());
                 self.session.set_resume(self.resume);
                 self.session.set_spectate(self.spectate);
                 self.next_hello = 0.0;
@@ -235,7 +241,7 @@ impl MatchClient {
     /// Every champion's name, for pickers.
     #[func]
     fn champion_names(&self) -> PackedStringArray {
-        ChampionId::ALL.iter().map(|c| GString::from(c.def().name)).collect()
+        ChampionId::registered().iter().map(|c| GString::from(c.def().name)).collect()
     }
 
     /// The server's key fingerprint (empty until its handshake reply arrives).
@@ -435,7 +441,10 @@ impl MatchClient {
     fn set_champion(&mut self, name: GString) -> bool {
         let name = name.to_string();
         self.champion_request = ChampionId::by_name(&name);
-        name.is_empty() || self.champion_request.is_some()
+        // Not known here: perhaps one of the server's custom champions, known once its files
+        // are fetched (`Rook-neo`). Kept, and the server picks if it never turns up.
+        self.champion_name = (self.champion_request.is_none() && !name.is_empty()).then_some(name);
+        true
     }
 
     /// Reconnect: the token (hex, from `session_token` of an earlier session) to present when
@@ -1409,6 +1418,24 @@ impl MatchClient {
         d.set("abilities", &names);
         if let (Some(s), Some(t)) = (self.session.own_state_now(), self.session.input_sim_time(now)) {
             d.set("health", s.health);
+            // The resource (01 §9): its kind ("" costless), what there is now, the pool, Q W E R's costs.
+            let r = champ.def().resource;
+            let kind = match r.kind {
+                mftr_sim::champion::ResourceKind::None => "",
+                mftr_sim::champion::ResourceKind::Mana => "mana",
+                mftr_sim::champion::ResourceKind::Energy => "energy",
+                mftr_sim::champion::ResourceKind::Rage => "rage",
+                mftr_sim::champion::ResourceKind::Health => "health",
+            };
+            d.set("resource_kind", kind);
+            if !kind.is_empty() {
+                let level = s.progress.level;
+                let have = r.available(s.resource, s.health, level);
+                d.set("resource", if have.is_finite() { have } else { 0.0 });
+                d.set("resource_max", r.max_at(level));
+                let costs: PackedFloat32Array = r.costs.iter().copied().collect();
+                d.set("resource_costs", &costs);
+            }
             let (stats, attack) = items::champion_stats(champ.def(), &s.progress.stats_key());
             d.set("max_health", stats.max_health);
             d.set("attack_damage", stats.attack_damage);
@@ -1935,6 +1962,8 @@ impl MatchClient {
                         s.champion.and_then(|c| c.ability(slot)).map_or("Ability".to_string(), |a| a.name.to_string()),
                         ["Q", "W", "E", "R", "D", "F"].get(slot as usize).copied().unwrap_or(""),
                     ),
+                    // A champion's own passive (20 §8.1) has no item.
+                    DamageOrigin::Item(items::INNATE) => ("Passive".to_string(), ""),
                     DamageOrigin::Item(id) => (items::item(id).map_or("Item".to_string(), |i| i.name.to_string()), ""),
                     DamageOrigin::Augment(id) => {
                         (augments::augment(id).map_or("Augment".to_string(), |a| a.name.to_string()), "")

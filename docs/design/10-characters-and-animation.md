@@ -2,6 +2,8 @@
 
 How champions look, move and animate, and the pipeline that builds them. This expands [05 §4](05-art-and-assets.md#4-champions). It's written so that first-party champions and community champions ([11](11-content-packs-and-mods.md)) go through the **same** rig, rules, tools and validator.
 
+**Coming change (D68):** champions will be made in the champion creator ([20](20-champion-creator.md)) as recipes, built at load from a catalog. The rig standard, timing contract, animation set, runtime blending and budgets here all still apply. What changes is the pipeline (§8): Blender makes base meshes, morphs, parts and moves for the catalog instead of whole champions, and the ten champions' clips become the humanoid move library.
+
 **Quality bar:** every champion ships with its *complete* animation set (§5). Not a placeholder set to finish later. Genre entries that cut corners here (Dawngate, Paragon, Infinite Crisis) felt floaty and unreadable, and players notice that in the first minute. Most of the "feel" lives in the timing contract (§4) and the release and impact frames (§4.4), not in the polygon count.
 
 ## 1. Principles
@@ -253,7 +255,7 @@ sockets (non-deforming): socket_projectile, socket_weapon_tip, socket_cast, sock
 optional: smear (scale-only, for 1-frame smears)
 ```
 
-- **~30 deforming bones plus extras and sockets; ≤ 64 total**, hard cap 80. Fingers are "mittens": one bone for the fingers and one for the thumb, which fits the faceted style.
+- **~30 deforming bones plus extras and sockets; ≤ 64 total**, hard cap 100. The creator's sculpt bones (24 face bones, 21 §1.3; 24 body helpers, 21 §9.1) don't count toward the 64: no clip keys them, and they're baked into the rest. Fingers are "mittens": one bone for the fingers and one for the thumb, which fits the faceted style.
 - **Weights:** at most **2 influences** per vertex *(start)*, hard cap 4. Armor plates are rigid (1 influence), the authentic PS1 look and the crispest facets.
 - **Props** (weapons) are separate meshes parented to `prop_l`/`prop_r`, so they can be thrown, swapped or hidden by clips.
 - **Axes:** the character faces **−Y in Blender** (looking at you in Front view), which exports to glTF +Z = Godot's `MODEL_FRONT`. Z is up. The rest pose is an A-pose.

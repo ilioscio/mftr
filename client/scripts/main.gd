@@ -99,6 +99,7 @@ var corpses := []
 const MINION_LIFT := -0.45               # minion bodies sit at y 0.45 (the capsule's center)
 const MINION_SLOTS := ["skin", "cloth", "metal", "emissive", "accent", "accent_glow"]
 const MapView := preload("res://scripts/map_view.gd")
+const FaceLife := preload("res://scripts/face_life.gd")
 var use_models := true
 var hovered_body: Node3D = null
 const TURN_RATE := deg_to_rad(4500.0)    # 10 §3: a 180° turn in ~40 ms
@@ -110,7 +111,8 @@ const MODEL_LIFT := -0.85                # bodies sit at y 0.85 (the placeholder
 var vfx: Node3D
 var _vfx_tables := {}                    # champion name -> { event: [effect] }
 var _vfx_recent := {}                    # dedupe key -> time (a prediction and its confirmation)
-const PARTICLE_KITS := ["flare", "burst", "ring", "dust", "slash", "flash", "crack", "pillar", "shock", "rocks", "rain"]
+const PARTICLE_KITS := ["flare", "burst", "ring", "dust", "slash", "flash", "crack", "pillar", "shock", "rocks", "rain",
+		"vortex", "embers", "shards", "smoke", "motes"]
 # A4c: the SFX player and each champion's sounds by event, from its pack's `<id>.sfx.ron`,
 # falling back to the shared library's (as the VFX do).
 var sfx: Node3D
@@ -242,6 +244,66 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--shot-tab":
 			_shot_tab = true
+		elif args[i] == "--practice" and i + 1 < args.size():
+			# The creator's Test without the creator (screenshots): a practice duel for this file.
+			_practice_start = args[i + 1]
+			i += 1
+		elif args[i] == "--practice-leave" and i + 1 < args.size():
+			# …and leave it after this many seconds, as Esc → Leave would (the creator reopens).
+			_practice_leave = float(args[i + 1])
+			i += 1
+		elif args[i] == "--creator":
+			_start_creator = true
+		elif args[i] == "--creator-load" and i + 1 < args.size():
+			_start_creator = true
+			_creator_load = args[i + 1]
+			i += 1
+		elif args[i] == "--creator-step" and i + 1 < args.size():
+			_creator_step = args[i + 1]
+		elif args[i] == "--creator-scroll" and i + 1 < args.size():
+			# …its side panel scrolled this far (screenshots of the lower panels).
+			_creator_scroll = int(args[i + 1])
+			i += 1
+		elif args[i] == "--creator-zoom" and i + 1 < args.size():
+			# …and zoomed this much (past the wheel's 3, for close-ups of the eyes).
+			_creator_zoom = float(args[i + 1])
+			i += 1
+		elif args[i] == "--creator-yaw" and i + 1 < args.size():
+			# …turned this far (radians; screenshots from the side).
+			_creator_yaw = float(args[i + 1])
+			i += 1
+		elif args[i] == "--creator-brush" and i + 1 < args.size():
+			# A brush or decal stroke at a point of the stage (fractions of its size), to check
+			# painting in screenshots (CR5b): `decal:0.5,0.45:0` (a palette color last), `brush:0.5,0.6`.
+			_creator_brush = args[i + 1]
+		elif args[i] == "--creator-sculpt" and i + 1 < args.size():
+			# A few sculpt strokes at a point of the stage (CR9): `inflate:0.5,0.2`.
+			_creator_sculpt = args[i + 1]
+			i += 1
+		elif args[i] == "--creator-random-face" and i + 1 < args.size():
+			# A random face from the shapes (FR5), seeded: captures of what Randomize gives.
+			_creator_random_face = int(args[i + 1])
+			i += 1
+		elif args[i] == "--creator-life" and i + 1 < args.size():
+			# The eyes held for a capture (22 §2.4): `BLINK,YAW,PITCH` (0–1, radians).
+			_creator_life = args[i + 1]
+			i += 1
+		elif args[i] == "--creator-body" and i + 1 < args.size():
+			# A part of the body dragged on the stage (FR6), as `--creator-feature`:
+			# `size:0.5,0.4:0.5,0.3` grows what's under the first point; `move:…`; `:hold`.
+			_creator_body = args[i + 1]
+			i += 1
+		elif args[i] == "--creator-feature" and i + 1 < args.size():
+			# A face feature dragged on the stage (FR4): `move:0.5,0.5:0.5,0.42` (from, to as
+			# fractions of the stage), `turn:…`, `size:…`; `:hold` keeps the drag open, glowing.
+			_creator_feature = args[i + 1]
+			i += 1
+		elif args[i] == "--champion-file" and i + 1 < args.size():
+			# A champion made in the creator (CR2): registered here, its model forged.
+			var loaded := MftrModel.load_champion_file(args[i + 1])
+			if loaded != "":
+				print("MFTR: loaded champion ", loaded)
+			i += 1
 		elif args[i] == "--lineup" and i + 1 < args.size():
 			_lineup = args[i + 1]
 			i += 1
@@ -366,6 +428,12 @@ func _ready() -> void:
 		_start_lineup.call_deferred()
 	elif _start_editor:
 		_open_map_editor.call_deferred()
+	elif _start_creator:
+		_open_creator.call_deferred()
+	elif _practice_start != "" and not _practice_started:
+		# Once: leaving the match reloads the scene, and the creator takes over from there.
+		_practice_started = true
+		_start_practice.call_deferred(_practice_start, MftrModel.load_champion_file(_practice_start))
 	elif address == "" or _back_to_menu:
 		_back_to_menu = false
 		_show_menu("")
@@ -505,12 +573,15 @@ func _art_path(rel: String) -> String:
 
 
 ## A champion's own pack (`art/champions/<id>/export/<id>.glb`, A4) if it ships one and it
-## validates, else the template. Loaded once per champion.
+## validates, else its model forged from its champion file's looks (the creator, CR2), else the
+## template. Built once per champion.
 func _model_for(champion: String) -> MftrModel:
 	if not champion_models.has(champion):
 		var id := champion.to_lower()
 		var path := _art_path("champions/%s/export/%s.glb" % [id, id])
 		var own: MftrModel = MftrModel.load(path) if FileAccess.file_exists(path) else null
+		if own == null:
+			own = MftrModel.forge(_art_root(), champion)
 		champion_models[champion] = own if own != null else champion_model
 	return champion_models[champion]
 
@@ -606,6 +677,25 @@ var _shot_claim := false                 # `--shot-claim`: take Claim in F at th
 var _start_editor := false               # `--map-editor`: open the map editor at start
 var _editor_actual := false              # `--editor-actual`: …in its Actual view (captures)
 var _editor_angle := false               # `--editor-angle`: …from the game's camera angle
+# The creator's Test: a practice server in this process, for this champion file. Static: leaving
+# the match reloads the scene, and the menu then reopens the creator on the file.
+static var practice: MftrPractice = null
+static var _practice_file := ""
+var _practice_start := ""               # `--practice FILE`: start a practice duel for it
+static var _practice_started := false    # …started already (it survives the leave's reload)
+var _practice_leave := -1.0             # `--practice-leave S`: …and leave it after S seconds
+var _start_creator := false              # `--creator`: open the champion creator (20) at start
+var _creator_load := ""                  # `--creator-load FILE`: …with this champion file
+var _creator_yaw := INF                 # `--creator-yaw R`: …turned this far (screenshots)
+var _creator_scroll := 0                 # `--creator-scroll PX`: …its panel scrolled (screenshots)
+var _creator_zoom := 0.0                # `--creator-zoom Z`: …zoomed this much (screenshots)
+var _creator_step := ""                  # `--creator-step NAME`: …on this step (screenshots)
+var _creator_brush := ""                 # `--creator-brush TOOL:X,Y`: …and paint once there (screenshots)
+var _creator_sculpt := ""                # `--creator-sculpt BRUSH:X,Y`: …or sculpt there (screenshots)
+var _creator_random_face := -1           # `--creator-random-face SEED`: …with a random face
+var _creator_feature := ""               # `--creator-feature MODE:X,Y:X,Y[:hold]`: …or drag a face feature
+var _creator_life := ""                  # `--creator-life BLINK,YAW,PITCH`: …with the eyes held
+var _creator_body := ""                  # `--creator-body MODE:X,Y:X,Y[:hold]`: …or a part of the body
 var _editor_map := ""                    # `--editor-map bridge|crossroads|FILE`: …on that map
 var _dev_overlay := ""                   # `--dev-overlay FILE`: the editor's reference image
 var _shot_ward := false                  # `--shot-ward`: place a stealth ward ahead at 2.5 s
@@ -1254,6 +1344,11 @@ func _attach_model(body: MeshInstance3D, team: Color, champion: String, pack: Mf
 		m.set_shader_parameter("team_accent", team)
 		m.set_shader_parameter("identity", CHAMPION_COLORS.get(champion, Color(0.5, 0.5, 0.5)))
 		m.set_shader_parameter("identity_mix", 0.6 if template else 0.0)
+		# A champion made in the creator: its brush strokes and decals (CR5b).
+		var paint: ImageTexture = source.surface_paint(i)
+		if paint != null:
+			m.set_shader_parameter("paint", paint)
+			m.set_shader_parameter("has_paint", true)
 		m.next_pass = outline
 		mesh.set_surface_override_material(i, m)
 		mats.append(m)
@@ -1265,7 +1360,14 @@ func _attach_model(body: MeshInstance3D, team: Color, champion: String, pack: Mf
 		"yaw": NAN,
 		"last": Vector3.INF,
 		"speed": 0.0,
+		"life": _face_life(model.get_node("Skeleton")),
 	})
+
+
+## A forged champion's eyes look about and blink (22 §2.4); null for a model without eye bones.
+func _face_life(skeleton: Skeleton3D) -> FaceLife:
+	var life := FaceLife.new()
+	return life if life.setup(skeleton) else null
 
 
 ## Model or placeholder shapes (F3).
@@ -1335,6 +1437,8 @@ func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
 			_fire_effects(champ, e.substr(5), p, rig.yaw)
 		else:
 			_sfx_play(champ, [e + ".cast", "*.cast"], p + Vector3(0, 1.2, 0))
+	if rig.get("life") != null and not info.get("dead", false):
+		rig.life.tick(rig.skeleton, delta)
 
 
 func _flash(id: int) -> void:
@@ -3840,6 +3944,12 @@ func _draw_bottom_hud(font: Font) -> void:
 			overlay.draw_texture_rect(ItemIcons.icon(pot), Rect2(hb.position + Vector2(2.0 * k, -2.0 * k), Vector2(pi, pi)), false)
 		Hud.text(overlay, font, hb.position + Vector2(pi + 6.0 * k, hb.size.y / 2.0 + 5.0 * k), "%d s" % ceili(potion), roundi(12.0 * k), Color(0.6, 1.0, 0.65))
 	Hud.text(overlay, bold, hb.position + Vector2(0, hb.size.y / 2.0 + 5.0 * k), hp_text, roundi(14.0 * k), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, hb.size.x)
+	# The resource (01 §9): a thin bar under the health, in its color (health costs have none).
+	var rkind: String = own_status.get("resource_kind", "")
+	if rkind != "" and rkind != "health":
+		var rcolor: Color = {"mana": Color(0.3, 0.55, 1.0), "energy": Color(1.0, 0.86, 0.3), "rage": Color(0.92, 0.25, 0.2)}[rkind]
+		var rb := Rect2(hb.position.x, hb.end.y + 2.0 * k, hb.size.x, 7.0 * k)
+		Hud.bar(overlay, rb, own_status.get("resource", 0.0), maxf(own_status.get("resource_max", 1.0), 1.0), rcolor, 0.0, Color.WHITE, 0.0, 0.0)
 	# Jungle buffs: their names and seconds left, just above the health bar.
 	var bx := hb.position.x
 	for buff in [["insight", "Insight", Color(0.45, 0.68, 1.0)], ["cinder", "Cinder", Color(1.0, 0.5, 0.25)]]:
@@ -6395,6 +6505,12 @@ func _center(panel: Control) -> void:
 
 
 func _show_menu(error: String) -> void:
+	# Back from the creator's Test: stop the practice server and reopen the creator on it.
+	if practice != null and practice.running():
+		practice.stop()
+		_creator_load = _practice_file
+		_open_creator.call_deferred()
+		return
 	print("MFTR: start menu")
 	if menu_panel != null:
 		menu_panel.queue_free()
@@ -6490,6 +6606,11 @@ func _show_menu(error: String) -> void:
 		err.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4))
 		v.add_child(err)
 	v.add_child(HSeparator.new())
+	var creator := Button.new()
+	creator.text = "Champion creator"
+	creator.tooltip_text = "Make your own champion: build, face, body and kit; save it as a champion file a server can offer."
+	creator.pressed.connect(_open_creator)
+	v.add_child(creator)
 	var editor := Button.new()
 	editor.text = "Map editor"
 	editor.tooltip_text = "Draw lane maps: lanes, river, jungle and camps; export one for a server to host."
@@ -6610,6 +6731,84 @@ func _release_to_get() -> String:
 	if theirs != "":
 		return theirs if MftrRelease.is_newer(theirs) else ""
 	return updates.newer_version()
+
+
+## The champion creator (20, CR3), over everything; closing it brings the menu back. A champion
+## it saves is registered here, so it can be picked and its model forged.
+func _open_creator() -> void:
+	if menu_panel != null:
+		menu_panel.queue_free()
+		menu_panel = null
+	var screen: Control = preload("res://scripts/creator.gd").new()
+	screen.setup(_art_root())
+	if _creator_yaw != INF:
+		screen._yaw = _creator_yaw
+	if _creator_zoom > 0.0:
+		screen._zoom = _creator_zoom
+	overlay.get_parent().add_child(screen)
+	if _creator_load != "":
+		screen.call_deferred("load_file", _creator_load)
+	if _creator_step != "":
+		screen.call_deferred("_show_step", _creator_step)
+	if _creator_brush != "":
+		await get_tree().create_timer(1.0).timeout
+		var parts := _creator_brush.split(":")
+		var xy := parts[1].split(",")
+		screen.paint_at_fraction(parts[0], Vector2(float(xy[0]), float(xy[1])), int(parts[2]) if parts.size() > 2 else -1)
+	if _creator_sculpt != "":
+		await get_tree().create_timer(1.0).timeout
+		var sp := _creator_sculpt.split(":")
+		var sxy := sp[1].split(",")
+		screen.sculpt_at_fraction(sp[0], Vector2(float(sxy[0]), float(sxy[1])))
+	if _creator_random_face >= 0:
+		await get_tree().create_timer(0.5).timeout
+		screen.random_face(_creator_random_face)
+	if _creator_feature != "":
+		await get_tree().create_timer(1.0).timeout
+		var fp := _creator_feature.split(":")
+		var a := fp[1].split(",")
+		var b := fp[2].split(",")
+		screen.feature_at_fraction(fp[0], Vector2(float(a[0]), float(a[1])), Vector2(float(b[0]), float(b[1])), 8, fp.size() > 3 and fp[3] == "hold")
+	if _creator_scroll > 0:
+		await get_tree().create_timer(0.8).timeout
+		screen.scroll_panel(_creator_scroll)
+	if _creator_life != "":
+		var lp := _creator_life.split(",")
+		screen.hold_eyes(Vector3(float(lp[0]), float(lp[1]) if lp.size() > 1 else 0.0, float(lp[2]) if lp.size() > 2 else 0.0))
+	if _creator_body != "":
+		await get_tree().create_timer(1.0).timeout
+		# Several drags, one after another: `size:…;move:…`.
+		for drag in _creator_body.split(";"):
+			var bp := drag.split(":")
+			var ba := bp[1].split(",")
+			var bb := bp[2].split(",")
+			screen.feature_at_fraction(bp[0], Vector2(float(ba[0]), float(ba[1])), Vector2(float(bb[0]), float(bb[1])), 8, bp.size() > 3 and bp[3] == "hold", "body")
+	screen.saved.connect(func(_path): champion_models.clear())
+	screen.test.connect(_start_practice)
+	screen.closed.connect(func(): _show_menu(""))
+	if _shot_path != "":
+		await get_tree().create_timer(maxf(_shot_at, 1.5)).timeout
+		get_viewport().get_texture().get_image().save_png(_shot_path)
+		print("MFTR: saved screenshot to ", _shot_path)
+		get_tree().quit()
+
+
+## The creator's Test (20 §10): a practice duel for `champion` on a server in this process.
+func _start_practice(path: String, champion: String) -> void:
+	if practice == null:
+		practice = MftrPractice.create()
+	var address: String = practice.start(path)
+	if address == "":
+		_creator_load = path
+		_open_creator()
+		return
+	_practice_file = path
+	_menu_champion = champion
+	client.set_spectate(false)
+	client.set_champion(champion)
+	_connect(address)
+	if _practice_leave > 0.0:
+		get_tree().create_timer(_practice_leave).timeout.connect(_leave)
 
 
 ## The map editor (12), over everything; closing it brings the menu back.

@@ -9,8 +9,11 @@
 use std::sync::Arc;
 
 use godot::classes::audio_stream_wav::Format;
+use godot::classes::image::Format as ImageFormat;
 use godot::classes::mesh::{ArrayType, PrimitiveType};
-use godot::classes::{ArrayMesh, AudioStreamWav, MeshInstance3D, Node3D, RefCounted, Skeleton3D};
+use godot::classes::{
+    ArrayMesh, AudioStreamWav, Image, ImageTexture, MeshInstance3D, Node3D, RefCounted, Skeleton3D, Skin,
+};
 use godot::prelude::*;
 use mftr_pack::animator::{Action, ActionKind, AnimEvent, Animator, Drive, Phase};
 use mftr_pack::pose::Trs;
@@ -20,21 +23,94 @@ use mftr_pack::pose::Trs;
 pub struct MftrModel {
     base: Base<RefCounted>,
     pack: Arc<mftr_pack::Loaded>,
+    /// The creator's preview: each vertex carries its face region in UV2 (21 §3.2), which the
+    /// shader lights under the cursor. Game models don't.
+    regions: bool,
+}
+
+/// The champion creator's catalog (CR2), loaded once from the art folder.
+static CATALOG: std::sync::Mutex<Option<Arc<mftr_forge::Catalog>>> = std::sync::Mutex::new(None);
+
+pub(crate) fn catalog(art: &str) -> Option<Arc<mftr_forge::Catalog>> {
+    let mut c = CATALOG.lock().unwrap_or_else(|e| e.into_inner());
+    if c.is_none() {
+        match mftr_forge::Catalog::load(std::path::Path::new(art)) {
+            Ok(cat) => *c = Some(Arc::new(cat)),
+            Err(e) => {
+                godot_error!("MFTR creator catalog: {e}");
+                return None;
+            }
+        }
+    }
+    c.clone()
+}
+
+impl MftrModel {
+    /// A model of a pack built here (the creator's preview, CR3).
+    pub(crate) fn from_pack(pack: Arc<mftr_pack::Loaded>) -> Gd<MftrModel> {
+        Gd::from_init_fn(|base| MftrModel { base, pack, regions: true })
+    }
 }
 
 #[godot_api]
 impl MftrModel {
+    /// Check and register a champion file from disk (`--champion-file`, the creator): its
+    /// champion's name, or "" if it was refused (the reason goes to the error log).
+    #[func]
+    fn load_champion_file(path: GString) -> GString {
+        let path = path.to_string();
+        match std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|t| mftr_client::load_champion_file(&t))
+        {
+            Ok(id) => GString::from(id.def().name),
+            Err(e) => {
+                godot_error!("MFTR champion file {path} refused: {e}");
+                GString::new()
+            }
+        }
+    }
+
+    /// Forge the model of `champion` from its champion file's looks and the catalog under `art`
+    /// (CR2, `mftr-forge`): `null` for a champion with no file or no looks.
+    #[func]
+    fn forge(art: GString, champion: GString) -> Option<Gd<MftrModel>> {
+        let text = mftr_client::champion_file(&champion.to_string())?;
+        let looks = match mftr_forge::looks::of_champion_file(&text) {
+            Ok(Some(l)) => l,
+            Ok(None) => return None,
+            Err(e) => {
+                godot_error!("MFTR {champion}'s looks: {e}");
+                return None;
+            }
+        };
+        let cat = catalog(&art.to_string())?;
+        match cat.forge(&champion.to_string(), &looks) {
+            Ok(pack) => Some(Gd::from_init_fn(|base| MftrModel { base, pack: Arc::new(pack), regions: false })),
+            Err(e) => {
+                godot_error!("MFTR {champion} couldn't be forged: {e}");
+                None
+            }
+        }
+    }
+
     /// Loads and validates `<id>.glb` and its `<id>.anims.ron` (an absolute path). `null` if it
     /// fails validation or can't be read (the reason goes to the error log).
     #[func]
     fn load(path: GString) -> Option<Gd<MftrModel>> {
         match mftr_pack::load_file(std::path::Path::new(&path.to_string())) {
-            Ok(pack) => Some(Gd::from_init_fn(|base| MftrModel { base, pack: Arc::new(pack) })),
+            Ok(pack) => Some(Gd::from_init_fn(|base| MftrModel { base, pack: Arc::new(pack), regions: false })),
             Err(e) => {
                 godot_error!("MFTR model refused: {e}");
                 None
             }
         }
+    }
+
+    /// Triangles drawn (the creator's budget meter, 20 §7.2).
+    #[func]
+    fn triangles(&self) -> i64 {
+        self.pack.model.triangles() as i64
     }
 
     /// The material slot of each surface of the mesh `instantiate` builds, in order.
@@ -46,6 +122,17 @@ impl MftrModel {
             .flatten()
             .map(|p| GString::from(p.material.and_then(|i| m.materials.get(i)).map_or("cloth", |s| s.as_str())))
             .collect()
+    }
+
+    /// The paint image of surface `i` (CR5b, D70: a forged champion's brush strokes and
+    /// decals), for the shader's `paint`; `null` for surfaces without one.
+    #[func]
+    fn surface_paint(&self, i: i64) -> Option<Gd<ImageTexture>> {
+        let prim = self.pack.model.meshes.iter().flatten().nth(usize::try_from(i).ok()?)?;
+        let p = prim.paint.as_ref()?;
+        let data = PackedByteArray::from(p.rgba.as_slice());
+        let img = Image::create_from_data(p.size as i32, p.size as i32, false, ImageFormat::RGBA8, &data)?;
+        ImageTexture::create_from_image(&img)
     }
 
     /// A new `Node3D` with a `Skeleton3D` ("Skeleton", in the rest pose) and the skinned mesh
@@ -66,7 +153,23 @@ impl MftrModel {
             }
         }
         skeleton.reset_bone_poses();
-        let skin = skeleton.create_skin_from_rest_transforms();
+        // The skin binds each bone where the mesh was built around it: its rest, except a face
+        // bone whose rest carries a sculpted face (21 §2.3), which binds where it was before.
+        // So the face shows at rest and in every pose, with no mesh rebuilt.
+        let mut global: Vec<Transform3D> = Vec::with_capacity(lib.rig.bind.len());
+        for (i, b) in lib.rig.bind.iter().enumerate() {
+            let local = transform(b);
+            let g = match lib.rig.parents[i] {
+                Some(p) => global[p] * local,
+                None => local,
+            };
+            global.push(g);
+        }
+        let mut skin = Skin::new_gd();
+        for (i, g) in global.iter().enumerate() {
+            skin.add_bind(i as i32, g.affine_inverse());
+        }
+        let skin = Some(skin);
 
         let mesh = self.build_mesh(true);
         let mut mesh_node = MeshInstance3D::new_alloc();
@@ -282,7 +385,12 @@ impl MftrModel {
     fn build_mesh(&self, skinned: bool) -> Gd<ArrayMesh> {
         let lib = &self.pack.library;
         let mut mesh = ArrayMesh::new_gd();
-        for prim in self.pack.model.meshes.iter().flatten() {
+        // Region k (face bone k - 1, 0 = none) as UV2.x = k / 256: the shader reads it back.
+        let regions = if self.regions { mftr_forge::face::vertex_regions(&self.pack.model) } else { Vec::new() };
+        let region_of = regions.iter().flatten();
+        for (prim, reg) in
+            self.pack.model.meshes.iter().flatten().zip(region_of.map(Some).chain(std::iter::repeat(None)))
+        {
             let n = prim.positions.len();
             let normals = smooth_normals(&prim.positions, &prim.indices);
             let mut arrays = VarArray::new();
@@ -295,6 +403,14 @@ impl MftrModel {
                 let colors: PackedColorArray =
                     prim.colors.iter().map(|c| Color::from_rgba(c[0], c[1], c[2], c[3])).collect();
                 arrays.set(ArrayType::COLOR.ord() as usize, &colors.to_variant());
+            }
+            if prim.uvs.len() == n {
+                let uvs: PackedVector2Array = prim.uvs.iter().map(|u| Vector2::new(u[0], u[1])).collect();
+                arrays.set(ArrayType::TEX_UV.ord() as usize, &uvs.to_variant());
+            }
+            if let Some(r) = reg.filter(|r| r.len() == n && r.iter().any(|&x| x > 0)) {
+                let uv2: PackedVector2Array = r.iter().map(|&x| Vector2::new(x as f32 / 256.0, 0.0)).collect();
+                arrays.set(ArrayType::TEX_UV2.ord() as usize, &uv2.to_variant());
             }
             if skinned && prim.joints.len() == n && prim.weights.len() == n {
                 let map = &lib.joint_to_bone;

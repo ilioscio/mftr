@@ -1,0 +1,128 @@
+# The face sliders as presets on the face bones (21 §2.7, FR3, D76).
+#
+# A recipe's `shape: (nose_reach: 0.6, …)` moves the face bones by 0.6 × the preset below
+# (negative values the opposite way), summed over every slider and clamped to each bone's limits
+# (mftr_forge::face::LIMITS). The forge and the Blender preview both read this file.
+#
+# Format: `[id] description` starts a preset; `[id+] …` is one-sided (values below 0 do
+# nothing). Each line under it: `bone kind x y z` with kind t (translation, 0.1 mm), r (rotation
+# vector, 0.01°) or s (scale, log2 in 0.001 steps), in the bone's own frame: +x toward the
+# character's right, +y out of the face, +z up; except the jaw's, which leans along the jaw toward
+# the chin (+y forward and down, +z back and down: straight down is y 0.68, z 0.74). A trailing `mirror` on a `_l` bone adds the
+# `_r` bone mirrored (x and the rotation's y and z flip).
+
+[head_width] A broad or a narrow head
+face_cheekbone_l t -224 0 0 mirror
+face_jaw_angle_l t -225 0 0 mirror
+face_ear_l t -240 0 0 mirror
+face_forehead s 297 0 0
+
+[face_length] A long or a short lower face
+jaw t 0 160 176
+face_chin t 0 0 -128
+
+[jaw_width] A wide, square jaw or a narrow one
+face_jaw_angle_l t -225 0 0 mirror
+face_jaw_angle_l s 320 0 320 mirror
+jaw s 256 0 0
+
+[chin_length] A long chin or a short one
+face_chin t 0 0 -288
+face_chin s 0 0 352
+
+[chin_reach] A jutting chin or a receding one
+face_chin t 0 360 0
+
+[cheekbones] High, sharp cheekbones or flat ones
+face_cheekbone_l t -144 225 80 mirror
+face_cheekbone_l s 400 400 400 mirror
+
+[cheeks_hollow] Gaunt, hollow cheeks or full ones
+face_cheek_l t 64 -225 0 mirror
+face_cheek_l s -400 -400 -400 mirror
+
+[brow_ridge] A heavy brow ridge or a smooth forehead
+face_brow_l t 0 225 -48 mirror
+face_brow_l s 400 400 400 mirror
+face_brow_mid t 0 225 -48
+
+[nose_length] A long nose or a short one
+face_nose_tip t 0 96 -256
+face_nose_tip s 0 0 400
+
+[nose_reach] A nose that stands far out, or a flat one
+face_nose_tip t 0 320 0
+
+[nose_width] A broad nose or a thin one
+face_nostril_l t -208 0 0 mirror
+face_nose_tip s 560 0 0
+
+[nose_hook] A hooked bridge or a scooped one
+face_nose_bridge t 0 192 0
+face_nose_tip r -1260 0 0
+
+[mouth_width] A wide mouth or a small one
+face_mouth_l t -225 0 0 mirror
+face_lip_upper s 480 0 0
+face_lip_lower s 480 0 0
+
+[eyes_size] Big eyes or small ones
+face_eye_l s 495 495 495 mirror
+
+[ears_size] Big ears or small ones
+face_ear_l s 675 675 675 mirror
+
+[ears_point+] Pointed ears
+face_ear_l t -64 0 256 mirror
+face_ear_l s 0 0 675 mirror
+
+[eyes_spacing] Wide-set eyes or close-set ones
+face_eye_l t -128 0 0 mirror
+
+[eyes_height] Eyes set high in the face or low
+face_eye_l t 0 0 144 mirror
+
+[eyes_tilt] Eyes slanting up at the corners, or down
+face_eye_l r 0 -1800 0 mirror
+
+[eyes_depth] Deep-set eyes or prominent ones
+face_eye_l t 0 -45 0 mirror
+
+[brow_height] A brow set high or low over the eyes
+face_brow_l t 0 0 225 mirror
+face_brow_mid t 0 0 208
+
+[brow_angle] A scowling brow or a worried one
+face_brow_l r 0 1800 0 mirror
+face_brow_mid t 0 0 -160
+
+[mouth_lips] Full lips or thin ones
+face_lip_upper s 0 495 495
+face_lip_lower s 0 495 495
+face_lip_upper t 0 160 0
+face_lip_lower t 0 160 0
+
+[mouth_height] A mouth set high, near the nose, or low
+face_lip_upper t 0 0 225
+face_lip_lower t 0 0 225
+face_mouth_l t 0 0 225 mirror
+
+[mouth_corners] A smile or a frown
+face_mouth_l t 0 0 225 mirror
+face_mouth_l r 0 1260 0 mirror
+
+[head_forehead] A tall, upright forehead or a sloping one
+face_forehead t 0 180 128
+face_forehead r -1080 0 0
+
+[head_crown] A tall crown or a flat one
+face_forehead s 0 0 297
+face_forehead t 0 0 180
+
+[jaw_corners] Heavy, dropped jaw corners or a tapered jaw
+face_jaw_angle_l t -160 0 -225 mirror
+face_jaw_angle_l s 480 480 480 mirror
+
+[nose_tip] An upturned nose or a drooping one
+face_nose_tip r 1960 0 0
+face_nose_tip t 0 0 128

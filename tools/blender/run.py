@@ -11,6 +11,8 @@ Commands:
                                                 next to the .blend)
     review      [--out DIR] [--clips a,b]       Review renders (default DIR: ./review next to
                                                 the .blend, git-ignored)
+    moves                                       Add (or replace) the creator's own moves' clips
+                                                (`mftr_blender.moveset`) in the open library file
 """
 
 import os
@@ -20,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bpy  # noqa: E402
 
-from mftr_blender import export, library, mesh, review, rig  # noqa: E402
+from mftr_blender import export, library, mesh, moveset, review, rig  # noqa: E402
 
 
 def _args():
@@ -59,6 +61,11 @@ def main():
         os.makedirs(os.path.dirname(out), exist_ok=True)
         bpy.ops.wm.save_as_mainfile(filepath=out, compress=True)
         print(f"saved {out}")
+    elif cmd == "moves":
+        # The creator's own moves' clips (`moveset`), added to the open library file.
+        names = moveset.add(export.find_armature())
+        bpy.ops.wm.save_mainfile(compress=True)
+        print(f"moves: {names}")
     elif cmd == "export":
         r = export.export(opts.get("out") or _here("export"), opts["id"], opts["kind"])
         print(f"exported {r}")

@@ -96,6 +96,12 @@ impl SimDuration {
     pub const fn from_millis(ms: u64) -> Self {
         SimDuration(ms * SUBTICKS_PER_SECOND / 1000)
     }
+
+    /// This duration times `k`, to the nearest whole millisecond (what champion files hold).
+    pub fn scaled_ms(self, k: f32) -> Self {
+        let ms = self.0 as f64 * 1000.0 / SUBTICKS_PER_SECOND as f64 * k as f64;
+        SimDuration::from_millis(ms.round().max(0.0) as u64)
+    }
 }
 
 /// Map a continuous server time, in fractional ticks, to the tick whose interval contains it

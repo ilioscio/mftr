@@ -1,0 +1,61 @@
+// Rook-neo: Rook rebuilt in the champion creator, to play next to the hand-made Rook (20 §12).
+// Generated from art/champions/rook/rook.champion.ron with the name changed (a test keeps them in step);
+// load the whole set with `mftr-server --champion-dir art/champions/neo --champions both`.
+// A grizzled veteran in slab pauldrons and a crimson tabard, a maul in his fists.
+// The kit is a copy of crates/mftr-sim/champions/rook.ron (a test checks they match); the
+// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// Rook: Bruiser (melee).
+// Bruiser: a cleave, a missing-health heal, a slowing lunge, and a slowing shockwave.
+// Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability
+// numbers are rank 1, and `per_rank` adds to them each rank (M2 slice 2). Durations are in
+// milliseconds. The format is in `crates/mftr-sim/src/data.rs`.
+Champion(
+    format: 0,
+    looks: (
+        build: "humanoid_heavy",
+        gender: Masculine,
+        shape: (jaw_width: 0.8, chin_reach: 0.4, chin_length: 0.2, brow_ridge: 0.9, nose_width: 0.5, nose_hook: 0.4, cheekbones: 0.3, cheeks_hollow: 0.3, eyes_size: -0.4, body_bulk: 0.4, body_shoulders: 0.6, body_muscle: 0.4, neck_thickness: 1),
+        proportions: (legs: -0.2, arms: 0.3, head: -0.2, hands: 0.5),
+        skin: 3,
+        outfit: ["hair.short", "shoulders.slabs", "torso.tunic", "arms.gauntlets", "legs.greaves", "feet.boots", "waist.belt", "weapon.maul"],
+        paint: [("body", 0, 4), ("torso.tunic", 0, 18), ("hair.short", 0, 2)],
+        signature: 355,
+        moves: (attack: "rook.attack", q: "rook.q", w: "rook.w", e: "rook.e", r: "rook.r"),
+    ),
+    name: "Rook-neo",
+    class: Bruiser,
+    stats: (max_health: 650, health_regen: 1.7, armor: 33, magic_resist: 32, attack_damage: 68, move_speed: 340),
+    growth: (max_health: 102, health_regen: 0.08, armor: 4.5, magic_resist: 1.6, attack_damage: 3.8),
+    attack: (range: 175, attack_speed: 0.7, windup_fraction: 0.28),
+    abilities: [
+        (
+            name: "Cleave",
+            cooldown_ms: 6000,
+            effect: Area(windup_ms: 200, radius: 275, damage: (kind: Physical, base: 40, ad_ratio: 1)),
+            reaction: None,
+            per_rank: (damage: 25, cooldown_ms: 500),
+        ),
+        (
+            name: "Second Wind",
+            cooldown_ms: 14000,
+            effect: Support(heal: 40, heal_missing: 0.12),
+            reaction: None,
+            per_rank: (damage: 20, cooldown_ms: 1000),
+        ),
+        (
+            name: "Lunge",
+            cooldown_ms: 10000,
+            effect: Lunge(range: 550, speed: 1500, damage: (kind: Physical, base: 50, ad_ratio: 0.6), cc: Slow(pct: 30, ms: 1000)),
+            reaction: None,
+            per_rank: (damage: 30, cooldown_ms: 800),
+        ),
+        (
+            name: "Shockwave",
+            cooldown_ms: 60000,
+            effect: Line(windup_ms: 450, speed: 1400, radius: 90, range: 700, damage: (kind: Physical, base: 150, ad_ratio: 0.8), cc: Slow(pct: 50, ms: 1500)),
+            reaction: Burst,
+            per_rank: (damage: 100, cooldown_ms: 10000),
+            transforms: [Multishot, Echo, Wide],
+        ),
+    ],
+)

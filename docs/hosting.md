@@ -201,6 +201,9 @@ that key over the same way, without `adoptKeyFrom`.
 | `--max-matches N` | `32` | Matches running at once, at most. Past it, a player who'd need a new match is told the server is busy, and their client keeps asking. |
 | `--workers N` | one per core | Threads that step the matches. |
 | `--seed N` | fresh | Seeds everything random (each match draws its own seed from it), to play a run's matches again. Without it, every start picks a fresh seed and prints it. |
+| `--champion-file FILE` | none | Add a custom champion (a `*.champion.ron` from the champion creator, or by hand; up to 21). The server checks each at start like a pack (the format and the limits every kit respects) and refuses one that breaks a rule; players download them before they join, and replays carry them. |
+| `--champion-dir DIR` | none | Add every `*.champion.ron` in a folder, as `--champion-file` does each. `art/champions/neo` holds the official ten rebuilt in the creator (`Rook-neo` …), to play next to the hand-made ones: `--champion-dir art/champions/neo --champions both`. |
+| `--champions WHICH` | `official` (`both` once a champion file is given) | Which champions matches draw from: `official`, `customs` or `both`. |
 | `--bot-tier T` | `veteran` | How well bots play: `recruit`, `veteran`, `elite` or `nightmare` (see below). |
 | `--replay DIR` | off | Record every match into DIR, as `<started>-<queue>-<match>.replay`. A file is rewritten every minute, when its match ends and when it stops. |
 | `--scenario NAME` | | For development: offer this one scenario instead, any of the above or `duel` (the Duel Sandbox), `minions`, `dodge`, `empty` (test grounds). With it, `--bots N` adds server bots (they count toward `--max-players N`, default 10: leave a seat for each player) and `--lobby` holds champion select first. A spectating client can watch a match of bots alone. |

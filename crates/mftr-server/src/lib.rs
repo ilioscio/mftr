@@ -18,10 +18,12 @@ use mftr_sim::{
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+pub mod customs;
 pub mod game;
 pub mod hub;
 pub mod inspect;
 pub mod lobby;
+pub mod local;
 pub use game::{Fog, Match, Replay, ReplayCheck, ReplayEntry};
 pub use hub::{Hub, HubConfig, QueueSpec};
 use lobby::Lobby;
@@ -164,6 +166,10 @@ pub struct ServerConfig {
     /// How well bots play (17 §3): the starting choice in co-op champion select, and the tier
     /// of Versus fill-ins and of bots that take over dropped players.
     pub bot_tier: Tier,
+    /// The server's champion files (CR1d), sent to players before they join and recorded in
+    /// replays, and which champions matches draw from.
+    pub customs: customs::Customs,
+    pub champions: customs::ChampionPolicy,
 }
 
 impl Default for ServerConfig {
@@ -180,6 +186,8 @@ impl Default for ServerConfig {
             map: None,
             coop: false,
             bot_tier: Tier::Veteran,
+            customs: customs::Customs::default(),
+            champions: customs::ChampionPolicy::Official,
         }
     }
 }
@@ -308,6 +316,22 @@ struct Dropped {
     since: f64,
 }
 
+/// A `MapChunk` of `text` (a custom map or a champion file) from byte `have` on.
+pub(crate) fn file_chunk(text: &str, hash: u64, have: u32, header: &PacketHeader) -> Option<Vec<u8>> {
+    let start = have as usize;
+    if start > text.len() {
+        return None;
+    }
+    let end = (start + msg::MAP_CHUNK_BYTES).min(text.len());
+    let chunk = ServerMessage::MapChunk {
+        hash,
+        total: text.len() as u32,
+        offset: have,
+        bytes: text.as_bytes()[start..end].to_vec(),
+    };
+    Some(msg::encode_server(header, &chunk))
+}
+
 pub struct ServerCore {
     cfg: ServerConfig,
     game: Match,
@@ -333,6 +357,9 @@ pub struct ServerCore {
     missiles: BTreeMap<u32, Missile>,
     areas: BTreeMap<u32, Area>,
     channels: BTreeMap<u32, Channel>,
+    /// Packet sequences for clients that haven't joined yet (fetching champion files, CR1d):
+    /// the client drops a repeated sequence as a duplicate.
+    front: BTreeMap<ClientKey, SendTracker>,
     pub stats: ServerStats,
 }
 
@@ -375,6 +402,7 @@ impl ServerCore {
             missiles: BTreeMap::new(),
             areas: BTreeMap::new(),
             channels: BTreeMap::new(),
+            front: BTreeMap::new(),
             stats: ServerStats::default(),
         }
     }
@@ -512,9 +540,17 @@ impl ServerCore {
         };
         let mut out = Vec::new();
         match message {
-            ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate, .. } => {
+            ClientMessage::Hello { protocol, client_time_us, champion, resume, spectate, roster, .. } => {
                 if protocol != PROTOCOL_VERSION {
                     out.push((from, self.reject(RejectReason::ProtocolMismatch)));
+                    return out;
+                }
+                // Customs (CR1d): the client loads this server's champion files first.
+                if !self.cfg.customs.is_empty() && roster != self.cfg.customs.hash() {
+                    let header = self.front_header(from);
+                    let bytes = msg::encode_server(&header, &ServerMessage::Roster(self.cfg.customs.roster()));
+                    self.stats.bytes_out += bytes.len() as u64;
+                    out.push((from, bytes));
                     return out;
                 }
                 if let Some(p) = self.pending.get_mut(&from) {
@@ -635,9 +671,18 @@ impl ServerCore {
                 }
             }
             ClientMessage::MapRequest { hash, have } => {
-                // A piece of the custom map, to players and those in champion select only.
-                let Some(text) = self.cfg.map.clone() else { return out };
-                if mftr_sim::mapspec::text_hash(&text) != hash || have as usize > text.len() {
+                // A piece of the custom map or of a champion file (CR1d).
+                let map = self.cfg.map.clone().filter(|t| mftr_sim::mapspec::text_hash(t) == hash);
+                let Some(text) = map.or_else(|| self.cfg.customs.file(hash).cloned()) else { return out };
+                if have as usize > text.len() {
+                    return out;
+                }
+                if !self.conns.contains_key(&from) && !self.pending.contains_key(&from) {
+                    let header = self.front_header(from);
+                    let Some(bytes) = file_chunk(&text, hash, have, &header) else { return out };
+                    // Not joined yet: fetching champion files before the hello that joins.
+                    self.stats.bytes_out += bytes.len() as u64;
+                    out.push((from, bytes));
                     return out;
                 }
                 let header = if let Some(conn) = self.conns.get_mut(&from) {
@@ -793,9 +838,15 @@ impl ServerCore {
 
     fn make_lobby(cfg: &ServerConfig, seed: u64) -> Lobby {
         let lobby = if cfg.scenario == Scenario::Horde {
-            Lobby::blue_only(seed, cfg.max_players, cfg.bots, true)
+            Lobby::blue_only_from(seed, cfg.max_players, cfg.bots, true, cfg.customs.pool(cfg.champions))
         } else {
-            Lobby::new(seed, cfg.max_players, cfg.bots, cfg.scenario == Scenario::Classic)
+            Lobby::from_pool(
+                seed,
+                cfg.max_players,
+                cfg.bots,
+                cfg.scenario == Scenario::Classic,
+                cfg.customs.pool(cfg.champions),
+            )
         };
         // Co-op humans choose how well the bots play (17 §9).
         if cfg.coop { lobby.with_bot_vote(cfg.bot_tier) } else { lobby }
@@ -846,13 +897,24 @@ impl ServerCore {
         field.chain(joining).collect()
     }
 
+    /// The next packet header for a client that hasn't joined (bounded: a flood of strangers
+    /// starts it over).
+    fn front_header(&mut self, key: ClientKey) -> PacketHeader {
+        if self.front.len() > 4096 {
+            self.front.clear();
+        }
+        let send = self.front.entry(key).or_default();
+        PacketHeader { seq: send.next_seq(), ack: 0, ack_bits: 0 }
+    }
+
     /// A random champion `seat`'s team doesn't have, other than `besides` (not part of the
     /// simulation: the takeover records the choice).
     fn deal(&mut self, seat: PlayerId, besides: &[ChampionId]) -> ChampionId {
         let taken = self.team_champions(seat);
+        let all = self.cfg.customs.pool(self.cfg.champions);
         let free: Vec<ChampionId> =
-            ChampionId::ALL.into_iter().filter(|c| !taken.contains(c) && !besides.contains(c)).collect();
-        let pool = if free.is_empty() { ChampionId::ALL.to_vec() } else { free };
+            all.iter().copied().filter(|c| !taken.contains(c) && !besides.contains(c)).collect();
+        let pool = if free.is_empty() { all } else { free };
         pool[self.tokens.next_u32() as usize % pool.len()]
     }
 
@@ -1555,6 +1617,8 @@ pub struct ItemLog {
     pub uses: Vec<(u8, u32)>,
     /// Damage to enemy champions by item effects (`DamageOrigin::Item`), per item.
     pub damage: Vec<(u8, f32)>,
+    /// Q W E R cast (a cast started), for how bots use each move (CR7's leagues).
+    pub casts: [u32; 4],
     /// Basic attacks that hit an enemy champion, and how many crit.
     pub attacks: u32,
     pub crits: u32,
@@ -1709,6 +1773,13 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
                 let i = log_of(&mut logs, *unit);
                 bump(&mut logs[i].1.uses, *item, 1u32);
             }
+            if let SimEvent::CastStarted { unit, slot, .. } = e
+                && *slot < 4
+                && core.game.world.unit(*unit).is_some_and(|u| u.kind == UnitKind::Champion)
+            {
+                let i = log_of(&mut logs, *unit);
+                logs[i].1.casts[*slot as usize] += 1;
+            }
             if let SimEvent::Damage { source, target, amount, absorbed, origin, crit, .. } = e
                 && let (Some(s), Some(t)) = (core.game.world.unit(*source), core.game.world.unit(*target))
                 && s.kind == UnitKind::Champion
@@ -1718,7 +1789,10 @@ pub fn run_bot_match_with(cfg: ServerConfig, max_ticks: u32, opts: &BotMatchOpti
                 let i = log_of(&mut logs, s.id);
                 let log = &mut logs[i].1;
                 match origin {
-                    mftr_sim::world::DamageOrigin::Item(item) => bump(&mut log.damage, *item, amount + absorbed),
+                    // Items only: a champion's own passive (INNATE) isn't one.
+                    mftr_sim::world::DamageOrigin::Item(item) if *item != mftr_sim::items::INNATE => {
+                        bump(&mut log.damage, *item, amount + absorbed)
+                    }
                     mftr_sim::world::DamageOrigin::Attack => {
                         log.attacks += 1;
                         log.crits += *crit as u32;
@@ -2073,6 +2147,7 @@ mod tests {
                 resume: 0,
                 spectate: false,
                 queue: None,
+                roster: 0,
             },
         );
         core.handle_packet(key, &bytes, 0.0);
@@ -2107,6 +2182,7 @@ mod tests {
             resume,
             spectate,
             queue: None,
+            roster: 0,
         }
     }
 
@@ -2503,6 +2579,7 @@ mod tests {
                 resume: 0,
                 spectate: false,
                 queue: None,
+                roster: 0,
             },
         );
         core.handle_packet(key, &bytes, 0.0);

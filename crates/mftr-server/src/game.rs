@@ -371,6 +371,12 @@ impl Replay {
             s += text.trim_end();
             let _ = writeln!(s, "\nmap-end");
         }
+        // So do custom champions (CR1d), before the joins that name them.
+        for text in c.customs.texts.iter() {
+            let _ = writeln!(s, "champion-begin");
+            s += text.trim_end();
+            let _ = writeln!(s, "\nchampion-end");
+        }
         for e in &self.entries {
             match e {
                 ReplayEntry::Join { tick, player, champion } => {
@@ -435,7 +441,27 @@ impl Replay {
         let mut cfg = cfg;
         let mut entries: Vec<ReplayEntry> = Vec::new();
         let mut map_text: Option<String> = None;
+        let mut champion_text: Option<String> = None;
+        let mut champion_files: Vec<String> = Vec::new();
         for (n, line) in lines.enumerate() {
+            // A custom champion's file, between champion-begin and champion-end: registered at
+            // once, so the joins after it find it by name.
+            if let Some(text) = &mut champion_text {
+                if line == "champion-end" {
+                    let text = std::mem::take(text);
+                    mftr_sim::limits::load_champion_file(&text).map_err(|e| format!("line {}: {e}", n + 3))?;
+                    champion_files.push(text);
+                    champion_text = None;
+                } else {
+                    text.push_str(line);
+                    text.push('\n');
+                }
+                continue;
+            }
+            if line == "champion-begin" {
+                champion_text = Some(String::new());
+                continue;
+            }
             // The custom map's lines, between map-begin and map-end.
             if let Some(text) = &mut map_text {
                 if line == "map-end" {
@@ -457,7 +483,8 @@ impl Replay {
             let tick = Tick(int(1)? as u32);
             match f.first().copied() {
                 Some("J") => {
-                    let champion = match f.get(3).copied() {
+                    // The name is the rest of the line (custom names may have spaces).
+                    let champion = match line.splitn(4, ' ').nth(3) {
                         Some("-") => None,
                         Some(name) => Some(ChampionId::by_name(name).ok_or_else(bad)?),
                         None => return Err(bad()),
@@ -467,7 +494,7 @@ impl Replay {
                 Some("L") => entries.push(ReplayEntry::Leave { tick, player: PlayerId(int(2)? as u8) }),
                 Some("R") => entries.push(ReplayEntry::Restart { tick }),
                 Some("T") => {
-                    let champion = f.get(3).and_then(|n| ChampionId::by_name(n)).ok_or_else(bad)?;
+                    let champion = line.splitn(4, ' ').nth(3).and_then(ChampionId::by_name).ok_or_else(bad)?;
                     entries.push(ReplayEntry::Takeover { tick, player: PlayerId(int(2)? as u8), champion });
                 }
                 Some("H") => {
@@ -489,6 +516,10 @@ impl Replay {
                 }
                 _ => return Err(bad()),
             }
+        }
+        if !champion_files.is_empty() {
+            cfg.customs = crate::customs::Customs::load(champion_files)?;
+            cfg.champions = crate::customs::ChampionPolicy::Both;
         }
         Ok(Replay { cfg, entries })
     }

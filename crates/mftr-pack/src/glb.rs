@@ -22,7 +22,7 @@ const ALLOWED_TOP: &[&str] = &[
     "buffers",
     "extras",
 ];
-const ALLOWED_ATTRIBUTES: &[&str] = &["POSITION", "COLOR_0", "JOINTS_0", "WEIGHTS_0"];
+const ALLOWED_ATTRIBUTES: &[&str] = &["POSITION", "COLOR_0", "JOINTS_0", "WEIGHTS_0", "TEXCOORD_0"];
 
 #[derive(Clone, Debug)]
 pub struct Node {
@@ -35,7 +35,7 @@ pub struct Node {
     pub skin: Option<usize>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Primitive {
     pub material: Option<usize>,
     pub triangles: usize,
@@ -47,7 +47,25 @@ pub struct Primitive {
     pub indices: Vec<u32>,
     pub joints: Vec<[u32; 4]>,
     pub weights: Vec<[f32; 4]>,
+    /// Morph targets (champion creator bases only, CR2): each a position delta per vertex, in
+    /// the mesh's `target_names` order.
+    pub targets: Vec<Vec<[f32; 3]>>,
+    /// TEXCOORD_0 (champion creator bases only, CR5b): where a paint image lands; empty without.
+    pub uvs: Vec<[f32; 2]>,
+    /// The paint image drawn over the vertex colors through `uvs` (a forged champion's, D70).
+    pub paint: Option<std::sync::Arc<Paint>>,
 }
+
+/// A paint image (D70, CR5b): square, RGBA8 rows from the top (glTF's UV origin), alpha 0 where
+/// nothing is painted. Built by `mftr-forge` from a recipe's palette-indexed image.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Paint {
+    pub size: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// Most morph targets a mesh may carry (a creator base: two per slider).
+pub const MAX_TARGETS: usize = 128;
 
 #[derive(Clone, Debug)]
 pub struct Channel {
@@ -66,14 +84,24 @@ pub struct Animation {
     pub channels: Vec<Channel>,
 }
 
+/// A bind transform: translation, rotation (xyzw), scale.
+pub type BindTrs = ([f32; 3], [f32; 4], [f32; 3]);
+
 #[derive(Clone, Debug, Default)]
 pub struct Model {
     pub nodes: Vec<Node>,
+    /// Per node, the local transform the mesh is bound in where it differs from the node's
+    /// rest (translation, rotation, scale): a sculpted face is baked into the face bones' rest
+    /// while the skin keeps binding them where they were (21 §2.3). Empty, or `None`, means
+    /// bound at rest. Never read from a file: only `mftr-forge` sets it.
+    pub bind: Vec<Option<BindTrs>>,
     /// Joint node indices of each skin.
     pub skins: Vec<Vec<usize>>,
     pub meshes: Vec<Vec<Primitive>>,
     pub materials: Vec<String>,
     pub animations: Vec<Animation>,
+    /// Each mesh's morph target names (`mesh.extras.targetNames`; empty without targets).
+    pub target_names: Vec<Vec<String>>,
 }
 
 /// A node's world transform: translation, rotation (xyzw), scale.
@@ -268,9 +296,7 @@ pub fn parse(bytes: &[u8]) -> Result<Model, String> {
             if mode != 4 {
                 return Err(format!("mesh {mi}: only triangle lists are allowed"));
             }
-            if p.get("targets").is_some() {
-                return Err(format!("mesh {mi}: morph targets are not allowed"));
-            }
+            // Morph targets read here; only creator bases may have them (the validator).
             let attrs = p.get("attributes").ok_or(format!("mesh {mi}: primitive without attributes"))?;
             for k in attrs.keys() {
                 if !ALLOWED_ATTRIBUTES.contains(&k) {
@@ -301,6 +327,16 @@ pub fn parse(bytes: &[u8]) -> Result<Model, String> {
                 }
                 None => Vec::new(),
             };
+            let uvs: Vec<[f32; 2]> = match attr("TEXCOORD_0") {
+                Some(a) => {
+                    let (n, flat) = r.read(a)?;
+                    if n != count || flat.len() != 2 * n || flat.iter().any(|v| !v.is_finite()) {
+                        return Err(format!("mesh {mi}: TEXCOORD_0 must be one UV per vertex"));
+                    }
+                    flat.chunks(2).map(|c| [c[0] as f32, c[1] as f32]).collect()
+                }
+                None => Vec::new(),
+            };
             let has_color = !colors.is_empty();
             if (!joints.is_empty() && joints.len() != count) || (!weights.is_empty() && weights.len() != count) {
                 return Err(format!("mesh {mi}: attribute counts differ"));
@@ -316,6 +352,25 @@ pub fn parse(bytes: &[u8]) -> Result<Model, String> {
                 None => (0..count as u32).collect(),
             };
             let triangles = indices.len() / 3;
+            let mut targets = Vec::new();
+            let target_list = p.get("targets").map(Json::as_arr).unwrap_or(&[]);
+            if target_list.len() > MAX_TARGETS {
+                return Err(format!("mesh {mi}: more than {MAX_TARGETS} morph targets"));
+            }
+            for t in target_list {
+                if t.keys().any(|k| k != "POSITION") {
+                    return Err(format!("mesh {mi}: morph targets move positions only"));
+                }
+                let a = t
+                    .get("POSITION")
+                    .and_then(Json::as_index)
+                    .ok_or(format!("mesh {mi}: a target without POSITION"))?;
+                let deltas = r.vec3(a)?;
+                if deltas.len() != count || deltas.iter().flatten().any(|v| !v.is_finite() || v.abs() > 10.0) {
+                    return Err(format!("mesh {mi}: a morph target's size or values are wrong"));
+                }
+                targets.push(deltas);
+            }
             prims.push(Primitive {
                 material: opt_index(p.get("material"))?,
                 triangles,
@@ -325,8 +380,27 @@ pub fn parse(bytes: &[u8]) -> Result<Model, String> {
                 indices,
                 joints,
                 weights,
+                targets,
+                uvs,
+                paint: None,
             });
         }
+        let n = prims.first().map_or(0, |p| p.targets.len());
+        if prims.iter().any(|p| p.targets.len() != n) {
+            return Err(format!("mesh {mi}: primitives disagree on morph targets"));
+        }
+        let names: Vec<String> = mesh
+            .get("extras")
+            .and_then(|e| e.get("targetNames"))
+            .map(Json::as_arr)
+            .unwrap_or(&[])
+            .iter()
+            .map(|v| v.as_str().unwrap_or("").to_string())
+            .collect();
+        if n > 0 && names.len() != n {
+            return Err(format!("mesh {mi}: {n} morph targets but {} names", names.len()));
+        }
+        m.target_names.push(names);
         m.meshes.push(prims);
     }
 

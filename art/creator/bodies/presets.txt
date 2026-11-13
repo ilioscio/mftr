@@ -1,0 +1,55 @@
+# The body sliders as presets on the body's helper bones (21 §9.2, FR6; 22 BW4).
+#
+# A recipe's `shape: (body_belly: 0.6, …)` moves the helpers by 0.6 × the preset below (negative
+# values the opposite way), summed over every slider and clamped to each helper's limits
+# (mftr_forge::body::LIMITS). The ids are the old morph sliders', so recipes read as before.
+#
+# Format as the face's (art/creator/heads/presets.txt): `[id] description`, then
+# `bone kind x y z [mirror]`, kind t (translation, 0.1 mm) or s (scale, log2 in 0.001 steps),
+# in the helper's own frame:
+#   the torso's helpers (neck, trapezius, chest, back, belly, waist, hips, glutes) stand upright:
+#     +x out to the character's left, +y up, +z forward;
+#   the limbs' (shoulder, upper arm, forearm, thigh, calf) lie along the limb: +y along it (from
+#     the joint), +z forward, x across.
+# A trailing `mirror` on a `_l` helper adds the `_r` one mirrored.
+#
+# On the CC0 body (22 §1) the helpers' weights peak at 0.3–0.6 on the torso and 0.6–0.9 on the
+# limbs, so the presets run close to each helper's limits: a slider at 1 is a clear change.
+
+[body_bulk] A heavy body or a lean one
+body_belly s 450 0 500
+body_waist_l s 450 0 400 mirror
+body_lat_l s 450 0 350 mirror
+body_pec_l s 350 0 400 mirror
+body_hip_l s 400 0 350 mirror
+body_glute_l s 400 0 450 mirror
+body_trap_l s 350 0 250 mirror
+body_neck s 300 0 300
+
+[body_belly] A belly or a flat stomach
+body_belly t 0 -80 500
+body_belly s 600 200 700
+
+[body_chest] A deep chest (or bust) or a flat one
+body_pec_l t 0 0 400 mirror
+body_pec_l s 550 300 600 mirror
+
+[body_hips] Wide hips or narrow ones
+body_hip_l t 350 0 0 mirror
+body_hip_l s 500 0 400 mirror
+body_glute_l s 450 0 550 mirror
+
+[body_shoulders] Broad shoulders or narrow ones
+body_trap_l t 300 0 0 mirror
+body_trap_l s 450 0 350 mirror
+body_delt_l s 550 250 550 mirror
+
+[body_muscle] Thick, muscled limbs or thin ones
+body_delt_l s 450 0 450 mirror
+body_bicep_l s 600 200 600 mirror
+body_forearm_l s 500 0 500 mirror
+body_thigh_l s 550 0 550 mirror
+body_calf_l s 550 0 550 mirror
+
+[neck_thickness] A thick neck or a thin one
+body_neck s 500 0 500

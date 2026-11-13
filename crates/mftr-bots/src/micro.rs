@@ -99,7 +99,7 @@ pub fn team_burst(c: &Ctx, t: &Unit, reach: f32) -> f32 {
 pub fn burst_on(me: &Unit, t: &Unit, c: &Ctx) -> f32 {
     let mut dmg = 2.0 * kit::attack_damage(me, t);
     for slot in 0..4u8 {
-        if !me.state.can_cast(c.now, slot) {
+        if !me.can_cast(c.now, slot) {
             continue;
         }
         let Some(a) = me.ability(slot) else { continue };
@@ -279,7 +279,7 @@ pub fn best_cast(a: &mut Agent, c: &Ctx, target: &Unit, aggressive: bool) -> Opt
             .map(|m| (m.state.pos, m.gameplay_radius))
             .collect();
     for slot in 0..6u8 {
-        if !me.state.can_cast(now, slot) {
+        if !me.can_cast(now, slot) {
             continue;
         }
         let Some(ab) = me.ability(slot) else { continue };
@@ -498,7 +498,66 @@ pub fn fight(a: &mut Agent, c: &Ctx, chase: bool, prefer: Option<UnitId>) -> Opt
     if let Some(cmd) = cast_best(a, c, target, true) {
         return Some(cmd);
     }
+    if target.kind == UnitKind::Champion
+        && let Some(cmd) = close_in(a, c, target)
+    {
+        return Some(cmd);
+    }
     attack(a, c, target, chase)
+}
+
+/// In a fight, the moves that need the target closer (CR7's leagues: bots used dashes and blinks
+/// only to dodge, and novas only when the fight came to them, so kits built on them were weak
+/// whatever their price): a dash or blink to bring a champion just out of reach into it, and a
+/// step toward one just outside a ready nova's radius.
+pub fn close_in(a: &mut Agent, c: &Ctx, t: &Unit) -> Option<CommandKind> {
+    let me = c.me;
+    let now = c.now;
+    if turret_unsafe(c, t.state.pos) || a.rng_f32() > a.p.ability_use {
+        return None;
+    }
+    let d = me.state.pos.distance(t.state.pos);
+    let reach = me.attack.map_or(150.0, |s| s.range) + t.gameplay_radius;
+    let dir = (t.state.pos - me.state.pos).normalize_or_zero();
+    // A ready nova with the target just outside it: step in (the next think casts it).
+    for slot in 0..4u8 {
+        if !me.can_cast(now, slot) {
+            continue;
+        }
+        if let Some(Effect::Area(ar)) = me.ability(slot).map(|ab| ab.effect)
+            && ar.range == 0.0
+            && d > ar.radius + t.gameplay_radius * 0.5
+            && d < ar.radius + 260.0
+        {
+            let to = t.state.pos - dir * (ar.radius * 0.6);
+            if c.b.world.map().walkable(to, 40.0) && !turret_unsafe(c, to) {
+                return Some(CommandKind::MoveTo(QPoint::from_vec2(to)));
+            }
+        }
+    }
+    // Out of reach: a dash or blink (an ability's, not the Blink spell) to land in reach.
+    if d <= reach + 30.0 {
+        return None;
+    }
+    for slot in 0..4u8 {
+        if !me.can_cast(now, slot) {
+            continue;
+        }
+        let range = match me.ability(slot).map(|ab| ab.effect) {
+            Some(Effect::Dash(x)) => x.range,
+            Some(Effect::Blink(x)) => x.range,
+            _ => continue,
+        };
+        let need = d - reach + 40.0;
+        if need > range || need < 60.0 {
+            continue;
+        }
+        let at = me.state.pos + dir * need;
+        if c.b.world.map().walkable(at, 40.0) && !turret_unsafe(c, at) {
+            return Some(cast(slot, at));
+        }
+    }
+    None
 }
 
 /// Heal or shield whoever needs it most in reach (17 §7.2, peel), ourselves included.
@@ -506,7 +565,7 @@ pub fn support(a: &mut Agent, c: &Ctx) -> Option<CommandKind> {
     let me = c.me;
     let now = c.now;
     for slot in 0..6u8 {
-        if !me.state.can_cast(now, slot) {
+        if !me.can_cast(now, slot) {
             continue;
         }
         let Some(ab) = me.ability(slot) else { continue };
@@ -690,7 +749,7 @@ pub fn escape(a: &mut Agent, c: &Ctx, safe: Vec2) -> Option<CommandKind> {
             .copied()?;
     // Slow or stop it.
     for slot in 0..6u8 {
-        if !me.state.can_cast(now, slot) {
+        if !me.can_cast(now, slot) {
             continue;
         }
         let Some(ab) = me.ability(slot) else { continue };
@@ -712,7 +771,7 @@ pub fn escape(a: &mut Agent, c: &Ctx, safe: Vec2) -> Option<CommandKind> {
     let dir = (safe - me.state.pos).normalize_or_zero();
     let desperate = me.state.health < me.stats.max_health * 0.25;
     for slot in [2u8, 0, 1, 3, 5, 4] {
-        if !me.state.can_cast(now, slot) {
+        if !me.can_cast(now, slot) {
             continue;
         }
         let Some(ab) = me.ability(slot) else { continue };

@@ -16,6 +16,12 @@ rustPlatform.buildRustPackage {
       ../Cargo.toml
       ../Cargo.lock
       ../crates
+      # Data the forge embeds at compile time (include_str!).
+      ../art/creator/bodies/presets.txt
+      ../art/creator/heads/brows.txt
+      ../art/creator/heads/faces.txt
+      ../art/creator/heads/presets.txt
+      ../art/library/biped/moves.ron
     ];
   };
   # Every dependency is pinned with its checksum in Cargo.lock: no vendor hash to update.
