@@ -575,10 +575,10 @@ fn proportion(model: &mut Model, p: &looks::Proportions) {
         })
         .collect();
     let old = world(model);
-    for i in 0..n {
-        let parent = model.nodes[i].parent.map_or(BoneScale::NONE, |q| scales[q]);
-        let t = parent.apply(model.nodes[i].translation);
-        model.nodes[i].translation = [t[0] * height, t[1] * height, t[2] * height];
+    for node in &mut model.nodes {
+        let parent = node.parent.map_or(BoneScale::NONE, |q| scales[q]);
+        let t = parent.apply(node.translation);
+        node.translation = [t[0] * height, t[1] * height, t[2] * height];
     }
     // The legs hang from the pelvis: longer legs would push the feet into the ground, so lift
     // the pelvis until the feet stand where they stood (scaled by height).
