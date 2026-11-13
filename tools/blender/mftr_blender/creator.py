@@ -576,8 +576,8 @@ def build(gender, name, build="humanoid_slim"):
     if mass and BODY == "cc0":
         from . import cc0_body
         cc0_body.bake_mass(armature, [body] + [o for o in bpy.data.objects if o.name.startswith("part.")], mass)
-    # The hairstyles (22 §7 item 5), grown on this base's own head and shoulders by physics,
-    # after its mass, so the hair lies on the heavy builds' bulk.
+    # The hairstyles and beards (22 §7 item 5), grown on this base's own head and shoulders by
+    # physics, after its mass, so the hair lies on the heavy builds' bulk.
     if BODY == "cc0":
         from . import grooming
         made += grooming.groom_all(armature, body, fit)
@@ -599,9 +599,14 @@ def build(gender, name, build="humanoid_slim"):
     authored_head.brow_uvs(body)
     authored_head.lip_uvs(body)
     # Hair keeps its strands' coordinates (`grooming`), which the shader draws.
-    for obj in [o for o in bpy.data.objects if o.name.startswith("part.") and not o.name.startswith("part.hair.")]:
+    for obj in [o for o in bpy.data.objects if o.name.startswith("part.") and not o.name.startswith(("part.hair.", "part.beard."))]:
         unwrap(obj)
     armature["mftr_build"] = name
+    if BODY == "cc0":
+        from . import grooming
+        # The hair's and the beard's length controls (22 §7 item 5, BH2): sliders of theirs, not
+        # the body's.
+        ids = ids + grooming.length_sliders(armature)
     armature["mftr_sliders"] = ",".join(ids)
     keys = len(body.data.shape_keys.key_blocks) - 1
     print(f"{name}: {mesh.triangle_count(body)} triangles, {len(ids)} sliders ({keys} shape keys), {len(made)} parts")

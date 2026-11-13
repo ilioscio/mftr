@@ -24,5 +24,5 @@ STYLE = Style(cap=0.006, band=(0.55, 0.42, 0.16), locks=[
           tie=TIE, stiff=0.3, seed=31, lift=0.001, seg=0.04, hug=0.06),
     # The knot: thick locks wound round the tie.
     Locks(roots=ROOTS, length=0.10, width=0.036, thick=0.036, flow=coil, stiff=10.0, seed=32, seg=0.02,
-          lift=0.02, taper=0.5, hug=0.0, profile="round", sides=5),
+          lift=0.02, taper=0.5, hug=0.0, profile="round", sides=5, lengthen=False),
 ])

@@ -15,7 +15,7 @@ def flow(p):
     return p - CENTRE
 
 
-STYLE = Style(cap=0.038, ramp=0.045, locks=[
+STYLE = Style(cap=0.038, ramp=0.045, lengths=None, locks=[
     Locks(where=lambda p: above(p) > 0.025, spacing=0.034, length=0.024, width=0.05, thick=0.05, flow=flow,
           stiff=8.0, seed=71, seg=0.012, lift=0.026, profile="round", sides=5, taper=0.35, hug=0.0),
 ])

@@ -1031,16 +1031,52 @@ skull's middle out through it meets the headwear. So a helmet hides the hair und
 that would poke through, while long hair falling below it stays. A hood with a neck hides a
 ponytail whole.
 
-**Left for BH2:**
-- the length control;
-- beards and moustaches on the same system;
-- the shared color with a separate hair color;
-- a dwarf crest.
-
 **Left for the look:**
 - the heavy builds' braids kink where they meet the bigger shoulders;
 - coils read as knots more than as a rounded mass;
 - the short style's back is still a little ragged.
+
+### BH2 status (2026-11-13): length, beards, one color
+
+**The length control.** Each style is grown three times on each base: as patterned, shorter
+(0.55×) and longer (1.7×). The locks get longer segments, not more of them, so all three have the
+same mesh. The differences are the hair's morph targets `hair_length-` and `hair_length+`, and the
+forge blends them like the body's sliders. A tie's locks always reach the tie, and a topknot's
+coil keeps its size. The buzz cut and the coils have no length control.
+
+**Beards** are grown the same way, on a `beard` slot of their own (next to the hair, before the
+head; a mask stays on `face`):
+- **Where they grow:** the beard's area is drawn once on the source head: below a line from the
+  sideburns' foot to under the nose, in front of the ears, with the lips left bare.
+- **Weights:** a beard takes the weights of the skin right under it (within 1.5 cm), so it opens
+  with the jaw. It never takes the neck's weights.
+- **Length:** `beard_length` works as the hair's length does.
+
+| Beard | Triangles (slim masculine) |
+|---|---|
+| Full beard (jaw, chin, a moustache) | 1,001 |
+| Goatee | 958 |
+| Braided beard (a plaited braid from the chin) | 1,008 |
+| Moustache | 250 |
+
+The old block-out `face.beard` is gone.
+
+**Under headwear:** beards hide under masks and headwear as hair does: the forge checks hair and
+beards against the `head` and `face` slots.
+
+**One color.** The creator's Face step has a **Hair** panel. It holds:
+- the hairstyle and the beard, each with its length;
+- one **hair color**, which also colors the brows and the beard.
+
+A box gives the hair a color of its own. The brows and the beard then keep sharing theirs, which
+the Brows panel sets. A new hairstyle or beard keeps the old one's color. The color is an ordinary
+fill on the part's first paint region, so the Paint step still reaches it.
+
+**Left:**
+- a dwarf crest;
+- two-tone tips;
+- stubble shaded on the skin;
+- spring bones on the long locks (BW6).
 
 ## 7. Open questions for the owner
 

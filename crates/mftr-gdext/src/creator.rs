@@ -14,6 +14,9 @@ use mftr_sim::ChampionId;
 
 use crate::model::{MftrModel, catalog};
 
+/// The slots grown by grooming (22 §7 item 5): their parts' color is the hair's.
+const GROWN: [&str; 2] = ["hair", "beard"];
+
 #[derive(GodotClass)]
 #[class(base = RefCounted, no_init)]
 pub struct MftrCreator {
@@ -499,14 +502,53 @@ impl MftrCreator {
     #[func]
     fn set_part(&mut self, slot: GString, id: GString) {
         let (slot, id) = (slot.to_string(), id.to_string());
+        // A new hairstyle or beard keeps the old one's color (22 §7 item 5).
+        let kept = if GROWN.contains(&slot.as_str()) { self.grown_color(&slot) } else { None };
         let prefix = format!("{slot}.");
         self.recipe.looks.outfit.retain(|p| !p.starts_with(&prefix));
         if !id.is_empty() {
-            self.recipe.looks.outfit.push(id);
+            self.recipe.looks.outfit.push(id.clone());
         }
         // Fills on parts no longer worn go with them.
         let worn = self.recipe.looks.outfit.clone();
         self.recipe.looks.paint.retain(|(t, _, _)| t == "body" || worn.contains(t));
+        if let (Some(c), false) = (kept, id.is_empty()) {
+            self.recipe.looks.paint.push((id, 0, c));
+        }
+    }
+
+    /// The color of the hair (`slot` "hair") or the beard ("beard") worn: its first region's
+    /// palette index, -1 as built or with none worn (22 §7 item 5).
+    #[func]
+    fn hair_color(&self, slot: GString) -> i64 {
+        self.grown_color(&slot.to_string()).map_or(-1, i64::from)
+    }
+
+    /// Color the hair or the beard worn (a palette index; below 0 back to as built).
+    #[func]
+    fn set_hair_color(&mut self, slot: GString, color: i64) {
+        let Some(id) = self.worn_on(&slot.to_string()) else { return };
+        let paint = &mut self.recipe.looks.paint;
+        paint.retain(|(t, r, _)| !(*t == id && *r == 0));
+        if color >= 0 {
+            paint.push((id, 0, color.min(paint::PALETTE.len() as i64 - 1) as u8));
+        }
+    }
+
+    /// Whether part `id` has a length control (`<slot>_length`, 22 §7 item 5).
+    #[func]
+    fn has_length(&self, id: GString) -> bool {
+        let id = id.to_string();
+        let Some(slot) = id.split('.').next() else { return false };
+        let Some(cat) = catalog(&self.art) else { return false };
+        let Some(base) = cat.base(&self.recipe.looks.base_key()) else { return false };
+        let m = &base.model;
+        let want = format!("{slot}_length+");
+        m.nodes
+            .iter()
+            .find(|n| n.name.strip_prefix("part.") == Some(id.as_str()))
+            .and_then(|n| n.mesh)
+            .is_some_and(|mi| m.target_names[mi].contains(&want))
     }
 
     /// What can be painted: "body", then each worn part.
@@ -1117,6 +1159,18 @@ fn aimed(model: &mftr_pack::glb::Model) -> Option<Arc<mftr_pack::glb::Model>> {
 
 impl MftrCreator {
     /// The base's brow paint region (22 §3.1), if it has brows.
+    /// The part worn on `slot`, if any.
+    fn worn_on(&self, slot: &str) -> Option<String> {
+        let prefix = format!("{slot}.");
+        self.recipe.looks.outfit.iter().find(|p| p.starts_with(&prefix)).cloned()
+    }
+
+    /// The palette index the part worn on `slot` has on its first region, if filled.
+    fn grown_color(&self, slot: &str) -> Option<u8> {
+        let id = self.worn_on(slot)?;
+        self.recipe.looks.paint.iter().find(|(t, r, _)| *t == id && *r == 0).map(|(_, _, c)| *c)
+    }
+
     fn brow_region(&self) -> Option<usize> {
         catalog(&self.art)
             .and_then(|c| c.base(&self.recipe.looks.base_key()).and_then(|b| brows::color_region(&b.model)))

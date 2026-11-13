@@ -1,0 +1,9 @@
+// A beard (22 §7 item 5, BH2): over the lip, its ends drooping, groomed by physics (groom.py).
+(
+    id: "beard.moustache",
+    slot: "beard",
+    name: "Moustache",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

@@ -1,0 +1,9 @@
+// A beard (22 §7 item 5, BH2): on the chin and the lip only, groomed by physics (groom.py).
+(
+    id: "beard.goatee",
+    slot: "beard",
+    name: "Goatee",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

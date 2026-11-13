@@ -32,7 +32,9 @@ from mathutils.bvhtree import BVHTree
 from mathutils.kdtree import KDTree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.normpath(os.path.join(HERE, "..", "..", "..", "art", "wardrobe", "hair"))
+ROOT = os.path.normpath(os.path.join(HERE, "..", "..", "..", "art", "wardrobe"))
+# The slots grown by grooming, each a folder of `ROOT` (22 §7 item 5).
+SLOTS = ("hair", "beard")
 
 # The default hair color (as the old catalog's).
 HAIR = (0.24, 0.16, 0.11)
@@ -71,6 +73,31 @@ def above(p):
     return h
 
 
+# The beard's area (source frame): the jaw, the chin and the cheeks below a line from the
+# sideburns' foot to under the nose, the lip above the mouth, in front of the ears; the lips bare.
+BEARD_TOP = [(0.0, -0.026), (0.018, -0.028), (0.032, -0.026), (0.045, -0.016), (0.058, -0.004), (0.068, 0.006)]
+MOUTH = (Vector((0.0, -0.058, -0.045)), (0.027, 0.0105))
+
+
+def beard_line(x):
+    x = abs(x)
+    for (x0, z0), (x1, z1) in zip(BEARD_TOP, BEARD_TOP[1:]):
+        if x <= x1:
+            return z0 + (z1 - z0) * (x - x0) / (x1 - x0)
+    return BEARD_TOP[-1][1]
+
+
+def beard(p):
+    """How far `p` (source frame) is inside the beard's area (m); negative outside it."""
+    h = min(beard_line(p.x) - p.z, 0.035 - p.y)
+    c, (ax, az) = MOUTH
+    if p.y < c.y + 0.02:
+        e = (p.x / ax) ** 2 + ((p.z - c.z) / az) ** 2
+        if e < 1.0:
+            h = min(h, (e - 1.0) * 0.01)
+    return h
+
+
 # --- A pattern ---------------------------------------------------------------------------------------
 
 class Locks:
@@ -82,7 +109,7 @@ class Locks:
 
     def __init__(self, where=None, roots=None, spacing=0.03, length=0.08, width=0.04, thick=0.012,
                  flow=lambda p: Vector((0, 1, -0.4)), stiff=1.0, tie=None, profile="lens", plait=False,
-                 taper=0.75, seg=0.02, seed=1, lift=0.004, hug=0.03, sides=None):
+                 taper=0.75, seg=0.02, seed=1, lift=0.004, hug=0.03, sides=None, lengthen=True):
         self.where, self.roots, self.spacing = where, roots, spacing
         self.length, self.width, self.thick, self.flow = length, width, thick, flow
         self.stiff, self.tie, self.profile, self.plait = stiff, tie, profile, plait
@@ -91,6 +118,9 @@ class Locks:
         # (4 for a lens, 6 for a round by default).
         self.hug = hug
         self.sides = sides or (4 if profile == "lens" else 6)
+        # Whether the style's length control lengthens them (a tie's locks reach the tie whatever
+        # it says; a knot keeps its coil).
+        self.lengthen = lengthen and tie is None
 
 
 class Style:
@@ -98,28 +128,40 @@ class Style:
     at each tie (its color); `budget` (triangles)."""
 
     def __init__(self, cap=0.01, locks=(), color=HAIR, band=None, budget=2400, cap_from=0.0, cap_where=None,
-                 ramp=0.025, shaved=0.0015):
+                 ramp=0.025, shaved=0.0015, lengths=(0.55, 1.7), area=None, blend=0.05, drape=True):
         self.cap, self.locks, self.color, self.band, self.budget = cap, list(locks), color, band, budget
+        # Where it grows: `area(p)`, how far inside it a source point is (m); the scalp's by
+        # default (`above`), the beard's (`beard`). Its weights come from the skin within `blend`
+        # (m) round each vertex; with `drape`, a lock falling below the skull onto the neck and
+        # the back takes the body's weights there (a beard follows the jaw however long).
+        self.area = area or above
+        self.blend, self.drape = blend, drape
         # The cap covers the scalp from `cap_from` above the hairline (a receding line) and where
         # `cap_where(p)` says, if given; elsewhere on the scalp (a crest's sides) a `shaved` one.
         # It reaches its full depth `ramp` in from its edge.
         self.cap_from, self.cap_where, self.ramp, self.shaved = cap_from, cap_where, ramp, shaved
+        # The length control's ends (22 §7 item 5, BH2): the locks it lengthens, this many times
+        # as long at its short and long ends (`<slot>_length-` and `<slot>_length+`); None for
+        # none.
+        self.lengths = lengths
 
 
 def styles():
-    """Every style: (folder, `item.ron` fields, the `Style`), sorted by id."""
+    """Every style, hair and beards: (folder, `item.ron` fields, the `Style`), by slot and id."""
     from . import wardrobe
     out = []
-    if not os.path.isdir(ROOT):
-        return out
-    for name in sorted(os.listdir(ROOT)):
-        d = os.path.join(ROOT, name)
-        ron, groom = os.path.join(d, "item.ron"), os.path.join(d, "groom.py")
-        if os.path.isfile(ron) and os.path.isfile(groom):
-            spec = importlib.util.spec_from_file_location(f"groom_{name}", groom)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            out.append((d, wardrobe.read_item(ron), mod.STYLE))
+    for slot in SLOTS:
+        sdir = os.path.join(ROOT, slot)
+        if not os.path.isdir(sdir):
+            continue
+        for name in sorted(os.listdir(sdir)):
+            d = os.path.join(sdir, name)
+            ron, groom = os.path.join(d, "item.ron"), os.path.join(d, "groom.py")
+            if os.path.isfile(ron) and os.path.isfile(groom):
+                spec = importlib.util.spec_from_file_location(f"groom_{slot}_{name}", groom)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                out.append((d, wardrobe.read_item(ron), mod.STYLE))
     return out
 
 
@@ -164,9 +206,10 @@ class Head:
     def rig(self, p):
         return self.fit(Vector(p))
 
-    def scalp(self, margin=0.0):
-        """The skin's vertices above the hairline by `margin` (source metres)."""
-        return [i for i, ok in enumerate(self.skin) if ok and above(self.src(self.pos[i])) > margin]
+    def scalp(self, margin=0.0, area=above):
+        """The skin's vertices inside `area` (the scalp: above the hairline) by `margin` (source
+        metres)."""
+        return [i for i, ok in enumerate(self.skin) if ok and area(self.src(self.pos[i])) > margin]
 
     def outside(self, p, lift):
         """`p` pushed out to `lift` off the body if it's closer (or inside)."""
@@ -180,7 +223,7 @@ class Head:
 
 # --- Combing and simulating -----------------------------------------------------------------------
 
-def _roots(head, locks, scale):
+def _roots(head, locks, scale, area=above):
     """The lock set's roots on this head: (point, normal) in the rig's frame."""
     if locks.roots is not None:
         out = []
@@ -189,7 +232,7 @@ def _roots(head, locks, scale):
             loc, nrm, _, _ = head.tree.find_nearest(p)
             out.append((loc, nrm))
         return out
-    cand = [i for i in head.scalp(0.004) if locks.where is None or locks.where(head.src(head.pos[i]))]
+    cand = [i for i in head.scalp(0.004, area) if locks.where is None or locks.where(head.src(head.pos[i]))]
     rng = random.Random(locks.seed)
     rng.shuffle(cand)
     cand.sort(key=lambda i: -head.pos[i].z)  # from the crown down: the parting's roots first
@@ -203,9 +246,10 @@ def _roots(head, locks, scale):
     return taken
 
 
-def _comb(head, root, normal, locks, scale):
+def _comb(head, root, normal, locks, scale, k=1.0):
     """A lock's centreline combed from its root: along its flow over the head (pushed off the
-    skin), toward its tie if it has one, falling under its own weight once off the skull."""
+    skin), toward its tie if it has one, falling under its own weight once off the skull. `k`
+    lengthens it (its segments, not their number: every length has the same mesh)."""
     seg = locks.seg * scale
     lift = (locks.lift + locks.thick * 0.5) * scale
     p = head.outside(root + normal * lift, lift)
@@ -213,6 +257,8 @@ def _comb(head, root, normal, locks, scale):
     tie = head.rig(locks.tie) if locks.tie is not None else None
     length = locks.length(head.src(root)) if callable(locks.length) else locks.length
     n = max(2, round(length * scale / seg)) if tie is None else 0
+    if locks.lengthen:
+        seg *= k
     k = 0
     while True:
         if tie is not None:
@@ -380,7 +426,7 @@ def _cap(bm, uv, col, head, style, scale):
     is cut along the hairline itself, not round the skin's faces: a face the hairline crosses
     keeps its part above it, the corners below moved up their edges to where it crosses."""
     me = head.body.data
-    h = {i: above(head.src(head.pos[i])) - style.cap_from for i, ok in enumerate(head.skin) if ok}
+    h = {i: style.area(head.src(head.pos[i])) - style.cap_from for i, ok in enumerate(head.skin) if ok}
     keep = {i for i, x in h.items() if x > 0.0}
     full = keep
     if style.cap_where is not None:
@@ -434,7 +480,7 @@ def _cap(bm, uv, col, head, style, scale):
             continue
         for l in f.loops:
             q = head.src(l.vert.co)
-            l[uv].uv = (14.0 + min(max(above(q) / 0.03, 0.0), 1.0) * 0.3, 4.0 + q.x * ACROSS)
+            l[uv].uv = (14.0 + min(max(style.area(q) / 0.03, 0.0), 1.0) * 0.3, 4.0 + q.x * ACROSS)
         faces.append(f)
     for f in faces:
         for v in f.verts:
@@ -471,22 +517,24 @@ def _band(bm, uv, col, head, at, color, scale, radius=0.016):
 CAP_KEEP = 0.5
 
 
-def grow(head, style, name):
-    """`style` grown on `head`: a new mesh object `name`, in the rig's frame."""
-    from . import mesh
-    scale = head.fit.s
+def _settle(head, style, roots, scale, k=1.0):
+    """The style's locks combed from `roots` (per lock set) and settled: [(rows, locks)]."""
     combed = []
     sets = []
-    for locks in style.locks:
-        roots = _roots(head, locks, scale)
-        for root, normal in roots:
-            pts = _comb(head, root, normal, locks, scale)
+    for locks, rs in zip(style.locks, roots):
+        for root, normal in rs:
+            pts = _comb(head, root, normal, locks, scale, k)
             if len(pts) < 3:
                 continue
             hold = [0, 1] + ([len(pts) - 2, len(pts) - 1] if locks.tie is not None else [])
             combed.append((pts, locks.width * scale, normal, locks.stiff, hold))
             sets.append(locks)
     settled = _simulate(head, combed) if combed else []
+    return list(zip(settled, sets))
+
+
+def _mesh(head, style, locks, scale, name):
+    """The hair's mesh: the cap, the locks' bodies (`locks`, from `_settle`), the bands."""
     bm = bmesh.new()
     uv = bm.loops.layers.uv.new("Paint")
     col = bm.verts.layers.float_color.new("Col")
@@ -510,14 +558,25 @@ def grow(head, style, name):
         bpy.data.meshes.remove(reduced)
         uv = bm.loops.layers.uv["Paint"]
         col = bm.verts.layers.float_color["Col"]
-    for rows, locks in zip(settled, sets):
-        _lock(bm, uv, col, rows, locks, scale, style.color, rng)
+    for rows, ls in locks:
+        _lock(bm, uv, col, rows, ls, scale, style.color, rng)
     if style.band is not None:
-        for at in {tuple(l.tie) for l in style.locks if l.tie is not None}:
+        for at in sorted({tuple(t.tie) for t in style.locks if t.tie is not None}):
             _band(bm, uv, col, head, Vector(at), style.band, scale)
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
+    return me
+
+
+def grow(head, style, name, slot="hair"):
+    """`style` grown on `head`: a new mesh object `name`, in the rig's frame, and its length
+    control's ends ({shape key name: vertex positions}, empty for a style without one; the keys
+    are `<slot>_length-` and `+`)."""
+    from . import mesh
+    scale = head.fit.s
+    roots = [_roots(head, locks, scale, style.area) for locks in style.locks]
+    me = _mesh(head, style, _settle(head, style, roots, scale), scale, name)
     obj = bpy.data.objects.new(name, me)
     bpy.context.scene.collection.objects.link(obj)
     for s in mesh.MATERIAL_SLOTS:
@@ -528,12 +587,20 @@ def grow(head, style, name):
         p.use_smooth = False
     me.color_attributes.active_color = me.color_attributes["Col"]
     me.color_attributes.render_color_index = me.color_attributes.active_color_index
-    return obj
+    ends = {}
+    if style.lengths and any(ls.lengthen for ls in style.locks):
+        # The same locks, longer and shorter, settled again: the same mesh, moved.
+        for key, k in ((f"{slot}_length-", style.lengths[0]), (f"{slot}_length+", style.lengths[1])):
+            other = _mesh(head, style, _settle(head, style, roots, scale, k), scale, "length")
+            if len(other.vertices) == len(me.vertices):
+                ends[key] = [v.co.copy() for v in other.vertices]
+            bpy.data.meshes.remove(other)
+    return obj, ends
 
 
 # --- Skinning --------------------------------------------------------------------------------------
 
-def _weights(obj, head):
+def _weights(obj, head, blend=0.05, drape=True):
     """Each hair vertex takes the head skin's weights round where it roots (face bones included,
     averaged over 5 cm, as `authored_head.make_conform`; the neck's share given to the head), and,
     where it hangs below the skull onto the neck and shoulders, more and more of the body's under
@@ -570,17 +637,17 @@ def _weights(obj, head):
     for v in me.vertices:
         p = v.co
         acc = {}
-        near = kd_head.find_range(p, 0.05) or [kd_head.find(p)]
+        near = kd_head.find_range(p, blend) or [kd_head.find(p)]
         total = 0.0
         for _, j, d in near:
-            f = max(1.0 - d / 0.05, 0.05)
+            f = max(1.0 - d / blend, 0.05)
             total += f
             for n, w in head.weights[skin[j]].items():
                 n = "head" if n == "neck" else n
                 acc[n] = acc.get(n, 0.0) + w * f
         acc = {n: w / total for n, w in acc.items()}
         # Below the head's joint the hair lies on the neck and the back: the body's weights.
-        t = min(max((top - p.z) / 0.12, 0.0), 1.0)
+        t = min(max((top - p.z) / 0.12, 0.0), 1.0) if drape else 0.0
         if t > 0.0:
             on_body.add(find(v.index))
             _, j, _ = kd_body.find(p)
@@ -616,13 +683,34 @@ def groom_all(armature, body, fit, budget_scale=1.0):
     head = Head(body, fit)
     made = []
     for _folder, info, style in found:
-        obj = grow(head, style, f"part.{info['id']}")
-        _weights(obj, head)
+        obj, ends = grow(head, style, f"part.{info['id']}", info["slot"])
+        _weights(obj, head, style.blend, style.drape)
         obj.parent = armature
         mod = obj.modifiers.new("Armature", "ARMATURE")
         mod.object = armature
         body_rig.transfer(body, obj)
         n = parts.transfer_shape_keys(body, obj)
+        if ends:
+            # The length control (BH2): the hair's (or the beard's) own slider pair.
+            if obj.data.shape_keys is None:
+                obj.shape_key_add(name="Basis", from_mix=False)
+            for key, co in sorted(ends.items()):
+                kb = obj.shape_key_add(name=key, from_mix=False)
+                for i, q in enumerate(co):
+                    kb.data[i].co = q
+            n += 1
         made.append((info["id"], info["slot"], info["name"], [], bool(info["accent"]), mesh.triangle_count(obj), n,
                      {}))
     return made
+
+
+def length_sliders(armature):
+    """The length controls the grown parts under `armature` have (`hair_length`,
+    `beard_length`)."""
+    out = set()
+    for o in armature.children:
+        keys = o.data.shape_keys.key_blocks if o.type == "MESH" and o.data.shape_keys else []
+        for slot in SLOTS:
+            if o.name.startswith(f"part.{slot}.") and f"{slot}_length+" in keys:
+                out.add(f"{slot}_length")
+    return sorted(out)

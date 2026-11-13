@@ -155,10 +155,7 @@ def catalog(head):
         for s in (1, -1)] + [
         loft("head", tuple(hc + Vector((0, 0, 0.0))), tuple(hc + Vector((0, 0, 0.015))), 16,
              [(0, 0.11 * k, 0.115 * k), (1, 0.11 * k, 0.115 * k)], "cloth", LEATHER_DARK)])
-    add("face.beard", "face", "Beard", [
-        mesh.path_part("head", [tuple(head.front(0.21, 0) + Vector((0, 0.004, 0))), tuple(head.front(0.10, 0) + Vector((0, -0.012, 0))),
-                                tuple(head.front(0.0, 0) + Vector((0, -0.02, -0.06)))], 6,
-                       [(0.075 * k, 0.03), (0.065 * k, 0.04), (0.0, 0.0)], "cloth", HAIR, ref=(1, 0, 0))])
+    # Beards are grown by physics on each base (`grooming`, 22 §7 item 5), not made here.
     # Torso.
     sash = loft("pelvis", P("pelvis", 0.45), P("pelvis", 0.85), 16, [(0, 0.205, 0.155), (1, 0.205, 0.155)], "accent", ACCENT)
     add("torso.tunic", "torso", "Tunic", [
@@ -355,7 +352,7 @@ def catalog(head):
     return out
 
 
-SLOTS = ["hair", "head", "face", "torso", "shoulders", "arms", "waist", "legs", "feet", "back", "weapon", "offhand"]
+SLOTS = ["hair", "beard", "head", "face", "torso", "shoulders", "arms", "waist", "legs", "feet", "back", "weapon", "offhand"]
 
 
 def transfer_shape_keys(body, part):

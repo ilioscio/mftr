@@ -1,0 +1,9 @@
+// A beard (22 §7 item 5, BH2): over the jaw, the chin and the lip, groomed by physics (groom.py).
+(
+    id: "beard.full",
+    slot: "beard",
+    name: "Full beard",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

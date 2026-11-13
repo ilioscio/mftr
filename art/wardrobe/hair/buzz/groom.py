@@ -3,4 +3,4 @@
 
 from mftr_blender.grooming import Style
 
-STYLE = Style(cap=0.0035)
+STYLE = Style(cap=0.0035, lengths=None)

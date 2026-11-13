@@ -73,6 +73,22 @@ fits every head.
 | `hair.locs` | round, even locks to the shoulders |
 | `hair.coils` | a deep cap with knots of coils |
 
+Every style but the buzz cut and the coils also has a **length control**. It is grown shorter and
+longer too, with the same mesh, as the morph targets `hair_length-` and `hair_length+`.
+
+## Beards
+
+`beard/<style>/` holds a beard: the same files on the `beard` slot. It grows on the beard's area
+(`grooming.beard`), takes the jaw's weights from the skin right under it, and has the
+`beard_length` control.
+
+| Style | Pattern |
+|---|---|
+| `beard.full` | jaw, chin and lip, locks falling from the chin |
+| `beard.goatee` | chin and lip only |
+| `beard.braided` | full, with a plaited braid from the chin |
+| `beard.moustache` | the lip, drooping past the mouth's corners |
+
 To try a pattern without rebuilding a base, grow it on a saved base `.blend` with
 `mftr_blender.grooming.Head` and `grow`.
 
