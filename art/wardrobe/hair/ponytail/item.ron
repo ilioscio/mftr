@@ -1,0 +1,9 @@
+// A hairstyle (22 §7 item 5, BH1): drawn back to a tie behind the crown, the tail hanging, groomed by physics (groom.py).
+(
+    id: "hair.ponytail",
+    slot: "hair",
+    name: "Ponytail",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

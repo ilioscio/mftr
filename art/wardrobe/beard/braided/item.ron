@@ -1,0 +1,9 @@
+// A beard (22 §7 item 5, BH2): full, with a plaited braid from the chin, groomed by physics (groom.py).
+(
+    id: "beard.braided",
+    slot: "beard",
+    name: "Braided beard",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

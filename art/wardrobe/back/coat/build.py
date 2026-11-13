@@ -40,5 +40,5 @@ for side in ("r", "l"):
     seams.append(((f"front_{side}", f"shoulder_{side}", f"neck_{side}"), ("back", f"shoulder_{side}", f"neck_{side}")))
     seams.append(((f"front_{side}", f"hem_side_{side}", f"under_{side}"), ("back", f"hem_{side}", f"under_{side}")))
 garment = sewing.Garment(panels, seams, budget=1800, cloth=(0.22, 0.24, 0.30), trim_color=(0.55, 0.45, 0.20),
-                         thickness=0.005, mirror=None)
+                         thickness=0.005, mirror="-x")
 sewing.build(garment, os.path.join(HERE, "item.blend"))

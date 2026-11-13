@@ -19,7 +19,6 @@ import bpy
 from mathutils import Vector
 from mathutils.kdtree import KDTree
 
-from . import head as headmod
 from . import mesh, rig
 
 LEATHER = (0.36, 0.22, 0.12)
@@ -105,14 +104,6 @@ def _line(front, side, back):
     return line
 
 
-def _hair(head, style, color):
-    def build(bm, layers, groups, mats):
-        h = headmod.Head(base=head.base, height=head.height / head.scale, scale=head.scale, hair=color, hair_style=style,
-                         detail=head.detail)
-        headmod.hair(bm, layers, groups, mats, h)
-    return build
-
-
 # --- The catalog ---------------------------------------------------------------------------------
 
 def _hand_axis(side):
@@ -134,17 +125,7 @@ def catalog(head):
     def add(pid, slot, name, items, hides=(), accent=False):
         out.append((pid, slot, name, list(hides), accent, items))
 
-    # Hair (20 §5.2: picked on the face step too).
-    add("hair.short", "hair", "Short hair", [_hair(head, "short", HAIR)])
-    add("hair.ponytail", "hair", "Ponytail", [_hair(head, "ponytail", HAIR)])
-    add("hair.topknot", "hair", "Topknot", [
-        _head_shell(head, _line(0.82, 0.55, 0.40), 1.05, HAIR, "cloth"),
-        mesh.path_part("head", [tuple(hc + Vector((0, 0.03, 0.09 * k))), tuple(hc + Vector((0, 0.04, 0.19 * k)))], 6,
-                       [(0.05, 0.05), (0.02, 0.02)], "cloth", HAIR)])
-    add("hair.mohawk", "hair", "Crest", [
-        mesh.path_part("head", [tuple(hc + Vector((0, -0.09 * k, 0.075 * k))), tuple(hc + Vector((0, 0.0, 0.12 * k))),
-                                tuple(hc + Vector((0, 0.10 * k, 0.065 * k)))], 4, [(0.014, 0.05), (0.016, 0.07), (0.012, 0.04)],
-                       "cloth", HAIR)])
+    # Hair is grown by physics on each base (`grooming`, 22 §7 item 5), not made here.
     # Head.
     add("head.hood", "head", "Hood", [
         _head_shell(head, _line(0.80, 0.30, 0.10), 1.22, CLOTH_DARK, "cloth"),
@@ -174,10 +155,7 @@ def catalog(head):
         for s in (1, -1)] + [
         loft("head", tuple(hc + Vector((0, 0, 0.0))), tuple(hc + Vector((0, 0, 0.015))), 16,
              [(0, 0.11 * k, 0.115 * k), (1, 0.11 * k, 0.115 * k)], "cloth", LEATHER_DARK)])
-    add("face.beard", "face", "Beard", [
-        mesh.path_part("head", [tuple(head.front(0.21, 0) + Vector((0, 0.004, 0))), tuple(head.front(0.10, 0) + Vector((0, -0.012, 0))),
-                                tuple(head.front(0.0, 0) + Vector((0, -0.02, -0.06)))], 6,
-                       [(0.075 * k, 0.03), (0.065 * k, 0.04), (0.0, 0.0)], "cloth", HAIR, ref=(1, 0, 0))])
+    # Beards are grown by physics on each base (`grooming`, 22 §7 item 5), not made here.
     # Torso.
     sash = loft("pelvis", P("pelvis", 0.45), P("pelvis", 0.85), 16, [(0, 0.205, 0.155), (1, 0.205, 0.155)], "accent", ACCENT)
     add("torso.tunic", "torso", "Tunic", [
@@ -320,19 +298,8 @@ def catalog(head):
         mesh.path_part("hand_r", [at(1.06, across * -0.02), at(1.06, across * -0.12)], 4, [(0.05, 0.03), (0.0, 0.0)], "metal", IRON,
                        ref=tuple(axis))])
 
-    # More to make a figure from (20 §7.1): hair, headwear and faces with character, light
+    # More to make a figure from (20 §7.1): headwear and faces with character, light
     # armor, gear on the back, a spear and a hammer, a lantern, wrapped feet.
-    add("hair.long", "hair", "Long hair", [
-        _head_shell(head, _line(0.80, 0.50, 0.25), 1.06, HAIR, "cloth"),
-        mesh.path_part("head", [tuple(hc + Vector((0, 0.09 * k, 0.02 * k))), tuple(hc + Vector((0, 0.13 * k, -0.16 * k))),
-                                tuple(hc + Vector((0, 0.12 * k, -0.42 * k)))], 6, [(0.10 * k, 0.035), (0.11 * k, 0.035), (0.07 * k, 0.02)],
-                       "cloth", HAIR, ref=(1, 0, 0))])
-    add("hair.braids", "hair", "Braids", [_head_shell(head, _line(0.80, 0.45, 0.30), 1.05, HAIR, "cloth")] + [
-        part for sgn in (1, -1) for part in (
-            mesh.path_part("head", [tuple(hc + Vector((sgn * 0.10 * k, 0.02, -0.04 * k))), tuple(hc + Vector((sgn * 0.12 * k, -0.01, -0.2 * k))),
-                                    tuple(hc + Vector((sgn * 0.11 * k, -0.05, -0.4 * k)))], 6, [(0.028, 0.028), (0.026, 0.026), (0.018, 0.018)],
-                           "cloth", HAIR),
-            mesh.box_part("head", tuple(hc + Vector((sgn * 0.115 * k, -0.03, -0.3 * k))), (0.04, 0.04, 0.03), "metal", GOLD))])
     add("head.crown", "head", "Crown", [
         loft("head", tuple(hc + Vector((0, 0, 0.05 * k))), tuple(hc + Vector((0, 0, 0.10 * k))), 16,
              [(0, 0.118 * k, 0.122 * k), (1, 0.122 * k, 0.126 * k)], "metal", GOLD)] + [
@@ -385,7 +352,7 @@ def catalog(head):
     return out
 
 
-SLOTS = ["hair", "head", "face", "torso", "shoulders", "arms", "waist", "legs", "feet", "back", "weapon", "offhand"]
+SLOTS = ["hair", "beard", "head", "face", "torso", "shoulders", "arms", "waist", "legs", "feet", "back", "weapon", "offhand"]
 
 
 def transfer_shape_keys(body, part):

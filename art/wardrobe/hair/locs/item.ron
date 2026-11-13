@@ -1,0 +1,9 @@
+// A hairstyle (22 §7 item 5, BH1): rope-like locks falling to the shoulders, groomed by physics (groom.py).
+(
+    id: "hair.locs",
+    slot: "hair",
+    name: "Locs",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

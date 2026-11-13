@@ -76,8 +76,21 @@ struct PartList {
 }
 
 /// The order parts are offered in, slot by slot.
-pub const SLOTS: [&str; 12] =
-    ["hair", "head", "face", "torso", "shoulders", "arms", "waist", "legs", "feet", "back", "weapon", "offhand"];
+pub const SLOTS: [&str; 13] = [
+    "hair",
+    "beard",
+    "head",
+    "face",
+    "torso",
+    "shoulders",
+    "arms",
+    "waist",
+    "legs",
+    "feet",
+    "back",
+    "weapon",
+    "offhand",
+];
 
 impl Catalog {
     /// Load the catalog under `art` (the folder the packs live in): every base that's there,
@@ -412,6 +425,23 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
         let body: Vec<usize> =
             model.nodes.iter().filter(|n| !n.name.starts_with("part.")).filter_map(|n| n.mesh).collect();
         wardrobe::hide_covered(model, &body, &covering);
+    }
+    // Hair and beards hide under headwear and masks (22 §7 item 5).
+    let meshes_in = |model: &Model, slot: &str| -> Vec<usize> {
+        model
+            .nodes
+            .iter()
+            .filter(|n| {
+                n.name.strip_prefix("part.").is_some_and(|id| worn.iter().any(|p| p.slot == slot && p.id == id))
+            })
+            .filter_map(|n| n.mesh)
+            .collect()
+    };
+    let hair = [meshes_in(model, "hair"), meshes_in(model, "beard")].concat();
+    let headwear = [meshes_in(model, "head"), meshes_in(model, "face")].concat();
+    if let (false, false, Some(h)) = (hair.is_empty(), headwear.is_empty(), model.node_by_name("head")) {
+        let j = world(model)[h].0;
+        wardrobe::hide_hair(model, &hair, &headwear, [j[0], j[1] + wardrobe::SKULL, j[2]]);
     }
     // Layered items worn together: each outer one clear of each inner one (22 §4.3).
     let mesh_of = |id: &str| model.nodes.iter().find(|n| n.name.strip_prefix("part.") == Some(id)).and_then(|n| n.mesh);
@@ -895,7 +925,7 @@ mod tests {
         let key = "humanoid_slim_masculine";
         let welds = c.welds(key).unwrap();
         assert!(welds.rest.len() > 500);
-        let mut looks = Looks { outfit: vec!["head.wide_hat".into(), "face.beard".into()], ..Looks::default() };
+        let mut looks = Looks { outfit: vec!["head.wide_hat".into(), "beard.full".into()], ..Looks::default() };
         looks.set_slider("nose_reach", 1.0);
         let plain = c.forge("Sculpted", &looks).unwrap().model;
         let top = |m: &Model, target: &str| {
@@ -993,7 +1023,7 @@ mod tests {
             }
             d.iter().sum::<f32>() / d.len().max(1) as f32
         };
-        assert!(moved("face.beard") > 0.01, "the beard follows the jaw: {}", moved("face.beard"));
+        assert!(moved("beard.full") > 0.01, "the beard follows the jaw: {}", moved("beard.full"));
         // Symmetric: every moved weld off the middle line has its mirror moved too.
         for (w, o) in &offsets {
             let m = welds.mirror[*w as usize];
@@ -1704,12 +1734,7 @@ mod tests {
         let c = catalog();
         let rows = wardrobe::check_bodies(&c, false);
         assert!(rows.len() >= 12, "{}", rows.len());
-        // Known, and in doc 22 (BW5): the shirt's sleeves, simulated on the slim arms, are too
-        // narrow for the heavy masculine's; the sleeves want their own fit per build.
-        let known = |r: &wardrobe::Check| {
-            r.base == "humanoid_heavy_masculine" && r.outfit.iter().any(|o| o == "torso.sleeved_shirt")
-        };
-        for r in rows.iter().filter(|r| !known(r)) {
+        for r in &rows {
             assert!(r.fit.poke <= wardrobe::POKE_MAX, "{} {:?}: {:?}", r.base, r.outfit, r.fit);
         }
     }
@@ -1735,6 +1760,70 @@ mod tests {
             one.nodes.iter().filter(|n| !n.name.starts_with("part.")).filter_map(|n| n.mesh).collect();
         let fit = wardrobe::fit(&one, &pos, &body, &[mesh(&one, "legs.wool_trousers")]);
         assert!(fit.poke <= wardrobe::POKE_MAX, "{fit:?}");
+    }
+
+    #[test]
+    fn every_base_grows_the_hairstyles_and_beards_with_their_lengths_and_hides_them_under_headwear() {
+        // 22 §7 item 5: the hairstyles and beards are grown on every humanoid base, with the
+        // strands' coordinates the shader draws; under a helmet the hair it covers goes and long hair
+        // falling below it stays.
+        let c = catalog();
+        let styles = [
+            "hair.buzz",
+            "hair.short",
+            "hair.swept",
+            "hair.long",
+            "hair.ponytail",
+            "hair.topknot",
+            "hair.mohawk",
+            "hair.braids",
+            "hair.locs",
+            "hair.coils",
+            "beard.full",
+            "beard.goatee",
+            "beard.braided",
+            "beard.moustache",
+        ];
+        for key in
+            ["humanoid_slim_masculine", "humanoid_slim_feminine", "humanoid_heavy_masculine", "humanoid_heavy_feminine"]
+        {
+            for id in styles {
+                let part = c.parts(key).iter().find(|p| p.id == id).unwrap_or_else(|| panic!("{key} lacks {id}"));
+                assert_eq!(Some(part.slot.as_str()), id.split('.').next(), "{key} {id}");
+                assert!((200..=2_500).contains(&part.triangles), "{key} {id}: {} triangles", part.triangles);
+            }
+        }
+        // The length controls (BH2): the hair's and the beard's own sliders, which move them.
+        for id in ["hair_length", "beard_length"] {
+            assert!(c.sliders("humanoid_slim_masculine").iter().any(|s| s == id), "no {id}");
+        }
+        let mesh = |m: &Model, id: &str| m.nodes.iter().find(|n| n.name == format!("part.{id}")).unwrap().mesh.unwrap();
+        let tris = |m: &Model, id: &str| m.meshes[mesh(m, id)].iter().map(|p| p.indices.len() / 3).sum::<usize>();
+        let low = |m: &Model, id: &str| {
+            m.meshes[mesh(m, id)].iter().flat_map(|p| &p.positions).map(|q| q[1]).fold(f32::MAX, f32::min)
+        };
+        let worn = vec!["hair.long".to_string(), "beard.full".to_string()];
+        let mut long = Looks { outfit: worn.clone(), ..Looks::default() };
+        long.set_slider("hair_length", 1.0);
+        long.set_slider("beard_length", 1.0);
+        let (plain, long) = (
+            c.forge("A", &Looks { outfit: worn, ..Looks::default() }).unwrap().model,
+            c.forge("B", &long).unwrap().model,
+        );
+        for id in ["hair.long", "beard.full"] {
+            assert!(low(&long, id) < low(&plain, id) - 0.02, "{id} grows longer");
+        }
+        let bare = c.forge("A", &Looks { outfit: vec!["hair.long".into()], ..Looks::default() }).unwrap().model;
+        assert!(
+            bare.meshes[mesh(&bare, "hair.long")].iter().flat_map(|p| &p.uvs).all(|uv| (13.99..15.99).contains(&uv[0]))
+        );
+        let helmed = c
+            .forge("B", &Looks { outfit: vec!["hair.long".into(), "head.helmet".into()], ..Looks::default() })
+            .unwrap()
+            .model;
+        let (a, b) = (tris(&bare, "hair.long"), tris(&helmed, "hair.long"));
+        assert!(b < a * 3 / 4, "the helmet hides the hair under it: {b} of {a}");
+        assert!(b > a / 4, "the long hair below the helmet stays: {b} of {a}");
     }
 
     #[test]

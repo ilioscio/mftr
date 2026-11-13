@@ -1,0 +1,9 @@
+// A hairstyle (22 §7 item 5, BH1): short, combed back, groomed by physics (groom.py).
+(
+    id: "hair.short",
+    slot: "hair",
+    name: "Short hair",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

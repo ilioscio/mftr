@@ -80,6 +80,8 @@ var _viewport: SubViewport
 var _paint_tool := "fill"
 # Which brow the Brows panel shapes when each has its own (22 §3.1).
 var _brow_side := "left"
+# Whether the hair has a color of its own, apart from the brows' and the beard's (22 §7 item 5).
+var _hair_own := false
 # The side panel's scroll (`scroll_panel`, for captures).
 var _scroll: ScrollContainer
 var _brush_color := 18
@@ -520,6 +522,7 @@ func _show_step(id: String) -> void:
 			_face_shapes()
 			_eyes_panel()
 			_brows_panel()
+			_hair_panel()
 			var have: Array = Array(creator.sliders())
 			var listed := {}
 			for group in FACE_GROUPS:
@@ -543,7 +546,7 @@ func _show_step(id: String) -> void:
 				_slider(PROPORTION_NAMES.get(p, p), creator.proportion(p), func(v): creator.set_proportion(p, v), "smaller", "bigger")
 			_section("Shape")
 			for id2 in creator.sliders():
-				if not _is_face(id2):
+				if not _is_face(id2) and not _is_grown(id2):
 					_slider(_label_of(id2).trim_prefix("Body "), creator.slider(id2), func(v): creator.set_slider(id2, v), "less", "more")
 		"clothes":
 			var by_slot := {}
@@ -850,6 +853,11 @@ func _is_face(id: String) -> bool:
 	return FACE_PREFIXES.any(func(p): return id.begins_with(p))
 
 
+## The hair's and the beard's own sliders (their length), on the Face step's Hair panel.
+func _is_grown(id: String) -> bool:
+	return id.begins_with("hair_") or id.begins_with("beard_")
+
+
 func _label_of(id: String) -> String:
 	return id.replace("_", " ").capitalize()
 
@@ -998,6 +1006,11 @@ func _brows_panel() -> void:
 	for i in range(0, mini(24, pal.size())):
 		var sw := _swatch(pal[i], i == now, func():
 			creator.set_brow_color(i)
+			# The brows and the beard share a color (22 §7 item 5), and the hair too unless
+			# it has its own.
+			creator.set_hair_color("beard", i)
+			if not _hair_own:
+				creator.set_hair_color("hair", i)
 			_changed(true)
 			_show_step("face"), 26)
 		row.add_child(sw)
@@ -1013,6 +1026,73 @@ func _brows_panel() -> void:
 		creator.set_brows_own(on)
 		_brow_side = "left"
 		_changed(true)
+		_show_step("face"))
+	_panel.add_child(own_box)
+
+
+## The Hair panel (22 §7 item 5): the hairstyle and the beard, each with its length where it has
+## one, and their color, which the brows share unless the hair has its own.
+func _hair_panel() -> void:
+	var by_slot := {"hair": [], "beard": []}
+	for p in creator.parts():
+		if by_slot.has(p.slot):
+			by_slot[p.slot].append(p)
+	if by_slot.hair.is_empty() and by_slot.beard.is_empty():
+		return
+	var worn: PackedStringArray = creator.outfit()
+	var have: Array = Array(creator.sliders())
+	# A loaded recipe whose hair and brows differ has the hair's own color.
+	var hc: int = creator.hair_color("hair")
+	if hc >= 0 and creator.brow_color() >= 0 and hc != creator.brow_color():
+		_hair_own = true
+	for slot in ["hair", "beard"]:
+		var opts: Array = by_slot[slot]
+		if opts.is_empty():
+			continue
+		_section("Hair" if slot == "hair" else "Beard")
+		var cur := ""
+		var tools := [["", "None"]]
+		for p in opts:
+			tools.append([p.id, p.name])
+			if worn.has(p.id):
+				cur = p.id
+		_tool_row(tools, cur, func(k):
+			creator.set_part(slot, k)
+			_changed(true)
+			_show_step("face"))
+		var len_id: String = slot + "_length"
+		if cur != "" and have.has(len_id) and creator.has_length(cur):
+			_slider("Length", creator.slider(len_id), func(v): creator.set_slider(len_id, v), "shorter", "longer")
+	var shown := "hair" if creator.hair_color("hair") >= 0 or not by_slot.hair.is_empty() else "beard"
+	var now: int = creator.hair_color(shown)
+	if now < 0:
+		now = creator.brow_color()
+	_section("Hair color")
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", 5)
+	row.add_theme_constant_override("v_separation", 5)
+	var pal: PackedColorArray = creator.palette()
+	for i in range(0, mini(24, pal.size())):
+		row.add_child(_swatch(pal[i], i == now, func():
+			creator.set_hair_color("hair", i)
+			if not _hair_own:
+				creator.set_hair_color("beard", i)
+				creator.set_brow_color(i)
+			_changed(true)
+			_show_step("face"), 26))
+	_panel.add_child(row)
+	var own_box := CheckBox.new()
+	own_box.text = "Hair its own color (apart from the brows and beard)"
+	own_box.button_pressed = _hair_own
+	own_box.toggled.connect(func(on):
+		_hair_own = on
+		if not on:
+			# Back to one color: the brows' and the beard's take the hair's.
+			var c: int = creator.hair_color("hair")
+			if c >= 0:
+				creator.set_brow_color(c)
+				creator.set_hair_color("beard", c)
+			_changed(true)
 		_show_step("face"))
 	_panel.add_child(own_box)
 

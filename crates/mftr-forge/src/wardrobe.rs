@@ -236,6 +236,40 @@ pub fn hide_covered(model: &mut Model, body: &[usize], items: &[usize]) {
     }
 }
 
+/// How far above the head's joint (the neck's top) the skull's middle is in a base (m, bind
+/// pose): where `hide_hair` looks out from.
+pub const SKULL: f32 = 0.12;
+
+/// Hide the hair (`hair`, mesh indices) under worn headwear (`headwear`) in a dressed, unposed
+/// `model` (22 §7 item 5: the owner's call, hair hides under a helmet): a hair vertex is under
+/// it when the line from the skull's middle (`centre`) out through the vertex meets the
+/// headwear before `REACH` past it, so the hair a helmet covers goes, and so does any that
+/// would poke through it; a ponytail falling below it stays. Its triangles go when all three
+/// corners are under.
+pub fn hide_hair(model: &mut Model, hair: &[usize], headwear: &[usize], centre: V3) {
+    if hair.is_empty() || headwear.is_empty() {
+        return;
+    }
+    let grid = Grid::new(triangles(model, headwear, false), 0.04);
+    for &mi in hair {
+        for p in model.meshes[mi].iter_mut() {
+            let mask: Vec<bool> = p
+                .positions
+                .iter()
+                .map(|v| {
+                    let off = sub(*v, centre);
+                    let len = dot(off, off).sqrt();
+                    len > 1e-6 && grid.hits(centre, norm(off), len + REACH, None)
+                })
+                .collect();
+            let kept: Vec<u32> =
+                p.indices.chunks(3).filter(|t| !t.iter().all(|&i| mask[i as usize])).flatten().copied().collect();
+            p.triangles = kept.len() / 3;
+            p.indices = kept;
+        }
+    }
+}
+
 /// The layers, inner to outer (22 §4.1): an item of a later layer is pushed clear of a worn item
 /// of an earlier one. Accessories and parts without a layer aren't pushed.
 pub const LAYERS: [&str; 3] = ["under", "over", "armor"];
