@@ -461,6 +461,25 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
     if tris > mftr_pack::rules::TRIANGLES_MAX {
         return Err(format!("{tris} triangles: over the {} cap (20 §7.2)", mftr_pack::rules::TRIANGLES_MAX));
     }
+    // Over the extras' cap, the innermost garments go still first (their chains folded onto the
+    // bone they hang from): a tunic under a coat shows least; hair swings last.
+    let chain_bones = |model: &Model, id: &str| {
+        let prefix = format!("extra_{}_", id.replace('.', "_"));
+        model.nodes.iter().filter(|n| n.name.starts_with(&prefix)).count()
+    };
+    let mut order: Vec<&Part> = worn.clone();
+    order.sort_by_key(|p| (p.slot == "hair" || p.slot == "beard", wardrobe::LAYERS.iter().position(|l| *l == p.layer)));
+    let mut total: usize = worn.iter().map(|p| chain_bones(model, &p.id)).sum();
+    for p in order {
+        if total <= mftr_pack::rules::EXTRA_BONES_MAX {
+            break;
+        }
+        let n = chain_bones(model, &p.id);
+        if n > 0 {
+            fold_chains(model, &format!("extra_{}_", p.id.replace('.', "_")));
+            total -= n;
+        }
+    }
     let extras = prune_chains(model);
     if extras > mftr_pack::rules::EXTRA_BONES_MAX {
         return Err(format!(
@@ -469,6 +488,42 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
         ));
     }
     Ok(())
+}
+
+/// Still a part's chains (the bones named `prefix…`): their weights go to the bone each chain
+/// hangs from, so `prune_chains` drops them.
+fn fold_chains(model: &mut Model, prefix: &str) {
+    let Some(joints) = model.skins.first().cloned() else { return };
+    let to: Vec<Option<u32>> = joints
+        .iter()
+        .map(|&node| {
+            if !model.nodes[node].name.starts_with(prefix) {
+                return None;
+            }
+            let mut up = model.nodes[node].parent;
+            while let Some(p) = up.filter(|&p| model.nodes[p].name.starts_with("extra_")) {
+                up = model.nodes[p].parent;
+            }
+            up.and_then(|p| joints.iter().position(|&j| j == p)).map(|j| j as u32)
+        })
+        .collect();
+    for p in model.meshes.iter_mut().flatten() {
+        for (j, w) in p.joints.iter_mut().zip(p.weights.iter_mut()) {
+            for k in 0..4 {
+                if let Some(Some(root)) = to.get(j[k] as usize) {
+                    // Onto the root: merged with a slot already on it, else in place.
+                    match (0..4).find(|&m| m != k && j[m] == *root && w[m] > 0.0) {
+                        Some(m) => {
+                            w[m] += w[k];
+                            w[k] = 0.0;
+                            j[k] = 0;
+                        }
+                        None => j[k] = *root,
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Drop the spring-bone chains (22 §4.5, BW6) of the parts not worn: the base carries every
@@ -1956,6 +2011,7 @@ mod tests {
             ),
             (vec!["hair.ponytail", "back.long_coat"], vec!["hair_ponytail_tail_", "back_long_coat_"]),
             (vec!["hair.braids", "back.travel_cape"], vec!["hair_braids_l_", "hair_braids_r_", "back_travel_cape_"]),
+            (vec!["torso.linen_tunic", "hair.locs"], vec!["torso_linen_tunic_", "hair_locs_"]),
         ] {
             let looks = Looks { outfit: outfit.iter().map(|s| s.to_string()).collect(), ..Looks::default() };
             let m = c.forge("Swing", &looks).unwrap().model;
@@ -1984,6 +2040,32 @@ mod tests {
                 if m.nodes[node].name.starts_with("extra_") {
                     assert!(weighed[i], "{} carries nothing", m.nodes[node].name);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn a_folded_chain_gives_its_weight_to_the_bone_it_hangs_from() {
+        // Over the extras' cap the innermost garment goes still: its chains' weights move to the
+        // bone each hangs from, and pruning then drops them.
+        let c = catalog();
+        let looks = Looks { outfit: vec!["waist.wrap_skirt".into()], ..Looks::default() };
+        let mut m = c.forge("Skirt", &looks).unwrap().model;
+        let before: usize = m.skins[0].iter().filter(|&&j| m.nodes[j].name.starts_with("extra_")).count();
+        assert!(before > 0);
+        fold_chains(&mut m, "extra_waist_wrap_skirt_");
+        assert_eq!(prune_chains(&mut m), 0);
+        let pelvis = m.skins[0].iter().position(|&j| m.nodes[j].name == "pelvis").unwrap() as u32;
+        let mesh = m.nodes.iter().find(|n| n.name == "part.waist.wrap_skirt").unwrap().mesh.unwrap();
+        let on_pelvis = m.meshes[mesh]
+            .iter()
+            .flat_map(|p| p.joints.iter().zip(&p.weights))
+            .filter(|(j, w)| (0..4).any(|k| j[k] == pelvis && w[k] > 0.3))
+            .count();
+        assert!(on_pelvis > 100, "{on_pelvis} skirt vertices on the pelvis");
+        for p in m.meshes.iter().flatten() {
+            for w in &p.weights {
+                assert!((w.iter().sum::<f32>() - 1.0).abs() < 0.01);
             }
         }
     }

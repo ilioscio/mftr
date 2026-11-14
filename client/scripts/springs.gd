@@ -23,6 +23,9 @@ const FEEL := {
 ## The headwind for each m/s of ground speed.
 const WIND := 0.1
 
+## Beyond this far from the camera (m) a champion's chains rest as built: too small to see swing.
+const FAR := 45.0
+
 ## Colliders: [bone, toward the child bone (a capsule along the bone), radius (m) on the slim
 ## build], spheres where there is no child.
 const BODY := [
@@ -86,6 +89,19 @@ static func wind(sim: SpringBoneSimulator3D, velocity: Vector3) -> void:
 	var now := was.lerp(-v * WIND, 0.2)
 	sim.set_meta("wind", now)
 	sim.external_force = now
+
+
+## Swing only what can be seen (22 §4.5): `sim` pauses while its champion at `at` (world) is out
+## of `camera`'s view or past `FAR`, its chains resting as built, and starts again from rest.
+static func detail(sim: SpringBoneSimulator3D, camera: Camera3D, at: Vector3) -> void:
+	if sim == null or camera == null:
+		return
+	var seen := camera.global_position.distance_to(at) < FAR and (
+		camera.is_position_in_frustum(at) or camera.is_position_in_frustum(at + Vector3(0, 1.8, 0)))
+	if seen != sim.active:
+		sim.active = seen
+		if seen:
+			sim.reset()
 
 
 ## The last bone's own length: as long as the bone before it.

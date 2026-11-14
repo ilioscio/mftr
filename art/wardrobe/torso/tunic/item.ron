@@ -6,4 +6,9 @@
     layer: "over",
     accent: true,
     rigid: false,
+    // Spring-bone chains round the hips (22 §4.5, BW6): the hem flaring to mid-thigh carries
+    // half its swing (the rest follows the legs).
+    chains: 4,
+    chain_turn: 45,
+    swing: 0.5,
 )

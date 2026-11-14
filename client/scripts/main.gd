@@ -1443,6 +1443,7 @@ func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
 		if flat.length() < 0.5:
 			Springs.wind(rig.springs, Vector3(flat.x, 0.0, flat.y) / delta)
 	rig.last = p
+	Springs.detail(rig.springs, camera, p)
 	# Facing: the model's front (+Z) turns toward the sim's facing at TURN_RATE.
 	if info.has("facing"):
 		var target: float = PI / 2.0 - float(info.facing)

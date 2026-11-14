@@ -57,17 +57,18 @@ Each chain is two bones laid down the garment where it settled, and the item's v
 where they start blend onto them. Hair marks its hanging lock sets in `groom.py` instead
 (`Locks(chain=…)`): a tail's chain, or loose hair's (`split`: a chain each side and down the
 back). The base carries every item's chains; the forge keeps only the worn ones', 32 bones at
-most (a coat, a skirt and long hair together fit).
+most (a coat, a skirt and long hair together fit). Past that, the innermost garments go still
+first.
 
 ## Items
 
 | Item | Slot, layer | How | Triangles |
 |---|---|---|---|
-| `torso.linen_tunic` | torso, over | sewn: front and back, mirrored | 1,651 |
+| `torso.linen_tunic` | torso, over | sewn: front and back, mirrored; four chains round the hips | 1,651 |
 | `legs.wool_trousers` | legs, under | sewn: four panels, crotch extension | 1,619 |
 | `torso.sleeved_shirt` | torso, over | sewn: front, back, sleeves along the arm | 2,078 |
 | `waist.wrap_skirt` | waist, over | sewn: front and back, flared; four chains round the hips | 1,688 |
-| `back.long_coat` | back, armor | sewn: back and two open fronts, mirrored; four chains round the hips | 3,300 |
+| `back.long_coat` | back, armor | sewn: back and two open fronts, mirrored; four chains round the hips | 3,292 |
 | `back.travel_cape` | back, armor | sewn: a flared back panel on a collar round the neck; three chains from the chest | 1,292 |
 
 ## Hair

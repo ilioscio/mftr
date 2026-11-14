@@ -1084,8 +1084,8 @@ fill on the part's first paint region, so the Paint step still reaches it.
 
 ### BW6 status (2026-11-13): hair and cloth on spring bones
 
-What hangs now swings: long hair, tails and braids, a beard's braid, the skirt, the long coat's
-skirts and a new travelling cape. A coat, a skirt and long hair can be worn together.
+What hangs now swings: long hair, tails and braids, a beard's braid, the tunic's hem, the skirt,
+the long coat's skirts and a new travelling cape. A coat, a skirt and long hair can be worn together.
 
 **Chains, at build time** (`mftr_blender.chains`). Each hanging part gets chains of its own,
 `extra_<part>_<chain>_<n>`, two or three bones laid along where it settled on that base:
@@ -1096,6 +1096,7 @@ skirts and a new travelling cape. A coat, a skirt and long hair can be worn toge
 | `hair.ponytail` | the tail, from the tie |
 | `hair.braids` | one a braid |
 | `beard.braided` | the braid, from the chin |
+| `torso.linen_tunic` | four round the hips, 50% of its mid-thigh hem |
 | `waist.wrap_skirt` | four round the hips (front and back on each side), from the hip joints; they carry 60% of the hem, the legs the rest |
 | `back.long_coat` | four round the hips, 90% of the hem |
 | `back.travel_cape` (new) | three across the back, from the chest, all of it |
@@ -1114,8 +1115,9 @@ two layers instead of tearing (garments already built are unchanged until rebuil
 triangles. The block-out `back.cape` stays for the recipes that wear it.
 
 **In the pack and the forge.** A base carries every part's chains (they don't count toward its
-bones). The forge drops the chains of parts not worn, and refuses an outfit over 32 chain bones
-(10 §7.2's cap, raised from 16).
+bones). The forge drops the chains of parts not worn. Over 32 chain bones (10 §7.2's cap, raised
+from 16), the innermost garments go still first, their chains folded onto the bone they hang
+from, and hair last. So no outfit is refused for swinging too much.
 
 **In the client** (`client/scripts/springs.gd`). A champion's chains that no clip keys get a
 `SpringBoneSimulator3D`. Its colliders are the head, the chest, the hips, the upper arms and the
@@ -1129,13 +1131,18 @@ are left alone.
   them back.
 - **Feel:** hair is loose, a beard stiffer, cloth heavier. Standing, everything hangs exactly as
   built.
+- **Detail:** a champion out of the camera's view or over 45 m from it rests as built; its chains
+  start again from rest when it comes back into view.
 - **Testing:** `--no-springs` turns it off. `--lineup-move M/S` makes a lineup run ahead with the
   camera, for captures.
 
-**Left:**
-- the tunic's hem (mid-thigh) has no chains;
-- far champions aren't frozen yet (the cost is small: a few chains each);
-- a turn-in-place capture, and the owner's look in play.
+**The long coat** was sewn again with the fixed weld: its two small holes at the sides are closed.
+
+**In play:** a practice duel as a caped champion (`--practice FILE --shot-charge`) runs clean.
+At the gameplay camera's distance the swing is subtle; it shows most on the cape, the ponytail
+and long hair.
+
+**Left:** the owner's look in play.
 
 ## 7. Open questions for the owner
 
