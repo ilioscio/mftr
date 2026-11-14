@@ -16,6 +16,7 @@ for tie in TIES:
                        hug=0.06))
     locks.append(Locks(roots=[tie + Vector((s * 0.008, 0.0, 0.0))], length=0.30, width=0.038, thick=0.03,
                        flow=lambda p, s=s: Vector((s * 0.15, -0.35, -1.0)), stiff=0.6, seed=52, seg=0.022,
-                       lift=0.012, taper=0.45, plait=True, profile="round", sides=5, hug=0.0))
+                       lift=0.012, taper=0.45, plait=True, profile="round", sides=5, hug=0.0,
+                       chain="l" if s > 0 else "r"))
 
 STYLE = Style(cap=0.006, band=(0.55, 0.42, 0.16), locks=locks)

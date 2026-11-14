@@ -4,7 +4,9 @@ humanoid base at build time.
 
 **An item** lives in `art/wardrobe/<slot>/<name>/`:
 
-- `item.ron`: what it is (`id`, `slot`, `name`, `layer`, `accent`, `rigid`), as the catalog lists it;
+- `item.ron`: what it is (`id`, `slot`, `name`, `layer`, `accent`, `rigid`), as the catalog lists it,
+  and its spring-bone chains if it hangs (`chains`, `chain_turn`, `chain_arc`, `chain_from`, `swing`:
+  `chains.hang_cloth`);
 - `item.blend`: one mesh object, `item`, **authored around the reference body**: the CC0 male in
   its own space (`art/creator/bodies/body_source.blend`, `body_male`), standing as the bundle has
   it. Its faces use the material slots' names (`skin`, `cloth`, `metal`, `accent`…), its vertex
@@ -347,7 +349,7 @@ def fit_items(armature, body, gender, room=1.0):
     skinned to `armature`, as catalog parts. Returns `made` entries (as `parts.build_parts`'s,
     with `covers`). `room` scales the layers' distances off the skin: the heavy builds' greater
     bulk moves further under the cloth."""
-    from . import body_rig, mesh, parts
+    from . import body_rig, chains, mesh, parts
     found = items()
     if not found or "src_co" not in body.data.attributes:
         return []
@@ -381,6 +383,10 @@ def fit_items(armature, body, gender, room=1.0):
         body_rig.transfer(body, obj)
         # A sim's mesh is irregular: smooth its helper weights longer, under the step limit.
         body_rig.limit_steps(obj, max_step=0.28, rounds=240)
+        if info.get("chains"):
+            # What hangs below the hips swings on spring-bone chains (22 §4.5, BW6).
+            chains.hang_cloth(obj, armature, info["id"], int(info["chains"]), info.get("chain_turn", 45.0),
+                              info.get("swing", 1.0), info.get("chain_from", "pelvis"), info.get("chain_arc"))
         parts.transfer_shape_keys(body, obj)
         made.append((info["id"], info["slot"], info["name"], [], bool(info["accent"]), mesh.triangle_count(obj), 0,
                      {"covers": True, "rigid": bool(info["rigid"]), "layer": info["layer"]}))

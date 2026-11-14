@@ -237,16 +237,21 @@ def simulate(garment, body):
     for i in range(len(bm.verts)):
         groups.setdefault(find(i), []).append(i)
     target = {}
+    seam = set()
     for r, members in groups.items():
         if len(members) < 2:
             continue
         mid = sum((bm.verts[i].co for i in members), Vector()) / len(members)
         for i in members:
             bm.verts[i].co = mid
+            seam.add(bm.verts[i])
             if i != r:
                 target[bm.verts[i]] = bm.verts[r]
+    # What the sewing left: near the seams only. A fold elsewhere that lies on itself (a cape
+    # bunched on the back) stays two layers, not merged into a tear.
+    near = {w for v in seam for e in v.link_edges for w in e.verts} | seam
     bmesh.ops.weld_verts(bm, targetmap=target)
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=garment.spacing * 0.2)
+    bmesh.ops.remove_doubles(bm, verts=[v for v in near if v.is_valid], dist=garment.spacing * 0.2)
     _fill_holes(bm)
     if garment.mirror:
         _mirror(bm, garment.mirror)

@@ -273,6 +273,10 @@ Capes, skirts, coat tails, loose sleeves, long hair and braids get **spring-bone
 - Chains are `extra_<chain>_<n>` bones (10 §7.2). The extras cap rises from 16 to 32, for a
   coat and a cape and hair together.
 
+*(As built, BW6: each part has chains of its own, `extra_<part>_<chain>_<n>`; the base carries
+them all and the forge keeps the worn parts'. They swing in the champion's own space, with a
+headwind from its velocity: see the BW6 status below.)*
+
 ### 4.6 Quality bar and budgets
 
 Above LoL season 1:
@@ -1077,6 +1081,68 @@ fill on the part's first paint region, so the Paint step still reaches it.
 - two-tone tips;
 - stubble shaded on the skin;
 - spring bones on the long locks (BW6).
+
+### BW6 status (2026-11-13): hair and cloth on spring bones
+
+What hangs now swings: long hair, tails and braids, a beard's braid, the tunic's hem, the skirt,
+the long coat's skirts and a new travelling cape. A coat, a skirt and long hair can be worn together.
+
+**Chains, at build time** (`mftr_blender.chains`). Each hanging part gets chains of its own,
+`extra_<part>_<chain>_<n>`, two or three bones laid along where it settled on that base:
+
+| Part | Chains |
+|---|---|
+| `hair.long`, `hair.locs` | three: each side and down the back, from where the locks leave the skull |
+| `hair.ponytail` | the tail, from the tie |
+| `hair.braids` | one a braid |
+| `beard.braided` | the braid, from the chin |
+| `torso.linen_tunic` | four round the hips, 50% of its mid-thigh hem |
+| `waist.wrap_skirt` | four round the hips (front and back on each side), from the hip joints; they carry 60% of the hem, the legs the rest |
+| `back.long_coat` | four round the hips, 90% of the hem |
+| `back.travel_cape` (new) | three across the back, from the chest, all of it |
+
+A part's vertices blend from their own weights onto the chain over its first bone, then from
+bone to bone. A grooming pattern marks its hanging locks (`Locks(chain=…)`); an item says its
+chains in `item.ron` (`chains`, `chain_turn`, `chain_arc`, `chain_from`, `swing`).
+
+**The cape** is sewn like the coat (M1): a back panel flaring from the shoulders to the calves,
+on a collar sewn over both shoulders and across the chest. (The first version hung from two
+small yokes, and the cape's weight pulled it off the body in the simulation.) Its shoulders sit
+inside the shoulder line and its neckline low, so the heavy feminine build's shoulders and jaw
+don't poke through it. It isn't mirrored: a fold down the middle of the back tore at the mirror
+line. The sewing's last weld now merges only near the seams, so a fold that lies on itself stays
+two layers instead of tearing (garments already built are unchanged until rebuilt). 1,292
+triangles. The block-out `back.cape` stays for the recipes that wear it.
+
+**In the pack and the forge.** A base carries every part's chains (they don't count toward its
+bones). The forge drops the chains of parts not worn. Over 32 chain bones (10 §7.2's cap, raised
+from 16), the innermost garments go still first, their chains folded onto the bone they hang
+from, and hair last. So no outfit is refused for swinging too much.
+
+**In the client** (`client/scripts/springs.gd`). A champion's chains that no clip keys get a
+`SpringBoneSimulator3D`. Its colliders are the head, the chest, the hips, the upper arms and the
+legs, scaled with the build's hips. Official champions' capes are baked into their clips, so they
+are left alone.
+- **Champion space:** the chains swing relative to the champion's body node, not the world. In
+  world space a champion running at 3.5 m/s streamed everything out flat behind it, whatever
+  the stiffness, and a blink would have yanked it.
+- **Headwind:** moving adds a wind of 0.1 per m/s against the champion's ground velocity (none
+  for a jump in place). The stride, the turns and the clips swing the chains, and running blows
+  them back.
+- **Feel:** hair is loose, a beard stiffer, cloth heavier. Standing, everything hangs exactly as
+  built.
+- **Detail:** a champion out of the camera's view or over 45 m from it rests as built; its chains
+  start again from rest when it comes back into view.
+- **Testing:** `--no-springs` turns it off. `--lineup-move M/S` makes a lineup run ahead with the
+  camera, for captures.
+
+**The long coat** was sewn again with the fixed weld: its two small holes at the sides are closed.
+
+**In play:** a practice duel as a caped champion (`--practice FILE --shot-charge`) runs clean.
+At the gameplay camera's distance the swing is subtle; it shows most on the cape, the ponytail
+and long hair.
+
+**Left:** the owner's look in play.
 
 ## 7. Open questions for the owner
 

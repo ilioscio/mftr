@@ -194,6 +194,44 @@ impl MftrModel {
         self.build_mesh(false)
     }
 
+    /// The spring-bone chains (22 §4.5, BW6): a champion's `extra_<chain>_<n>` chains that no
+    /// clip keys (a forged champion's hair and cloth; an official champion's cape is baked into
+    /// its clips, and a siege cart's barrel is no cloth), as `[chain, root bone, end bone]`.
+    #[func]
+    fn spring_chains(&self) -> VarArray {
+        if self.pack.kind != "champion" {
+            return VarArray::new();
+        }
+        let m = &self.pack.model;
+        let keyed: std::collections::HashSet<&str> = m
+            .animations
+            .iter()
+            .flat_map(|a| a.channels.iter())
+            .filter_map(|c| m.nodes.get(c.node).map(|n| n.name.as_str()))
+            .collect();
+        let mut chains: std::collections::BTreeMap<&str, (u32, u32, bool)> = Default::default();
+        for name in &self.pack.library.rig.names {
+            let Some((chain, n)) = name.strip_prefix("extra_").and_then(|r| r.rsplit_once('_')) else { continue };
+            let Ok(n) = n.parse::<u32>() else { continue };
+            let e = chains.entry(chain).or_insert((u32::MAX, 0, false));
+            e.0 = e.0.min(n);
+            e.1 = e.1.max(n);
+            e.2 |= keyed.contains(name.as_str());
+        }
+        let mut out = VarArray::new();
+        for (chain, (first, last, keyed)) in chains {
+            if keyed || first == u32::MAX {
+                continue;
+            }
+            let mut row = VarArray::new();
+            row.push(&GString::from(chain).to_variant());
+            row.push(&GString::from(format!("extra_{chain}_{first}").as_str()).to_variant());
+            row.push(&GString::from(format!("extra_{chain}_{last}").as_str()).to_variant());
+            out.push(&row.to_variant());
+        }
+        out
+    }
+
     /// The sidecar's kind: `champion`, `library`, `minion`, `rig` or `prop`.
     #[func]
     fn kind(&self) -> GString {

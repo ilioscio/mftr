@@ -21,5 +21,5 @@ STYLE = Style(cap=0.009, ramp=0.012, area=beard, blend=0.015, drape=False, band=
     # The braid, from under the chin.
     Locks(roots=[Vector((0.0, -0.05, -0.094))], length=0.2, width=0.034, thick=0.034,
           flow=lambda p: Vector((0.0, -0.3, -1.0)), stiff=0.6, seed=87, seg=0.018, lift=0.012, taper=0.45,
-          plait=True, profile="round", sides=5, hug=0.0),
+          plait=True, profile="round", sides=5, hug=0.0, chain="braid"),
 ])

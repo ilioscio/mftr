@@ -27,8 +27,8 @@ pub const PROP_PARTS_MAX: usize = 8;
 /// Bones a rig aims for, the face's and the body's sculpt bones aside (21 §1.3, §9.1: a creator
 /// base carries 24 of each, which no clip keys).
 pub const BONES_TARGET: usize = 64;
-/// Every bone, sculpt bones included: the biped's 34, 16 extras, 24 face and 24 body bones fit.
-pub const BONES_MAX: usize = 100;
+/// Every bone, sculpt bones included: the biped's 34, 32 extras, 24 face and 24 body bones fit.
+pub const BONES_MAX: usize = 120;
 pub const INFLUENCES_TARGET: usize = 2;
 /// `accent` is the team color; `accent_glow` is the team color, glowing (A5: minions' eyes and
 /// orbs). Neither counts toward the four other slots.
@@ -114,7 +114,12 @@ fn is_extra_bone(name: &str) -> bool {
         && n.bytes().all(|b| b.is_ascii_digit())
 }
 
-pub const EXTRA_BONES_MAX: usize = 16;
+/// Extra bones a rig may have (capes, hair, tails: 22 §4.5 raised it from 16, for a coat, a
+/// skirt and hair together).
+pub const EXTRA_BONES_MAX: usize = 32;
+/// A creator base carries every catalog part's spring-bone chains (22 §4.5, BW6); the forge keeps
+/// the worn parts' only, within `EXTRA_BONES_MAX`. They don't count toward `BONES_MAX` there.
+pub const BASE_EXTRA_BONES_MAX: usize = 160;
 
 /// 10 §5: every champion ships these; abilities add `kit_clips`.
 pub const REQUIRED_CHAMPION: &[&str] = &[

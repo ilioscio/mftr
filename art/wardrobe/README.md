@@ -9,7 +9,7 @@ all four humanoid bases (slim and heavy, masculine and feminine) when the bases 
 
 | File | What |
 |---|---|
-| `item.ron` | `id` (`<slot>.<name>`), `slot`, `name`, `layer` (`under`, `over`, `armor`, `accessory`), `accent` (it shows the team color), `rigid` (a plate: little of the body's growth) |
+| `item.ron` | `id` (`<slot>.<name>`), `slot`, `name`, `layer` (`under`, `over`, `armor`, `accessory`), `accent` (it shows the team color), `rigid` (a plate: little of the body's growth); for a hanging item, its spring-bone chains (below) |
 | `item.blend` | One mesh object, `item`, authored around the **reference body**: `body_male` in `art/creator/bodies/body_source.blend`, standing as it is there. Faces use materials named for the material slots (`cloth`, `metal`, `accent`…); the color attribute `Col` holds its paint regions. |
 | `build.py` | Optional: what makes `item.blend`. A sewn garment's pattern (`mftr_blender.sewing`). |
 
@@ -40,15 +40,36 @@ fits every item to every base:
 In the base it is a catalog part flagged `covers`: the forge hides the body under it by its
 geometry (`mftr_forge::wardrobe`).
 
+## Swinging (22 §4.5, BW6)
+
+What hangs swings on **spring-bone chains** of its own (`mftr_blender.chains`), which the client
+simulates with Godot's spring bones, with the body as colliders (`client/scripts/springs.gd`):
+
+| `item.ron` field | What |
+|---|---|
+| `chains` | how many chains: round the hips (a skirt, a coat's skirts) or across the back (a cape) |
+| `chain_turn` | where the first is, or the middle of an arc, in degrees round from the front (180 is the back) |
+| `chain_arc` | optional: the chains spread across this many degrees instead of all round |
+| `chain_from` | the bone they hang from: `pelvis` (the default; they start at the hip joints) or `chest` |
+| `swing` | how much of the hem they carry (1: all; the skirt's 0.6 leaves the rest following the legs) |
+
+Each chain is two bones laid down the garment where it settled, and the item's vertices below
+where they start blend onto them. Hair marks its hanging lock sets in `groom.py` instead
+(`Locks(chain=…)`): a tail's chain, or loose hair's (`split`: a chain each side and down the
+back). The base carries every item's chains; the forge keeps only the worn ones', 32 bones at
+most (a coat, a skirt and long hair together fit). Past that, the innermost garments go still
+first.
+
 ## Items
 
 | Item | Slot, layer | How | Triangles |
 |---|---|---|---|
-| `torso.linen_tunic` | torso, over | sewn: front and back, mirrored | 1,651 |
+| `torso.linen_tunic` | torso, over | sewn: front and back, mirrored; four chains round the hips | 1,651 |
 | `legs.wool_trousers` | legs, under | sewn: four panels, crotch extension | 1,619 |
 | `torso.sleeved_shirt` | torso, over | sewn: front, back, sleeves along the arm | 2,078 |
-| `waist.wrap_skirt` | waist, over | sewn: front and back, flared | 1,688 |
-| `back.long_coat` | back, armor | sewn: back and two open fronts, mirrored | 3,300 |
+| `waist.wrap_skirt` | waist, over | sewn: front and back, flared; four chains round the hips | 1,688 |
+| `back.long_coat` | back, armor | sewn: back and two open fronts, mirrored; four chains round the hips | 3,292 |
+| `back.travel_cape` | back, armor | sewn: a flared back panel on a collar round the neck; three chains from the chest | 1,292 |
 
 ## Hair
 

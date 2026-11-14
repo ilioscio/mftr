@@ -6,4 +6,9 @@
     layer: "over",
     accent: true,
     rigid: false,
+    // Spring-bone chains round the hips (22 §4.5, BW6): how many, their turn from the front
+    // (degrees), and how much of the hem they carry (the rest follows the legs).
+    chains: 4,
+    chain_turn: 45,
+    swing: 0.6,
 )

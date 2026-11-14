@@ -14,5 +14,6 @@ def flow(p):
 
 STYLE = Style(cap=0.008, locks=[
     Locks(where=lambda p: above(p) > 0.008, spacing=0.036, length=0.24, width=0.028, thick=0.028, flow=flow,
-          stiff=0.25, seed=61, seg=0.06, lift=0.004, profile="round", sides=4, taper=0.2),
+          stiff=0.25, seed=61, seg=0.06, lift=0.004, profile="round", sides=4, taper=0.2,
+          chain="hang", split=True),
 ])
