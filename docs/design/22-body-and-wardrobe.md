@@ -1144,6 +1144,48 @@ and long hair.
 
 **Left:** the owner's look in play.
 
+### Vesper in the wardrobe (2026-11-14): an official champion rebuilt in the new clothes
+
+The owner asked for one of the official ten to be rebuilt in the creator, its clothes made in
+the new system. Vesper went first, for her cloak and quiver. `vesper.champion.ron` and
+`vesper-neo.champion.ron` now wear three new items, beside the catalog's trousers, boots,
+bracers and bow:
+
+| Item | How | Like the hand-made Vesper |
+|---|---|---|
+| `torso.ranger_tunic` | sewn: forest-green body to the upper thigh, cream sleeves to the elbow, teal trims; four chains on the hem | her tunic over a cream shirt |
+| `shoulders.ranger_cloak` | sewn: a leather collar spreading over the left shoulder as a pauldron, holding a green cloak with a teal hem that falls off the left shoulder and diagonally across the back; three chains | her one-sided cloak and pauldron |
+| `back.ranger_quiver` | modelled by its `build.py`: a leather quiver from the left hip to over the right shoulder, steel bands, teal-fletched arrows, a strap laid on the body across the chest | her quiver |
+
+Her trousers are painted dark forest, her ponytail auburn. The cloak is on the `shoulders` slot
+so the quiver keeps the `back` one.
+
+**What it took:**
+- **Panel colors** (`sewing.Panel(color=…)`): a panel can have its own color, a paint region of
+  its own. Panels are split apart after the lining pass. Before the lining, the split seam was
+  taken for an opening and lined with a rim that sat under the skin.
+- **`sleeves: true`:** fits a torso item to the arms. Only an id containing "sleeve" did before,
+  so the tunic's sleeves were fitted to an armless body and the shoulders poked through.
+- **`hold: "chest"`:** what stands off the body (the quiver, the arrows) rides that bone whole,
+  blending from the body's weights from 4 cm off the skin. Without it, the arrows by the right
+  shoulder would swing with the arm.
+- **Chain labels** close together across an arc (the cloak's) are numbered apart: two came out
+  `bl`, and Blender renamed one.
+
+**A bug fixed on the way:** every sewn garment came out on the `skin` material slot. The sewing
+wrote the faces' slots before the mesh had materials, and Blender reset them to the first slot.
+So the skin tone tinted them, the Paint step couldn't reach them, and their trims never showed
+the team color. Every garment is on `cloth` now, and the trims the build scripts asked for are
+on `accent`. The others were sewn again; the sleeved shirt kept main's shape (sewn again, it
+draped a little differently and failed the harness on the heavy masculine base), its faces moved
+onto the right slots by their colors. The linen tunic's, the trousers', the shirt's, the skirt's,
+the coat's and the cape's trims now take the team color in play.
+
+**Left:**
+- The bow is still the catalog's block-out; weapons come in BW7.
+- She has one hairstyle: the concept's side-swept bangs need a style of their own.
+- The owner's look.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

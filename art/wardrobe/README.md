@@ -9,7 +9,7 @@ all four humanoid bases (slim and heavy, masculine and feminine) when the bases 
 
 | File | What |
 |---|---|
-| `item.ron` | `id` (`<slot>.<name>`), `slot`, `name`, `layer` (`under`, `over`, `armor`, `accessory`), `accent` (it shows the team color), `rigid` (a plate: little of the body's growth); for a hanging item, its spring-bone chains (below) |
+| `item.ron` | `id` (`<slot>.<name>`), `slot`, `name`, `layer` (`under`, `over`, `armor`, `accessory`), `accent` (it shows the team color), `rigid` (a plate: little of the body's growth); `sleeves` (a torso item with sleeves, fitted to the arms too); `hold` (a bone: what stands off the body, like a quiver's arrows, rides it whole rather than following the arm under it); for a hanging item, its spring-bone chains (below) |
 | `item.blend` | One mesh object, `item`, authored around the **reference body**: `body_male` in `art/creator/bodies/body_source.blend`, standing as it is there. Faces use materials named for the material slots (`cloth`, `metal`, `accent`…); the color attribute `Col` holds its paint regions. |
 | `build.py` | Optional: what makes `item.blend`. A sewn garment's pattern (`mftr_blender.sewing`). |
 
@@ -25,8 +25,12 @@ all four humanoid bases (slim and heavy, masculine and feminine) when the bases 
   Blender's cloth simulation sews the panels onto the reference body; the folds and the drape
   are physics (D77, M1). The result is welded, trimmed at its open edges and lined there.
 
+  A panel may have its own color (`sewing.Panel(color=…)`): a ranger's tunic's cream sleeves on
+  its green body. Each color is a paint region of its own.
+
 - **Modelled** (armour, accessories): model it in Blender around `body_male` and save it as
-  `item.blend`, the object named `item`.
+  `item.blend`, the object named `item`. A hard object can also be built by its `build.py`
+  (the ranger's quiver), its strap laid on the body's surface.
 
 Then rebuild the bases (`art/creator/humanoid_*/build.py --export`). `mftr_blender.wardrobe`
 fits every item to every base:
@@ -70,6 +74,9 @@ first.
 | `waist.wrap_skirt` | waist, over | sewn: front and back, flared; four chains round the hips | 1,688 |
 | `back.long_coat` | back, armor | sewn: back and two open fronts, mirrored; four chains round the hips | 3,292 |
 | `back.travel_cape` | back, armor | sewn: a flared back panel on a collar round the neck; three chains from the chest | 1,292 |
+| `torso.ranger_tunic` | torso, over | sewn: green body to the upper thigh, cream sleeves, teal trims; four chains round the hips (Vesper's) | ~2,000 |
+| `shoulders.ranger_cloak` | shoulders, armor | sewn: a cloak off the left shoulder on a leather collar and pauldron; three chains from the chest (Vesper's) | 1,369 |
+| `back.ranger_quiver` | back, accessory | modelled: leather, steel bands, teal-fletched arrows, a strap across the chest; held on the chest (Vesper's) | 545 |
 
 ## Hair
 

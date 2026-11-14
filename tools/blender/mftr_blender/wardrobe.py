@@ -5,8 +5,9 @@ humanoid base at build time.
 **An item** lives in `art/wardrobe/<slot>/<name>/`:
 
 - `item.ron`: what it is (`id`, `slot`, `name`, `layer`, `accent`, `rigid`), as the catalog lists it,
-  and its spring-bone chains if it hangs (`chains`, `chain_turn`, `chain_arc`, `chain_from`, `swing`:
-  `chains.hang_cloth`);
+  its spring-bone chains if it hangs (`chains`, `chain_turn`, `chain_arc`, `chain_from`, `swing`:
+  `chains.hang_cloth`), `hold`, a bone that what stands off the body rides whole (`_hold`), and
+  `sleeves` (a torso item with sleeves is fitted to the arms too);
 - `item.blend`: one mesh object, `item`, **authored around the reference body**: the CC0 male in
   its own space (`art/creator/bodies/body_source.blend`, `body_male`), standing as the bundle has
   it. Its faces use the material slots' names (`skin`, `cloth`, `metal`, `accent`…), its vertex
@@ -330,6 +331,31 @@ def _weights(obj, body, skip, avoid=()):
             groups[n].add([v.index], x / tot, "REPLACE")
 
 
+# How far off the skin a held item's vertex rides its bone whole (m); it blends in over HOLD_BLEND.
+HOLD_FROM, HOLD_BLEND = 0.04, 0.02
+
+
+def _hold(obj, body, bone, start):
+    """`obj`'s vertices further than `start` from `body`'s surface onto `bone` alone, blending
+    from the body's weights over HOLD_BLEND."""
+    from . import chains
+    bme = body.data
+    tree = BVHTree.FromPolygons([v.co.copy() for v in bme.vertices], [tuple(p.vertices) for p in bme.polygons])
+    names = {g.index: g.name for g in obj.vertex_groups}
+    weights = {}
+    for v in obj.data.vertices:
+        q, _n, _i, d = tree.find_nearest(v.co)
+        if q is None:
+            continue
+        t = min(max((d - start) / HOLD_BLEND, 0.0), 1.0)
+        if t <= 0.0:
+            continue
+        own = {names[g.group]: g.weight * (1.0 - t) for g in v.groups if g.weight > 0}
+        own[bone] = own.get(bone, 0.0) + t
+        weights[v.index] = own
+    chains.reweigh(obj, weights, keep=4)
+
+
 def _materials(obj):
     """The item's faces on the base's material slots (by their materials' names)."""
     from . import mesh
@@ -359,7 +385,7 @@ def fit_items(armature, body, gender, room=1.0):
     for folder, info in found:
         obj = load(folder)
         me = obj.data
-        arms = info["slot"] not in ("torso", "back", "waist", "legs") or "sleeve" in info["id"]
+        arms = info["slot"] not in ("torso", "back", "waist", "legs") or "sleeve" in info["id"] or info.get("sleeves", False)
         if arms not in surfaces:
             surfaces[arms] = (_source_surfaces(sex, arms), _base_surface(body, arms))
         to_sex, to_base = surfaces[arms]
@@ -383,6 +409,10 @@ def fit_items(armature, body, gender, room=1.0):
         body_rig.transfer(body, obj)
         # A sim's mesh is irregular: smooth its helper weights longer, under the step limit.
         body_rig.limit_steps(obj, max_step=0.28, rounds=240)
+        if info.get("hold"):
+            # A hard thing standing off the body rides one bone whole (22 §4: a quiver's arrows
+            # mustn't follow the arm); what lies on the body keeps the body's weights.
+            _hold(obj, body, info["hold"], info.get("hold_from", HOLD_FROM))
         if info.get("chains"):
             # What hangs below the hips swings on spring-bone chains (22 §4.5, BW6).
             chains.hang_cloth(obj, armature, info["id"], int(info["chains"]), info.get("chain_turn", 45.0),
