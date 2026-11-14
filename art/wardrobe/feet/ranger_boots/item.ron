@@ -1,0 +1,10 @@
+// A wardrobe item (22 §4): a ranger's boots (Vesper's), knee-high leather with a folded cuff, a
+// shell of the reference body's legs (build.py, `mftr_blender.shell`).
+(
+    id: "feet.ranger_boots",
+    slot: "feet",
+    name: "Ranger's boots",
+    layer: "over",
+    accent: false,
+    rigid: false,
+)

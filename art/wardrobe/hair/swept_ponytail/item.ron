@@ -1,0 +1,10 @@
+// A hairstyle (22 §7 item 5; Vesper's): side-swept bangs, the rest drawn back to a tie behind the
+// crown, the tail hanging on a spring chain, groomed by physics (groom.py).
+(
+    id: "hair.swept_ponytail",
+    slot: "hair",
+    name: "Swept ponytail",
+    layer: "hair",
+    accent: false,
+    rigid: false,
+)

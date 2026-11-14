@@ -26,10 +26,12 @@ from mathutils.geometry import delaunay_2d_cdt
 
 class Panel:
     """A flat panel: `outline`, [(name or None, x, z)] in order round it (counter-clockwise seen
-    from the front), standing in the plane y = `y`, facing -y (`front`) or +y."""
+    from the front), standing in the plane y = `y`, facing -y (`front`) or +y. `color`: its own
+    cloth color (a paint region of its own), else the garment's."""
 
-    def __init__(self, name, outline, y, front=True, turn=None):
+    def __init__(self, name, outline, y, front=True, turn=None, color=None):
         self.name, self.outline, self.y, self.front = name, outline, y, front
+        self.color = color
         # Optional: (pivot (x, z), angle in degrees about the y axis), so a sleeve hangs along
         # the arm rather than in the body's plane.
         self.turn = turn
@@ -164,8 +166,14 @@ def simulate(garment, body):
     object, welded at its seams, its sewing edges gone."""
     bm = bmesh.new()
     outlines = {}
-    for p in garment.panels:
+    # Each face remembers its panel (`finish` colors it by the panel's own color).
+    which = bm.faces.layers.int.new("panel")
+    for k, p in enumerate(garment.panels):
+        before = set(bm.faces)
         outlines[p.name] = _panel_mesh(bm, p, garment.spacing)
+        for f in bm.faces:
+            if f not in before:
+                f[which] = k
     sewn = []
     for (pa, a0, a1), (pb, b0, b1) in garment.seams:
         sa = _stretch(*outlines[pa], a0, a1)
@@ -337,18 +345,54 @@ def finish(obj, garment):
         c = garment.trim_color if f in trim else garment.cloth
         for v in f.verts:
             v[col] = (*c, 1.0)
-    bm.to_mesh(obj.data)
-    bm.free()
+    # The slots first: a face's material index past the mesh's materials is reset to 0 (every
+    # garment came out on `skin` until this was in this order).
     me = obj.data
     me.materials.clear()
     for s in slots:
         me.materials.append(mesh.material(s))
+    bm.to_mesh(me)
+    bm.free()
     _line(obj, garment.lining, garment.thickness)
+    _panel_colors(obj, garment)
     me = obj.data
     me.color_attributes.active_color = me.color_attributes["Col"]
     for p in me.polygons:
         p.use_smooth = False
     return sum(len(p.vertices) - 2 for p in me.polygons)
+
+
+def _panel_colors(obj, garment):
+    """The panels with colors of their own (`Panel.color`) in them, outside the trims: split from
+    their neighbours where they meet (vertex colors are per vertex), each vertex keeping its
+    occlusion. After the lining, so a seam between two colors isn't lined as an opening."""
+    if not any(p.color for p in garment.panels):
+        return
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    which = bm.faces.layers.int.get("panel")
+    col = bm.verts.layers.float_color.get("Col")
+    if which is None or col is None:
+        bm.free()
+        return
+
+    def own(f):
+        k = f[which]
+        return garment.panels[k].color if 0 <= k < len(garment.panels) else None
+
+    trim_c = tuple(round(c, 4) for c in garment.trim_color)
+    cut = [e for e in bm.edges if len(e.link_faces) == 2 and own(e.link_faces[0]) != own(e.link_faces[1])]
+    bmesh.ops.split_edges(bm, edges=cut)
+    for f in bm.faces:
+        c = own(f)
+        if c is None:
+            continue
+        for v in f.verts:
+            r, g, b_, a = v[col]
+            if tuple(round(x, 4) for x in (r, g, b_)) != trim_c:
+                v[col] = (*c, a)
+    bm.to_mesh(obj.data)
+    bm.free()
 
 
 # A lining vertex's occlusion alpha: the inside of a garment is in its shade.
@@ -371,6 +415,7 @@ def _line(obj, depth, thickness):
     kd.balance()
     near = [f for f in bm.faces if kd.find(f.calc_center_median())[2] < depth]
     col = bm.verts.layers.float_color.get("Col")
+    which = bm.faces.layers.int.get("panel")
     inner = {}
     for f in near:
         for v in f.verts:
@@ -387,6 +432,8 @@ def _line(obj, depth, thickness):
             nf = bm.faces.new([inner[v] for v in reversed(f.verts)])
             nf.material_index = f.material_index
             nf.smooth = False
+            if which is not None:
+                nf[which] = f[which]
         except ValueError:
             pass
     for e in edge:
@@ -398,6 +445,8 @@ def _line(obj, depth, thickness):
                 rf = bm.faces.new([b, a, inner[a], inner[b]])
                 rf.material_index = f0.material_index
                 rf.smooth = False
+                if which is not None:
+                    rf[which] = f0[which]
             except ValueError:
                 pass
     bm.normal_update()

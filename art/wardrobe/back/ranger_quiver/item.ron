@@ -1,0 +1,13 @@
+// A wardrobe item (22 §4): a ranger's quiver (Vesper's), modelled (build.py): leather, steel
+// bands, teal-fletched arrows over the right shoulder, on a strap across the chest.
+(
+    id: "back.ranger_quiver",
+    slot: "back",
+    name: "Ranger's quiver",
+    layer: "accessory",
+    accent: false,
+    rigid: true,
+    // What stands off the body (the quiver and its arrows) rides the chest whole, so the arrows
+    // don't follow the arm; the strap on the body follows the body.
+    hold: "chest",
+)

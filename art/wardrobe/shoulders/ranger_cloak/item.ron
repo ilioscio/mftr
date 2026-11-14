@@ -1,0 +1,17 @@
+// A wardrobe item (22 §4): a ranger's cloak (Vesper's), sewn and simulated (build.py, M1): off
+// the left shoulder on a leather collar and pauldron, forest green with a teal hem.
+(
+    id: "shoulders.ranger_cloak",
+    slot: "shoulders",
+    name: "Ranger's cloak",
+    layer: "armor",
+    accent: false,
+    rigid: false,
+    // Spring-bone chains (22 §4.5): three from the chest across the back's left side, carrying
+    // all of its hang.
+    chains: 3,
+    chain_turn: 150,
+    chain_arc: 70,
+    chain_from: "chest",
+    swing: 1.0,
+)

@@ -213,6 +213,7 @@ def hang_cloth(obj, armature, part_id, count, turn=45.0, swing=1.0, parent="pelv
     angles = [((a + 180.0) % 360.0) - 180.0 for a in spots]
     chains = []
     made = []
+    used = set()
     bands = 8
     for k, a in enumerate(angles):
         pts = []
@@ -227,6 +228,10 @@ def hang_cloth(obj, armature, part_id, count, turn=45.0, swing=1.0, parent="pelv
         path, length = _resample(pts)
         label = ("f" if abs(a) < 67.5 else "b" if abs(a) > 112.5 else "") + (
             "" if abs(a) < 22.5 or abs(a) > 157.5 else "l" if a > 0 else "r")
+        # Chains close together (across an arc) share a side: numbered apart.
+        if label in used:
+            label = f"{label}{k}"
+        used.add(label)
         # Two bones a chain: a coat, a skirt and hair together stay within the extras' cap.
         bones = add(armature, name(part_id, label), parent, _joints(path, length, most=2))
         made += bones

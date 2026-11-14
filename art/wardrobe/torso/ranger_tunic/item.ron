@@ -1,0 +1,16 @@
+// A wardrobe item (22 §4): a ranger's tunic (Vesper's), sewn and simulated (build.py, M1):
+// forest green to the upper thigh over cream sleeves, trimmed in teal.
+(
+    id: "torso.ranger_tunic",
+    slot: "torso",
+    name: "Ranger's tunic",
+    layer: "over",
+    accent: false,
+    rigid: false,
+    // It has sleeves: fitted to the arms too.
+    sleeves: true,
+    // Spring-bone chains round the hips (22 §4.5): the flared hem carries half its swing.
+    chains: 4,
+    chain_turn: 45,
+    swing: 0.5,
+)
