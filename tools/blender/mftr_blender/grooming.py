@@ -105,11 +105,14 @@ class Locks:
     gives them; `flow(p)` is the way they're combed (source frame, any length); `length` (or
     `length(p)` by the root), `width` and `thick` in metres (width and thickness taper to the tip); `stiff` is the cloth's
     bending stiffness (short hair stands, long hair falls); `tie`, a source point they're drawn
-    to and held at; `profile`, `lens` (flat) or `round`; `plait`, a braid's bulges."""
+    to and held at; `profile`, `lens` (flat) or `round`; `plait`, a braid's bulges. `chain`, the
+    spring-bone chain they swing on (22 §4.5, BW6; `mftr_blender.chains`): a tail's label, or
+    with `split` loose hair's, split by the side it falls."""
 
     def __init__(self, where=None, roots=None, spacing=0.03, length=0.08, width=0.04, thick=0.012,
                  flow=lambda p: Vector((0, 1, -0.4)), stiff=1.0, tie=None, profile="lens", plait=False,
-                 taper=0.75, seg=0.02, seed=1, lift=0.004, hug=0.03, sides=None, lengthen=True):
+                 taper=0.75, seg=0.02, seed=1, lift=0.004, hug=0.03, sides=None, lengthen=True, chain=None,
+                 split=False):
         self.where, self.roots, self.spacing = where, roots, spacing
         self.length, self.width, self.thick, self.flow = length, width, thick, flow
         self.stiff, self.tie, self.profile, self.plait = stiff, tie, profile, plait
@@ -121,6 +124,7 @@ class Locks:
         # Whether the style's length control lengthens them (a tie's locks reach the tie whatever
         # it says; a knot keeps its coil).
         self.lengthen = lengthen and tie is None
+        self.chain, self.split = chain, split
 
 
 class Style:
@@ -365,9 +369,10 @@ def _simulate(head, combed, frames=50):
 ACROSS = 1.0 / 0.16
 
 
-def _lock(bm, uv, col, rows, locks, scale, color, rng):
+def _lock(bm, uv, col, rows, locks, scale, color, rng, tag=None):
     """A lock's body from its settled ribbon: a lens (or a round) across, tapering to the tip;
-    the tip closed on a point."""
+    the tip closed on a point. `tag`: (the vertex layers `lock` and `lock_t`, its number), to
+    mark its vertices and how far along it each is."""
     n = len(rows)
     sides = locks.sides
     off = rng.random() * 3.0
@@ -399,6 +404,12 @@ def _lock(bm, uv, col, rows, locks, scale, color, rng):
             ring.append(bm.verts.new(p))
         rings.append((ring, t))
     tip = bm.verts.new((rows[-1][0] + rows[-1][1]) * 0.5)
+    if tag is not None:
+        (lk, lt), num = tag
+        for ring, t in rings:
+            for v in ring:
+                v[lk], v[lt] = num, t
+        tip[lk], tip[lt] = num, 1.0
     faces = []
     perim = 2 * math.pi * locks.width * scale * 0.4
     for (r0, t0), (r1, t1) in zip(rings, rings[1:]):
@@ -515,6 +526,8 @@ def _band(bm, uv, col, head, at, color, scale, radius=0.016):
 
 # The share of the cap's faces kept.
 CAP_KEEP = 0.5
+# Loose hair hangs free on its chains below this height over the head's joint (source m).
+CHAIN_TOP = 0.02
 
 
 def _settle(head, style, roots, scale, k=1.0):
@@ -534,7 +547,9 @@ def _settle(head, style, roots, scale, k=1.0):
 
 
 def _mesh(head, style, locks, scale, name):
-    """The hair's mesh: the cap, the locks' bodies (`locks`, from `_settle`), the bands."""
+    """The hair's mesh: the cap, the locks' bodies (`locks`, from `_settle`), the bands. Each
+    lock's vertices carry its number (`lock`, from 1 in `locks`' order; 0 off the locks) and how
+    far along it they are (`lock_t`)."""
     bm = bmesh.new()
     uv = bm.loops.layers.uv.new("Paint")
     col = bm.verts.layers.float_color.new("Col")
@@ -558,8 +573,10 @@ def _mesh(head, style, locks, scale, name):
         bpy.data.meshes.remove(reduced)
         uv = bm.loops.layers.uv["Paint"]
         col = bm.verts.layers.float_color["Col"]
-    for rows, ls in locks:
-        _lock(bm, uv, col, rows, ls, scale, style.color, rng)
+    lk = bm.verts.layers.int.new("lock")
+    lt = bm.verts.layers.float.new("lock_t")
+    for num, (rows, ls) in enumerate(locks, start=1):
+        _lock(bm, uv, col, rows, ls, scale, style.color, rng, ((lk, lt), num))
     if style.band is not None:
         for at in sorted({tuple(t.tie) for t in style.locks if t.tie is not None}):
             _band(bm, uv, col, head, Vector(at), style.band, scale)
@@ -570,13 +587,23 @@ def _mesh(head, style, locks, scale, name):
 
 
 def grow(head, style, name, slot="hair"):
-    """`style` grown on `head`: a new mesh object `name`, in the rig's frame, and its length
+    """`style` grown on `head`: a new mesh object `name`, in the rig's frame; its length
     control's ends ({shape key name: vertex positions}, empty for a style without one; the keys
-    are `<slot>_length-` and `+`)."""
+    are `<slot>_length-` and `+`); and its locks, for their chains (`chains.hang_locks`):
+    [(Locks, centreline, [(vertex, how far along)])]."""
     from . import mesh
     scale = head.fit.s
     roots = [_roots(head, locks, scale, style.area) for locks in style.locks]
-    me = _mesh(head, style, _settle(head, style, roots, scale), scale, name)
+    settled = _settle(head, style, roots, scale)
+    me = _mesh(head, style, settled, scale, name)
+    verts = [[] for _ in settled]
+    lk, lt = me.attributes["lock"].data, me.attributes["lock_t"].data
+    for i in range(len(me.vertices)):
+        if lk[i].value > 0:
+            verts[lk[i].value - 1].append((i, lt[i].value))
+    locks = [(ls, [(a + b) * 0.5 for a, b in rows], vs) for (rows, ls), vs in zip(settled, verts)]
+    me.attributes.remove(me.attributes["lock"])
+    me.attributes.remove(me.attributes["lock_t"])
     obj = bpy.data.objects.new(name, me)
     bpy.context.scene.collection.objects.link(obj)
     for s in mesh.MATERIAL_SLOTS:
@@ -595,7 +622,7 @@ def grow(head, style, name, slot="hair"):
             if len(other.vertices) == len(me.vertices):
                 ends[key] = [v.co.copy() for v in other.vertices]
             bpy.data.meshes.remove(other)
-    return obj, ends
+    return obj, ends, locks
 
 
 # --- Skinning --------------------------------------------------------------------------------------
@@ -676,19 +703,21 @@ def _weights(obj, head, blend=0.05, drape=True):
 def groom_all(armature, body, fit, budget_scale=1.0):
     """Every hairstyle grown on `body` and skinned to `armature`, as catalog parts. Returns
     `made` entries (as `parts.build_parts`')."""
-    from . import body_rig, mesh, parts
+    from . import body_rig, chains, mesh, parts
     found = styles()
     if not found:
         return []
     head = Head(body, fit)
     made = []
     for _folder, info, style in found:
-        obj, ends = grow(head, style, f"part.{info['id']}", info["slot"])
+        obj, ends, locks = grow(head, style, f"part.{info['id']}", info["slot"])
         _weights(obj, head, style.blend, style.drape)
         obj.parent = armature
         mod = obj.modifiers.new("Armature", "ARMATURE")
         mod.object = armature
         body_rig.transfer(body, obj)
+        # Its hanging locks on spring-bone chains (BW6), from below the skull's base.
+        chains.hang_locks(obj, armature, info["id"], locks, head.fit.joint.z + CHAIN_TOP * head.fit.s)
         n = parts.transfer_shape_keys(body, obj)
         if ends:
             # The length control (BH2): the hair's (or the beard's) own slider pair.

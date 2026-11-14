@@ -19,5 +19,5 @@ STYLE = Style(cap=0.006, band=(0.30, 0.18, 0.10), locks=[
           tie=TIE, stiff=0.3, seed=21, lift=0.001, seg=0.04, hug=0.06),
     # The tail.
     Locks(roots=ROOTS, length=0.26, width=0.034, thick=0.034, flow=lambda p: Vector((0.0, 0.45, -1.0)), stiff=0.2,
-          seed=22, seg=0.05, lift=0.01, taper=0.8, profile="round", sides=5),
+          seed=22, seg=0.05, lift=0.01, taper=0.8, profile="round", sides=5, chain="tail"),
 ])

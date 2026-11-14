@@ -15,6 +15,7 @@ signal test(path: String, champion: String)
 const DIR := "user://champions"
 const UI := preload("res://scripts/ui_theme.gd")
 const FaceLife := preload("res://scripts/face_life.gd")
+const Springs := preload("res://scripts/springs.gd")
 const SLOTS := ["skin", "cloth", "metal", "emissive", "accent", "accent_glow"]
 const TEAM := Color(0.3, 0.85, 0.8)
 ## (id, title, what it's for, built yet)
@@ -1504,6 +1505,7 @@ func _rebuild() -> void:
 		mesh.set_surface_override_material(i, mat)
 		_mats.append(mat)
 	_pivot.add_child(_model_node)
+	Springs.attach(_model_node, m)
 	_update_status()
 	_skeleton = _model_node.get_node("Skeleton")
 	_animator = m.new_animator()

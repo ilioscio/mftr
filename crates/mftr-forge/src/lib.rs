@@ -461,7 +461,120 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
     if tris > mftr_pack::rules::TRIANGLES_MAX {
         return Err(format!("{tris} triangles: over the {} cap (20 §7.2)", mftr_pack::rules::TRIANGLES_MAX));
     }
+    let extras = prune_chains(model);
+    if extras > mftr_pack::rules::EXTRA_BONES_MAX {
+        return Err(format!(
+            "the outfit swings on {extras} chain bones: over the {} cap (22 §4.5)",
+            mftr_pack::rules::EXTRA_BONES_MAX
+        ));
+    }
     Ok(())
+}
+
+/// Drop the spring-bone chains (22 §4.5, BW6) of the parts not worn: the base carries every
+/// part's, and an extra bone that nothing left weighs on (nor any bone under it) goes, with its
+/// keys. Returns the extra bones kept.
+fn prune_chains(model: &mut Model) -> usize {
+    let Some(joints) = model.skins.first().cloned() else { return 0 };
+    let n = model.nodes.len();
+    let mut keep = vec![true; n];
+    let mut weighed = vec![false; n];
+    for p in model.meshes.iter().flatten() {
+        for (j, w) in p.joints.iter().zip(&p.weights) {
+            for k in 0..4 {
+                if w[k] > 1e-4
+                    && let Some(&node) = joints.get(j[k] as usize)
+                {
+                    weighed[node] = true;
+                }
+            }
+        }
+    }
+    for (i, node) in model.nodes.iter().enumerate() {
+        keep[i] = !node.name.starts_with("extra_") || weighed[i];
+    }
+    // A bone stays while one under it does (a chain keeps its root).
+    loop {
+        let mut changed = false;
+        for i in 0..n {
+            if keep[i]
+                && let Some(p) = model.nodes[i].parent
+                && !keep[p]
+            {
+                keep[p] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let kept = (0..n).filter(|&i| keep[i] && model.nodes[i].name.starts_with("extra_")).count();
+    if keep.iter().all(|&k| k) {
+        return kept;
+    }
+    let mut new_index = vec![usize::MAX; n];
+    let mut next = 0;
+    for i in 0..n {
+        if keep[i] {
+            new_index[i] = next;
+            next += 1;
+        }
+    }
+    let old = std::mem::take(&mut model.nodes);
+    model.nodes = old
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| keep[*i])
+        .map(|(_, mut node)| {
+            node.parent = node.parent.map(|p| new_index[p]);
+            node
+        })
+        .collect();
+    if !model.bind.is_empty() {
+        let bind = std::mem::take(&mut model.bind);
+        model.bind = bind
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| keep.get(*i).copied().unwrap_or(false))
+            .map(|(_, b)| b)
+            .collect();
+    }
+    // The skin's joints (every mesh is on the one skin), and each vertex's indices into them.
+    let mut at = 0u32;
+    let remap: Vec<Option<u32>> = joints
+        .iter()
+        .map(|&node| {
+            keep[node].then(|| {
+                at += 1;
+                at - 1
+            })
+        })
+        .collect();
+    for skin in &mut model.skins {
+        *skin = skin.iter().filter(|&&node| keep[node]).map(|&node| new_index[node]).collect();
+    }
+    for p in model.meshes.iter_mut().flatten() {
+        for (j, w) in p.joints.iter_mut().zip(p.weights.iter_mut()) {
+            for k in 0..4 {
+                match remap.get(j[k] as usize).copied().flatten() {
+                    Some(r) => j[k] = r,
+                    // Nothing weighs on a dropped bone.
+                    None => {
+                        w[k] = 0.0;
+                        j[k] = 0;
+                    }
+                }
+            }
+        }
+    }
+    for a in &mut model.animations {
+        a.channels.retain(|c| keep[c.node]);
+        for c in &mut a.channels {
+            c.node = new_index[c.node];
+        }
+    }
+    kept
 }
 
 /// Blend the morph targets: each slider's `+` by its value above 0, its `-` below, a signed
@@ -1824,6 +1937,55 @@ mod tests {
         let (a, b) = (tris(&bare, "hair.long"), tris(&helmed, "hair.long"));
         assert!(b < a * 3 / 4, "the helmet hides the hair under it: {b} of {a}");
         assert!(b > a / 4, "the long hair below the helmet stays: {b} of {a}");
+    }
+
+    #[test]
+    fn hanging_parts_keep_their_spring_chains_and_the_rest_go() {
+        // 22 §4.5 (BW6): the base carries every hanging part's chains; a forged champion keeps
+        // the worn parts' only, each weighed on, within the extras' cap.
+        let c = catalog();
+        let extras = |m: &Model| -> Vec<String> {
+            m.skins[0].iter().map(|&j| m.nodes[j].name.clone()).filter(|n| n.starts_with("extra_")).collect()
+        };
+        let plain = c.forge("Plain", &Looks::default()).unwrap().model;
+        assert!(extras(&plain).is_empty(), "{:?}", extras(&plain));
+        for (outfit, chains) in [
+            (
+                vec!["hair.long", "beard.braided", "waist.wrap_skirt"],
+                vec!["hair_long_", "beard_braided_braid_", "waist_wrap_skirt_"],
+            ),
+            (vec!["hair.ponytail", "back.long_coat"], vec!["hair_ponytail_tail_", "back_long_coat_"]),
+            (vec!["hair.braids", "back.travel_cape"], vec!["hair_braids_l_", "hair_braids_r_", "back_travel_cape_"]),
+        ] {
+            let looks = Looks { outfit: outfit.iter().map(|s| s.to_string()).collect(), ..Looks::default() };
+            let m = c.forge("Swing", &looks).unwrap().model;
+            let e = extras(&m);
+            assert!(e.len() <= mftr_pack::rules::EXTRA_BONES_MAX, "{outfit:?}: {} chain bones", e.len());
+            for chain in &chains {
+                assert!(e.iter().any(|n| n.starts_with(&format!("extra_{chain}"))), "{outfit:?} lacks {chain}: {e:?}");
+            }
+            assert!(e.iter().all(|n| chains.iter().any(|c| n.starts_with(&format!("extra_{c}")))), "{outfit:?}: {e:?}");
+            // The skin still adds up: every joint in it, every vertex's weights one, and each
+            // chain bone carries something.
+            let joints = &m.skins[0];
+            let mut weighed = vec![false; joints.len()];
+            for p in m.meshes.iter().flatten() {
+                for (j, w) in p.joints.iter().zip(&p.weights) {
+                    assert!((w.iter().sum::<f32>() - 1.0).abs() < 0.01);
+                    for k in 0..4 {
+                        assert!((j[k] as usize) < joints.len());
+                        if w[k] > 1e-3 {
+                            weighed[j[k] as usize] = true;
+                        }
+                    }
+                }
+            }
+            for (i, &node) in joints.iter().enumerate() {
+                if m.nodes[node].name.starts_with("extra_") {
+                    assert!(weighed[i], "{} carries nothing", m.nodes[node].name);
+                }
+            }
+        }
     }
 
     #[test]

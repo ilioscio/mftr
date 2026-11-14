@@ -16,6 +16,7 @@ extends Node3D
 
 const Seasons = preload("res://scripts/seasons.gd")
 const Splashes = preload("res://scripts/splashes.gd")
+const Springs := preload("res://scripts/springs.gd")
 
 const UNITS_TO_METERS := 0.01           # 1 game unit = 1 cm
 const CAMERA_PITCH_DEG := 56.0          # D13 / R01 §1
@@ -310,6 +311,11 @@ func _ready() -> void:
 		elif args[i] == "--lineup-turn" and i + 1 < args.size():
 			_lineup_turn = float(args[i + 1])
 			i += 1
+		elif args[i] == "--lineup-move" and i + 1 < args.size():
+			# The row runs ahead at this many m/s, the camera with it: hair and cloth swing
+			# from the motion (22 §4.5).
+			_lineup_move = float(args[i + 1])
+			i += 1
 		elif args[i] == "--lineup-black":
 			_lineup_black = true
 		elif args[i] == "--season" and i + 1 < args.size():
@@ -451,6 +457,8 @@ func _ready() -> void:
 var _lineup := ""
 var _lineup_black := false
 var _lineup_turn := -25.0                 # `--lineup-turn DEG`: how far each model turns from the camera
+var _lineup_move := 0.0                   # `--lineup-move M/S`: the row runs ahead, the camera with it
+var _lineup_center := Vector3.ZERO
 var _lineup_rows := []                    # [{body, clip, at, t}]
 var _lineup_t := 0.0
 var _lineup_frame := 0
@@ -504,11 +512,20 @@ func _start_lineup() -> void:
 	# Center the row in view.
 	for r in _lineup_rows:
 		r.body.position.x -= x / 2.0
+	_lineup_center = center
 	_place_camera(center)
 
 
 func _update_lineup(delta: float) -> void:
 	_lineup_t += delta
+	if _lineup_move > 0.0:
+		var ahead := Vector3(sin(deg_to_rad(_lineup_turn)), 0.0, cos(deg_to_rad(_lineup_turn))) * _lineup_move * delta
+		for r in _lineup_rows:
+			r.body.position += ahead
+			if r.body.has_meta("rig"):
+				Springs.wind(r.body.get_meta("rig").springs, ahead / delta)
+		_lineup_center += ahead
+		_place_camera(_lineup_center)
 	for r in _lineup_rows:
 		var body: Node3D = r.body
 		if not body.has_meta("rig"):
@@ -1335,6 +1352,8 @@ func _attach_model(body: MeshInstance3D, team: Color, champion: String, pack: Mf
 	var model: Node3D = source.instantiate()
 	model.position = Vector3(0, lift, 0)
 	body.add_child(model)
+	# Hanging hair and cloth swing on spring bones (22 §4.5).
+	var springs := Springs.attach(model, source)
 	var mesh: MeshInstance3D = model.get_node("Skeleton/Mesh")
 	var outline: ShaderMaterial = body.get_meta("outline")
 	var mats := []
@@ -1363,6 +1382,7 @@ func _attach_model(body: MeshInstance3D, team: Color, champion: String, pack: Mf
 		"last": Vector3.INF,
 		"speed": 0.0,
 		"life": _face_life(model.get_node("Skeleton")),
+		"springs": springs,
 	})
 
 
@@ -1419,6 +1439,9 @@ func _animate(body: Node3D, info: Dictionary, delta: float) -> void:
 		var flat := Vector2(p.x - rig.last.x, p.z - rig.last.z)
 		var v := flat.length() / delta / UNITS_TO_METERS
 		rig.speed = lerpf(rig.speed, v, clampf(delta / 0.05, 0.0, 1.0))
+		# A blink or a respawn isn't a run: no headwind from a jump in place.
+		if flat.length() < 0.5:
+			Springs.wind(rig.springs, Vector3(flat.x, 0.0, flat.y) / delta)
 	rig.last = p
 	# Facing: the model's front (+Z) turns toward the sim's facing at TURN_RATE.
 	if info.has("facing"):

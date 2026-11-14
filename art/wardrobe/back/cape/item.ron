@@ -1,0 +1,17 @@
+// A wardrobe item (22 §4, BW6): a sewn travelling cape, from the shoulders to the calves,
+// simulated (build.py, M1). On the `back` slot, over a shirt or a tunic.
+(
+    id: "back.travel_cape",
+    slot: "back",
+    name: "Travelling cape",
+    layer: "armor",
+    accent: true,
+    rigid: false,
+    // Spring-bone chains (22 §4.5, BW6): three down the back from the chest, across the cape's
+    // width (`chain_arc` degrees round the body at `chain_turn`), carrying all of its hang.
+    chains: 3,
+    chain_turn: 180,
+    chain_arc: 70,
+    chain_from: "chest",
+    swing: 1.0,
+)

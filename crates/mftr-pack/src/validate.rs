@@ -106,7 +106,7 @@ pub fn validate_model(model: &Model, glb_len: usize, side: &Sidecar) -> Report {
     let joints = if side.archetype == "creature" {
         check_creature_skeleton(&mut r, model)
     } else {
-        check_skeleton(&mut r, model)
+        check_skeleton(&mut r, model, side.kind == "base")
     };
     check_clips(&mut r, model, side, &joints);
     r
@@ -294,8 +294,9 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
 
     let mut over_target = 0usize;
     // A face vertex may blend its head with up to three face bones (21 §1.4), and a body
-    // vertex its bone with up to three helpers (21 §9.2): not counted.
-    let sculpt_bone = |n: &str| crate::face::is_face_bone(n) || crate::body::is_body_bone(n);
+    // vertex its bone with up to three helpers (21 §9.2), and cloth on spring-bone chains its
+    // body's bones with the chains either side (22 §4.5): not counted.
+    let sculpt_bone = |n: &str| crate::face::is_face_bone(n) || crate::body::is_body_bone(n) || n.starts_with("extra_");
     let face_joint: Vec<bool> =
         m.skins.first().map_or(Vec::new(), |j| j.iter().map(|&n| sculpt_bone(&m.nodes[n].name)).collect());
     for (mi, prims) in m.meshes.iter().enumerate() {
@@ -348,8 +349,9 @@ fn check_mesh(r: &mut Report, m: &Model, bytes: usize, kind: &str) {
     }
 }
 
-/// Returns the skin's joint node indices (empty if the skin is unusable).
-fn check_skeleton(r: &mut Report, m: &Model) -> Vec<usize> {
+/// Returns the skin's joint node indices (empty if the skin is unusable). A creator `base`
+/// carries its catalog parts' chains besides (`rules::BASE_EXTRA_BONES_MAX`).
+fn check_skeleton(r: &mut Report, m: &Model, base: bool) -> Vec<usize> {
     // A creator base's catalog parts are skinned meshes of their own on the same skin.
     let skinned: Vec<_> =
         m.nodes.iter().filter(|n| n.skin.is_some() && n.mesh.is_some() && !is_part_node(&n.name)).collect();
@@ -359,9 +361,15 @@ fn check_skeleton(r: &mut Report, m: &Model) -> Vec<usize> {
     }
     let joints = m.skins[0].clone();
     let names: Vec<&str> = joints.iter().map(|&j| m.nodes[j].name.as_str()).collect();
-    let animated = names.iter().filter(|n| !crate::face::is_face_bone(n) && !crate::body::is_body_bone(n)).count();
-    if names.len() > rules::BONES_MAX {
-        r.err(format!("{} bones, over the {} cap", names.len(), rules::BONES_MAX));
+    let extras = names.iter().filter(|n| n.starts_with("extra_")).count();
+    let counted = if base { names.len() - extras } else { names.len() };
+    let animated = names
+        .iter()
+        .filter(|n| !crate::face::is_face_bone(n) && !crate::body::is_body_bone(n))
+        .filter(|n| !base || !n.starts_with("extra_"))
+        .count();
+    if counted > rules::BONES_MAX {
+        r.err(format!("{counted} bones, over the {} cap", rules::BONES_MAX));
     } else if animated > rules::BONES_TARGET {
         r.warn(format!("{animated} bones, over the {} target", rules::BONES_TARGET));
     }
@@ -375,9 +383,9 @@ fn check_skeleton(r: &mut Report, m: &Model) -> Vec<usize> {
             r.err(format!("required bone `{need}` is missing"));
         }
     }
-    let extras = names.iter().filter(|n| n.starts_with("extra_")).count();
-    if extras > rules::EXTRA_BONES_MAX {
-        r.err(format!("{extras} extra bones, at most {}", rules::EXTRA_BONES_MAX));
+    let cap = if base { rules::BASE_EXTRA_BONES_MAX } else { rules::EXTRA_BONES_MAX };
+    if extras > cap {
+        r.err(format!("{extras} extra bones, at most {cap}"));
     }
     let max_joint = joints.len() as u32;
     if m.meshes.iter().flatten().flat_map(|p| p.joints.iter()).any(|j| j.iter().any(|&i| i >= max_joint)) {
