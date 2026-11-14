@@ -331,6 +331,9 @@ def _weights(obj, body, skip, avoid=()):
             groups[n].add([v.index], x / tot, "REPLACE")
 
 
+# How far below the body's lowest point an item may reach (m): a sole's thickness.
+FLOOR = 0.008
+
 # How far off the skin a held item's vertex rides its bone whole (m); it blends in over HOLD_BLEND.
 HOLD_FROM, HOLD_BLEND = 0.04, 0.02
 
@@ -395,6 +398,12 @@ def fit_items(armature, body, gender, room=1.0):
         offset = LAYERS.get(info["layer"], 0.006) * room
         _push_out(obj, body, offset, arms=arms)
         _clear_peaks(obj, body, offset, arms=arms)
+        # Nothing sinks into the floor: a boot's sole pushed out off a heavy build's foot stays
+        # within FLOOR of the body's lowest point.
+        ground = min(v.co.z for v in body.data.vertices)
+        for v in me.vertices:
+            if v.co.z < ground - FLOOR:
+                v.co.z = ground - FLOOR
         obj.name = f"part.{info['id']}"
         me.name = obj.name
         _materials(obj)

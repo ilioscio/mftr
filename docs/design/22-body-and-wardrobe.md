@@ -1181,9 +1181,24 @@ draped a little differently and failed the harness on the heavy masculine base),
 onto the right slots by their colors. The linen tunic's, the trousers', the shirt's, the skirt's,
 the coat's and the cape's trims now take the team color in play.
 
+**Second pass: all new, the bow aside.** The owner asked for the rest of her in the new
+system too. Each rebuilt champion's things also join the creator's catalog, so the catalog grows
+as the official ten are rebuilt. She now wears:
+- `feet.ranger_boots`: knee-high leather with a flared cuff, an ankle strap and dark soles.
+- `arms.ranger_bracers`: leather forearms with two teal bands.
+- `hair.swept_ponytail`: side-swept bangs over the ponytail. A new style in the hair catalog.
+
+The boots and bracers are **shells** (`mftr_blender.shell`): a region of the reference body's
+skin is lifted off it, smoothed, and thickened. They also *envelop* the body under them: each
+vertex moves out until every body point within 2.5 cm is inside it. Without that, the toes
+poked through the smoothed toe box. Fitted, no item reaches more than 8 mm below the body's
+lowest point (`wardrobe.FLOOR`): pushed off a heavy foot, the soles had sunk 3.8 cm into the
+floor.
+
 **Left:**
-- The bow is still the catalog's block-out; weapons come in BW7.
-- She has one hairstyle: the concept's side-swept bangs need a style of their own.
+- The bow waits for BW7.
+- The bases are now 4.08 to 4.18 MB, over the 4 MB budget (a validator warning, not a CI
+  failure). The catalog's growth will need them slimmed.
 - The owner's look.
 
 ## 7. Open questions for the owner

@@ -32,6 +32,10 @@ all four humanoid bases (slim and heavy, masculine and feminine) when the bases 
   `item.blend`, the object named `item`. A hard object can also be built by its `build.py`
   (the ranger's quiver), its strap laid on the body's surface.
 
+- **Shells** (boots, bracers, gloves: close-fitting, not cloth): a region of the reference
+  body's own skin, lifted off it, smoothed, enveloping the body under it, thickened and colored
+  by region (`mftr_blender.shell`). The item's `build.py` says which region and how.
+
 Then rebuild the bases (`art/creator/humanoid_*/build.py --export`). `mftr_blender.wardrobe`
 fits every item to every base:
 
@@ -77,6 +81,8 @@ first.
 | `torso.ranger_tunic` | torso, over | sewn: green body to the upper thigh, cream sleeves, teal trims; four chains round the hips (Vesper's) | ~2,000 |
 | `shoulders.ranger_cloak` | shoulders, armor | sewn: a cloak off the left shoulder on a leather collar and pauldron; three chains from the chest (Vesper's) | 1,369 |
 | `back.ranger_quiver` | back, accessory | modelled: leather, steel bands, teal-fletched arrows, a strap across the chest; held on the chest (Vesper's) | 545 |
+| `feet.ranger_boots` | feet, over | shell: knee-high leather, a flared cuff, an ankle strap, dark soles (Vesper's) | 1,372 |
+| `arms.ranger_bracers` | arms, over | shell: leather forearms, two teal bands, flaring at the elbow (Vesper's) | 864 |
 
 ## Hair
 
@@ -95,6 +101,7 @@ fits every head.
 | `hair.swept` | parted on the left, the top swept across |
 | `hair.long` | parted in the middle, past the shoulders |
 | `hair.ponytail` | drawn to a tie behind the crown, a round tail |
+| `hair.swept_ponytail` | side-swept bangs, the rest drawn to a tie behind the crown, a round tail (Vesper's) |
 | `hair.topknot` | drawn to a tie on the crown, a coiled knot |
 | `hair.mohawk` | a standing crest, the sides shaved |
 | `hair.braids` | drawn to two ties behind the ears, plaited tails |

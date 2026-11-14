@@ -1,0 +1,10 @@
+// A wardrobe item (22 §4): a ranger's bracers (Vesper's), leather with two teal bands, a shell of
+// the reference body's forearms (build.py, `mftr_blender.shell`).
+(
+    id: "arms.ranger_bracers",
+    slot: "arms",
+    name: "Ranger's bracers",
+    layer: "over",
+    accent: false,
+    rigid: false,
+)
