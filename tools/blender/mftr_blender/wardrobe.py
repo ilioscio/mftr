@@ -151,10 +151,13 @@ def _tris(me, keep=None):
     return [tuple(t.vertices) for t in me.loop_triangles if keep is None or all(keep[i] for i in t.vertices)]
 
 
-def _armless(cos):
+def _armless(cos, upper=False):
     """Which of the source body's vertices (`cos`) aren't the arms below the shoulder: in the
-    bundle's A pose, beyond the torso's widest (the shoulders' 20 cm) and below them."""
-    return [not (abs(c.x) > 0.19 and 0.95 < c.z < 1.38) and not (abs(c.x) > 0.24 and c.z <= 0.95) for c in cos]
+    bundle's A pose, beyond the torso's widest (the shoulders' 20 cm) and below them. With
+    `upper`, the shoulder caps stay (above 1.2 m, where a pauldron sits): the rest of the arm,
+    the elbow on, goes."""
+    top = 1.20 if upper else 1.38
+    return [not (abs(c.x) > 0.19 and 0.95 < c.z < top) and not (abs(c.x) > 0.24 and c.z <= 0.95) for c in cos]
 
 
 def _source_surfaces(sex, arms=True):
@@ -164,7 +167,7 @@ def _source_surfaces(sex, arms=True):
     their own angle and would carry it out with them."""
     from . import cc0_body
     male = cc0_body.load("male")
-    tris = _tris(male.data, None if arms else _armless([v.co for v in male.data.vertices]))
+    tris = _tris(male.data, None if arms is True else _armless([v.co for v in male.data.vertices], arms == "upper"))
     rest = [v.co.copy() for v in male.data.vertices]
     if sex == "male":
         moved = rest
@@ -174,6 +177,15 @@ def _source_surfaces(sex, arms=True):
         bpy.data.objects.remove(female)
     bpy.data.objects.remove(male)
     return Surface(rest, moved, tris)
+
+
+def _off_arms(body, arms=False):
+    """Which of the base body's vertices aren't the arms an item without `arms` ignores: by the
+    arms' bones; for "upper", by each vertex's place on its source body (`src_co`), as
+    `_armless` draws the line on the reference body (the bones don't split the upper arm)."""
+    if arms == "upper":
+        return _armless([Vector(d.vector) for d in body.data.attributes["src_co"].data], upper=True)
+    return [not a for a in _arm_bones(body)]
 
 
 def _arm_bones(body):
@@ -197,8 +209,8 @@ def _base_surface(body, arms=True):
     ok = me.attributes["src_ok"].data
     keep = [d.value > 0.5 for d in ok]
     rest = [Vector(d.vector) for d in src]
-    if not arms:
-        keep = [k and not a for k, a in zip(keep, _arm_bones(body))]
+    if arms is not True:
+        keep = [k and a for k, a in zip(keep, _off_arms(body, arms))]
     moved = [v.co.copy() for v in me.vertices]
     return Surface(rest, moved, _tris(me, keep))
 
@@ -210,8 +222,8 @@ def _body_keep(body, arms):
     nor the arms below the shoulder without `arms`)."""
     me = body.data
     keep = [d.value > 0.5 for d in me.attributes["src_ok"].data]
-    if not arms:
-        keep = [k and not a for k, a in zip(keep, _arm_bones(body))]
+    if arms is not True:
+        keep = [k and a for k, a in zip(keep, _off_arms(body, arms))]
     return keep
 
 
@@ -296,13 +308,16 @@ def _clear_peaks(obj, body, offset, rounds=8, arms=True):
 HANDS = ("forearm_", "hand_", "fingers_", "thumb_", "prop_")
 
 
-def _weights(obj, body, skip, avoid=()):
+def _weights(obj, body, skip, avoid=(), arms=True):
     """Each item vertex takes the biped weights of the body's surface under it (the nearest
     face's, by barycentric place), its two largest, normalized; helpers (`skip`) not. The body's
-    faces owned by bones starting with `avoid` aren't candidates."""
+    faces owned by bones starting with `avoid` aren't candidates, nor (for "upper" `arms`) the
+    arms below the shoulder caps."""
     bme = body.data
     names = {g.index: g.name for g in body.vertex_groups}
     keep = [d.value > 0.5 for d in bme.attributes["src_ok"].data]
+    if arms == "upper":
+        keep = [k and a for k, a in zip(keep, _off_arms(body, arms))]
     if avoid:
         for v in bme.vertices:
             top = max(((g.weight, names[g.group]) for g in v.groups), default=(0.0, ""))[1]
@@ -373,6 +388,19 @@ def _materials(obj):
         p.material_index = s
 
 
+def _arms(info):
+    """How much of the arms an item is fitted to (bound, pushed out of, weighted to): all of them
+    (True: gloves, bracers, a sleeved garment), none (False: what's on the torso, the waist, the
+    legs or the back hangs beside them), or "upper" (the shoulders: a cloak's pauldron rides the
+    shoulder cap, but its side, beside the elbow and the hand in the reference body's A pose,
+    mustn't be carried out with the arm)."""
+    if "sleeve" in info["id"] or info.get("sleeves", False):
+        return True
+    if info["slot"] == "shoulders":
+        return "upper"
+    return info["slot"] not in ("torso", "back", "waist", "legs")
+
+
 def fit_items(armature, body, gender, room=1.0):
     """Every wardrobe item fitted to `body` (a base just built, before its mass is baked) and
     skinned to `armature`, as catalog parts. Returns `made` entries (as `parts.build_parts`'s,
@@ -388,7 +416,7 @@ def fit_items(armature, body, gender, room=1.0):
     for folder, info in found:
         obj = load(folder)
         me = obj.data
-        arms = info["slot"] not in ("torso", "back", "waist", "legs") or "sleeve" in info["id"] or info.get("sleeves", False)
+        arms = _arms(info)
         if arms not in surfaces:
             surfaces[arms] = (_source_surfaces(sex, arms), _base_surface(body, arms))
         to_sex, to_base = surfaces[arms]
@@ -410,7 +438,8 @@ def fit_items(armature, body, gender, room=1.0):
         if "Col" in me.color_attributes:
             me.color_attributes.active_color = me.color_attributes["Col"]
             me.color_attributes.render_color_index = me.color_attributes.active_color_index
-        _weights(obj, body, set(body_rig.NAMES), HANDS if info["slot"] in ("torso", "back", "waist", "legs") else ())
+        _weights(obj, body, set(body_rig.NAMES),
+                 HANDS if arms == "upper" or info["slot"] in ("torso", "back", "waist", "legs") else (), arms)
         obj.parent = armature
         mod = obj.modifiers.new("Armature", "ARMATURE")
         mod.object = armature

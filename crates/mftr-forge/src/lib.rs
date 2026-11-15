@@ -450,12 +450,17 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
     for a in worn.iter().filter(|p| rank(p).is_some()) {
         for b in worn.iter().filter(|p| rank(p) > rank(a)) {
             if let (Some(ia), Some(ib)) = (mesh_of(&a.id), mesh_of(&b.id)) {
-                pairs.push((ia, ib));
+                pairs.push((ia, ib, wardrobe::TUCKING.contains(&b.slot.as_str())));
             }
         }
     }
-    for (inner, outer) in pairs {
-        wardrobe::layer(model, &[inner], &[outer], 0.05);
+    for (inner, outer, tucks) in pairs {
+        if tucks {
+            // Boots, bracers, gloves: what's under them goes in.
+            wardrobe::tuck_in(model, &[inner], &[outer]);
+        } else {
+            wardrobe::layer(model, &[inner], &[outer], 0.05);
+        }
     }
     let tris = model.triangles();
     if tris > mftr_pack::rules::TRIANGLES_MAX {

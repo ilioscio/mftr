@@ -10,8 +10,8 @@
     // Spring-bone chains (22 §4.5): three from the chest across the back's left side, carrying
     // all of its hang.
     chains: 3,
-    chain_turn: 150,
-    chain_arc: 70,
+    chain_turn: 140,
+    chain_arc: 50,
     chain_from: "chest",
     swing: 1.0,
 )

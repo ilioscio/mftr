@@ -852,6 +852,10 @@ base, an item is a catalog part flagged `covers`, with its `layer`.
   pushing single vertices folded faces over and opened holes. The inner garment's faces under the
   outer are then hidden, as the body's are. A garment's lining (its inside near the openings,
   marked by a dark occlusion alpha) is left out of the push, since it faces the wrong way.
+  **Tucked in:** over an item of a tight slot (`feet`, `arms`, `hands`: boots, bracers, gloves),
+  it goes the other way. The inner garment is taken in under the outer, up to 8 cm out, in three
+  rounds of the same smooth field, and the outer keeps its shape. A shell a few millimetres off
+  the skin pushed out over loose trousers went lumpy, and the trousers still showed through.
 
 **M1: sewn garments** (`mftr_blender.sewing`). A pattern is data: flat panels (named outline
 points) and seams (outline stretches, sewn start to start). The build:
@@ -1195,11 +1199,31 @@ poked through the smoothed toe box. Fitted, no item reaches more than 8 mm below
 lowest point (`wardrobe.FLOOR`): pushed off a heavy foot, the soles had sunk 3.8 cm into the
 floor.
 
+**Third pass: the owner's look in the creator** (2026-11-15).
+- **The trousers showed through the boots** in long strips down the shins. The layering pushed
+  the boots out over the trousers, as a coat over a shirt. But a boot is a tight shell, and the
+  loose trousers stood up to 5 cm out from it. Boots, bracers and gloves now take what's under
+  them in (§4.3, "Tucked in"; `mftr_forge::wardrobe::tuck_in`). Small flecks can still show at
+  the front of the ankle, where the hem meets the instep.
+- **The cloak flared out from her side, with holes from the front.** It wasn't the springs: it
+  flared as much with them off. Its pattern hung wide, round the reference body's raised arm,
+  and the fit bound its side to the forearm and the hand there. When the arm came down to the
+  base's own angle and the idle pose, it stayed spread, pulled out to a point. Three changes:
+  - its pattern hangs behind the back now;
+  - a `shoulders` item is fitted and weighted to the shoulder caps only, not the arm below
+    them (`wardrobe._arms`): its pauldron still rides the shoulder; its side no longer follows
+    the elbow or the hand;
+  - it is lined all over (`lining=1.0`). Its inside is seen whenever it swings out, and a lining
+    only near the openings left the rest see-through from the front. 1,156 triangles, down from
+    1,369.
+- **The shoulder bump** is the collar's leather pauldron: it holds the cloak on the left
+  shoulder, as the hand-made Vesper's pauldron does. Kept.
+
 **Left:**
 - The bow waits for BW7.
-- The bases are now 4.08 to 4.18 MB, over the 4 MB budget (a validator warning, not a CI
-  failure). The catalog's growth will need them slimmed.
-- The owner's look.
+- The bases are over the 4 MB budget (a validator warning, not a CI failure). The catalog's
+  growth will need them slimmed.
+- The owner's look at the third pass.
 
 ## 7. Open questions for the owner
 

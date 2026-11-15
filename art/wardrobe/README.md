@@ -41,12 +41,17 @@ fits every item to every base:
 
 1. carried onto the female body (same topology as the male) for the feminine bases;
 2. carried onto the base, through each body vertex's place on its source body;
-3. pushed out to its layer's distance from the skin;
+3. pushed out to its layer's distance from the skin. A torso, waist, legs or back item ignores
+   the arms below the shoulder: it hangs beside them. A `shoulders` item keeps only the shoulder
+   caps (fitted and weighted): a pauldron rides the shoulder, but a cloak's side doesn't follow
+   the elbow or the hand;
 4. weighted from the body under it, the body's helper bones included, so it follows the body
    sliders and the sculpting.
 
 In the base it is a catalog part flagged `covers`: the forge hides the body under it by its
-geometry (`mftr_forge::wardrobe`).
+geometry (`mftr_forge::wardrobe`). Worn together, an outer item is pushed clear of an inner
+one, except over boots, bracers and gloves (the `feet`, `arms` and `hands` slots): what's under
+them is tucked in instead.
 
 ## Swinging (22 §4.5, BW6)
 
@@ -79,7 +84,7 @@ first.
 | `back.long_coat` | back, armor | sewn: back and two open fronts, mirrored; four chains round the hips | 3,292 |
 | `back.travel_cape` | back, armor | sewn: a flared back panel on a collar round the neck; three chains from the chest | 1,292 |
 | `torso.ranger_tunic` | torso, over | sewn: green body to the upper thigh, cream sleeves, teal trims; four chains round the hips (Vesper's) | ~2,000 |
-| `shoulders.ranger_cloak` | shoulders, armor | sewn: a cloak off the left shoulder on a leather collar and pauldron; three chains from the chest (Vesper's) | 1,369 |
+| `shoulders.ranger_cloak` | shoulders, armor | sewn: a cloak off the left shoulder on a leather collar and pauldron, lined all over; three chains from the chest (Vesper's) | 1,156 |
 | `back.ranger_quiver` | back, accessory | modelled: leather, steel bands, teal-fletched arrows, a strap across the chest; held on the chest (Vesper's) | 545 |
 | `feet.ranger_boots` | feet, over | shell: knee-high leather, a flared cuff, an ankle strap, dark soles (Vesper's) | 1,372 |
 | `arms.ranger_bracers` | arms, over | shell: leather forearms, two teal bands, flaring at the elbow (Vesper's) | 864 |

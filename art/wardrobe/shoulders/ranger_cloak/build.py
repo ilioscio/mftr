@@ -28,9 +28,11 @@ COLLAR = [
     ("sh_n", -0.13, 1.415),
 ]
 # The cloak, behind: from the collar's back edge over both shoulders; long on the left, falling
-# to the knee, its right edge running from the right shoulder in and down across the back.
+# to the knee, its right edge running from the right shoulder in and down across the back. Its
+# left edge stays behind the back: the reference body's arms stand out from it, and a cloak
+# draped round one keeps that shape when the arm comes down (it flared out from her side).
 CLOAK = [
-    ("hem_n", 0.04, 0.55), ("hem_p", 0.44, 0.52), ("side_p", 0.34, 1.05), ("arm_p", 0.30, 1.24),
+    ("hem_n", 0.04, 0.55), ("hem_p", 0.32, 0.55), ("side_p", 0.24, 1.05), ("arm_p", 0.30, 1.24),
     ("sh_p", 0.265, 1.41), ("neck_p", 0.095, 1.43), ("neck_n", -0.095, 1.43), ("sh_n", -0.13, 1.415),
     ("edge_n", -0.11, 1.33), ("mid_n", 0.0, 1.0),
 ]
@@ -41,6 +43,7 @@ seams = [
     (("collar", "sh_n", "neck_n"), ("cloak", "sh_n", "neck_n")),
     (("collar", "neck_p", "arm_p"), ("cloak", "neck_p", "arm_p")),
 ]
-garment = sewing.Garment(panels, seams, budget=700, cloth=GREEN, trim_color=TEAL, trim_slot="cloth",
-                         thickness=0.005, mirror=None)
+# Lined all over: its inside shows whenever it swings out from her back.
+garment = sewing.Garment(panels, seams, budget=480, cloth=GREEN, trim_color=TEAL, trim_slot="cloth",
+                         thickness=0.005, mirror=None, lining=1.0)
 sewing.build(garment, os.path.join(HERE, "item.blend"))
