@@ -1225,6 +1225,43 @@ floor.
   growth will need them slimmed.
 - The owner's look at the third pass.
 
+### BW7 status (2026-11-15): held items, and the ranger's bow first
+
+**Held items.** A weapon isn't fitted to the body: `wardrobe._place_grip` puts it on the hand
+(`art/wardrobe/README.md`, "Held items"). It is modelled in a grip frame: the grip at the origin,
++Z along it, +Y its back. Its `item.ron` names the hand bone (`grip`), where along it the grip
+sits (`grip_at`), and where the item's +Z and +Y point in that bone's own frame (`grip_up`,
+`grip_back`). It rides that bone alone, rigid, and covers nothing. The frame is the official
+champion's whose moves the weapon class plays, so their clips aim it as they aim their own.
+
+**The ranger's bow** (`offhand.ranger_bow`, 464 triangles), Vesper's, and now hers and
+Vesper-neo's in place of the block-out:
+- a tall recurve (1.6 m), its flat, wide limbs curving back toward her and flicking forward at
+  the tips;
+- a leather grip between silver bands, a teal stone in its face, silver caps and teal-glowing
+  tips (her signature);
+- the string on her side.
+
+Its frame was read off the hand-made Vesper's bow (`art/champions/vesper`): the limbs and back
+at rest in `hand_l`'s frame. So at her full draw it stands upright, its string toward her, as
+hers does; the block-out had been upright at rest and leaned at the draw. Her moves' weapon
+(`moves::weapon`) is the new bow, so a recipe that takes her attack takes it too.
+
+**The bases' size.** With the bow, the heavy feminine base went over the 4 MiB container cap
+(`glb::MAX_GLB_BYTES`) and the creator's catalog stopped loading. Skin weights are now written
+as normalized bytes, not floats (`mftr_blender.glb._quantize_weights`): 4 bytes a vertex, not 16.
+Each vertex's four still sum to exactly one. The bases went from 4.07–4.20 MB to 3.51–3.60 MB,
+under the 4 MB budget again, with room for the rest of the weapons.
+
+**Left:**
+- The string doesn't draw: the hand-made Vesper's bow has bones that bend its limbs and pull
+  the string to her fingers, and the base's has none. At the full draw her hand is back by her
+  cheek while the string stays straight.
+- The other classes: sword, axe, maul, hammer, spear, staff, dagger, shield, orb, lantern.
+- Weight classes picking the clips.
+- The old block-out `offhand.bow` stays in the catalog until the classes are rebuilt, for
+  recipes that name it.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

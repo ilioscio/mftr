@@ -61,11 +61,16 @@ def items():
 
 
 def read_item(path):
-    """`item.ron`'s fields: strings, booleans and numbers of one flat struct."""
+    """`item.ron`'s fields: strings, booleans, numbers and tuples of numbers of one flat struct."""
     text = re.sub(r"//[^\n]*", "", open(path, encoding="utf-8").read())
     out = {}
-    for key, val in re.findall(r"(\w+)\s*:\s*(\"[^\"]*\"|true|false|-?[\d.]+)", text):
-        out[key] = val[1:-1] if val.startswith('"') else (val == "true" if val in ("true", "false") else float(val))
+    num = r"-?[\d.]+"
+    pattern = rf"(\w+)\s*:\s*(\"[^\"]*\"|true|false|\(\s*{num}(?:\s*,\s*{num})*\s*,?\s*\)|{num})"
+    for key, val in re.findall(pattern, text):
+        if val.startswith("("):
+            out[key] = tuple(float(x) for x in re.findall(num, val))
+        else:
+            out[key] = val[1:-1] if val.startswith('"') else (val == "true" if val in ("true", "false") else float(val))
     for k in ("id", "slot", "name"):
         if k not in out:
             raise ValueError(f"{path}: needs `{k}`")
@@ -401,6 +406,29 @@ def _arms(info):
     return info["slot"] not in ("torso", "back", "waist", "legs")
 
 
+def _place_grip(obj, armature, info):
+    """A held item (a weapon, a shield, a lantern: `grip` in its `item.ron`) on its hand bone, not
+    fitted to the body. It is modelled in its own frame: the grip at the origin, +Z along it
+    (a bow's upper limb, a blade's point), +Y its back (a bow's string side). `grip_up` and
+    `grip_back` say where those point in the hand bone's own frame (+Y along the bone, as
+    Blender's bones), `grip_at` how far along the bone the grip sits (a fraction of its length).
+    The official champion whose moves the weapon class plays sets them, so its clips aim the
+    item as they aim theirs (a bow stands upright at the full draw). Rigid, on that bone alone."""
+    bone = armature.data.bones[info["grip"]]
+    up = Vector(info.get("grip_up", (0.0, 1.0, 0.0))).normalized()
+    back = Vector(info.get("grip_back", (0.0, 0.0, 1.0)))
+    back = (back - up * back.dot(up)).normalized()
+    side = back.cross(up)
+    at = Vector((0.0, bone.length * info.get("grip_at", 0.5), 0.0))
+    m = armature.matrix_world @ bone.matrix_local
+    for v in obj.data.vertices:
+        c = v.co.copy()
+        v.co = m @ (at + side * c.x + back * c.y + up * c.z)
+    obj.vertex_groups.clear()
+    g = obj.vertex_groups.new(name=info["grip"])
+    g.add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
+
+
 def fit_items(armature, body, gender, room=1.0):
     """Every wardrobe item fitted to `body` (a base just built, before its mass is baked) and
     skinned to `armature`, as catalog parts. Returns `made` entries (as `parts.build_parts`'s,
@@ -416,6 +444,21 @@ def fit_items(armature, body, gender, room=1.0):
     for folder, info in found:
         obj = load(folder)
         me = obj.data
+        if info.get("grip"):
+            # Held, not worn: on the hand, rigid; it covers nothing.
+            _place_grip(obj, armature, info)
+            obj.name = f"part.{info['id']}"
+            me.name = obj.name
+            _materials(obj)
+            if "Col" in me.color_attributes:
+                me.color_attributes.active_color = me.color_attributes["Col"]
+                me.color_attributes.render_color_index = me.color_attributes.active_color_index
+            obj.parent = armature
+            mod = obj.modifiers.new("Armature", "ARMATURE")
+            mod.object = armature
+            made.append((info["id"], info["slot"], info["name"], [], bool(info["accent"]), mesh.triangle_count(obj), 0,
+                         {"rigid": True}))
+            continue
         arms = _arms(info)
         if arms not in surfaces:
             surfaces[arms] = (_source_surfaces(sex, arms), _base_surface(body, arms))

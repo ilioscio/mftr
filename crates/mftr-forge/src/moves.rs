@@ -95,7 +95,7 @@ pub fn library() -> Vec<(String, String)> {
 /// carries it ("" for none: fists, or a crossbow the catalog lacks yet).
 pub fn weapon(champion: ChampionId) -> (&'static str, &'static str) {
     match champion {
-        ChampionId::Vesper => ("bow", "offhand.bow"),
+        ChampionId::Vesper => ("bow", "offhand.ranger_bow"),
         ChampionId::Rook => ("heavy", "weapon.maul"),
         ChampionId::Shade => ("blades", "weapon.dagger"),
         ChampionId::Lumen | ChampionId::Quill | ChampionId::Cairn | ChampionId::Marrow => ("staff", "weapon.staff"),

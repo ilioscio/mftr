@@ -9,7 +9,7 @@ all four humanoid bases (slim and heavy, masculine and feminine) when the bases 
 
 | File | What |
 |---|---|
-| `item.ron` | `id` (`<slot>.<name>`), `slot`, `name`, `layer` (`under`, `over`, `armor`, `accessory`), `accent` (it shows the team color), `rigid` (a plate: little of the body's growth); `sleeves` (a torso item with sleeves, fitted to the arms too); `hold` (a bone: what stands off the body, like a quiver's arrows, rides it whole rather than following the arm under it); for a hanging item, its spring-bone chains (below) |
+| `item.ron` | `id` (`<slot>.<name>`), `slot`, `name`, `layer` (`under`, `over`, `armor`, `accessory`), `accent` (it shows the team color), `rigid` (a plate: little of the body's growth); `sleeves` (a torso item with sleeves, fitted to the arms too); `hold` (a bone: what stands off the body, like a quiver's arrows, rides it whole rather than following the arm under it); for a hanging item, its spring-bone chains (below); for a **held** item (a weapon), `grip` and its frame (below) |
 | `item.blend` | One mesh object, `item`, authored around the **reference body**: `body_male` in `art/creator/bodies/body_source.blend`, standing as it is there. Faces use materials named for the material slots (`cloth`, `metal`, `accent`…); the color attribute `Col` holds its paint regions. |
 | `build.py` | Optional: what makes `item.blend`. A sewn garment's pattern (`mftr_blender.sewing`). |
 
@@ -88,6 +88,23 @@ first.
 | `back.ranger_quiver` | back, accessory | modelled: leather, steel bands, teal-fletched arrows, a strap across the chest; held on the chest (Vesper's) | 545 |
 | `feet.ranger_boots` | feet, over | shell: knee-high leather, a flared cuff, an ankle strap, dark soles (Vesper's) | 1,372 |
 | `arms.ranger_bracers` | arms, over | shell: leather forearms, two teal bands, flaring at the elbow (Vesper's) | 864 |
+| `offhand.ranger_bow` | offhand, held | modelled: a tall recurve, flat wide limbs, a leather grip between silver bands with a teal stone, silver caps, teal-glowing tips, the string (Vesper's) | 464 |
+
+## Held items (22 §4.7, BW7)
+
+A weapon (or a shield, a lantern) is **held**, not worn: it isn't fitted to the body, it is
+placed on the hand. Its `item.blend` is modelled in its own **grip frame**: the grip at the
+origin, +Z along it (a blade's point, a bow's upper limb), +Y its back (a bow's string side).
+
+| `item.ron` field | What |
+|---|---|
+| `grip` | the bone that holds it (`hand_l`, `hand_r`); the item rides it alone, rigid |
+| `grip_at` | where along that bone the grip sits, as a fraction of its length |
+| `grip_up`, `grip_back` | where the item's +Z and +Y point, in the bone's own frame (+Y along the bone) |
+
+The frame comes from the official champion whose moves the weapon class plays, so their clips
+aim it as they aim their own: the ranger's bow's was read off the hand-made Vesper, so it stands
+upright at her full draw. A held item covers nothing and isn't layered.
 
 ## Hair
 
