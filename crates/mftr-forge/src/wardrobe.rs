@@ -332,6 +332,80 @@ pub fn layer(model: &mut Model, inner: &[usize], outer: &[usize], reach: f32) {
     hide_covered(model, inner, outer);
 }
 
+/// The slots whose items are tight over a limb (boots, bracers, gloves): what is worn under one
+/// is tucked into it (`tuck_in`), not covered by it pushed out over it (`layer`), which a shell
+/// a few millimetres off the skin can't be without going lumpy (trousers in boots).
+pub const TUCKING: [&str; 3] = ["feet", "arms", "hands"];
+
+/// How far out an inner garment may stand from a tucking item and still be taken in (m): loose
+/// trousers over a boot's shaft.
+pub const TUCK_REACH: f32 = 0.08;
+
+/// `layer` for an outer item of a `TUCKING` slot: the inner garment goes in under it, the outer
+/// keeps its shape (three rounds: each takes in what the last one's smoothing left out); then
+/// what of the inner it covers goes.
+pub fn tuck_in(model: &mut Model, inner: &[usize], outer: &[usize]) {
+    for _ in 0..3 {
+        pull_in(model, outer, inner, TUCK_REACH);
+    }
+    hide_covered(model, inner, outer);
+}
+
+/// Move the inner garment's vertices (`inner` meshes; not its lining) that lie outside the outer
+/// item, or less than `LAYER_GAP` inside it, to `LAYER_GAP` inside it, along the outer face's
+/// normal: those within `reach` of it, beside one of its faces (not above its top or below its
+/// bottom: the nearest point is square to the face), on the near side. Neighbours follow
+/// smoothly, so the garment gathers in at a boot's top.
+fn pull_in(model: &mut Model, outer: &[usize], inner: &[usize], reach: f32) {
+    let tris = triangles(model, outer, true);
+    if tris.is_empty() {
+        return;
+    }
+    let grid = Grid::new(tris, 0.04);
+    let span = (reach / grid.cell).ceil() as i32;
+    let mut pulls: Vec<(V3, V3)> = Vec::new();
+    for &mi in inner {
+        for p in model.meshes[mi].iter() {
+            let own = normals(p);
+            for (i, (v, vn)) in p.positions.iter().zip(&own).enumerate() {
+                if p.colors.get(i).is_some_and(|c| c[3] <= LINING) {
+                    continue;
+                }
+                let c = v.map(|x| (x / grid.cell).floor() as i32);
+                let mut best: Option<(f32, V3, V3)> = None;
+                let mut seen = std::collections::HashSet::new();
+                for x in -span..=span {
+                    for y in -span..=span {
+                        for z in -span..=span {
+                            for &t in grid.cells.get(&(c[0] + x, c[1] + y, c[2] + z)).map_or(&[][..], Vec::as_slice) {
+                                if !seen.insert(t) {
+                                    continue;
+                                }
+                                let tri = &grid.tris[t as usize];
+                                let q = closest(*v, tri);
+                                let d = dot(sub(*v, q), sub(*v, q));
+                                if d < reach * reach && best.is_none_or(|b| d < b.0) {
+                                    best = Some((d, q, norm(cross(sub(tri[1], tri[0]), sub(tri[2], tri[0])))));
+                                }
+                            }
+                        }
+                    }
+                }
+                let Some((d, q, n)) = best else { continue };
+                let s = dot(sub(*v, q), n);
+                // The near side only (a boot's far wall, its inside, looks away); outside, only
+                // square to the face (a thigh above a boot's top isn't in it).
+                if dot(n, *vn) < 0.0 || s <= -LAYER_GAP || (s > 0.0 && s < 0.5 * d.sqrt()) {
+                    continue;
+                }
+                let k = s + LAYER_GAP;
+                pulls.push((*v, [-n[0] * k, -n[1] * k, -n[2] * k]));
+            }
+        }
+    }
+    spread(model, inner, &pulls);
+}
+
 /// Pull the inner garment's vertices that poke through the outer garment back in under it: a
 /// vertex whose inward ray (back along its normal) meets the outer's outside within `POKE`, the
 /// outer face looking the way the vertex does, goes in past it by `LAYER_GAP`; its neighbours
@@ -694,5 +768,47 @@ mod tests {
         m.meshes.push(vec![quad(0.2, 0.5)]);
         hide_covered(&mut m, &[0], &[1]);
         assert_eq!(m.meshes[0][0].triangles, 2);
+    }
+
+    fn tube(r: f32, z0: f32, z1: f32) -> Primitive {
+        // An open tube round the z axis, facing out: 16 sides, a ring every 5 cm.
+        let (sides, rings) = (16u32, ((z1 - z0) / 0.05).round() as u32);
+        let mut positions = Vec::new();
+        for k in 0..=rings {
+            for i in 0..sides {
+                let a = std::f32::consts::TAU * i as f32 / sides as f32;
+                positions.push([r * a.cos(), r * a.sin(), z0 + (z1 - z0) * k as f32 / rings as f32]);
+            }
+        }
+        let mut indices = Vec::new();
+        for k in 0..rings {
+            for i in 0..sides {
+                let (a, b) = (k * sides + i, k * sides + (i + 1) % sides);
+                indices.extend([a, b, b + sides, a, b + sides, a + sides]);
+            }
+        }
+        let triangles = indices.len() / 3;
+        Primitive { positions, indices, triangles, ..Primitive::default() }
+    }
+
+    #[test]
+    fn trousers_go_into_a_boot_and_stay_out_above_it() {
+        // Loose trousers (8 cm round) and a boot (5 cm round) up to 45 cm: what's in the boot's
+        // height goes in under it and is hidden; well above its top, the trousers are as they were.
+        let mut m = Model::default();
+        m.meshes.push(vec![tube(0.08, 0.0, 0.8)]);
+        m.meshes.push(vec![tube(0.05, 0.0, 0.45)]);
+        tuck_in(&mut m, &[0], &[1]);
+        let r = |v: &V3| (v[0] * v[0] + v[1] * v[1]).sqrt();
+        for v in &m.meshes[0][0].positions {
+            if v[2] < 0.4 {
+                assert!(r(v) < 0.048, "{v:?} still outside the boot");
+            } else if v[2] > 0.6 {
+                assert!((r(v) - 0.08).abs() < 1e-4, "{v:?} moved, well above the boot");
+            }
+        }
+        assert!(m.meshes[0][0].triangles < tube(0.08, 0.0, 0.8).triangles, "what's in the boot is hidden");
+        // The boot keeps its shape.
+        assert!(m.meshes[1][0].positions.iter().all(|v| (r(v) - 0.05).abs() < 1e-4));
     }
 }
