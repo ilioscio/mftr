@@ -6,11 +6,13 @@ signature), and the string.
 
 Modelled in its grip frame (`wardrobe._place_grip`): the grip at the origin, +Z the upper limb,
 +Y its back (the string's side, toward her). `item.ron` puts it in the left hand as her full draw
-holds it.
+holds it. It has the hand-made Vesper's bow bones, by name: two on each limb and one on each half
+of the string, so her shots' baked draws bend it and pull the string to her fingers.
 
     blender -b --python art/wardrobe/offhand/ranger_bow/build.py
 """
 
+import json
 import math
 import os
 import sys
@@ -35,6 +37,9 @@ HALF = 0.80              # grip to tip (m): a bow taller than her shoulders
 BRACE, RECURVE = 0.20, 0.09
 GRIP = 0.075             # the grip's half-length
 SIDES = 8
+# Where each limb's bones start (off the grip) and where the inner one hands over to the outer
+# (the hand-made Vesper's: 0.07 and 0.45 of her 0.85).
+LIMB_ROOT, LIMB_SPLIT = 0.07, 0.42
 
 
 def centre(s):
@@ -103,6 +108,8 @@ def cap(bm, r, point, color, slot, faces, flip=False):
 def build():
     bpy.ops.wm.read_homefile(use_empty=True)
     bm = bmesh.new()
+    # The color layer first: adding a layer reallocates the vertices (keys taken before go stale).
+    col = bm.verts.layers.float_color.new("Col")
     faces = []
     # The limbs and the riser: segments between stations, each its own rings (its own color).
     stations = [-HALF, -0.76, -0.71, -0.67, -0.60, -0.50, -0.38, -0.26, -0.17, -GRIP - 0.02, -GRIP, -0.025, 0.025,
@@ -132,16 +139,52 @@ def build():
     sv = [bm.verts.new(shelf + Vector(o)) for o in ((0, -0.012, 0), (0, 0.012, 0), (0, 0.012, 0.012), (0, -0.012, 0.012))]
     faces.append((bm.faces.new(sv), WOOD_DARK, "cloth"))
     faces.append((bm.faces.new([bm.verts.new(v.co) for v in reversed(sv)]), WOOD_DARK, "cloth"))
-    # The string: tip to tip on her side, at the nocks just inside the tips.
+    # The string: tip to tip on her side, at the nocks just inside the tips, in two halves that
+    # meet at the nocking point (each follows its own bone when she draws).
     top, bot = centre(HALF - 0.05) + Vector((0, 0.008, 0)), centre(-(HALF - 0.05)) + Vector((0, 0.008, 0))
+    nock = (top + bot) / 2
     axis = (top - bot).normalized()
     across = Vector((1, 0, 0))
     out_ = axis.cross(across).normalized()
-    sa = [bm.verts.new(bot + (across * math.cos(2 * math.pi * k / 4) + out_ * math.sin(2 * math.pi * k / 4)) * 0.0035) for k in range(4)]
-    sb = [bm.verts.new(top + (across * math.cos(2 * math.pi * k / 4) + out_ * math.sin(2 * math.pi * k / 4)) * 0.0035) for k in range(4)]
-    bridge(bm, sa, sb, STRING, "cloth", faces)
+
+    def string_ring(c):
+        return [bm.verts.new(c + (across * math.cos(2 * math.pi * k / 4) + out_ * math.sin(2 * math.pi * k / 4)) * 0.0035)
+                for k in range(4)]
+
+    string = {}
+    for half, (a, b) in (("extra_string_2", (bot, nock)), ("extra_string_1", (nock, top))):
+        ra, rb = string_ring(a), string_ring(b)
+        bridge(bm, ra, rb, STRING, "cloth", faces)
+        for v in ra + rb:
+            string[v] = {half: 1.0}
+    # Weights: the grip on the hand, each limb on two bones (the hand-made Vesper's: `extra_bow_1`
+    # and `_2` up, `_3` and `_4` down), blended where they meet so it bends smoothly.
+    def smooth(t):
+        t = min(max(t, 0.0), 1.0)
+        return t * t * (3 - 2 * t)
+
+    weights = {}
+    for v in bm.verts:
+        if v in string:
+            weights[v] = string[v]
+            continue
+        a = abs(v.co.z)
+        inner, outer = ("extra_bow_1", "extra_bow_2") if v.co.z > 0 else ("extra_bow_3", "extra_bow_4")
+        f1 = smooth((a - LIMB_ROOT + 0.02) / 0.04)
+        f2 = smooth((a - LIMB_SPLIT + 0.05) / 0.10)
+        weights[v] = {"grip": 1.0 - f1, inner: f1 * (1.0 - f2), outer: f1 * f2}
+    # The bones, in the grip frame ("grip" is the hand that holds it): placed on the base with the
+    # bow (`wardrobe._place_grip`). Named as the hand-made Vesper's, so her shots' baked draws
+    # (the limbs bending toward her, the string to her fingers) play on it (`Retarget`, by name).
+    bones = [
+        ("extra_bow_1", centre(LIMB_ROOT), centre(LIMB_SPLIT), "grip"),
+        ("extra_bow_2", centre(LIMB_SPLIT), centre(HALF), "extra_bow_1"),
+        ("extra_bow_3", centre(-LIMB_ROOT), centre(-LIMB_SPLIT), "grip"),
+        ("extra_bow_4", centre(-LIMB_SPLIT), centre(-HALF), "extra_bow_3"),
+        ("extra_string_1", top, nock, "extra_bow_2"),
+        ("extra_string_2", bot, nock, "extra_bow_4"),
+    ]
     # Colors and slots.
-    col = bm.verts.layers.float_color.new("Col")
     slots = mesh.MATERIAL_SLOTS
     for f, c, slot in faces:
         f.material_index = slots.index(slot)
@@ -151,11 +194,19 @@ def build():
     me = bpy.data.meshes.new("item")
     for s in slots:
         me.materials.append(mesh.material(s))
+    bm.verts.index_update()
+    order = [(v.index, weights[v]) for v in bm.verts]
     bm.to_mesh(me)
     bm.free()
     obj = bpy.data.objects.new("item", me)
     bpy.context.scene.collection.objects.link(obj)
     me.color_attributes.active_color = me.color_attributes["Col"]
+    for vi, ws in order:
+        for name, w in ws.items():
+            if w > 1e-4:
+                g = obj.vertex_groups.get(name) or obj.vertex_groups.new(name=name)
+                g.add([vi], w, "REPLACE")
+    obj["mftr_bones"] = json.dumps([(n, list(a), list(b), p) for n, a, b, p in bones])
     tris = sum(len(p.vertices) - 2 for p in me.polygons)
     bpy.ops.wm.save_as_mainfile(filepath=os.path.join(HERE, "item.blend"), compress=True)
     print(f"item: {tris} triangles")

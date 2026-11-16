@@ -218,9 +218,18 @@ impl MftrModel {
             e.1 = e.1.max(n);
             e.2 |= keyed.contains(name.as_str());
         }
+        // A chain is a line, each bone under the one before: a bow's limbs (`extra_bow_1..4`, two
+        // limbs off the hand) and its string aren't, and swing only with the clips that draw them.
+        let line = |chain: &str, first: u32, last: u32| {
+            (first + 1..=last).all(|n| {
+                m.node_by_name(&format!("extra_{chain}_{n}"))
+                    .and_then(|i| m.nodes[i].parent)
+                    .is_some_and(|p| m.nodes[p].name == format!("extra_{chain}_{}", n - 1))
+            })
+        };
         let mut out = VarArray::new();
         for (chain, (first, last, keyed)) in chains {
-            if keyed || first == u32::MAX {
+            if keyed || first == u32::MAX || !line(chain, first, last) {
                 continue;
             }
             let mut row = VarArray::new();

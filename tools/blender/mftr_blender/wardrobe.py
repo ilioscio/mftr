@@ -413,7 +413,12 @@ def _place_grip(obj, armature, info):
     `grip_back` say where those point in the hand bone's own frame (+Y along the bone, as
     Blender's bones), `grip_at` how far along the bone the grip sits (a fraction of its length).
     The official champion whose moves the weapon class plays sets them, so its clips aim the
-    item as they aim theirs (a bow stands upright at the full draw). Rigid, on that bone alone."""
+    item as they aim theirs (a bow stands upright at the full draw). Rigid, on that bone alone,
+    unless it brings bones of its own: `mftr_bones` on the item object, [(name, head, tail,
+    parent)] in its grip frame ("grip" the hand), added to the rig, and its vertex groups (a
+    "grip" group for what rides the hand). A bow's limbs and string, named as the official
+    champion's, so its clips' channels for them play on it."""
+    import json
     bone = armature.data.bones[info["grip"]]
     up = Vector(info.get("grip_up", (0.0, 1.0, 0.0))).normalized()
     back = Vector(info.get("grip_back", (0.0, 0.0, 1.0)))
@@ -421,12 +426,37 @@ def _place_grip(obj, armature, info):
     side = back.cross(up)
     at = Vector((0.0, bone.length * info.get("grip_at", 0.5), 0.0))
     m = armature.matrix_world @ bone.matrix_local
+
+    def place(c):
+        c = Vector(c)
+        return m @ (at + side * c.x + back * c.y + up * c.z)
+
     for v in obj.data.vertices:
-        c = v.co.copy()
-        v.co = m @ (at + side * c.x + back * c.y + up * c.z)
-    obj.vertex_groups.clear()
-    g = obj.vertex_groups.new(name=info["grip"])
-    g.add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
+        v.co = place(v.co.copy())
+    own = json.loads(obj.get("mftr_bones", "[]"))
+    if not own:
+        obj.vertex_groups.clear()
+        g = obj.vertex_groups.new(name=info["grip"])
+        g.add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
+        return
+    if "grip" in obj.vertex_groups:
+        obj.vertex_groups["grip"].name = info["grip"]
+    world_back = (m.to_3x3() @ back).normalized()
+    inv = armature.matrix_world.inverted()
+    prev = bpy.context.view_layer.objects.active
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode="EDIT")
+    eb = armature.data.edit_bones
+    for name, head, tail, parent in own:
+        b = eb.new(name)
+        b.head, b.tail = inv @ place(head), inv @ place(tail)
+        b.use_deform = True
+        b.align_roll(inv.to_3x3() @ world_back)
+        b.parent = eb[info["grip"] if parent == "grip" else parent]
+    bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.context.view_layer.objects.active = prev
+    for pb in armature.pose.bones:
+        pb.rotation_mode = "QUATERNION"
 
 
 def fit_items(armature, body, gender, room=1.0):

@@ -88,7 +88,7 @@ first.
 | `back.ranger_quiver` | back, accessory | modelled: leather, steel bands, teal-fletched arrows, a strap across the chest; held on the chest (Vesper's) | 545 |
 | `feet.ranger_boots` | feet, over | shell: knee-high leather, a flared cuff, an ankle strap, dark soles (Vesper's) | 1,372 |
 | `arms.ranger_bracers` | arms, over | shell: leather forearms, two teal bands, flaring at the elbow (Vesper's) | 864 |
-| `offhand.ranger_bow` | offhand, held | modelled: a tall recurve, flat wide limbs, a leather grip between silver bands with a teal stone, silver caps, teal-glowing tips, the string (Vesper's) | 464 |
+| `offhand.ranger_bow` | offhand, held | modelled: a tall recurve, flat wide limbs, a leather grip between silver bands with a teal stone, silver caps, teal-glowing tips, the string; bones that draw with Vesper's shots (Vesper's) | 472 |
 
 ## Held items (22 §4.7, BW7)
 
@@ -101,6 +101,12 @@ origin, +Z along it (a blade's point, a bow's upper limb), +Y its back (a bow's 
 | `grip` | the bone that holds it (`hand_l`, `hand_r`); the item rides it alone, rigid |
 | `grip_at` | where along that bone the grip sits, as a fraction of its length |
 | `grip_up`, `grip_back` | where the item's +Z and +Y point, in the bone's own frame (+Y along the bone) |
+
+A held item can have **bones of its own**: `mftr_bones` on its `item.blend` object, a JSON list
+of `[name, head, tail, parent]` in the grip frame (`"grip"` is the hand), with vertex groups by
+those names (and `grip` for what rides the hand). They're added to each base's rig with it.
+Named as the official champion's, they play its clips: the ranger's bow's limbs and string
+draw with Vesper's shots.
 
 The frame comes from the official champion whose moves the weapon class plays, so their clips
 aim it as they aim their own: the ranger's bow's was read off the hand-made Vesper, so it stands

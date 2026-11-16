@@ -1234,7 +1234,7 @@ sits (`grip_at`), and where the item's +Z and +Y point in that bone's own frame 
 `grip_back`). It rides that bone alone, rigid, and covers nothing. The frame is the official
 champion's whose moves the weapon class plays, so their clips aim it as they aim their own.
 
-**The ranger's bow** (`offhand.ranger_bow`, 464 triangles), Vesper's, and now hers and
+**The ranger's bow** (`offhand.ranger_bow`, 472 triangles), Vesper's, and now hers and
 Vesper-neo's in place of the block-out:
 - a tall recurve (1.6 m), its flat, wide limbs curving back toward her and flicking forward at
   the tips;
@@ -1253,10 +1253,19 @@ as normalized bytes, not floats (`mftr_blender.glb._quantize_weights`): 4 bytes 
 Each vertex's four still sum to exactly one. The bases went from 4.07–4.20 MB to 3.51–3.60 MB,
 under the 4 MB budget again, with room for the rest of the weapons.
 
+**The draw.** A held item can bring bones of its own (`mftr_bones` on its `item.blend` object,
+placed with it under the hand, and its vertex groups). The ranger's bow has the hand-made
+Vesper's, by name: two on each limb (`extra_bow_1..4`) and one on each half of the string, from
+the tip to the nocking point (`extra_string_1..2`). Her shots' baked draws are clips like any
+other, so `Retarget` plays their channels on these bones by name, corrected for their rest: the
+string comes back to her fingers at her cheek, the limbs bend toward her, and on the release it
+snaps straight and shivers. Two consequences:
+- The spring bones take only a real chain, each bone under the one before (`spring_chains`):
+  the bow's limbs aren't one, so on a stance whose clips don't key them it stays still.
+- The forge counts every extra bone the outfit uses against the cap of 32 before it folds the
+  garments' chains: the bow's six don't fold, so the garments give way first.
+
 **Left:**
-- The string doesn't draw: the hand-made Vesper's bow has bones that bend its limbs and pull
-  the string to her fingers, and the base's has none. At the full draw her hand is back by her
-  cheek while the string stays straight.
 - The other classes: sword, axe, maul, hammer, spear, staff, dagger, shield, orb, lantern.
 - Weight classes picking the clips.
 - The old block-out `offhand.bow` stays in the catalog until the classes are rebuilt, for
