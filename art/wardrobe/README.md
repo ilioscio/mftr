@@ -102,6 +102,11 @@ origin, +Z along it (a blade's point, a bow's upper limb), +Y its back (a bow's 
 | `grip_at` | where along that bone the grip sits, as a fraction of its length |
 | `grip_up`, `grip_back` | where the item's +Z and +Y point, in the bone's own frame (+Y along the bone) |
 
+`class` and `weight` (light, medium, heavy) record its weapon class and weight class. Model one
+with `mftr_blender.armory` (a `Kit` of lathes, slabs, blades, boxes and stones in the grip
+frame): see `weapon/sword/build.py`. The weapons: `weapon.dagger`, `sword`, `hammer`, `staff`,
+`spear`, `great_axe`, `maul`; `offhand.shield`, `tower_shield`, `orb`, `lantern`, `ranger_bow`.
+
 A held item can have **bones of its own**: `mftr_bones` on its `item.blend` object, a JSON list
 of `[name, head, tail, parent]` in the grip frame (`"grip"` is the hand), with vertex groups by
 those names (and `grip` for what rides the hand). They're added to each base's rig with it.

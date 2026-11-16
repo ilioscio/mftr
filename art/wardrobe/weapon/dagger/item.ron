@@ -1,0 +1,17 @@
+// A wardrobe item (22 §4.7, BW7): held, modelled by build.py in its grip frame.
+(
+    id: "weapon.dagger",
+    slot: "weapon",
+    name: "Dagger",
+    accent: false,
+    rigid: true,
+    // Its weapon class and weight class (22 §4.7: the weight will pick the clip set).
+    class: "dagger",
+    weight: "light",
+    // Held along the right hand, where the block-out lay (as Rook's maul and Lumen's staff: the
+    // clips aim it as they aim theirs).
+    grip: "hand_r",
+    grip_at: 0.55,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, 1.0),
+)

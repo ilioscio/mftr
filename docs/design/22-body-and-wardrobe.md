@@ -1265,11 +1265,39 @@ snaps straight and shivers. Two consequences:
 - The forge counts every extra bone the outfit uses against the cap of 32 before it folds the
   garments' chains: the bow's six don't fold, so the garments give way first.
 
+**The other classes** (second pass, 2026-11-15). Eleven held items replace the block-outs of
+`parts.py`, under the same ids, so recipes and the moves that equip them are unchanged:
+
+| Item | Class, weight | What | Triangles |
+|---|---|---|---|
+| `weapon.dagger` | dagger, light | a leaf blade, a dark guard with a glowing stone, a wrapped grip | 128 |
+| `weapon.sword` | sword, medium | a broad diamond-section blade, a gold crossguard with swept quillons, a pommel stone | 148 |
+| `weapon.hammer` | hammer, medium | a beveled iron head with a gold striking face and a back spike | 198 |
+| `weapon.staff` | staff, medium | an iron-shod shaft, three iron prongs holding a glowing crystal | 246 |
+| `weapon.spear` | spear, medium | a leaf head with glowing stones, a team-colored collar, a butt spike | 144 |
+| `weapon.great_axe` | axe, heavy | a crescent blade ground to its edge, a back spike and a top spike | 188 |
+| `weapon.maul` | maul, heavy | a great faceted head with gold-banded faces, a rune stone in each cheek | 352 |
+| `offhand.shield` | shield, medium | an iron heater, a team-colored field, a gold boss | 114 |
+| `offhand.tower_shield` | shield, heavy | a tall slab with clipped corners, a team stripe, gold studs, a sigil | 120 |
+| `offhand.orb` | orb, light | a faceted crystal in a gold cage of three claws | 180 |
+| `offhand.lantern` | lantern, light | a chain, an iron cap and base, four posts, a glowing core | 184 |
+
+- **The kit** (`mftr_blender.armory`): lathes, slabs with a ground rim, diamond-section blades,
+  beveled boxes and cut stones, in the grip frame. Each item's `build.py` is a dozen lines.
+- **Where they sit.** Each takes the frame its block-out was built in, so the clips made round
+  the block-outs (Rook's maul, Shade's dagger, the casters' staff) hold them the same: along the
+  right hand, upright at the left hand's prop point (orb, lantern), or on the left forearm
+  (shields).
+- **Classes and weights** are recorded in each `item.ron` (`class`, `weight`). Nothing reads
+  them yet.
+- Most are under §4.7's 300-triangle floor: they read at the gameplay camera, and the bases
+  have little room (3.59 to 3.69 MB of 4).
+
 **Left:**
-- The other classes: sword, axe, maul, hammer, spear, staff, dagger, shield, orb, lantern.
 - Weight classes picking the clips.
-- The old block-out `offhand.bow` stays in the catalog until the classes are rebuilt, for
-  recipes that name it.
+- The old block-out `offhand.bow` stays in the catalog for recipes that name it: the forge
+  refuses an outfit id it doesn't know.
+- The owner's look at the weapons.
 
 ## 7. Open questions for the owner
 

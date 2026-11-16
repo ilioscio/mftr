@@ -106,16 +106,6 @@ def _line(front, side, back):
 
 # --- The catalog ---------------------------------------------------------------------------------
 
-def _hand_axis(side):
-    """The hand bone's head, its direction, a direction across it, and its length (the current
-    shape's)."""
-    bones = {b[0]: b for b in rig.bone_table()}
-    h, t = Vector(bones[f"hand_{side}"][2]), Vector(bones[f"hand_{side}"][3])
-    axis = (t - h).normalized()
-    across = axis.cross(Vector((0, 1, 0))).normalized()
-    return h, axis, across, (t - h).length
-
-
 def catalog(head):
     """(id, slot, name, hides, accent, parts) for every part, on `head` (the base's Head)."""
     hc = head.base + Vector((0, 0.01, head.height * 0.55))
@@ -222,41 +212,12 @@ def catalog(head):
         mesh.box_part("chest", P("chest", 0.3, (0.05, 0.17, 0.0)), (0.10, 0.10, 0.50), "cloth", LEATHER, rot=(0, -25, 0)),
         mesh.box_part("chest", P("chest", 0.3, (0.13, 0.17, 0.26)), (0.09, 0.08, 0.10), "emissive", GLOW, rot=(0, -25, 0))])
     # Weapons (20 §7.3: a class each; moves name the classes they take, CR6).
-    # Weapons are laid along the hand that holds them, like the official champions' (Rook's maul,
-    # Lumen's staff): the fist closes on the grip, so the move's clips aim them as they aim theirs.
-    h, axis, across, hand_len = _hand_axis("r")
-    g = h + axis * (0.55 * hand_len)
-
-    def at(d, off=Vector()):
-        return tuple(g + axis * d + off)
-
-    add("weapon.sword", "weapon", "Sword", [
-        mesh.path_part("hand_r", [at(-0.12), at(0.02)], 6, [(0.03, 0.03), (0.03, 0.03)], "cloth", LEATHER_DARK, ref=tuple(across)),
-        mesh.path_part("hand_r", [at(0.02, across * -0.10), at(0.02, across * 0.10)], 4, [(0.025, 0.03)] * 2, "metal", GOLD,
-                       ref=tuple(axis)),
-        mesh.path_part("hand_r", [at(0.04), at(0.80), at(0.92)], 4, [(0.04, 0.012), (0.035, 0.01), (0.0, 0.0)], "metal", IRON,
-                       ref=tuple(across))])
-    add("weapon.staff", "weapon", "Staff", [
-        mesh.path_part("hand_r", [at(-0.62), at(1.0)], 6, [(0.024, 0.024), (0.028, 0.028)], "cloth", WOOD, ref=tuple(across)),
-        mesh.path_part("hand_r", [at(1.0), at(1.08), at(1.16)], 6, [(0.03, 0.03), (0.07, 0.07), (0.0, 0.0)], "emissive", GLOW,
-                       ref=tuple(across))])
-    add("weapon.maul", "weapon", "Maul", [
-        mesh.path_part("hand_r", [at(-0.28), at(1.16)], 6, [(0.036, 0.036), (0.04, 0.04)], "cloth", WOOD, ref=tuple(across)),
-        mesh.path_part("hand_r", [at(1.30, across * -0.26), at(1.30, across * 0.26)], 4, [(0.22, 0.22)] * 2, "metal", IRON,
-                       ref=tuple(axis))])
-    add("weapon.dagger", "weapon", "Dagger", [
-        mesh.path_part("hand_r", [at(0.0), at(0.38), at(0.46)], 4, [(0.034, 0.01), (0.03, 0.008), (0.0, 0.0)], "metal", IRON,
-                       ref=tuple(across))])
-    add("offhand.shield", "offhand", "Shield", [
-        mesh.box_part("forearm_l", P("forearm_l", 0.6, (0.07, -0.02, 0)), (0.04, 0.40, 0.50), "metal", IRON, bevel=0.3),
-        mesh.box_part("forearm_l", P("forearm_l", 0.6, (0.095, -0.02, 0)), (0.02, 0.16, 0.16), "accent", ACCENT, rot=(45, 0, 0))],
-        accent=True)
+    # Weapons are held items of the wardrobe now (`art/wardrobe/weapon`, `offhand`; 22 §4.7, BW7).
+    # The bow's block-out stays for recipes that name it.
     add("offhand.bow", "offhand", "Bow", [
         mesh.path_part("hand_l", [P("prop_l", 0.0, (0, 0, 0.75)), P("prop_l", 0.0, (0, -0.12, 0.35)), P("prop_l", 0.0, (0, 0, 0)),
                                   P("prop_l", 0.0, (0, -0.12, -0.35)), P("prop_l", 0.0, (0, 0, -0.75))], 6,
                        [(0.015, 0.015), (0.025, 0.025), (0.03, 0.03), (0.025, 0.025), (0.015, 0.015)], "cloth", WOOD)])
-    add("offhand.orb", "offhand", "Orb", [
-        mesh.box_part("hand_l", P("prop_l", 0.0, (0, -0.06, 0.08)), (0.10, 0.10, 0.10), "emissive", GLOW, rot=(45, 35, 0))])
 
     # Heavy gear (CR8, 20 §12: Rook's, Bastion's and Cairn's looks). Every base gets these too.
     face_y = hc.y - 0.145 * k
@@ -285,16 +246,6 @@ def catalog(head):
         for a in (-1.2, -0.45, 0.45, 1.2)] + [
         loft("pelvis", P("pelvis", 0.55), P("pelvis", 0.85), 16, [(0, 0.205, 0.155), (1, 0.205, 0.155)], "accent", ACCENT)],
         accent=True)
-    add("offhand.tower_shield", "offhand", "Tower shield", [
-        mesh.box_part("forearm_l", P("forearm_l", 0.6, (0.08, -0.02, 0)), (0.05, 0.56, 0.86), "metal", IRON, bevel=0.15),
-        mesh.box_part("forearm_l", P("forearm_l", 0.6, (0.11, -0.02, 0)), (0.02, 0.08, 0.70), "accent", ACCENT)],
-        accent=True)
-    add("weapon.great_axe", "weapon", "Great axe", [
-        mesh.path_part("hand_r", [at(-0.30), at(1.22)], 6, [(0.034, 0.034), (0.036, 0.036)], "cloth", WOOD, ref=tuple(across)),
-        mesh.path_part("hand_r", [at(1.06, across * 0.02), at(1.06, across * 0.18), at(1.06, across * 0.34)], 4,
-                       [(0.09, 0.02), (0.16, 0.014), (0.24, 0.008)], "metal", IRON, ref=tuple(axis)),
-        mesh.path_part("hand_r", [at(1.06, across * -0.02), at(1.06, across * -0.12)], 4, [(0.05, 0.03), (0.0, 0.0)], "metal", IRON,
-                       ref=tuple(axis))])
 
     # More to make a figure from (20 §7.1): headwear and faces with character, light
     # armor, gear on the back, a spear and a hammer, a lantern, wrapped feet.
@@ -325,23 +276,6 @@ def catalog(head):
         loft("chest", P("chest", 0.95, (-0.2, 0.2, 0.06)), P("chest", 0.95, (0.2, 0.2, 0.06)), 10, [(0, 0.07, 0.07), (1, 0.07, 0.07)], "cloth",
              CLOTH_RED),
         mesh.box_part("chest", P("chest", 0.2, (0.17, 0.2, 0)), (0.06, 0.1, 0.14), "cloth", LEATHER_DARK)])
-    # Carried point up: the blade on the end above the fist.
-    add("weapon.spear", "weapon", "Spear", [
-        mesh.path_part("hand_r", [at(0.9), at(-1.25)], 6, [(0.022, 0.022), (0.024, 0.024)], "cloth", WOOD, ref=tuple(across)),
-        mesh.path_part("hand_r", [at(-1.22), at(-1.34), at(-1.52)], 4, [(0.03, 0.01), (0.05, 0.012), (0.0, 0.0)], "metal", IRON, ref=tuple(across)),
-        mesh.path_part("hand_r", [at(-1.18), at(-1.24)], 6, [(0.032, 0.032), (0.032, 0.032)], "accent", ACCENT, ref=tuple(across))],
-        accent=True)
-    add("weapon.hammer", "weapon", "War hammer", [
-        mesh.path_part("hand_r", [at(-0.12), at(0.58)], 6, [(0.026, 0.026), (0.028, 0.028)], "cloth", WOOD, ref=tuple(across)),
-        mesh.path_part("hand_r", [at(0.62, across * -0.11), at(0.62, across * 0.11)], 6, [(0.07, 0.07), (0.07, 0.07)], "metal", IRON,
-                       ref=tuple(axis)),
-        mesh.path_part("hand_r", [at(0.62, across * -0.13), at(0.62, across * -0.11)], 6, [(0.075, 0.075), (0.075, 0.075)], "metal", GOLD,
-                       ref=tuple(axis))])
-    add("offhand.lantern", "offhand", "Lantern", [
-        mesh.path_part("hand_l", [P("prop_l", 0.0, (0, 0, 0)), P("prop_l", 0.0, (0, 0, -0.16))], 4, [(0.008, 0.008), (0.008, 0.008)], "metal", IRON),
-        mesh.box_part("hand_l", P("prop_l", 0.0, (0, 0, -0.25)), (0.09, 0.09, 0.14), "emissive", GLOW, bevel=0.2),
-        mesh.box_part("hand_l", P("prop_l", 0.0, (0, 0, -0.17)), (0.11, 0.11, 0.025), "metal", IRON),
-        mesh.box_part("hand_l", P("prop_l", 0.0, (0, 0, -0.33)), (0.11, 0.11, 0.025), "metal", IRON)])
     add("feet.wraps", "feet", "Foot wraps", pair(
         loft("calf_l", P("calf_l", 0.55), P("calf_l", 1.0), 8, [(0, 0.075, 0.075), (1, 0.068, 0.07)], "cloth", CLOTH))
         + pair(loft("foot_l", P("foot_l", 0.0, (0, 0, -0.005)), P("toe_l", 0.8, (0, 0, -0.005)), 6,
