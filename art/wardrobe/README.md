@@ -98,9 +98,23 @@ origin, +Z along it (a blade's point, a bow's upper limb), +Y its back (a bow's 
 
 | `item.ron` field | What |
 |---|---|
-| `grip` | the bone that holds it (`hand_l`, `hand_r`); the item rides it alone, rigid |
+| `grip` | the bone it is placed by (`hand_l`, `hand_r`, `forearm_l`); without `grasp_radius` it rides that bone alone, rigid |
 | `grip_at` | where along that bone the grip sits, as a fraction of its length |
 | `grip_up`, `grip_back` | where the item's +Z and +Y point, in the bone's own frame (+Y along the bone) |
+
+An item **gripped in the fist** adds (22 §4.7, "Hands that hold"):
+
+| `item.ron` field | What |
+|---|---|
+| `grasp_radius` | the haft's radius where it is held (m). With it, the item rides that hand's prop bone and the forge closes the hand on it in every clip |
+| `grasp_at` | where along the item (its +Z) the fist's middle sits |
+| `grasp_span` | how far along it a hand may hold: a second hand closes on it there |
+| `grasp_edge` | it has an edge (the knuckles lead it) |
+| `grasp_on_hand` | the clips carry it on the hand bone itself, not the prop bone (the ranger's bow) |
+| `grasp_upright` | carried upright whatever the hand does (the orb, the lantern) |
+| `grasp_strap` | strapped to the forearm (a shield): it keeps its `grip` bone, gets a grip bar where the fist is, and the fist closes on it |
+
+Model a haft no thicker than a hand closes on: a radius of 12 to 30 mm.
 
 `class` and `weight` (light, medium, heavy) record its weapon class and weight class. Model one
 with `mftr_blender.armory` (a `Kit` of lathes, slabs, blades, boxes and stones in the grip

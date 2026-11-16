@@ -10,7 +10,7 @@
     weight: "medium",
     // Strapped to the left forearm, upright, its face out from the arm (+X in its frame).
     grip: "forearm_l",
-    grip_at: 0.6,
+    grip_at: 1.0,
     grip_up: (-0.702, -0.708, 0.08),
     grip_back: (0.0, -0.112, -0.993),
     // Strapped (22 §4.7): the fist closes on a grip bar behind it, the wrist held straight.

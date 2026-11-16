@@ -1293,11 +1293,82 @@ snaps straight and shivers. Two consequences:
 - Most are under §4.7's 300-triangle floor: they read at the gameplay camera, and the bases
   have little room (3.59 to 3.69 MB of 4).
 
+**Hands that hold** (third pass, 2026-11-16; the owner's look: "sloppy", hands flat beside the
+hafts). Three things were wrong, and each has its fix:
+
+1. *The hands had no joints.* The rig's hand is a mitten (one `fingers` bone, one `thumb`), and
+   Blender's automatic weights had given that one bone the index and middle fingers only: the
+   ring and little fingers and most of the thumb were welded to the palm. A creator base's
+   hands are now read off its mesh and rigged (`mftr_blender.hands`):
+   - the five tips are the far points of the skin from the wrist, each digit the skin nearer
+     its tip than any other's, out to the nearest web;
+   - `fingers_<s>`, `fingers_02_<s>`, `fingers_03_<s>` are the four fingers' three rows of
+     joints (they close together: one bone a row), `thumb_<s>` the thumb from its root at the
+     wrist and `thumb_02_<s>` its last joint. Six new optional `biped` bones
+     (`rules::BIPED_OPTIONAL`); a forged champion has at most 120, the cap;
+   - each of those bones lies across its row: local X is the hinge, Z the back of the hand, so
+     a negative turn about X closes it, on both sides;
+   - the four fingers are brought side by side at rest (a fifth of their spread stays) and slid
+     so each row of joints is straight: fingers that share a hinge only close into a fist if
+     they lie alongside each other;
+   - every digit is weighted by where it lies along its joints, the ball of the thumb with the
+     thumb, two bones a vertex. What is worn on the hands is weighted the same way
+     (`hands.glove`), and the gauntlets, which are the hand's own surface, take all of it and
+     hide the hand under them.
+2. *The weapons lay along the hand.* The official champions' weapons run out of the wrist like
+   a sixth finger, and their clips aim them by turning the hand (14 §3.3's pass then keys the
+   prop bone to hold the weapon where it was aimed). A held item with `grasp_radius` rides the
+   **prop bone** now, not the hand, and the forge re-poses every clip (`mftr_forge::grip`):
+   - **the weapon keeps its line**: the point the fist holds and the haft's direction, each
+     frame, are the clip's;
+   - **the fist closes on it**: the haft lies against the palm in the crook of the fingers,
+     each phalanx tangent to it (the turn at a joint is twice the angle its tangent length
+     subtends, so a thinner haft is wrapped tighter), the thumb round the other way, found by a
+     small search; the knuckles lead an edge;
+   - **the arm comes to the hand**: two freedoms are left, where round the haft the palm sits
+     and how far the haft tilts across the palm (a hammer's grip to a sabre's, 0 to 38°). Each
+     frame takes the pair that bends the wrist least (a bend past 26° and a turn past 75° cost;
+     so does stretching the arm), the elbow re-solved to reach it, bent the way the clip bent
+     it; the choice is the cheapest path through the whole clip, so the hand never jumps, and
+     a loop is walked twice so its ends meet;
+   - the arm's bones are turned by its joints, not by the clip's own twists: each lies along
+     its bone with the elbow's hinge across the plane the arm folds in, and the forearm takes
+     half of the wrist's turn;
+   - **a second hand** closes on a haft too, wherever the clip brings its palm within 7.5 cm of
+     it along the item's `grasp_span` (Rook's left on the maul), easing in from 15 cm;
+   - **free hands relax**: every joint a little bent; a clip's mitten curl becomes a curl of
+     every joint, to a closed fist.
+3. *The off-hand items had nothing to hold.* The orb has a stem and the lantern a leather grip,
+   both gripped in the fist and carried upright whatever the hand does (`grasp_upright`). A
+   shield stays strapped to the forearm (`grasp_strap`): the fit gives it a grip bar on two
+   posts where the closed fist is, moves it off the back of the hand if it lay through it, and
+   the forge closes the fist and holds the wrist straight.
+
+What the look found on the way:
+- The staff's diagonal carry was the rig step's doing, not the clips': placing the knuckle bone
+  dragged the hand bone's tail (a connected child), which turned every weapon's frame 41°. The
+  finger, thumb and prop bones are cut loose from the hand before they move.
+- The official staves are held a third of the way down, the head past the fingers: the new
+  staff's origin was already there.
+- Vesper's bow hangs on her hand itself, not the prop bone (its bones are the hand's children):
+  `grasp_on_hand` takes its line from the clip's hand.
+- The maul's and the great axe's hafts were 7.6 cm through, more than a hand closes on: 5.6 cm.
+
+Checked in captures (idle and mid-attack, four sides of each hand): Rook's maul in both hands,
+bare and gauntleted; Shade's dagger; Lumen's staff; Vesper's bow hand at rest and at the full
+draw. The sword, hammer, spear and great axe were checked at body distance, the two shields,
+the orb and the lantern at rest only. `grip`'s tests hold the fists closed through the clips,
+the second hand on the maul, and the wrist's turn under 2.2 rad through Shade's and Rook's
+attacks (it reached 3.0 before the arm was turned by its joints).
+
 **Left:**
 - Weight classes picking the clips.
+- Vesper's string hand: its fingers close as her clip's mitten did, not hooked on the string.
+- The hand-made champions keep their mitten hands: this is the creator bases' (and so every
+  rebuilt champion's).
 - The old block-out `offhand.bow` stays in the catalog for recipes that name it: the forge
   refuses an outfit id it doesn't know.
-- The owner's look at the weapons.
+- The owner's look at the hands.
 
 ## 7. Open questions for the owner
 

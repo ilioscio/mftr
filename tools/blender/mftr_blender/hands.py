@@ -191,8 +191,15 @@ def _smooth(t):
 
 
 def _assign(hand, p):
-    """Point `p` of the hand's skin on its bones: (weights by bone, the finger it belongs to or
-    None)."""
+    """Point `p` of the hand's skin on its bones: (weights by bone, its two largest; the finger
+    it belongs to or None). Two bones a vertex is the runtime's budget."""
+    w, d = _assign_all(hand, p)
+    top = sorted(w.items(), key=lambda t: -t[1])[:2]
+    tot = sum(x for _, x in top) or 1.0
+    return {n: x / tot for n, x in top}, d
+
+
+def _assign_all(hand, p):
     f4, th = hand["fingers"], hand["thumb"]
 
     def off(d):
@@ -223,23 +230,37 @@ def _assign(hand, p):
     return {"thumb": ball, "hand": 1.0 - ball}, None
 
 
+BONES = ("hand", "fingers", "fingers_02", "fingers_03", "thumb", "thumb_02")
+
+
+def _put(obj, hand, verts):
+    """`verts` of `obj` onto the hand's bones by where they lie (`_assign`), in place of what
+    they had on them; what they have on other bones (the forearm, at the wrist) stays, and each
+    keeps its two largest."""
+    s = hand["side"]
+    groups = {b: obj.vertex_groups.get(f"{b}_{s}") or obj.vertex_groups.new(name=f"{b}_{s}") for b in BONES}
+    mine = {g.index: b for b, g in groups.items()}
+    for vi in verts:
+        v = obj.data.vertices[vi]
+        on = sum(g.weight for g in v.groups if g.group in mine)
+        others = {g.group: g.weight for g in v.groups if g.group not in mine and g.weight > 0}
+        w, _ = _assign(hand, v.co)
+        mixed = {("o", k): x for k, x in others.items()}
+        mixed.update({("h", b): x * on for b, x in w.items()})
+        total = sum(mixed.values())
+        top = sorted(mixed.items(), key=lambda t: -t[1])[:2]
+        kept = sum(x for _, x in top) or 1.0
+        for g in list(v.groups):
+            obj.vertex_groups[g.group].remove([vi])
+        for (kind, k), x in top:
+            if x > 1e-4:
+                (groups[k] if kind == "h" else obj.vertex_groups[k]).add([vi], x * total / kept, "REPLACE")
+
+
 def _weigh(body, hand, verts):
     """The hand's vertices onto its bones: each digit by its joints, the palm on the hand, the
     knuckles and the ball of the thumb blended."""
-    s = hand["side"]
-    cos = body.data.vertices
-    groups = {}
-    for n in ("hand", "fingers", "fingers_02", "fingers_03", "thumb", "thumb_02"):
-        name = f"{n}_{s}"
-        groups[n] = body.vertex_groups.get(name) or body.vertex_groups.new(name=name)
-    for v in verts:
-        w, _ = _assign(hand, cos[v].co)
-        for g in groups.values():
-            g.remove([v])
-        tot = sum(w.values())
-        for n, x in w.items():
-            if x > 1e-3:
-                groups[n].add([v], x / tot, "REPLACE")
+    _put(body, hand, verts)
 
 
 def _gather(body, hand, verts, keep=SPLAY):
@@ -391,24 +412,10 @@ def glove(armature, obj):
     hands = _READ.get(armature.name)
     if not hands:
         return 0
-    names = {g.index: g.name for g in obj.vertex_groups}
     n = 0
     for s, h in hands.items():
-        mine = {f"{b}_{s}" for b in ("hand", "fingers", "fingers_02", "fingers_03", "thumb", "thumb_02")}
-        groups = {b: obj.vertex_groups.get(f"{b}_{s}") or obj.vertex_groups.new(name=f"{b}_{s}")
-                  for b in ("hand", "fingers", "fingers_02", "fingers_03", "thumb", "thumb_02")}
-        names = {g.index: g.name for g in obj.vertex_groups}
-        for v in obj.data.vertices:
-            on = sum(g.weight for g in v.groups if names.get(g.group) in mine)
-            if on < 0.5:
-                continue
-            w, _ = _assign(h, v.co)
-            for g in list(v.groups):
-                if names.get(g.group) in mine:
-                    obj.vertex_groups[g.group].remove([v.index])
-            tot = sum(w.values())
-            for b, x in w.items():
-                if x > 1e-3:
-                    groups[b].add([v.index], on * x / tot, "REPLACE")
-            n += 1
+        mine = {obj.vertex_groups[f"{b}_{s}"].index for b in BONES if f"{b}_{s}" in obj.vertex_groups}
+        verts = [v.index for v in obj.data.vertices if sum(g.weight for g in v.groups if g.group in mine) >= 0.5]
+        _put(obj, h, verts)
+        n += len(verts)
     return n
