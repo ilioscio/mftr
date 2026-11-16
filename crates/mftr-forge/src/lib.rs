@@ -16,6 +16,7 @@ pub mod body;
 pub mod brows;
 pub mod eyes;
 pub mod face;
+pub mod grip;
 pub mod image;
 pub mod libmoves;
 pub mod looks;
@@ -67,6 +68,9 @@ pub struct Part {
     /// of a worn one of an earlier layer (22 §4.3).
     #[nserde(default)]
     pub layer: String,
+    /// A held item gripped in a fist (22 §4.7): how, for the grip pass (`grip::apply`).
+    #[nserde(default)]
+    pub grasp: Option<grip::Grasp>,
 }
 
 #[derive(Clone, Debug, nanoserde::DeRon)]
@@ -290,6 +294,20 @@ impl Catalog {
             sounds.extend(own);
             (side, Some(moves::effects(&m, &self.packs, looks.signature)), sounds)
         };
+        if base.library.clips.is_empty() {
+            // Hands close on what they hold, in every clip; free hands relax (22 §4.7).
+            let held: Vec<&grip::Grasp> = self
+                .parts(&key)
+                .iter()
+                .filter(|p| looks.outfit.contains(&p.id))
+                .filter_map(|p| p.grasp.as_ref())
+                .collect();
+            grip::apply(&mut model, &held, &|name| match clips.iter().find(|c| c.name == name) {
+                Some(c) if c.layer == "additive" => grip::Kind::Additive,
+                Some(c) => grip::Kind::Pose { looping: c.looping },
+                None => grip::Kind::Pose { looping: false },
+            });
+        }
         // The face last (21 §2.3): clips were retargeted from the bones' unsculpted rest. The
         // face sliders add their presets to the recipe's own face (21 §2.7).
         if model.node_by_name("face_forehead").is_some()

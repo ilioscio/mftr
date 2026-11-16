@@ -28,10 +28,10 @@ GLOW = (0.20, 0.95, 0.85)
 ACCENT = (0.25, 0.45, 0.85)
 
 k = armory.Kit()
-k.lathe([(-0.30, 0.0), (-0.28, 0.034), (-0.24, 0.04), (-0.22, 0.034)], IRON, "metal", sides=6)
-k.lathe([(-0.22, 0.034), (1.14, 0.038)], WOOD, sides=6)
+k.lathe([(-0.30, 0.0), (-0.28, 0.034), (-0.24, 0.04), (-0.22, 0.03)], IRON, "metal", sides=6)
+k.lathe([(-0.22, 0.027), (1.14, 0.030)], WOOD, sides=6)
 for z in (-0.02, 0.10, 0.55, 0.95):
-    k.lathe([(z - 0.02, 0.043), (z + 0.02, 0.043)], LEATHER if z < 0.3 else IRON, "cloth" if z < 0.3 else "metal", sides=6)
+    k.lathe([(z - 0.02, 0.034), (z + 0.02, 0.034)], LEATHER if z < 0.3 else IRON, "cloth" if z < 0.3 else "metal", sides=6)
 k.lathe([(-0.27, 0.15), (-0.25, 0.19), (-0.12, 0.20), (-0.09, 0.17), (0.09, 0.17), (0.12, 0.20), (0.25, 0.19), (0.27, 0.15)],
         IRON, "metal", sides=8, at=(0, 0, 1.30), axis=(1, 0, 0), twist=math.pi / 8)
 for sx in (-1, 1):

@@ -161,6 +161,11 @@ class Kit:
             self._face((ring[k], ring[(k + 1) % 4], top), color, slot)
             self._face((ring[(k + 1) % 4], ring[k], bot), color, slot)
 
+    def move(self, by):
+        """Shift everything made so far (to put the grip at the origin)."""
+        for v in self.bm.verts:
+            v.co += Vector(by)
+
     def weigh(self, bone, verts):
         """Give `verts` to one of the item's own bones (`bones`)."""
         for v in verts:

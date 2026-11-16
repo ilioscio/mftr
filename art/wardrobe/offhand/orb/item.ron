@@ -13,4 +13,9 @@
     grip_at: 0.745,
     grip_up: (-0.673, -0.736, 0.068),
     grip_back: (0.0, -0.092, -0.996),
+    // Gripped in the fist by its stem (22 §4.7), and carried upright whatever the hand does.
+    grasp_radius: 0.012,
+    grasp_at: 0.0,
+    grasp_span: (-0.05, 0.05),
+    grasp_upright: true,
 )

@@ -28,8 +28,11 @@ GLOW = (0.20, 0.95, 0.85)
 ACCENT = (0.25, 0.45, 0.85)
 
 k = armory.Kit()
-k.lathe([(-0.16, 0.006), (0.0, 0.006)], IRON, "metal", sides=4)
-k.lathe([(0.0, 0.0), (0.012, 0.02), (0.024, 0.0)], IRON, "metal", sides=6, at=(0, 0, -0.012))
+# A grip for the fist (at the origin), leather between iron caps; the chain hangs from its foot.
+k.lathe([(-0.07, 0.0), (-0.06, 0.017), (-0.05, 0.012)], IRON, "metal", sides=6)
+k.lathe([(-0.05, 0.012), (0.05, 0.012)], LEATHER, sides=6)
+k.lathe([(0.05, 0.012), (0.06, 0.017), (0.07, 0.0)], IRON, "metal", sides=6)
+k.lathe([(-0.16, 0.006), (-0.07, 0.006)], IRON, "metal", sides=4)
 k.lathe([(-0.205, 0.07), (-0.19, 0.075), (-0.17, 0.03), (-0.16, 0.012)], IRON, "metal", sides=6)
 k.lathe([(-0.355, 0.05), (-0.34, 0.072), (-0.325, 0.06)], IRON, "metal", sides=6)
 for i in range(4):

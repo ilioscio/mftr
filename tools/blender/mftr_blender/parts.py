@@ -355,6 +355,11 @@ def write_catalog(path, base, made):
         flags = "".join(f", {k}: true" for k in ("covers", "rigid") if extra.get(k))
         if extra.get("layer"):
             flags += f', layer: "{extra["layer"]}"'
+        g = extra.get("grasp")
+        if g:
+            vec = lambda v: "(" + ", ".join(f"{x:.4f}" for x in v) + ")"  # noqa: E731
+            flags += (f', grasp: (hand: "{g["hand"]}", radius: {g["radius"]:.4f}, at: {g["at"]:.4f}, up: {vec(g["up"])}, '
+                      f'back: {vec(g["back"])}, span: {vec(g["span"])}, edge: {"true" if g["edge"] else "false"}, on_hand: {"true" if g["on_hand"] else "false"}, upright: {"true" if g["upright"] else "false"}, strap: {"true" if g["strap"] else "false"})')
         lines.append(f'        (id: "{pid}", slot: "{slot}", name: "{name}", hides: [{hide}], accent: {"true" if accent else "false"}, triangles: {tris}{flags}),')
     lines += ["    ],", ")", ""]
     with open(path, "w", encoding="utf-8", newline="\n") as f:
