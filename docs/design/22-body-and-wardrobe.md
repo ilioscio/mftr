@@ -1361,14 +1361,60 @@ the orb and the lantern at rest only. `grip`'s tests hold the fists closed throu
 the second hand on the maul, and the wrist's turn under 2.2 rad through Shade's and Rook's
 attacks (it reached 3.0 before the arm was turned by its joints).
 
+**Arms, the bow and the shields** (fourth pass, 2026-11-16; the owner's look at the third:
+Rook's and Lumen's arms went through their bodies, the bowstring didn't come back to the draw
+hand, the shields floated off their grips, and Vesper's string hand):
+
+1. *Arms out of the trunk.* The clips were made on the hand-made champions' bodies; a creator
+   body is broader, and Lumen's robe wider still, so an arm the clip lays across the chest goes
+   into it (Lumen's free hand 14 cm deep in her robe at rest, Rook's forearm in his chest
+   through his swings). `grip` now reads the trunk off the skin: the body's and what is worn
+   on it (not what swings on springs: a cloak, a skirt's flaps), weighted to the pelvis and the
+   spine, cut in four slices round each of those bones, each slice an ellipse; the arms'
+   thickness from their own skin.
+   - The grip solver keeps a held arm out of it: for each pose it tries, the elbow may swing
+     out round the line from shoulder to wrist (up to 54°), and what still goes in costs.
+   - Then every arm, held or free, gets a last pass: where it still goes in, its elbow swings
+     (up to 97°) and its wrist is pushed clear (up to 20 cm), the hand turned as it was. Two
+     hands on one haft go together, the haft with them (Lumen's idle holds her staff in both
+     hands in front of her chest now, where the clip had the left hand inside her).
+   - The change is held a few frames either side of where it is needed and faded, as the
+     elbow's and the wrist's places (smoothing the swing angles mixed poses that didn't fit),
+     and the pass is run twice.
+   An arm touching the trunk is allowed (1.2 cm); a hand meant to rest on it (on the chest, at
+   the chin at the full draw) still does.
+2. *The bow keeps its roll.* Vesper's bow hangs on her hand's prop bone, so the solver's free
+   choice of where round the grip the palm sits turned the whole bow, the string's draw point
+   with it. A bow (`grasp_on_hand`) now keeps the clip's roll: its back to the mark, the palm a
+   step either way of it at most.
+3. *The string comes to the fingers.* Wherever the clip draws the string (its nock more than
+   1 cm off its rest, wholly from 5 cm), the string's two halves are turned and stretched so
+   the nock is in the draw hand's fingers: in the crease of their last joints, on the palm side.
+4. *The string hand hooks.* As far as the string is drawn, that hand's fingers take a
+   bowstring hook (the knuckles nearly straight, the last two joints curled round the string)
+   and the thumb tucks in.
+5. *The shields are on their grips.* The shield had been put where the official clips carry
+   it and its grip bar where the fist was, the posts out along the back of the hand; the face
+   was tilted from that, so the posts stopped short and the fist hung at its lower edge. The
+   fit now finds the shield's plane (the way its body is thinnest), slides it in that plane
+   till the fist is behind its middle (the boss: a centre grip), on the back of the hand's
+   side, its back 5.5 cm from the fist's middle (a gauntlet's knuckles clear it), and runs the
+   posts from the bar's ends to the back they hit. The forge holds the strapped hand on the
+   forearm after the trunk pass too.
+
+`grip`'s tests: the arms keep out of the trunk through Lumen's and Rook's idles and attacks
+(under 8 cm at the deepest, from 14), and the string is in the fingers wherever the attack has
+it drawn.
+
 **Left:**
 - Weight classes picking the clips.
-- Vesper's string hand: its fingers close as her clip's mitten did, not hooked on the string.
+- Spells and emotes that cross the arms hard over the chest (Rook's `select`, his fidget, the
+  library's `whirlwind`) still touch or go a little in: the push stops at 20 cm.
 - The hand-made champions keep their mitten hands: this is the creator bases' (and so every
   rebuilt champion's).
 - The old block-out `offhand.bow` stays in the catalog for recipes that name it: the forge
   refuses an outfit id it doesn't know.
-- The owner's look at the hands.
+- The owner's look at the arms, the bow and the shields.
 
 ## 7. Open questions for the owner
 

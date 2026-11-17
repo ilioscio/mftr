@@ -112,7 +112,7 @@ An item **gripped in the fist** adds (22 §4.7, "Hands that hold"):
 | `grasp_edge` | it has an edge (the knuckles lead it) |
 | `grasp_on_hand` | the clips carry it on the hand bone itself, not the prop bone (the ranger's bow) |
 | `grasp_upright` | carried upright whatever the hand does (the orb, the lantern) |
-| `grasp_strap` | strapped to the forearm (a shield): it keeps its `grip` bone, gets a grip bar where the fist is, and the fist closes on it |
+| `grasp_strap` | strapped to the forearm (a shield): it keeps its `grip` bone, is slid in its own plane till the fist is behind its middle, gets a grip bar there on posts to its back, and the fist closes on it |
 
 Model a haft no thicker than a hand closes on: a radius of 12 to 30 mm.
 

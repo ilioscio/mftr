@@ -302,7 +302,10 @@ impl Catalog {
                 .filter(|p| looks.outfit.contains(&p.id))
                 .filter_map(|p| p.grasp.as_ref())
                 .collect();
-            grip::apply(&mut model, &held, &|name| match clips.iter().find(|c| c.name == name) {
+            // What is worn on the trunk, which the arms keep out of too.
+            let worn: Vec<usize> =
+                looks.outfit.iter().filter_map(|id| model.node_by_name(&format!("part.{id}"))).collect();
+            grip::apply(&mut model, &held, &worn, &|name| match clips.iter().find(|c| c.name == name) {
                 Some(c) if c.layer == "additive" => grip::Kind::Additive,
                 Some(c) => grip::Kind::Pose { looping: c.looping },
                 None => grip::Kind::Pose { looping: false },

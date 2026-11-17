@@ -409,9 +409,10 @@ def _arms(info):
 
 def _strap_handle(obj, armature, s, m, at, side, back, up, radius):
     """A strapped item (a shield on the forearm) gets its grip: a bar where the closed fist of
-    hand `s` is (the prop bone's head, along the knuckles), on two posts to its back. The item
-    is moved out, off the back of the hand, if it would lie through the fist. In the item's own
-    frame (`m`, `at`, `side`, `back`, `up` place it, as `_place_grip` does)."""
+    hand `s` is (the prop bone's head, along the knuckles), on two posts that reach its back.
+    The item is slid in its own plane till the fist is behind its middle, on the back of the
+    hand's side, its back just clear of the knuckles. In the item's own frame (`m`, `at`,
+    `side`, `back`, `up` place it, as `_place_grip` does)."""
     import bmesh
     from . import hands as hand_rig
     bones = armature.data.bones
@@ -422,19 +423,44 @@ def _strap_handle(obj, armature, s, m, at, side, back, up, radius):
     to_item = lambda p: frame.inverted() @ ((m.inverted() @ (armature.matrix_world @ p)) - at)  # noqa: E731
     turn = lambda d: (frame.inverted() @ (m.to_3x3().inverted() @ (armature.matrix_world.to_3x3() @ d))).normalized()  # noqa: E731
     c, along, out = to_item(fist), turn(knuckles), turn(dorsal)
-    # How far off the fist's middle the item's back is, out of the back of the hand.
-    near = [(v.co - c).dot(out) for v in obj.data.vertices if ((v.co - c) - out * (v.co - c).dot(out)).length < 0.12]
-    gap = min((d for d in near), default=0.0)
-    clear = 0.05
-    if gap < clear:
-        for v in obj.data.vertices:
-            v.co += out * (clear - gap)
-        gap = clear
+    # The shield's face: the way its body is thinnest (its plane's normal), from the fist toward
+    # it. Its back is found by a ray from behind the fist, and the shield is moved along its
+    # normal till its back lies just past the knuckles, whichever way its maker tilted it.
+    import numpy
+    from mathutils.bvhtree import BVHTree
+    pts = numpy.array([tuple(v.co) for v in obj.data.vertices])
+    centre = pts.mean(axis=0)
+    _, vecs = numpy.linalg.eigh(numpy.cov((pts - centre).T))
+    n = Vector(tuple(vecs[:, 0])).normalized()
+    # On the back of the hand's side, as the clips carry it; slid in its plane so the fist is
+    # behind its middle (the boss), where a centre grip's bar is.
+    if out.dot(n) < 0:
+        n = -n
+    slide = Vector(tuple(centre)) - c
+    slide -= n * slide.dot(n)
+    for v in obj.data.vertices:
+        v.co -= slide
+
+    def back_at(p):
+        tree = BVHTree.FromPolygons([v.co.copy() for v in obj.data.vertices], [tuple(f.vertices) for f in obj.data.polygons])
+        hit = tree.ray_cast(p - n * 0.5, n)
+        return None if hit[0] is None else (hit[0] - p).dot(n)
+
+    d = back_at(c)
+    if d is None:
+        d = min(((v.co - c).dot(n) for v in obj.data.vertices if ((v.co - c) - n * (v.co - c).dot(n)).length < 0.12), default=0.0)
+    # The fist's knuckles, and a gauntlet over them, clear of its back.
+    clear = 0.055
+    for v in obj.data.vertices:
+        v.co += n * (clear - d)
+    print(f"strap: shield slid {slide.length:.3f} m and moved {clear - d:+.3f} m off the fist")
+    half = 0.06
+    ends = [c + along * (half * e * 0.92) for e in (-1, 1)]
+    posts = [back_at(e) for e in ends]
     bm = bmesh.new()
     bm.from_mesh(obj.data)
     col = bm.verts.layers.float_color["Col"]
     slot = list(mesh_slots()).index("metal")
-    half = 0.06
 
     def rod(a, b, r, sides=6):
         d = (b - a).normalized()
@@ -453,8 +479,9 @@ def _strap_handle(obj, armature, s, m, at, side, back, up, radius):
         return faces
 
     made = rod(c - along * half, c + along * half, radius)
-    for e in (-1, 1):
-        made += rod(c + along * (half * e * 0.92), c + along * (half * e * 0.92) + out * (gap + 0.004), radius * 0.8, 4)
+    # Two posts from the bar's ends to the shield's back, along its normal.
+    for e, reach in zip(ends, posts):
+        made += rod(e, e + n * ((reach if reach is not None else clear) + 0.006), radius * 0.8, 4)
     bmesh.ops.recalc_face_normals(bm, faces=made)
     bm.to_mesh(obj.data)
     bm.free()
