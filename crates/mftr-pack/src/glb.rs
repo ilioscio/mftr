@@ -4,8 +4,9 @@
 
 use crate::json::Json;
 
-/// Container cap (11 §4): checked before anything is parsed.
-pub const MAX_GLB_BYTES: usize = 4 * 1024 * 1024;
+/// Container cap (11 §4): checked before anything is parsed. Raised from 4 MiB for the creator
+/// bases, which carry the whole wardrobe catalog fitted to their body (22 §7).
+pub const MAX_GLB_BYTES: usize = 7 * 1024 * 1024;
 const MAX_ELEMENTS: usize = 1 << 20;
 
 const ALLOWED_TOP: &[&str] = &[

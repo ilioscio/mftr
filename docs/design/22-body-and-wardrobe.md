@@ -1557,14 +1557,15 @@ from a sky sash, ivory boots strapped in gold (her sandals, below), a lantern st
   jumping 0.36 across an edge, over 21 §1.4's 0.35): a hanging item's helper weights are smoothed
   again after its chains.
 
-**The bases' size.** With Lumen's items the bases are 4.00–4.06 MB, under the 4 MiB container cap
-(4.19 MB) by about 130 KB, and three are past the validator's 4,000,000-byte budget (a warning): the next rebuilt champion won't fit. Vertex attributes are half of a
-base and the body's morph targets a third; positions and normals are still full floats. Before the
-next champion, the bases need slimming (normals as bytes, which the forge's glb reader and Godot
-would both have to read) or the catalog splitting out of them.
+**The bases' size.** With Lumen's items the bases reached 4.00–4.06 MB, about 130 KB under the
+old 4 MiB container cap. The owner chose detail over slimming for now: the glb container cap
+(`mftr_pack::glb::MAX_GLB_BYTES`) and the base budget (`rules::BASE_BYTES_BUDGET`) are both
+7 MiB (2026-11-17), room for about forty more champions' worth of items at Lumen's ~65 KB a base.
+Bases ship with the game and never cross the network, and one base's meshes are shared by every
+champion built on it, so the cost is install size and a little load time. Slimming (normals as
+bytes, or the catalog split out of the bases) stays open for later.
 
 **Left:**
-- The bases' size, above.
 - Seen in creator captures at rest only (13,843 triangles), not in a match or in motion; the
   tails' and skirt's chains not yet seen swinging.
 - In the creator: the tails' sky edging reads heavy, the middle tail ends short of the others,
