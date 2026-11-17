@@ -73,7 +73,7 @@ def lathe(bm, faces, tree, rows, angles, z_at, centre, lift, color, loop=True, s
     height `z_at(r, angle)`, one point per angle in `angles` (degrees round from the front,
     -y, toward +x), each on a ray out from `centre(z)` (a Vector) to the skin and `lift(r, c)`
     beyond it. `color(r, c)` is the quad's (color, slot) from ring r to r + 1. `loop`: the
-    angles go all round. Returns the grid of vertices."""
+    angles go all round. A quad whose color is None is left out. Returns the grid of vertices."""
     grid = []
     for r in range(rows + 1):
         row = []
@@ -92,8 +92,11 @@ def lathe(bm, faces, tree, rows, angles, z_at, centre, lift, color, loop=True, s
     for r in range(rows):
         for c in range(n if loop else n - 1):
             c2 = (c + 1) % n
+            col = color(r, c)
+            if col is None:
+                continue
             f = bm.faces.new((verts[r][c], verts[r][c2], verts[r + 1][c2], verts[r + 1][c]))
-            faces[f] = color(r, c)
+            faces[f] = col
     return verts
 
 
@@ -104,7 +107,8 @@ def tube(bm, faces, tree, stations, up, sides, lift, color, smooth=4, caps=(True
     beyond the skin, the distances smoothed over the grid but never inside it. `color(i, c)` is
     the quad's from station i to i + 1, and a cap's (fanned to a point past each end, along the
     path, at the skin) is `color(-1, c)` or `color(len, c)`. A ray that meets no skin within
-    `reach` stops there (up a foot's heel, inside the leg). Returns the grid of vertices."""
+    `reach` stops there (up a foot's heel, inside the leg). A face whose color is None is left
+    out (a sandal: a sole and straps). Returns the grid of vertices."""
     n = len(stations)
     rows = []
     for i, o in enumerate(stations):
@@ -125,8 +129,11 @@ def tube(bm, faces, tree, stations, up, sides, lift, color, smooth=4, caps=(True
     for i in range(n - 1):
         for c in range(sides):
             c2 = (c + 1) % sides
+            col = color(i, c)
+            if col is None:
+                continue
             f = bm.faces.new((verts[i][c], verts[i][c2], verts[i + 1][c2], verts[i + 1][c]))
-            faces[f] = color(i, c)
+            faces[f] = col
     for end, at in ((0, -1), (n - 1, n)):
         if not caps[0 if end == 0 else 1]:
             continue
@@ -137,9 +144,38 @@ def tube(bm, faces, tree, stations, up, sides, lift, color, smooth=4, caps=(True
         p = bm.verts.new(tip)
         for c in range(sides):
             c2 = (c + 1) % sides
+            col = color(at, c)
+            if col is None:
+                continue
             f = bm.faces.new((verts[end][c2], verts[end][c], p) if end == 0 else (verts[end][c], verts[end][c2], p))
-            faces[f] = color(at, c)
+            faces[f] = col
     return verts
+
+
+def ribbon(bm, faces, tree, path, width, lift, color, toward=(0.0, 1.0, 0.0)):
+    """A strap laid on the body: `path` [(x, z)] as seen looking `toward` it (from the front, by
+    default), each point cast onto the skin along `toward` and stood `lift` off it back along the
+    ray; `width` across, in the view. Its ends are square. Returns its two rails."""
+    t = Vector(toward).normalized()
+    up = Vector((0.0, 0.0, 1.0))
+    side = t.cross(up).normalized()
+    pts = [Vector(p) for p in path]
+    rails = []
+    for i, p in enumerate(pts):
+        a, b = pts[max(i - 1, 0)], pts[min(i + 1, len(pts) - 1)]
+        d = (b - a).normalized()
+        n = Vector((-d.y, d.x)) * (width / 2)
+        row = []
+        for q in (p - n, p + n):
+            start = side * q.x + up * q.y - t * 1.0
+            hit, _n, _i, _d = tree.ray_cast(start, t)
+            if hit is None:
+                hit = start + t
+            row.append(bm.verts.new(hit - t * lift))
+        rails.append(row)
+    for (a0, a1), (b0, b1) in zip(rails, rails[1:]):
+        faces[bm.faces.new((a0, a1, b1, b0))] = color
+    return rails
 
 
 class Dome:
@@ -194,6 +230,8 @@ def finish(bm, faces, inside, thickness, name="plates"):
     split where colors meet (vertex colors are per vertex), on its slot, given `thickness`
     inward with rims. Frees `bm`."""
     from . import mesh
+    # Points no face was made on (a sandal's left-out faces').
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
     for f in faces:
         c = f.calc_center_median()
         if f.normal.dot(c - inside(c)) < 0:

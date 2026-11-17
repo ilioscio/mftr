@@ -1,7 +1,10 @@
 // Lumen-neo: Lumen rebuilt in the champion creator, to play next to the hand-made Lumen (20 §12).
 // Generated from art/champions/lumen/lumen.champion.ron with the name changed (a test keeps them in step);
 // load the whole set with `mftr-server --champion-dir art/champions/neo --champions both`.
-// A serene light-priestess: a white dress, a gold circlet like a halo, a lantern staff.
+// A serene light-priestess, in the wardrobe's clothes (22 §4): a golden ponytail under a gold
+// circlet and a floating halo, a white bodice under a sky collar laced in gold, bell sleeves,
+// a long white skirt hemmed in gold with three tails from a sky sash, ivory boots strapped in
+// gold, and a lantern staff.
 // The kit is a copy of crates/mftr-sim/champions/lumen.ron (a test checks they match); the
 // hand-made model in this folder stays what the game shows until the owner prefers this one.
 // Lumen: Enchanter.
@@ -17,8 +20,8 @@ Champion(
         shape: (eyes_size: 0.3, face_length: -0.2, cheekbones: 0.2),
         proportions: (height: 0.1),
         skin: 0,
-        outfit: ["hair.topknot", "head.circlet", "torso.robe", "arms.bracers", "weapon.staff"],
-        paint: [("torso.robe", 0, 0), ("hair.topknot", 0, 28)],
+        outfit: ["hair.ponytail", "head.priestess_circlet", "torso.priestess_bodice", "shoulders.priestess_collar", "arms.priestess_sleeves", "waist.priestess_skirt", "back.priestess_tails", "feet.priestess_boots", "weapon.lantern_staff"],
+        paint: [("hair.ponytail", 0, 28)],
         signature: 48,
         moves: (attack: "lumen.attack", q: "lumen.q", w: "lumen.w", e: "lumen.e", r: "lumen.r"),
     ),

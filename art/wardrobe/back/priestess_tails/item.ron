@@ -1,0 +1,16 @@
+// A wardrobe item (22 §4): a priestess's tails (Lumen's), sewn and simulated (build.py, M1): a
+// sky-blue sash round the waist and three long white tails edged in sky blue, down the back and
+// behind each hip. Over a skirt: on the armor layer.
+(
+    id: "back.priestess_tails",
+    slot: "back",
+    name: "Priestess's tails",
+    layer: "armor",
+    accent: false,
+    rigid: false,
+    // A chain down each tail (22 §4.5): behind each hip and down the back.
+    chains: 3,
+    chain_turn: 180,
+    chain_arc: 180,
+    swing: 1.0,
+)

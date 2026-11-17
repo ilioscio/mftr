@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): a priestess's bell sleeves (Lumen's), plates (build.py): a gold armlet
+// round each upper arm, and open ivory sleeves belling from the elbow to the wrist, a gold
+// band at the top, a sky-blue hem.
+(
+    id: "arms.priestess_sleeves",
+    slot: "arms",
+    name: "Priestess's sleeves",
+    layer: "over",
+    accent: false,
+    rigid: false,
+)

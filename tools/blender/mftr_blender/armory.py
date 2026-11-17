@@ -149,6 +149,29 @@ class Kit:
             self.faces.append((f, color, slot))
         return faces
 
+    def ring(self, center, radius, tube, color, slot="metal", axis=(0, 1, 0), sides=24, tube_sides=4,
+             squash=1.0):
+        """A torus: a ring `radius` round `axis` through `center`, its tube `tube` thick (a halo,
+        a lantern's sun ring). `squash` flattens the tube along the axis (a flat band)."""
+        a = Vector(axis).normalized()
+        e1 = a.orthogonal().normalized()
+        e2 = a.cross(e1)
+        c = Vector(center)
+        rings = []
+        for i in range(sides):
+            t = 2 * math.pi * i / sides
+            out = e1 * math.cos(t) + e2 * math.sin(t)
+            mid = c + out * radius
+            rings.append([self.bm.verts.new(mid + (out * math.cos(2 * math.pi * k / tube_sides)
+                                                   + a * squash * math.sin(2 * math.pi * k / tube_sides)) * tube)
+                          for k in range(tube_sides)])
+        for i in range(sides):
+            lo, hi = rings[i], rings[(i + 1) % sides]
+            for k in range(tube_sides):
+                k2 = (k + 1) % tube_sides
+                self._face((lo[k], hi[k], hi[k2], lo[k2]), color, slot)
+        return rings
+
     def gem(self, center, radius, color, slot="emissive", stretch=1.0, turn=None):
         """An octahedron: a cut stone, a crystal (`stretch` lengthens it along its z)."""
         rot = turn or Matrix.Identity(3)

@@ -1,0 +1,10 @@
+// A wardrobe item (22 §4): a priestess's boots (Lumen's), plates (build.py): soft ivory leather to
+// above the ankle, thin pale soles, two gold straps across the foot, a gold cuff and anklet.
+(
+    id: "feet.priestess_boots",
+    slot: "feet",
+    name: "Priestess's boots",
+    layer: "over",
+    accent: false,
+    rigid: false,
+)

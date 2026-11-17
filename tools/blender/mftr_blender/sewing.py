@@ -17,6 +17,7 @@ Run from an item's `build.py` (`build`).
 """
 
 import math
+import os
 
 import bmesh
 import bpy
@@ -40,8 +41,13 @@ class Panel:
 class Garment:
     def __init__(self, panels, seams, spacing=0.035, trim=0.03, budget=900, thickness=0.004,
                  cloth=(0.46, 0.42, 0.34), trim_color=(0.30, 0.20, 0.12), trim_slot="accent", frames=120,
-                 lining=0.07, mirror="-x"):
+                 lining=0.07, mirror="-x", over=()):
         self.panels, self.seams = panels, seams
+        # Items it is worn over (their folders, as `art/wardrobe/<slot>/<name>`): once
+        # simulated, it is laid over them (`_lay_over`): a skirt's tails over the skirt's flare,
+        # which the forge's layering (`wardrobe::MAX_PUSH`) wouldn't clear. Not colliders in the
+        # sim: the tails caught on the skirt there and bunched at the waist.
+        self.over = over
         self.spacing, self.trim, self.budget, self.thickness = spacing, trim, budget, thickness
         self.cloth, self.trim_color, self.trim_slot, self.frames = cloth, trim_color, trim_slot, frames
         self.lining = lining
@@ -321,19 +327,12 @@ def finish(obj, garment):
         dec = obj.modifiers.new("Decimate", "DECIMATE")
         dec.ratio = garment.budget * 0.8 / tris
         _apply(obj, dec)
-    # Trims: the faces near the open edges (the hems, the neckline, the armholes).
+    # Trims: a band along the open edges (the hems, the neckline, the armholes).
     bm = bmesh.new()
     bm.from_mesh(obj.data)
-    edge = [v.co.copy() for e in bm.edges if e.is_boundary for v in e.verts]
-    from mathutils.kdtree import KDTree
-    kd = KDTree(len(edge))
-    for i, c in enumerate(edge):
-        kd.insert(c, i)
-    kd.balance()
-    trim = set()
-    for f in bm.faces:
-        if kd.find(f.calc_center_median())[2] < garment.trim:
-            trim.add(f)
+    trim = _cut_trims(bm, garment.trim)
+    # The real openings, before the trims are split off (their line isn't one).
+    openings = {_edge_key(e) for e in bm.edges if e.is_boundary}
     slots = mesh.MATERIAL_SLOTS
     for f in bm.faces:
         f.material_index = slots.index(garment.trim_slot) if f in trim else slots.index("cloth")
@@ -353,13 +352,51 @@ def finish(obj, garment):
         me.materials.append(mesh.material(s))
     bm.to_mesh(me)
     bm.free()
-    _line(obj, garment.lining, garment.thickness)
+    _line(obj, garment.lining, garment.thickness, openings)
     _panel_colors(obj, garment)
     me = obj.data
     me.color_attributes.active_color = me.color_attributes["Col"]
     for p in me.polygons:
         p.use_smooth = False
     return sum(len(p.vertices) - 2 for p in me.polygons)
+
+
+def _cut_trims(bm, width):
+    """The faces of a trim `width` wide along `bm`'s open edges, cut out along its line: each
+    vertex's distance to the nearest open edge, and the faces split where it is `width` (between
+    two vertices on either side of it, where it crosses), so the trim's edge runs smooth beside
+    the hem rather than as a sawtooth of whole faces."""
+    from mathutils.kdtree import KDTree
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    samples = []
+    for e in bm.edges:
+        if e.is_boundary:
+            a, b = e.verts[0].co, e.verts[1].co
+            n = max(1, int((b - a).length / 0.003))
+            samples += [a.lerp(b, k / n) for k in range(n + 1)]
+    if not samples:
+        return set()
+    kd = KDTree(len(samples))
+    for i, c in enumerate(samples):
+        kd.insert(c, i)
+    kd.balance()
+    dist = {v: kd.find(v.co)[2] for v in bm.verts}
+    for v, d in dist.items():
+        if abs(d - width) < 1e-5:
+            dist[v] = width + 1e-5
+    cut = set()
+    for e in list(bm.edges):
+        a, b = e.verts
+        da, db = dist[a], dist[b]
+        if (da - width) * (db - width) < 0:
+            _e, v = bmesh.utils.edge_split(e, a, (width - da) / (db - da))
+            dist[v] = width
+            cut.add(v)
+    for f in list(bm.faces):
+        on = [v for v in f.verts if v in cut]
+        if len(on) == 2 and not any(e.other_vert(on[0]) is on[1] for e in on[0].link_edges):
+            bmesh.ops.connect_verts(bm, verts=on)
+    return {f for f in bm.faces if sum(dist[v] for v in f.verts) / len(f.verts) < width}
 
 
 def _panel_colors(obj, garment):
@@ -399,14 +436,21 @@ def _panel_colors(obj, garment):
 LINING = 0.55
 
 
-def _line(obj, depth, thickness):
+def _edge_key(e):
+    """An edge by where its ends are (the same after the mesh is split or rebuilt)."""
+    return frozenset(tuple(round(c, 5) for c in v.co) for v in e.verts)
+
+
+def _line(obj, depth, thickness, openings=None):
     """Thickness where it shows: an inner layer for the faces within `depth` of the open edges
     (a look into a neckline or a hem sees cloth, not the void), set `thickness` in and facing in,
-    joined to the outer layer at the edge by a rim. Deeper in, the body fills the garment."""
+    joined to the outer layer at the edge by a rim. Deeper in, the body fills the garment.
+    `openings` (`_edge_key`s): which open edges are the garment's own; a trim split off along
+    its line, for its color, isn't one."""
     bm = bmesh.new()
     bm.from_mesh(obj.data)
     bm.normal_update()
-    edge = [e for e in bm.edges if e.is_boundary]
+    edge = [e for e in bm.edges if e.is_boundary and (openings is None or _edge_key(e) in openings)]
     from mathutils.kdtree import KDTree
     pts = [v.co.copy() for e in edge for v in e.verts]
     kd = KDTree(len(pts))
@@ -462,6 +506,34 @@ def _apply(obj, mod):
     bpy.ops.object.modifier_apply(modifier=mod.name)
 
 
+# How far a garment laid over another stands clear of it (m).
+OVER_GAP = 0.008
+
+
+def _lay_over(obj, under, gap=OVER_GAP):
+    """`obj`'s vertices out of `under` (another item, as the reference body wears it): each
+    along its level line out from the body's upright middle, to `gap` past `under`'s outside
+    there, where it isn't already. Rays from far out find that outside."""
+    from mathutils.bvhtree import BVHTree
+    me = under.data
+    tree = BVHTree.FromPolygons([under.matrix_world @ v.co for v in me.vertices], [tuple(p.vertices) for p in me.polygons])
+    moved = 0
+    for v in obj.data.vertices:
+        d = Vector((v.co.x, v.co.y - 0.02, 0.0))
+        if d.length < 1e-6:
+            continue
+        d.normalize()
+        axis = Vector((0.0, 0.02, v.co.z))
+        hit, _n, _i, _dist = tree.ray_cast(axis + d * 1.0, -d)
+        if hit is None:
+            continue
+        r_out = (hit - axis).length + gap
+        if (v.co - axis).length < r_out:
+            v.co = axis + d * r_out
+            moved += 1
+    return moved
+
+
 def build(garment, out_path):
     """Simulate `garment` on the reference body and save it as an item's `item.blend`."""
     from . import cc0_body
@@ -469,11 +541,19 @@ def build(garment, out_path):
     bpy.context.scene.render.fps = 24
     body = cc0_body.load("male")
     obj = simulate(garment, body)
+    if garment.over:
+        from . import wardrobe
+        for d in garment.over:
+            under = wardrobe.load(os.path.abspath(d))
+            _lay_over(obj, under)
+            bpy.data.objects.remove(under)
     tris = finish(obj, garment)
     bpy.data.objects.remove(body)
     for o in list(bpy.data.objects):
         if o is not obj:
             bpy.data.objects.remove(o)
+    # Named `item` (what it was sewn over had the name while it was loaded).
+    obj.name = "item"
     bpy.ops.outliner.orphans_purge(do_recursive=True)
     bpy.ops.wm.save_as_mainfile(filepath=out_path, compress=True)
     print(f"item: {tris} triangles -> {out_path}")

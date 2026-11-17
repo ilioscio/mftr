@@ -1502,6 +1502,79 @@ its own, told apart at a thousandth, and a 1/255 step keeps them apart. The base
 - Seen in creator captures at rest only, not in a match or in motion.
 - The owner's look.
 
+### Lumen in the wardrobe (2026-11-17): the third official champion rebuilt
+
+Lumen-neo (and the `lumen` recipe) now wears new-system items only: eight new ones, beside the
+catalog's ponytail, painted gold. Like the hand-made Lumen: a halo, a sky collar laced in gold
+over a white bodice, bell sleeves, a long white skirt hemmed in gold with three tails streaming
+from a sky sash, ivory boots strapped in gold (her sandals, below), a lantern staff.
+
+| Item | How | Like the hand-made Lumen |
+|---|---|---|
+| `head.priestess_circlet` | modelled round the slim feminine base's head: a gold band at the brow, higher at the back, a sun stone in a gold setting; a double halo of sun gold floating behind the head | her circlet and halo |
+| `torso.priestess_bodice` | sewn: white linen on narrow straps to just below the waist, edged in ivory; the `under` layer, so the collar and the skirt clear it | her fitted bodice |
+| `shoulders.priestess_collar` | plates: a sky collar round the neck and over the shoulders, a gold rim, a sun stone; gold laces down the front in a V to a second stone at the waist | her sky collar, gold V and sun stones |
+| `arms.priestess_sleeves` | plates: gold armlets on the biceps; ivory sleeves belling open from the elbow to the wrist, a gold band at the top and a sky hem | her armlets and bell sleeves |
+| `waist.priestess_skirt` | sewn: white linen from the waist to mid-shin, flaring, a gold hem; four chains | her underskirt |
+| `back.priestess_tails` | sewn: a sky sash round the waist and three long white tails edged in sky, down the back and behind each hip, laid over the skirt; a chain down each | her dress's three tails |
+| `feet.priestess_boots` | plates: soft ivory leather to above the ankle, thin pale soles, two gold straps across the foot, a gold cuff and anklet | her gold anklets; not her sandals (below) |
+| `weapon.lantern_staff` | modelled: a pale shaft shod and banded in gold, a sun ring with rays round a caged lantern burning sun-white; held as the staff, so her clips aim it | her lantern staff |
+
+**What it took:**
+- **A head item.** The reference body has no head of its own to fit to (each base's head is
+  authored), so the circlet is worn on the `head` bone as a held item is on its hand, rigid, and
+  scaled to each base's head by that bone's length (`grip_scale` in its `item.ron`: the heavy
+  masculine head is a fifth bigger than the slim feminine one it was fitted on). The band stands
+  16 mm off the skin to clear hair drawn back over the skull; the halo stands far enough behind
+  the head that the forge's hair hiding (22 §7 item 5) leaves the hair under it.
+- **Clean trims, for every sewn item.** A trim was the faces near an open edge, so on a decimated
+  sim mesh it ran as a sawtooth (Rook's tabard, every hem). Now the faces are cut along the trim's
+  own line, a set width from the edges (`sewing._cut_trims`), and the trim runs smooth beside
+  the hem. The cut also showed an old waste: the trim is split off for its color, and that split
+  was taken for an opening, lined and rimmed. Only the garment's real openings are now
+  (`_line(openings=…)`); the bodice came down from 1,820 to 1,214 triangles at one budget. The catalog's other
+  sewn items keep their saved meshes until they are sewn again.
+- **One garment over another.** The tails must hang over the skirt's flare, further out than the
+  forge's layering pushes (2 cm, `wardrobe::MAX_PUSH`). With the skirt as a collider in the sim,
+  the tails caught on it and bunched at the waist (and the skirt, sewn over the bodice that way,
+  came out at the knee). So a garment `over` another is simulated on the body alone and then laid
+  over it: each point out along its level line from the body's middle to 8 mm past the other's
+  outside.
+- **Plates:** *ribbons* (straps laid on the body seen from the front: the collar's laces); a
+  face whose color is `None` is left out; `armory.Kit.ring` (a torus: the halo, the staff's sun
+  ring).
+- **Sandals didn't pass.** Built first as a sole and straps of a tube round the foot, they failed
+  the harness (22 §4.8) on the slim masculine base: 95 skin points through them, the limit 12,
+  where the sole's edges met the toes and the heel and the instep strap crossed the steep top of
+  the foot. Raising them off the skin, dropping the sole's ends and the heel cup, moving the
+  straps: still 40–50. Closed, like the veteran's boots, they pass, so she wears soft ivory boots
+  with gold straps and anklets. Open footwear needs the fitting to keep a strap's shape over a
+  foot it wasn't made on.
+- **The harness on the sleeves.** Armlets level with the armpit let the chest beside the arm
+  through on the slim masculine base; on the biceps below it, they pass.
+- **Helpers after the chains.** A long skirt's chains take up to four bones a vertex, so a body
+  helper dropped out at one vertex below the hip and stayed on its neighbour (`body_hip_r`
+  jumping 0.36 across an edge, over 21 §1.4's 0.35): a hanging item's helper weights are smoothed
+  again after its chains.
+
+**The bases' size.** With Lumen's items the bases are 4.00–4.06 MB, under the 4 MiB container cap
+(4.19 MB) by about 130 KB, and three are past the validator's 4,000,000-byte budget (a warning): the next rebuilt champion won't fit. Vertex attributes are half of a
+base and the body's morph targets a third; positions and normals are still full floats. Before the
+next champion, the bases need slimming (normals as bytes, which the forge's glb reader and Godot
+would both have to read) or the catalog splitting out of them.
+
+**Left:**
+- The bases' size, above.
+- Seen in creator captures at rest only (13,843 triangles), not in a match or in motion; the
+  tails' and skirt's chains not yet seen swinging.
+- In the creator: the tails' sky edging reads heavy, the middle tail ends short of the others,
+  and the bodice shows through the collar at the back.
+- The circlet is fitted to one head and scaled: a face sculpted far from it may meet the band.
+- Sandals: the fitting to keep open footwear's straps in shape (above).
+- The catalog's other sewn items to be sewn again for clean trims (Vesper's, Rook's, the tunic,
+  the skirt…): their looks change a little, for the owner to see.
+- The owner's look.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?
