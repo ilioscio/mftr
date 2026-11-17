@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """A priestess's tails (22 §4, M1; Lumen's): a sky-blue sash round the waist, and from it three
-long tails of white linen edged in sky blue, one down the back to the ankles and one behind each
-hip, that stream as she moves. The sash's front and back are sewn at the sides; the tails are
+tails of white linen finely edged in sky blue, the longest down the back to just above the skirt's
+gold hem and one behind each hip, that stream as she moves. (They ended below the hem at first:
+there they folded between the calves, 22 §7.) The sash's front and back are sewn at the sides; the tails are
 sewn to the back's lower edge and hang free. Sewn over the priestess's skirt (it collides in the
 sim), so they fall over it.
 
@@ -42,9 +43,9 @@ def tail(name, x0, x1, bottom, tip):
 panels = [
     sewing.Panel("sash_f", SASH_FRONT, y=-0.17, front=True, color=SKY),
     sewing.Panel("sash_b", SASH_BACK, y=0.19, front=False, color=SKY),
-    tail("tail_l", -0.235, -0.16, 0.30, 0.05),
-    tail("tail_c", -0.075, 0.075, 0.20, None),
-    tail("tail_r", 0.16, 0.235, 0.30, 0.05),
+    tail("tail_l", -0.235, -0.16, 0.42, 0.05),
+    tail("tail_c", -0.075, 0.075, 0.33, None),
+    tail("tail_r", 0.16, 0.235, 0.42, 0.05),
 ]
 seams = [
     (("sash_f", "hip_r", "waist_r"), ("sash_b", "hip_r", "waist_r")),
@@ -53,7 +54,7 @@ seams = [
     (("tail_c", "tl", "tr"), ("sash_b", "ct_l", "ct_r")),
     (("tail_r", "tl", "tr"), ("sash_b", "rt_in", "hip_r")),
 ]
-garment = sewing.Garment(panels, seams, budget=240, cloth=WHITE, trim_color=SKY, trim_slot="cloth",
-                         trim=0.022, lining=1.0, thickness=0.004,
+garment = sewing.Garment(panels, seams, budget=210, cloth=WHITE, trim_color=SKY, trim_slot="cloth",
+                         trim=0.010, lining=1.0, thickness=0.004,
                          over=[os.path.join(ROOT, "art", "wardrobe", "waist", "priestess_skirt")])
 sewing.build(garment, os.path.join(HERE, "item.blend"))

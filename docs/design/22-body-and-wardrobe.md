@@ -1516,7 +1516,7 @@ from a sky sash, ivory boots strapped in gold (her sandals, below), a lantern st
 | `shoulders.priestess_collar` | plates: a sky collar round the neck and over the shoulders, a gold rim, a sun stone; gold laces down the front in a V to a second stone at the waist | her sky collar, gold V and sun stones |
 | `arms.priestess_sleeves` | plates: gold armlets on the biceps; ivory sleeves belling open from the elbow to the wrist, a gold band at the top and a sky hem | her armlets and bell sleeves |
 | `waist.priestess_skirt` | sewn: white linen from the waist to mid-shin, flaring, a gold hem; four chains | her underskirt |
-| `back.priestess_tails` | sewn: a sky sash round the waist and three long white tails edged in sky, down the back and behind each hip, laid over the skirt; a chain down each | her dress's three tails |
+| `back.priestess_tails` | sewn: a sky sash round the waist and three white tails finely edged in sky, down the back and behind each hip to above its hem, laid over the skirt; a chain down each | her dress's three tails |
 | `feet.priestess_boots` | plates: soft ivory leather to above the ankle, thin pale soles, two gold straps across the foot, a gold cuff and anklet | her gold anklets; not her sandals (below) |
 | `weapon.lantern_staff` | modelled: a pale shaft shod and banded in gold, a sun ring with rays round a caged lantern burning sun-white; held as the staff, so her clips aim it | her lantern staff |
 
@@ -1565,11 +1565,20 @@ Bases ship with the game and never cross the network, and one base's meshes are 
 champion built on it, so the cost is install size and a little load time. Slimming (normals as
 bytes, or the catalog split out of the bases) stays open for later.
 
+**The look, second pass.** The owner's first look in the creator found three faults:
+- *The tails' sky edging read heavy:* a 22 mm trim on 75 mm tails left them more blue than white.
+  It is 10 mm now.
+- *The middle tail looked short:* the tails ran past the skirt's hem, and there the middle one
+  folded up between the calves. All three now end above the hem, the middle one longest, so the
+  gold hem shows below them.
+- *The bodice showed through the collar at the back:* its neckline rose to 1.44 m, over the
+  collar's top (1.425 m). It now ends level with that top at the sides and at 1.41 m at the
+  back, inside the collar's 16 mm lift. Lower (1.405 m) the slim masculine base's skin came
+  through it (32 pokes), and at 1.418 m the heavy feminine base's shoulders did (13).
+
 **Left:**
-- Seen in creator captures at rest only (13,843 triangles), not in a match or in motion; the
+- Seen in creator captures at rest only (13,900 triangles), not in a match or in motion; the
   tails' and skirt's chains not yet seen swinging.
-- In the creator: the tails' sky edging reads heavy, the middle tail ends short of the others,
-  and the bodice shows through the collar at the back.
 - The circlet is fitted to one head and scaled: a face sculpted far from it may meet the band.
 - Sandals: the fitting to keep open footwear's straps in shape (above).
 - The catalog's other sewn items to be sewn again for clean trims (Vesper's, Rook's, the tunic,

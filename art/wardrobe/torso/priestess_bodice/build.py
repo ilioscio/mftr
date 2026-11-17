@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """A priestess's bodice (22 §4, M1; Lumen's): fitted white linen from narrow straps over the
-shoulders to just below the waist, a round neck, edged in ivory. Worn under the collar and the
+shoulders to just below the waist, a round neck kept under the collar's top, edged in ivory. Worn under the collar and the
 skirt (the `under` layer: they're pushed clear of it). The linen tunic's pattern, cut shorter.
 
     blender -b --python art/wardrobe/torso/priestess_bodice/build.py
@@ -25,13 +25,13 @@ def outline(neck_z):
     return [
         ("hem_l", -0.235, 0.88), ("hem_r", 0.235, 0.88),
         ("waist_r", 0.205, 0.97), ("under_r", 0.185, 1.09), ("arm_r", 0.14, 1.27), ("shoulder_r", 0.15, 1.41),
-        ("neck_r", 0.088, 1.44), ("neck_c", 0.0, neck_z), ("neck_l", -0.088, 1.44),
+        ("neck_r", 0.088, 1.425), ("neck_c", 0.0, neck_z), ("neck_l", -0.088, 1.425),
         ("shoulder_l", -0.15, 1.41), ("arm_l", -0.14, 1.27), ("under_l", -0.185, 1.09), ("waist_l", -0.205, 0.97),
     ]
 
 
 front = sewing.Panel("front", outline(1.38), y=-0.17, front=True)
-back = sewing.Panel("back", outline(1.42), y=0.15, front=False)
+back = sewing.Panel("back", outline(1.41), y=0.15, front=False)
 seams = [
     (("front", "shoulder_r", "neck_r"), ("back", "shoulder_r", "neck_r")),
     (("front", "neck_l", "shoulder_l"), ("back", "neck_l", "shoulder_l")),

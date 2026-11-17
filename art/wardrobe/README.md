@@ -111,11 +111,11 @@ first.
 | `feet.veteran_boots` | feet, over | plates: heavy leather tubes from heel to toe and shafts to under the knee, two iron bands, an iron toe cap, thick soles, domed iron knee cops (Rook's) | 1,896 |
 | `offhand.ranger_bow` | offhand, held | modelled: a tall recurve, flat wide limbs, a leather grip between silver bands with a teal stone, silver caps, teal-glowing tips, the string; bones that draw with Vesper's shots (Vesper's) | 472 |
 | `head.priestess_circlet` | head, accessory | modelled round the slim feminine head: a gold band at the brow, a sun stone in a gold setting, a double halo of sun gold floating behind the head; worn on the head bone, scaled to each base's (Lumen's) | 440 |
-| `torso.priestess_bodice` | torso, under | sewn: white linen on narrow straps to just below the waist, edged in ivory (Lumen's) | 1,057 |
+| `torso.priestess_bodice` | torso, under | sewn: white linen on narrow straps to just below the waist, edged in ivory (Lumen's) | 1,065 |
 | `shoulders.priestess_collar` | shoulders, armor | plates: a sky collar round the neck and over the shoulders, a gold rim, a sun stone; gold laces down the front in a V to a second stone at the waist; rigid (Lumen's) | 664 |
 | `arms.priestess_sleeves` | arms, over | plates: gold armlets on the biceps; ivory sleeves belling open from the elbow to the wrist, a gold band, a sky hem (Lumen's) | 576 |
 | `waist.priestess_skirt` | waist, over | sewn: white linen from the waist to mid-shin, flaring, a gold hem; four chains round the hips (Lumen's) | 1,148 |
-| `back.priestess_tails` | back, armor | sewn: a sky sash round the waist, three long white tails edged in sky, down the back and behind each hip, laid over the skirt; a chain down each (Lumen's) | 1,092 |
+| `back.priestess_tails` | back, armor | sewn: a sky sash round the waist, three white tails finely edged in sky, down the back and behind each hip to above its hem, laid over the skirt; a chain down each (Lumen's) | 1,072 |
 | `feet.priestess_boots` | feet, over | plates: soft ivory leather to above the ankle, thin pale soles, two gold straps across the foot, a gold cuff and anklet (Lumen's) | 1,216 |
 | `weapon.lantern_staff` | weapon, held | modelled: a pale shaft shod and banded in gold, a sun ring with rays round a caged lantern burning sun-white; held as the staff (Lumen's) | 544 |
 
