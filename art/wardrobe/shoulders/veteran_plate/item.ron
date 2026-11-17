@@ -1,0 +1,10 @@
+// A wardrobe item (22 §4): a veteran's plate (Rook's), a shell (build.py): an iron breastplate
+// and backplate, a tall gorget, crimson-lacquered pauldrons with brass rims.
+(
+    id: "shoulders.veteran_plate",
+    slot: "shoulders",
+    name: "Veteran's plate",
+    layer: "armor",
+    accent: false,
+    rigid: true,
+)

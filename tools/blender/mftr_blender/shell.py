@@ -26,11 +26,14 @@ class Shell:
     """A shell item: `keep(p)`, whether the body's face at `p` (its centre) is under it; `lift`,
     how far off the skin (m); `thickness` (m); `smooth`, smoothing passes (`smooth_where(p)`
     limits them); `shape(p, n)`, an extra move for a vertex at `p` with normal `n` (a cuff's
-    flare); `paint(p)`, a face's (color, slot) by its centre; `budget`, its triangles."""
+    flare); `paint(p)`, a face's (color, slot) by its centre; `budget`, its triangles; `cuts`, how
+    many times each of the body's edges is cut first (the reference body is low-poly: cut, the
+    region's edge and its paint follow their lines rather than the body's facets)."""
 
     def __init__(self, keep, lift=0.008, thickness=0.004, smooth=0, smooth_where=None, shape=None,
-                 paint=None, budget=800, color=(0.36, 0.22, 0.12)):
+                 paint=None, budget=800, color=(0.36, 0.22, 0.12), cuts=0):
         self.keep, self.lift, self.thickness = keep, lift, thickness
+        self.cuts = cuts
         self.smooth, self.smooth_where, self.shape = smooth, smooth_where, shape
         self.paint = paint or (lambda p: (color, "cloth"))
         self.budget = budget
@@ -51,6 +54,9 @@ def make(spec, body):
     tree = BVHTree.FromPolygons([v.co.copy() for v in me.vertices], [tuple(p.vertices) for p in me.polygons])
     bm = bmesh.new()
     bm.from_mesh(me)
+    if spec.cuts:
+        bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=spec.cuts, use_grid_fill=True)
+        bm.verts.index_update()
     bm.normal_update()
     normals = {v.index: v.normal.copy() for v in bm.verts}
     gone = [f for f in bm.faces if not spec.keep(f.calc_center_median())]
