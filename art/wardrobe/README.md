@@ -36,6 +36,13 @@ all four humanoid bases (slim and heavy, masculine and feminine) when the bases 
   body's own skin, lifted off it, smoothed, enveloping the body under it, thickened and colored
   by region (`mftr_blender.shell`). The item's `build.py` says which region and how.
 
+- **Plates** (breastplates, gorgets, a boot's shaft, pauldrons, knee cops: hard, standing off the
+  body): `mftr_blender.plates`. *Lathed* round an upright axis through the body, or a *tube*
+  round a path through it (a foot, heel to toe): rings of rays find the skin, each point stood
+  off it, smoothed into a plate; its edges and bands are the grid's rows, straight lines rather
+  than the low-poly reference body's facets. *Domes* (an ellipsoid's cap) and *strips* of them
+  for pauldrons, their lames and knee cops. See `shoulders/veteran_plate/build.py`.
+
 Then rebuild the bases (`art/creator/humanoid_*/build.py --export`). `mftr_blender.wardrobe`
 fits every item to every base:
 
@@ -88,6 +95,10 @@ first.
 | `back.ranger_quiver` | back, accessory | modelled: leather, steel bands, teal-fletched arrows, a strap across the chest; held on the chest (Vesper's) | 545 |
 | `feet.ranger_boots` | feet, over | shell: knee-high leather, a flared cuff, an ankle strap, dark soles (Vesper's) | 1,372 |
 | `arms.ranger_bracers` | arms, over | shell: leather forearms, two teal bands, flaring at the elbow (Vesper's) | 864 |
+| `torso.veteran_gambeson` | torso, over | sewn: padded brown, a high neck, long sleeves to the wrist, bound in dark leather (Rook's) | 1,638 |
+| `shoulders.veteran_plate` | shoulders, armor | plates: an iron breastplate and backplate, open at the sides, a gorget, crimson-lacquered pauldrons with brass rims over two lames each; rigid (Rook's) | 1,632 |
+| `waist.veteran_tabard` | waist, armor | sewn: long crimson panels front and back from a band at the waist, open at the sides, lined; two chains (Rook's) | 1,584 |
+| `feet.veteran_boots` | feet, over | plates: heavy leather tubes from heel to toe and shafts to under the knee, two iron bands, an iron toe cap, thick soles, domed iron knee cops (Rook's) | 1,896 |
 | `offhand.ranger_bow` | offhand, held | modelled: a tall recurve, flat wide limbs, a leather grip between silver bands with a teal stone, silver caps, teal-glowing tips, the string; bones that draw with Vesper's shots (Vesper's) | 472 |
 
 ## Held items (22 §4.7, BW7)

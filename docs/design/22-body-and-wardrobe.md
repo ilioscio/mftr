@@ -1445,6 +1445,63 @@ neck).
   refuses an outfit id it doesn't know.
 - The owner's look at the arms, the bow and the shields, and at the spells and emotes.
 
+### Rook in the wardrobe (2026-11-17): the second official champion rebuilt
+
+Rook-neo (and the `rook` recipe) now wears new-system items only: four new ones, beside the
+catalog's gauntlets, wool trousers, braided beard and maul. Shaved bald, as the hand-made Rook.
+
+| Item | How | Like the hand-made Rook |
+|---|---|---|
+| `torso.veteran_gambeson` | sewn: padded brown, a high round neck, long sleeves to the wrist, bound in dark leather | his gambeson, at the arms and the belly |
+| `shoulders.veteran_plate` | plates: an iron breastplate and a dark backplate, open at the sides, a brass-rimmed gorget, crimson-lacquered pauldrons domed over the shoulders with brass rims, two lames each; rigid | his barrel breastplate, gorget and slab pauldrons |
+| `waist.veteran_tabard` | sewn: crimson panels front and back to the knee from a band at the waist, open at the sides, a darker hem, lined; a chain down each panel | his long tabard |
+| `feet.veteran_boots` | plates: heavy leather from heel to toe and up to under the knee, two iron bands, an iron toe cap, thick soles, domed knee cops | his heavy boots and knee cops |
+
+Trousers dark, beard grey-brown. The plate is on the `shoulders` slot so the gambeson keeps the
+torso one; the tabard is on the `armor` layer so the forge pushes it clear of the gambeson's
+hem (items on one layer aren't pushed apart).
+
+**Plates, a new way to make an item** (`mftr_blender.plates`). The first plate and boots were
+shells of the reference body's skin, and came out ragged: the CC0 body is low-poly (3,201
+vertices), so a region cut from it has its facets' sawtooth edges, and decimating it to its
+budget before painting it ran its bands across the triangles diagonally. A plate is instead
+built on its own grid:
+- *lathed* round an upright axis through the body (the torso's middle, a leg's): ring by ring,
+  rays out from the axis find the skin; each point stands its lift off it, the distances smoothed
+  across the grid (a plate, not the muscles under it) and never inside the skin;
+- a *tube* round a path through the body that needn't be upright: the boot's foot, heel to toe,
+  capped at both ends; a ray that meets no skin within its reach stops there (up the heel,
+  inside the leg);
+- *domes* (an ellipsoid's cap, cut where it should end: a pauldron short on the neck side, so it
+  stands clear of the trapezius) and *strips* of them (the lames).
+Edges and bands are the grid's rows and columns: straight. `shell.Shell` also takes `cuts` now
+(the body cut finer first).
+
+**Sleeves to the wrist.** The sleeved shirt's sleeve line ran from the shoulder toward a wrist
+at (0.469, 0.956), outside the reference arm: fine for a short sleeve, but a long one was sewn
+round empty air and fell away. Measured on the CC0 body, the forearm's middle is at x 0.25 at
+1.2 m and 0.345 at the wrist; a long sleeve also needs the arm's girth (about 30 cm round), not
+a shirt cuff's.
+
+**The bases' size.** With Rook's items the bases reached 4.03–4.09 MB, a hair under the 4 MiB
+container cap. Vertex colors are now written as normalized bytes, not shorts
+(`mftr_blender.glb._quantize_colors`, as the skin weights were): a paint region is a color of
+its own, told apart at a thousandth, and a 1/255 step keeps them apart. The bases are
+3.69–3.76 MB with Rook's items (after the triangle cut below).
+
+**The triangle cap.** First built, Rook-neo came to 16,128 triangles, over the creator's 14,000
+(20 §7.2); the four items were brought down to about 1,600–1,800 each, and he is
+13,589 now: under the cap, over the 5,000–10,000 target.
+
+**Left:**
+- The sewn trims (a hem's darker band) are jagged: they are the faces near the open edge of a
+  decimated sim mesh. A trim cut along its line would be cleaner, for every sewn item.
+- The pauldrons ride the shoulders' weights; the hand-made Rook's ride the clavicle whole.
+- The gambeson's sleeves are roomy and faceted on the heavy build; a slimmer sleeve (7.2 cm
+  across) fell off the arm in the sim.
+- Seen in creator captures at rest only, not in a match or in motion.
+- The owner's look.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

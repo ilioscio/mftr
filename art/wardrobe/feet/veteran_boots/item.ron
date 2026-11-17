@@ -1,0 +1,10 @@
+// A wardrobe item (22 §4): a veteran's boots (Rook's), a shell (build.py): heavy leather to
+// under the knee, iron bands, an iron toe cap, iron knee cops.
+(
+    id: "feet.veteran_boots",
+    slot: "feet",
+    name: "Veteran's boots",
+    layer: "over",
+    accent: false,
+    rigid: false,
+)
