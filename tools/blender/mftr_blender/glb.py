@@ -133,8 +133,40 @@ def process(path):
         for c in channels:
             c["sampler"] = renum[c["sampler"]]
         anim["channels"] = channels
+    weights = _quantize_weights(doc, arrays)
     _rewrite(path, doc, arrays)
-    return {"keys_before": before, "keys_after": after, "channels_at_rest_dropped": dropped}
+    return {"keys_before": before, "keys_after": after, "channels_at_rest_dropped": dropped, "weights_quantized": weights}
+
+
+def _quantize_weights(doc, arrays):
+    """Skin weights as normalized bytes, not floats (4 bytes a vertex, not 16: a creator base
+    carries a large catalog under the container cap). Each vertex's four still sum to exactly
+    255: the rounding's leftover goes to its largest. A 1/255 step is far below what shows.
+    Returns how many accessors were converted."""
+    done = set()
+    for mesh in doc.get("meshes", []):
+        for prim in mesh["primitives"]:
+            i = prim["attributes"].get("WEIGHTS_0")
+            if i is None or i in done:
+                continue
+            acc = doc["accessors"][i]
+            if acc["componentType"] != 5126:
+                continue
+            w = np.asarray(arrays[i], dtype=np.float64).clip(0.0, None)
+            total = w.sum(axis=1, keepdims=True)
+            empty = total[:, 0] == 0.0
+            total[empty] = 1.0
+            q = np.floor(w / total * 255.0 + 0.5).astype(np.int64)
+            rest = np.where(empty, 0, 255 - q.sum(axis=1))
+            top = np.argmax(w, axis=1)
+            q[np.arange(len(q)), top] += rest
+            arrays[i] = q.clip(0, 255).astype(np.uint8)
+            acc["componentType"] = 5121
+            acc["normalized"] = True
+            acc.pop("min", None)
+            acc.pop("max", None)
+            done.add(i)
+    return len(done)
 
 
 def _at_rest(values, node, path):

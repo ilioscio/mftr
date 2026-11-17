@@ -30,11 +30,12 @@ In the base it is a catalog part (`part.<slot>.<id>`) flagged `covers`: the forg
 under it by its geometry (`mftr_forge::wardrobe`).
 """
 
+import math
 import os
 import re
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -61,11 +62,16 @@ def items():
 
 
 def read_item(path):
-    """`item.ron`'s fields: strings, booleans and numbers of one flat struct."""
+    """`item.ron`'s fields: strings, booleans, numbers and tuples of numbers of one flat struct."""
     text = re.sub(r"//[^\n]*", "", open(path, encoding="utf-8").read())
     out = {}
-    for key, val in re.findall(r"(\w+)\s*:\s*(\"[^\"]*\"|true|false|-?[\d.]+)", text):
-        out[key] = val[1:-1] if val.startswith('"') else (val == "true" if val in ("true", "false") else float(val))
+    num = r"-?[\d.]+"
+    pattern = rf"(\w+)\s*:\s*(\"[^\"]*\"|true|false|\(\s*{num}(?:\s*,\s*{num})*\s*,?\s*\)|{num})"
+    for key, val in re.findall(pattern, text):
+        if val.startswith("("):
+            out[key] = tuple(float(x) for x in re.findall(num, val))
+        else:
+            out[key] = val[1:-1] if val.startswith('"') else (val == "true" if val in ("true", "false") else float(val))
     for k in ("id", "slot", "name"):
         if k not in out:
             raise ValueError(f"{path}: needs `{k}`")
@@ -401,6 +407,156 @@ def _arms(info):
     return info["slot"] not in ("torso", "back", "waist", "legs")
 
 
+def _strap_handle(obj, armature, s, m, at, side, back, up, radius):
+    """A strapped item (a shield on the forearm) gets its grip: a bar where the closed fist of
+    hand `s` is (the prop bone's head, along the knuckles), on two posts that reach its back.
+    The item is slid in its own plane till the fist is behind its middle, on the back of the
+    hand's side, its back just clear of the knuckles. In the item's own frame (`m`, `at`,
+    `side`, `back`, `up` place it, as `_place_grip` does)."""
+    import bmesh
+    from . import hands as hand_rig
+    bones = armature.data.bones
+    if bones.get(f"fingers_02_{s}") is None or "Col" not in obj.data.color_attributes:
+        return
+    fist, knuckles, dorsal = hand_rig.fist_centre(armature, s, radius)
+    frame = Matrix((side, back, up)).transposed()
+    to_item = lambda p: frame.inverted() @ ((m.inverted() @ (armature.matrix_world @ p)) - at)  # noqa: E731
+    turn = lambda d: (frame.inverted() @ (m.to_3x3().inverted() @ (armature.matrix_world.to_3x3() @ d))).normalized()  # noqa: E731
+    c, along, out = to_item(fist), turn(knuckles), turn(dorsal)
+    # The shield's face: the way its body is thinnest (its plane's normal), from the fist toward
+    # it. Its back is found by a ray from behind the fist, and the shield is moved along its
+    # normal till its back lies just past the knuckles, whichever way its maker tilted it.
+    import numpy
+    from mathutils.bvhtree import BVHTree
+    pts = numpy.array([tuple(v.co) for v in obj.data.vertices])
+    centre = pts.mean(axis=0)
+    _, vecs = numpy.linalg.eigh(numpy.cov((pts - centre).T))
+    n = Vector(tuple(vecs[:, 0])).normalized()
+    # On the back of the hand's side, as the clips carry it; slid in its plane so the fist is
+    # behind its middle (the boss), where a centre grip's bar is.
+    if out.dot(n) < 0:
+        n = -n
+    slide = Vector(tuple(centre)) - c
+    slide -= n * slide.dot(n)
+    for v in obj.data.vertices:
+        v.co -= slide
+
+    def back_at(p):
+        tree = BVHTree.FromPolygons([v.co.copy() for v in obj.data.vertices], [tuple(f.vertices) for f in obj.data.polygons])
+        hit = tree.ray_cast(p - n * 0.5, n)
+        return None if hit[0] is None else (hit[0] - p).dot(n)
+
+    d = back_at(c)
+    if d is None:
+        d = min(((v.co - c).dot(n) for v in obj.data.vertices if ((v.co - c) - n * (v.co - c).dot(n)).length < 0.12), default=0.0)
+    # The fist's knuckles, and a gauntlet over them, clear of its back.
+    clear = 0.055
+    for v in obj.data.vertices:
+        v.co += n * (clear - d)
+    print(f"strap: shield slid {slide.length:.3f} m and moved {clear - d:+.3f} m off the fist")
+    half = 0.06
+    ends = [c + along * (half * e * 0.92) for e in (-1, 1)]
+    posts = [back_at(e) for e in ends]
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    col = bm.verts.layers.float_color["Col"]
+    slot = list(mesh_slots()).index("metal")
+
+    def rod(a, b, r, sides=6):
+        d = (b - a).normalized()
+        u = d.orthogonal().normalized()
+        w = d.cross(u)
+        rings = [[bm.verts.new(p + (u * math.cos(2 * math.pi * k / sides) + w * math.sin(2 * math.pi * k / sides)) * r)
+                  for k in range(sides)] for p in (a, b)]
+        faces = [bm.faces.new((rings[0][k], rings[0][(k + 1) % sides], rings[1][(k + 1) % sides], rings[1][k]))
+                 for k in range(sides)]
+        faces += [bm.faces.new(list(reversed(rings[0]))), bm.faces.new(rings[1])]
+        for f in faces:
+            f.material_index = slot
+            f.smooth = False
+            for v in f.verts:
+                v[col] = (0.30, 0.31, 0.34, 1.0)
+        return faces
+
+    made = rod(c - along * half, c + along * half, radius)
+    # Two posts from the bar's ends to the shield's back, along its normal.
+    for e, reach in zip(ends, posts):
+        made += rod(e, e + n * ((reach if reach is not None else clear) + 0.006), radius * 0.8, 4)
+    bmesh.ops.recalc_face_normals(bm, faces=made)
+    bm.to_mesh(obj.data)
+    bm.free()
+
+
+def mesh_slots():
+    from . import mesh
+    return mesh.MATERIAL_SLOTS
+
+
+def _place_grip(obj, armature, info):
+    """A held item (a weapon, a shield, a lantern: `grip` in its `item.ron`) on its hand bone, not
+    fitted to the body. It is modelled in its own frame: the grip at the origin, +Z along it
+    (a bow's upper limb, a blade's point), +Y its back (a bow's string side). `grip_up` and
+    `grip_back` say where those point in the hand bone's own frame (+Y along the bone, as
+    Blender's bones), `grip_at` how far along the bone the grip sits (a fraction of its length).
+    The official champion whose moves the weapon class plays sets them, so its clips aim the
+    item as they aim theirs (a bow stands upright at the full draw). Rigid, on that bone alone,
+    unless it brings bones of its own: `mftr_bones` on the item object, [(name, head, tail,
+    parent)] in its grip frame ("grip" the hand), added to the rig, and its vertex groups (a
+    "grip" group for what rides the hand). A bow's limbs and string, named as the official
+    champion's, so its clips' channels for them play on it."""
+    import json
+    bone = armature.data.bones[info["grip"]]
+    up = Vector(info.get("grip_up", (0.0, 1.0, 0.0))).normalized()
+    back = Vector(info.get("grip_back", (0.0, 0.0, 1.0)))
+    back = (back - up * back.dot(up)).normalized()
+    side = back.cross(up)
+    at = Vector((0.0, bone.length * info.get("grip_at", 0.5), 0.0))
+    m = armature.matrix_world @ bone.matrix_local
+    held = info["grip"]
+    if info.get("grasp_strap"):
+        _strap_handle(obj, armature, held[-1], m, at, side, back, up, info["grasp_radius"])
+    elif "grasp_radius" in info:
+        # Gripped in the fist (see `hands`, and the forge's `grip`): it rides that hand's prop
+        # bone, which the forge keys so the hand closes on it; the point `grasp_at` along it sits
+        # in the fist's middle (the prop bone's head), turned as `grip_up` and `grip_back` say in
+        # the hand's frame.
+        prop = armature.data.bones["prop_" + held[-1]]
+        prop.use_deform = True
+        at = m.inverted() @ (armature.matrix_world @ prop.head_local) - up * info.get("grasp_at", 0.0)
+        held = prop.name
+
+    def place(c):
+        c = Vector(c)
+        return m @ (at + side * c.x + back * c.y + up * c.z)
+
+    for v in obj.data.vertices:
+        v.co = place(v.co.copy())
+    own = json.loads(obj.get("mftr_bones", "[]"))
+    if not own:
+        obj.vertex_groups.clear()
+        g = obj.vertex_groups.new(name=held)
+        g.add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
+        return
+    if "grip" in obj.vertex_groups:
+        obj.vertex_groups["grip"].name = held
+    world_back = (m.to_3x3() @ back).normalized()
+    inv = armature.matrix_world.inverted()
+    prev = bpy.context.view_layer.objects.active
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode="EDIT")
+    eb = armature.data.edit_bones
+    for name, head, tail, parent in own:
+        b = eb.new(name)
+        b.head, b.tail = inv @ place(head), inv @ place(tail)
+        b.use_deform = True
+        b.align_roll(inv.to_3x3() @ world_back)
+        b.parent = eb[held if parent == "grip" else parent]
+    bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.context.view_layer.objects.active = prev
+    for pb in armature.pose.bones:
+        pb.rotation_mode = "QUATERNION"
+
+
 def fit_items(armature, body, gender, room=1.0):
     """Every wardrobe item fitted to `body` (a base just built, before its mass is baked) and
     skinned to `armature`, as catalog parts. Returns `made` entries (as `parts.build_parts`'s,
@@ -416,6 +572,30 @@ def fit_items(armature, body, gender, room=1.0):
     for folder, info in found:
         obj = load(folder)
         me = obj.data
+        if info.get("grip"):
+            # Held, not worn: on the hand, rigid; it covers nothing.
+            _place_grip(obj, armature, info)
+            obj.name = f"part.{info['id']}"
+            me.name = obj.name
+            _materials(obj)
+            if "Col" in me.color_attributes:
+                me.color_attributes.active_color = me.color_attributes["Col"]
+                me.color_attributes.render_color_index = me.color_attributes.active_color_index
+            obj.parent = armature
+            mod = obj.modifiers.new("Armature", "ARMATURE")
+            mod.object = armature
+            flags = {"rigid": True}
+            if "grasp_radius" in info:
+                flags["grasp"] = {
+                    "hand": info["grip"][-1], "radius": info["grasp_radius"], "at": info.get("grasp_at", 0.0),
+                    "up": tuple(info.get("grip_up", (0.0, 1.0, 0.0))), "back": tuple(info.get("grip_back", (0.0, 0.0, 1.0))),
+                    "span": tuple(info.get("grasp_span", (0.0, 0.0))), "edge": bool(info.get("grasp_edge", False)),
+                    "on_hand": bool(info.get("grasp_on_hand", False)), "upright": bool(info.get("grasp_upright", False)),
+                    "strap": bool(info.get("grasp_strap", False)),
+                }
+            made.append((info["id"], info["slot"], info["name"], [], bool(info["accent"]), mesh.triangle_count(obj), 0,
+                         flags))
+            continue
         arms = _arms(info)
         if arms not in surfaces:
             surfaces[arms] = (_source_surfaces(sex, arms), _base_surface(body, arms))
@@ -440,6 +620,9 @@ def fit_items(armature, body, gender, room=1.0):
             me.color_attributes.render_color_index = me.color_attributes.active_color_index
         _weights(obj, body, set(body_rig.NAMES),
                  HANDS if arms == "upper" or info["slot"] in ("torso", "back", "waist", "legs") else (), arms)
+        # What it has on the hands closes with the fingers, joint by joint.
+        from . import hands as hand_rig
+        hand_rig.glove(armature, obj)
         obj.parent = armature
         mod = obj.modifiers.new("Armature", "ARMATURE")
         mod.object = armature

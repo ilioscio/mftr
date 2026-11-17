@@ -1225,6 +1225,226 @@ floor.
   growth will need them slimmed.
 - The owner's look at the third pass.
 
+### BW7 status (2026-11-15): held items, and the ranger's bow first
+
+**Held items.** A weapon isn't fitted to the body: `wardrobe._place_grip` puts it on the hand
+(`art/wardrobe/README.md`, "Held items"). It is modelled in a grip frame: the grip at the origin,
++Z along it, +Y its back. Its `item.ron` names the hand bone (`grip`), where along it the grip
+sits (`grip_at`), and where the item's +Z and +Y point in that bone's own frame (`grip_up`,
+`grip_back`). It rides that bone alone, rigid, and covers nothing. The frame is the official
+champion's whose moves the weapon class plays, so their clips aim it as they aim their own.
+
+**The ranger's bow** (`offhand.ranger_bow`, 472 triangles), Vesper's, and now hers and
+Vesper-neo's in place of the block-out:
+- a tall recurve (1.6 m), its flat, wide limbs curving back toward her and flicking forward at
+  the tips;
+- a leather grip between silver bands, a teal stone in its face, silver caps and teal-glowing
+  tips (her signature);
+- the string on her side.
+
+Its frame was read off the hand-made Vesper's bow (`art/champions/vesper`): the limbs and back
+at rest in `hand_l`'s frame. So at her full draw it stands upright, its string toward her, as
+hers does; the block-out had been upright at rest and leaned at the draw. Her moves' weapon
+(`moves::weapon`) is the new bow, so a recipe that takes her attack takes it too.
+
+**The bases' size.** With the bow, the heavy feminine base went over the 4 MiB container cap
+(`glb::MAX_GLB_BYTES`) and the creator's catalog stopped loading. Skin weights are now written
+as normalized bytes, not floats (`mftr_blender.glb._quantize_weights`): 4 bytes a vertex, not 16.
+Each vertex's four still sum to exactly one. The bases went from 4.07–4.20 MB to 3.51–3.60 MB,
+under the 4 MB budget again, with room for the rest of the weapons.
+
+**The draw.** A held item can bring bones of its own (`mftr_bones` on its `item.blend` object,
+placed with it under the hand, and its vertex groups). The ranger's bow has the hand-made
+Vesper's, by name: two on each limb (`extra_bow_1..4`) and one on each half of the string, from
+the tip to the nocking point (`extra_string_1..2`). Her shots' baked draws are clips like any
+other, so `Retarget` plays their channels on these bones by name, corrected for their rest: the
+string comes back to her fingers at her cheek, the limbs bend toward her, and on the release it
+snaps straight and shivers. Two consequences:
+- The spring bones take only a real chain, each bone under the one before (`spring_chains`):
+  the bow's limbs aren't one, so on a stance whose clips don't key them it stays still.
+- The forge counts every extra bone the outfit uses against the cap of 32 before it folds the
+  garments' chains: the bow's six don't fold, so the garments give way first.
+
+**The other classes** (second pass, 2026-11-15). Eleven held items replace the block-outs of
+`parts.py`, under the same ids, so recipes and the moves that equip them are unchanged:
+
+| Item | Class, weight | What | Triangles |
+|---|---|---|---|
+| `weapon.dagger` | dagger, light | a leaf blade, a dark guard with a glowing stone, a wrapped grip | 128 |
+| `weapon.sword` | sword, medium | a broad diamond-section blade, a gold crossguard with swept quillons, a pommel stone | 148 |
+| `weapon.hammer` | hammer, medium | a beveled iron head with a gold striking face and a back spike | 198 |
+| `weapon.staff` | staff, medium | an iron-shod shaft, three iron prongs holding a glowing crystal | 246 |
+| `weapon.spear` | spear, medium | a leaf head with glowing stones, a team-colored collar, a butt spike | 144 |
+| `weapon.great_axe` | axe, heavy | a crescent blade ground to its edge, a back spike and a top spike | 188 |
+| `weapon.maul` | maul, heavy | a great faceted head with gold-banded faces, a rune stone in each cheek | 352 |
+| `offhand.shield` | shield, medium | an iron heater, a team-colored field, a gold boss | 114 |
+| `offhand.tower_shield` | shield, heavy | a tall slab with clipped corners, a team stripe, gold studs, a sigil | 120 |
+| `offhand.orb` | orb, light | a faceted crystal in a gold cage of three claws | 180 |
+| `offhand.lantern` | lantern, light | a chain, an iron cap and base, four posts, a glowing core | 184 |
+
+- **The kit** (`mftr_blender.armory`): lathes, slabs with a ground rim, diamond-section blades,
+  beveled boxes and cut stones, in the grip frame. Each item's `build.py` is a dozen lines.
+- **Where they sit.** Each takes the frame its block-out was built in, so the clips made round
+  the block-outs (Rook's maul, Shade's dagger, the casters' staff) hold them the same: along the
+  right hand, upright at the left hand's prop point (orb, lantern), or on the left forearm
+  (shields).
+- **Classes and weights** are recorded in each `item.ron` (`class`, `weight`). Nothing reads
+  them yet.
+- Most are under §4.7's 300-triangle floor: they read at the gameplay camera, and the bases
+  have little room (3.59 to 3.69 MB of 4).
+
+**Hands that hold** (third pass, 2026-11-16; the owner's look: "sloppy", hands flat beside the
+hafts). Three things were wrong, and each has its fix:
+
+1. *The hands had no joints.* The rig's hand is a mitten (one `fingers` bone, one `thumb`), and
+   Blender's automatic weights had given that one bone the index and middle fingers only: the
+   ring and little fingers and most of the thumb were welded to the palm. A creator base's
+   hands are now read off its mesh and rigged (`mftr_blender.hands`):
+   - the five tips are the far points of the skin from the wrist, each digit the skin nearer
+     its tip than any other's, out to the nearest web;
+   - `fingers_<s>`, `fingers_02_<s>`, `fingers_03_<s>` are the four fingers' three rows of
+     joints (they close together: one bone a row), `thumb_<s>` the thumb from its root at the
+     wrist and `thumb_02_<s>` its last joint. Six new optional `biped` bones
+     (`rules::BIPED_OPTIONAL`); a forged champion has at most 120, the cap;
+   - each of those bones lies across its row: local X is the hinge, Z the back of the hand, so
+     a negative turn about X closes it, on both sides;
+   - the four fingers are brought side by side at rest (a fifth of their spread stays) and slid
+     so each row of joints is straight: fingers that share a hinge only close into a fist if
+     they lie alongside each other;
+   - every digit is weighted by where it lies along its joints, the ball of the thumb with the
+     thumb, two bones a vertex. What is worn on the hands is weighted the same way
+     (`hands.glove`), and the gauntlets, which are the hand's own surface, take all of it and
+     hide the hand under them.
+2. *The weapons lay along the hand.* The official champions' weapons run out of the wrist like
+   a sixth finger, and their clips aim them by turning the hand (14 §3.3's pass then keys the
+   prop bone to hold the weapon where it was aimed). A held item with `grasp_radius` rides the
+   **prop bone** now, not the hand, and the forge re-poses every clip (`mftr_forge::grip`):
+   - **the weapon keeps its line**: the point the fist holds and the haft's direction, each
+     frame, are the clip's;
+   - **the fist closes on it**: the haft lies against the palm in the crook of the fingers,
+     each phalanx tangent to it (the turn at a joint is twice the angle its tangent length
+     subtends, so a thinner haft is wrapped tighter), the thumb round the other way, found by a
+     small search; the knuckles lead an edge;
+   - **the arm comes to the hand**: two freedoms are left, where round the haft the palm sits
+     and how far the haft tilts across the palm (a hammer's grip to a sabre's, 0 to 38°). Each
+     frame takes the pair that bends the wrist least (a bend past 26° and a turn past 75° cost;
+     so does stretching the arm), the elbow re-solved to reach it, bent the way the clip bent
+     it; the choice is the cheapest path through the whole clip, so the hand never jumps, and
+     a loop is walked twice so its ends meet;
+   - the arm's bones are turned by its joints, not by the clip's own twists: each lies along
+     its bone with the elbow's hinge across the plane the arm folds in, and the forearm takes
+     half of the wrist's turn;
+   - **a second hand** closes on a haft too, wherever the clip brings its palm within 7.5 cm of
+     it along the item's `grasp_span` (Rook's left on the maul), easing in from 15 cm;
+   - **free hands relax**: every joint a little bent; a clip's mitten curl becomes a curl of
+     every joint, to a closed fist.
+3. *The off-hand items had nothing to hold.* The orb has a stem and the lantern a leather grip,
+   both gripped in the fist and carried upright whatever the hand does (`grasp_upright`). A
+   shield stays strapped to the forearm (`grasp_strap`): the fit gives it a grip bar on two
+   posts where the closed fist is, moves it off the back of the hand if it lay through it, and
+   the forge closes the fist and holds the wrist straight.
+
+What the look found on the way:
+- The staff's diagonal carry was the rig step's doing, not the clips': placing the knuckle bone
+  dragged the hand bone's tail (a connected child), which turned every weapon's frame 41°. The
+  finger, thumb and prop bones are cut loose from the hand before they move.
+- The official staves are held a third of the way down, the head past the fingers: the new
+  staff's origin was already there.
+- Vesper's bow hangs on her hand itself, not the prop bone (its bones are the hand's children):
+  `grasp_on_hand` takes its line from the clip's hand.
+- The maul's and the great axe's hafts were 7.6 cm through, more than a hand closes on: 5.6 cm.
+
+Checked in captures (idle and mid-attack, four sides of each hand): Rook's maul in both hands,
+bare and gauntleted; Shade's dagger; Lumen's staff; Vesper's bow hand at rest and at the full
+draw. The sword, hammer, spear and great axe were checked at body distance, the two shields,
+the orb and the lantern at rest only. `grip`'s tests hold the fists closed through the clips,
+the second hand on the maul, and the wrist's turn under 2.2 rad through Shade's and Rook's
+attacks (it reached 3.0 before the arm was turned by its joints).
+
+**Arms, the bow and the shields** (fourth pass, 2026-11-16; the owner's look at the third:
+Rook's and Lumen's arms went through their bodies, the bowstring didn't come back to the draw
+hand, the shields floated off their grips, and Vesper's string hand):
+
+1. *Arms out of the trunk.* The clips were made on the hand-made champions' bodies; a creator
+   body is broader, and Lumen's robe wider still, so an arm the clip lays across the chest goes
+   into it (Lumen's free hand 14 cm deep in her robe at rest, Rook's forearm in his chest
+   through his swings). `grip` now reads the trunk off the skin: the body's and what is worn
+   on it (not what swings on springs: a cloak, a skirt's flaps), weighted to the pelvis and the
+   spine, cut in four slices round each of those bones, each slice an ellipse; the arms'
+   thickness from their own skin.
+   - The grip solver keeps a held arm out of it: for each pose it tries, the elbow may swing
+     out round the line from shoulder to wrist (up to 54°), and what still goes in costs.
+   - Then every arm, held or free, gets a last pass: where it still goes in, its elbow swings
+     (up to 97°) and its wrist is pushed clear (up to 20 cm), the hand turned as it was. Two
+     hands on one haft go together, the haft with them (Lumen's idle holds her staff in both
+     hands in front of her chest now, where the clip had the left hand inside her).
+   - The change is held a few frames either side of where it is needed and faded, as the
+     elbow's and the wrist's places (smoothing the swing angles mixed poses that didn't fit),
+     and the pass is run twice.
+   An arm touching the trunk is allowed (1.2 cm); a hand meant to rest on it (on the chest, at
+   the chin at the full draw) still does.
+2. *The bow keeps its roll.* Vesper's bow hangs on her hand's prop bone, so the solver's free
+   choice of where round the grip the palm sits turned the whole bow, the string's draw point
+   with it. A bow (`grasp_on_hand`) now keeps the clip's roll: its back to the mark, the palm a
+   step either way of it at most.
+3. *The string comes to the fingers.* Wherever the clip draws the string (its nock more than
+   1 cm off its rest, wholly from 5 cm), the string's two halves are turned and stretched so
+   the nock is in the draw hand's fingers: in the crease of their last joints, on the palm side.
+4. *The string hand hooks.* As far as the string is drawn, that hand's fingers take a
+   bowstring hook (the knuckles nearly straight, the last two joints curled round the string)
+   and the thumb tucks in.
+5. *The shields are on their grips.* The shield had been put where the official clips carry
+   it and its grip bar where the fist was, the posts out along the back of the hand; the face
+   was tilted from that, so the posts stopped short and the fist hung at its lower edge. The
+   fit now finds the shield's plane (the way its body is thinnest), slides it in that plane
+   till the fist is behind its middle (the boss: a centre grip), on the back of the hand's
+   side, its back 5.5 cm from the fist's middle (a gauntlet's knuckles clear it), and runs the
+   posts from the bar's ends to the back they hit. The forge holds the strapped hand on the
+   forearm after the trunk pass too.
+
+`grip`'s tests: the arms keep out of the trunk through Lumen's and Rook's idles and attacks
+(under 8 cm at the deepest, from 14), and the string is in the fingers wherever the attack has
+it drawn.
+
+**Every clip, every champion** (fifth pass, 2026-11-17; the owner: make sure the spells and
+emotes are good). Measured through every clip of all ten champions, the trunk pass had left
+the library's `whirlwind` through the shoulders on every build (31 cm), Rook's second fidget in
+his chest (21 cm), and some thirty spells, emotes and attacks 8–20 cm in. Four causes:
+
+1. *Arms keyed sparser than the body.* The pass keyed an arm at the arm's own keys; the
+   whirlwind's arm is keyed every other frame, its spine every frame, so between two arm keys
+   the body had turned 60° on and the arm, eased between its two poses, went through it. The
+   pass keys every frame at least.
+2. *Moves carried round a turning body.* The fix found at one frame was held and faded into
+   its neighbours in the world's frame; a body turning fast took the arm round while the move
+   stayed put. The moves are the chest's now (in its frame), and a frame whose smoothed move
+   would put the arm in where its own move doesn't takes its own.
+3. *A second hand off the haft.* A second hand moved only as far as it followed the haft's
+   push; let go of the haft (Rook's fidget), it couldn't move at all. It pushes itself clear for
+   what it doesn't follow.
+4. *Only level pushes.* The wrist was pushed only round the level: an arm over the shoulders
+   needs up, one across the belly down. The pushes go up and down too (45° and straight), as
+   far as 35 cm.
+
+The neck and the head are the trunk's now too, for the arm (the hand and the wrist may touch
+them: a hand at the chin, at the full draw), and what a hand holds keeps out of the head (Rook's
+maul went through it in his overhead windup), measured on the held item's own skin: a weapon
+may rest on a shoulder, by the neck.
+
+`grip`'s tests: through every clip of all ten champions, an arm is under 6 cm into the trunk
+(4.4 at the deepest) and a held item under 7 cm into the head (6.3, a maul on the shoulder by the
+neck).
+
+**Left:**
+- Weight classes picking the clips.
+- A held weapon may pass through hair (not part of the head the pass keeps out of: Rook's maul
+  through the back of his hair in his overhead windup).
+- The hand-made champions keep their mitten hands: this is the creator bases' (and so every
+  rebuilt champion's).
+- The old block-out `offhand.bow` stays in the catalog for recipes that name it: the forge
+  refuses an outfit id it doesn't know.
+- The owner's look at the arms, the bow and the shields, and at the spells and emotes.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

@@ -224,6 +224,10 @@ def build_base(gender, name, build="humanoid_slim"):
             body = mesh.build_mannequin(armature, name=name, part_list=parts + [head_part])
         else:
             body = _cc0_body(armature, name, gender, build, head_part)
+            # Finger joints, and every digit weighted to them: hands that close on a haft
+            # (22 §4.7).
+            from . import hands as hand_rig
+            hand_rig.rig(armature, body)
     finally:
         head.DEFAULT_DETAIL = 1
     face_rig.weight(armature, body, h, piv)

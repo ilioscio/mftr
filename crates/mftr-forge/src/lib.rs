@@ -16,6 +16,7 @@ pub mod body;
 pub mod brows;
 pub mod eyes;
 pub mod face;
+pub mod grip;
 pub mod image;
 pub mod libmoves;
 pub mod looks;
@@ -67,6 +68,9 @@ pub struct Part {
     /// of a worn one of an earlier layer (22 §4.3).
     #[nserde(default)]
     pub layer: String,
+    /// A held item gripped in a fist (22 §4.7): how, for the grip pass (`grip::apply`).
+    #[nserde(default)]
+    pub grasp: Option<grip::Grasp>,
 }
 
 #[derive(Clone, Debug, nanoserde::DeRon)]
@@ -290,6 +294,23 @@ impl Catalog {
             sounds.extend(own);
             (side, Some(moves::effects(&m, &self.packs, looks.signature)), sounds)
         };
+        if base.library.clips.is_empty() {
+            // Hands close on what they hold, in every clip; free hands relax (22 §4.7).
+            let held: Vec<&grip::Grasp> = self
+                .parts(&key)
+                .iter()
+                .filter(|p| looks.outfit.contains(&p.id))
+                .filter_map(|p| p.grasp.as_ref())
+                .collect();
+            // What is worn on the trunk, which the arms keep out of too.
+            let worn: Vec<usize> =
+                looks.outfit.iter().filter_map(|id| model.node_by_name(&format!("part.{id}"))).collect();
+            grip::apply(&mut model, &held, &worn, &|name| match clips.iter().find(|c| c.name == name) {
+                Some(c) if c.layer == "additive" => grip::Kind::Additive,
+                Some(c) => grip::Kind::Pose { looping: c.looping },
+                None => grip::Kind::Pose { looping: false },
+            });
+        }
         // The face last (21 §2.3): clips were retargeted from the bones' unsculpted rest. The
         // face sliders add their presets to the recipe's own face (21 §2.7).
         if model.node_by_name("face_forehead").is_some()
@@ -474,7 +495,9 @@ fn dress(model: &mut Model, catalog: &[Part], outfit: &[String]) -> Result<(), S
     };
     let mut order: Vec<&Part> = worn.clone();
     order.sort_by_key(|p| (p.slot == "hair" || p.slot == "beard", wardrobe::LAYERS.iter().position(|l| *l == p.layer)));
-    let mut total: usize = worn.iter().map(|p| chain_bones(model, &p.id)).sum();
+    // Every extra bone the outfit uses counts, a held item's own too (a bow's limbs and string,
+    // named as its champion's: they don't fold, the garments do).
+    let mut total = prune_chains(model);
     for p in order {
         if total <= mftr_pack::rules::EXTRA_BONES_MAX {
             break;
@@ -2275,5 +2298,22 @@ mod tests {
         let b = c.forge("A", &l).unwrap();
         let flat = |m: &Model| m.meshes.iter().flatten().flat_map(|p| p.positions.clone()).collect::<Vec<_>>();
         assert_eq!(flat(&a.model), flat(&b.model));
+    }
+
+    #[test]
+    fn the_ranger_bow_draws_with_vespers_shots() {
+        // BW7: the bow brings the hand-made Vesper's bow bones, and her attack's baked draw
+        // plays on them (by name), so the string comes back to her fingers.
+        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/neo");
+        let r =
+            recipe::Recipe::from_text(&std::fs::read_to_string(art.join("vesper-neo.champion.ron")).unwrap()).unwrap();
+        let m = catalog().forge(&r.name, &r.looks).unwrap().model;
+        for b in ["extra_bow_1", "extra_bow_2", "extra_bow_3", "extra_bow_4", "extra_string_1", "extra_string_2"] {
+            let node = m.node_by_name(b).unwrap_or_else(|| panic!("no {b}"));
+            assert!(m.skins[0].contains(&node), "{b} isn't in the skin");
+        }
+        let string = m.node_by_name("extra_string_1").unwrap();
+        let attack = m.animations.iter().find(|a| a.name == "attack_1").expect("an attack_1 clip");
+        assert!(attack.channels.iter().any(|c| c.node == string), "the attack doesn't draw the string");
     }
 }

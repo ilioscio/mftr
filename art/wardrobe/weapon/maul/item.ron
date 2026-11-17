@@ -1,0 +1,24 @@
+// A wardrobe item (22 §4.7, BW7): held, modelled by build.py in its grip frame.
+(
+    id: "weapon.maul",
+    slot: "weapon",
+    name: "Maul",
+    accent: false,
+    rigid: true,
+    // Its weapon class and weight class (22 §4.7: the weight will pick the clip set).
+    class: "maul",
+    weight: "heavy",
+    // Held along the right hand, where the block-out lay (as Rook's maul and Lumen's staff: the
+    // clips aim it as they aim theirs).
+    grip: "hand_r",
+    grip_at: 0.55,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, 1.0),
+    // Gripped in the fist (22 §4.7): the haft's radius there, where along the item the fist's
+    // middle sits, how far along it a hand may hold, and whether it has an edge to line up (the
+    // knuckles lead it) or is round (the hand may sit any way round it).
+    grasp_radius: 0.028,
+    grasp_at: 0.0,
+    grasp_span: (-0.2, 0.8),
+    grasp_edge: true,
+)

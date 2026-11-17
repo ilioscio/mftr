@@ -1,0 +1,25 @@
+// A wardrobe item (22 §4.7, BW7): a ranger's bow (Vesper's), a tall recurve with teal-glowing
+// tips, modelled by build.py in its grip frame.
+(
+    id: "offhand.ranger_bow",
+    slot: "offhand",
+    name: "Ranger's bow",
+    accent: false,
+    rigid: true,
+    // Held, not worn (`wardrobe._place_grip`): in the left hand as Vesper's own bow, read off her
+    // model (art/champions/vesper: the bow's limbs and back at rest, in hand_l's frame). Her
+    // clips turn the hand so it stands upright at the full draw, its string toward her.
+    grip: "hand_l",
+    grip_at: 0.42,
+    grip_up: (-0.981, 0.007, 0.195),
+    grip_back: (-0.010, -1.0, -0.010),
+    // Gripped in the fist (22 §4.7): the haft's radius there, where along the item the fist's
+    // middle sits, how far along it a hand may hold, and whether it has an edge to line up (the
+    // knuckles lead it) or is round (the hand may sit any way round it).
+    grasp_radius: 0.024,
+    grasp_at: 0.0,
+    grasp_span: (-0.07, 0.07),
+    grasp_edge: true,
+    // Vesper's bow rides her hand itself (its bones hang on it), not the prop bone.
+    grasp_on_hand: true,
+)

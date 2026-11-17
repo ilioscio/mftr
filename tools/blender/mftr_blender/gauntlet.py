@@ -62,7 +62,8 @@ class Hand:
             w = {names[g.group]: g.weight for g in v.groups}
             top = max(w.items(), key=lambda t: t[1], default=("", 0.0))[0]
             owner.append(top)
-        pick = {f"hand_{side}", f"fingers_{side}", f"thumb_{side}"}
+        # Every bone of the hand: a creator base's fingers have three joints (`hands`).
+        pick = {f"{b}_{side}" for b in ("hand", "fingers", "fingers_02", "fingers_03", "thumb", "thumb_02")}
         self.verts = {i: self.to_local(v.co) for i, v in enumerate(me.vertices) if owner[i] in pick}
         # The forearm near the wrist, for the cuff.
         self.forearm = [self.to_local(v.co) for i, v in enumerate(me.vertices) if owner[i] == f"forearm_{side}"]
@@ -604,5 +605,9 @@ def game_part(armature, body, pid="arms.gauntlets"):
     mod.object = armature
     body_rig.transfer(body, obj)
     n = parts.transfer_shape_keys(body, obj)
-    return (pid, "arms", "Gauntlets", [], False, mesh.triangle_count(obj), n,
+    # The glove is the hand's whole surface: the hands under it go (fingers side by side would
+    # show through each other's glove where they close).
+    hides = [f"{b}_{s}" for s in "lr" for b in ("hand", "fingers", "fingers_02", "fingers_03", "thumb", "thumb_02")
+             if f"{b}_{s}" in armature.data.bones]
+    return (pid, "arms", "Gauntlets", hides, False, mesh.triangle_count(obj), n,
             {"covers": True, "rigid": True, "layer": "armor"})

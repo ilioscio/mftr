@@ -91,7 +91,17 @@ pub const BIPED_DEFORM: &[&str] = &[
 pub const BIPED_OTHER: &[&str] = &["root", "prop_l", "prop_r"];
 pub const SOCKETS: &[&str] =
     &["socket_projectile", "socket_weapon_tip", "socket_cast", "socket_chest", "socket_overhead"];
-pub const BIPED_OPTIONAL: &[&str] = &["jaw", "smear"];
+pub const BIPED_OPTIONAL: &[&str] = &[
+    "jaw",
+    "smear",
+    // Finger joints (22 §4.7): the creator bases' hands close on what they hold.
+    "fingers_02_l",
+    "fingers_03_l",
+    "thumb_02_l",
+    "fingers_02_r",
+    "fingers_03_r",
+    "thumb_02_r",
+];
 
 /// Every name a `biped` skeleton may use: the standard bones, `extra_<chain>_<n>` chains.
 pub fn biped_bone_allowed(name: &str) -> bool {
