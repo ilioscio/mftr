@@ -1585,6 +1585,56 @@ bytes, or the catalog split out of the bases) stays open for later.
   the skirt…): their looks change a little, for the owner to see.
 - The owner's look.
 
+### Shade in the wardrobe (2026-11-17): the fourth official champion rebuilt
+
+Shade-neo (and the `shade` recipe) now wears new-system items only: eleven new ones, after his
+concept (`art/champions/shade/concept.md`) and the hand-made Shade. A tall indigo hood sweeping back
+into a point over a black mask with burning violet eyes, a violet scarf with two tails down the
+back, an indigo jerkin, a spiked steel guard on the right shoulder only, wrapped forearms, a
+team-colored belt with kunai strapped to the thighs, black leggings into wrapped boots, and a
+curved blade in each hand held forward. 11,483 triangles in the creator, no paint.
+
+| Item | How | Like the hand-made Shade |
+|---|---|---|
+| `head.shadow_hood` | plates round the slim masculine head on the head bone, as the circlet is: a roomy hood closed under the chin, a violet rim at the face, rings narrowing up and back to the point | his tall pointed hood |
+| `face.shadow_mask` | plates round the slim masculine face on the head bone: a smooth black mask, brow to chin, two violet slits at the eyes, their outer corners raised | his mask and violet eyes |
+| `torso.shadow_jerkin` | sewn: the veteran's gambeson's pattern cut lean and short, thin indigo cloth, bound in black | his indigo torso |
+| `shoulders.shadow_guard` | plates: a dark steel dome on the right shoulder over one lame, three spikes up and back; a strap across the chest and back | his right shoulder's spiked guard |
+| `arms.shadow_wraps` | plates: wraps round each forearm between black bands, a dark steel plate on the outside | his wrapped forearms and their guards |
+| `waist.shadow_belt` | plates: black leather over a band of the team's color; a strap round each thigh with three kunai, points down | the accent band, the thigh kunai |
+| `back.shadow_scarf` | plates: a roll of violet cloth round the base of the neck, two tails laid down the back; a chain down each | his streaming scarf |
+| `legs.shadow_leggings` | sewn: the wool trousers' pattern narrow down the leg, black, to the middle of the calf | his black legs |
+| `feet.shadow_boots` | plates: the priestess's boots' build in black, wraps across the foot, shafts wound to the middle of the calf | his wrapped calves |
+| `weapon.shadow_blade`, `offhand.shadow_blade` | modelled in the dagger's grip frame: a long blade sweeping out past the knuckles over a guard, its outer edge violet; the left mirrors the right | his two forward hand blades |
+
+**What it took:**
+- **Two held items.** Shade's moves now equip both blades: `moves::weapon` names a champion's
+  weapon parts (none, one or two), and the creator puts all of them on when his attack is picked.
+- **Head items from plates.** The hood and the mask are cast from the skull's middle in its own
+  frame, row by row of rays by elevation, and worn on the head bone with `grip_scale`; the hair
+  hides under the hood (§7 item 5).
+- **Closed pieces in plates.** A spike or a kunai is already a closed shape: `plates.finish` takes
+  `thickness=None` to turn its faces out on their own instead of thickening it (that doubled the
+  kunai).
+- **A scarf that isn't sewn.** Sewn, the neck loop settled where the sim left it, and on the slim
+  and heavy bases the neck came through it (29 to 83 skin points, the limit 12) however it was
+  cut. Lathed from rays between the shoulders and the chin, standing off the neck by a set
+  distance and dipping in front under the jaw, it passes on all four; its tails are ribbons.
+- **The harness, item by item.** The guard's strap stands 34 mm off the chest (nearer, the slim
+  masculine armpit came through its end); the leggings have a deeper crotch than the trousers'
+  pattern (the heavy masculine base came through it); the jerkin's armholes are roomier than the
+  gambeson's and its neck is scooped in front (the heavy feminine throat). Sewing is a sim: each
+  re-cut drapes a little differently, so each change was checked on every base again.
+
+**The bases' size.** With Shade's items, 4.32–4.38 MB, under the 7 MiB cap.
+
+**Left:**
+- Seen in creator captures at rest only, not in a match or in motion: the blades' frame (the
+  dagger's) not yet seen through his slashes, the scarf's tails not yet seen swinging.
+- The spare blades crossed on his back (the back slot is the scarf's).
+- The jerkin shows its sim's facets; the scarf's tails are flat ribbons, not draped.
+- The owner's look.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

@@ -91,16 +91,16 @@ pub fn library() -> Vec<(String, String)> {
     out
 }
 
-/// The weapon class a champion's moves are animated with (20 §7.3), and the catalog part that
-/// carries it ("" for none: fists, or a crossbow the catalog lacks yet).
-pub fn weapon(champion: ChampionId) -> (&'static str, &'static str) {
+/// The weapon class a champion's moves are animated with (20 §7.3), and the catalog parts that
+/// carry it (none: fists, or a crossbow the catalog lacks yet; two: a blade in each hand).
+pub fn weapon(champion: ChampionId) -> (&'static str, &'static [&'static str]) {
     match champion {
-        ChampionId::Vesper => ("bow", "offhand.ranger_bow"),
-        ChampionId::Rook => ("heavy", "weapon.maul"),
-        ChampionId::Shade => ("blades", "weapon.dagger"),
-        ChampionId::Lumen | ChampionId::Quill | ChampionId::Cairn | ChampionId::Marrow => ("staff", "weapon.staff"),
-        ChampionId::Wren => ("crossbow", ""),
-        _ => ("unarmed", ""),
+        ChampionId::Vesper => ("bow", &["offhand.ranger_bow"]),
+        ChampionId::Rook => ("heavy", &["weapon.maul"]),
+        ChampionId::Shade => ("blades", &["weapon.shadow_blade", "offhand.shadow_blade"]),
+        ChampionId::Lumen | ChampionId::Quill | ChampionId::Cairn | ChampionId::Marrow => ("staff", &["weapon.staff"]),
+        ChampionId::Wren => ("crossbow", &[]),
+        _ => ("unarmed", &[]),
     }
 }
 

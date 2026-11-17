@@ -1,0 +1,17 @@
+// A wardrobe item (22 §4): a shadow hood (Shade's), modelled by build.py: a tall indigo hood, close
+// round the head and closed under the chin, open at the face with a violet rim, sweeping up and back
+// into a point. Worn on the head bone, rigid, scaled to each base's head (`grip_scale`: the slim
+// masculine head bone it was fitted on); the hair hides under it.
+(
+    id: "head.shadow_hood",
+    slot: "head",
+    name: "Shadow hood",
+    layer: "over",
+    accent: false,
+    rigid: true,
+    grip: "head",
+    grip_at: 0.0,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, -1.0),
+    grip_scale: 0.2352,
+)

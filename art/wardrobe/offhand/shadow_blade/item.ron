@@ -1,0 +1,23 @@
+// A wardrobe item (22 §4.7, BW7): Shade's left-hand blade, held, modelled by build.py in its grip
+// frame: a long curved blade held forward past the knuckles, punch-dagger style, its outer edge
+// burning violet. The right hand's, mirrored (`weapon.shadow_blade`).
+(
+    id: "offhand.shadow_blade",
+    slot: "offhand",
+    name: "Shadow blade",
+    accent: false,
+    rigid: true,
+    // Its weapon class and weight class (22 §4.7: the weight will pick the clip set).
+    class: "dagger",
+    weight: "light",
+    // Held along the left hand as the dagger is, so Shade's clips aim it as they aim theirs.
+    grip: "hand_l",
+    grip_at: 0.55,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, 1.0),
+    // Gripped in the fist (22 §4.7), its blade's edge led by the knuckles.
+    grasp_radius: 0.015,
+    grasp_at: -0.025,
+    grasp_span: (-0.06, 0.0),
+    grasp_edge: true,
+)

@@ -228,14 +228,18 @@ def strip(bm, faces, d, phis, t0, t1, rows, color, k=1.0):
 def finish(bm, faces, inside, thickness, name="plates"):
     """The faces as a mesh object: each turned out from `inside(centre)` (a point under it),
     split where colors meet (vertex colors are per vertex), on its slot, given `thickness`
-    inward with rims. Frees `bm`."""
+    inward with rims. `thickness` None: the faces are closed pieces already (a kunai, a spike),
+    turned out each on its own and not thickened. Frees `bm`."""
     from . import mesh
     # Points no face was made on (a sandal's left-out faces').
     bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
-    for f in faces:
-        c = f.calc_center_median()
-        if f.normal.dot(c - inside(c)) < 0:
-            f.normal_flip()
+    if thickness is None:
+        bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+    else:
+        for f in faces:
+            c = f.calc_center_median()
+            if f.normal.dot(c - inside(c)) < 0:
+                f.normal_flip()
     slots = mesh.MATERIAL_SLOTS
     for f, (_color, slot) in faces.items():
         f.material_index = slots.index(slot)
@@ -254,6 +258,8 @@ def finish(bm, faces, inside, thickness, name="plates"):
     obj = bpy.data.objects.new(name, me)
     bpy.context.scene.collection.objects.link(obj)
     me.color_attributes.active_color = me.color_attributes["Col"]
+    if thickness is None:
+        return obj
     sol = obj.modifiers.new("Solidify", "SOLIDIFY")
     sol.thickness = thickness
     sol.offset = -1.0
