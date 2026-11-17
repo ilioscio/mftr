@@ -20,7 +20,8 @@
 //!
 //! - **The arms keep out of the trunk.** A creator body is broader than the one a clip was made
 //!   on: an arm the clip lays across the chest is swung and pushed clear of it (`Trunk`), two
-//!   hands on one haft together.
+//!   hands on one haft together. The neck and the head are the trunk's too, for the arm, and
+//!   what a hand holds keeps out of the head.
 //! - **A drawn bow** keeps its roll, and its string comes back to the fingers that hook it.
 //!
 //! Free hands relax: the clips' mitten curl becomes a curl of every joint.
@@ -238,8 +239,10 @@ fn rest_world(model: &Model, node: usize) -> (V, Q) {
 }
 
 /// The trunk's bones, and where an arm's bones stop being trunk.
-const TRUNK: [&str; 4] = ["pelvis", "spine_01", "spine_02", "chest"];
-const LIMBS: [&str; 7] = ["clavicle_l", "clavicle_r", "neck", "head", "thigh_l", "thigh_r", "root"];
+const TRUNK: [&str; 6] = ["pelvis", "spine_01", "spine_02", "chest", "neck", "head"];
+/// Of those, what a hand may touch (a chin, a cheek at the full draw) but an arm keeps out of.
+const HEAD: [&str; 2] = ["neck", "head"];
+const LIMBS: [&str; 5] = ["clavicle_l", "clavicle_r", "thigh_l", "thigh_r", "root"];
 /// Each trunk bone's skin in this many slices along it.
 const SLICES: usize = 4;
 
@@ -258,6 +261,8 @@ struct Slice {
 /// round the spine's bones. An arm whose solved pose would pass through it is turned out.
 struct Trunk {
     bones: Vec<(usize, Vec<Slice>)>,
+    /// Per bone: the neck or the head (a hand may touch it).
+    head: Vec<bool>,
     /// The arm's half-thickness, upper and fore, per side (l, r).
     arm: [[f32; 2]; 2],
 }
@@ -367,8 +372,9 @@ impl Trunk {
                 .collect();
             bones.push((b, slices));
         }
+        let head = bones.iter().map(|(b, _)| HEAD.contains(&model.nodes[*b].name.as_str())).collect();
         let arm = arm.map(|s| s.map(|mut v| if v.is_empty() { 0.04 } else { quantile(&mut v, 0.4) }));
-        Trunk { bones, arm }
+        Trunk { bones, head, arm }
     }
 
     /// The trunk bones' world places in a frame.
@@ -378,8 +384,21 @@ impl Trunk {
 
     /// How deep a ball (`p`, radius `r`) is in the trunk (m), the trunk's bones at `at`.
     fn depth(&self, at: &[(V, Q)], p: V, r: f32) -> f32 {
+        self.depth_in(at, p, r, |_| true)
+    }
+
+    /// How deep a ball is in the neck or the head alone (m): what a haft keeps out of.
+    fn head_depth(&self, at: &[(V, Q)], p: V, r: f32) -> f32 {
+        self.depth_in(at, p, r, |head| head)
+    }
+
+    /// As `depth`, in the bones `keep` keeps (it's told whether a bone is the neck or the head).
+    fn depth_in(&self, at: &[(V, Q)], p: V, r: f32, keep: impl Fn(bool) -> bool) -> f32 {
         let mut deepest = 0.0f32;
-        for ((_, slices), (t, q)) in self.bones.iter().zip(at) {
+        for (((_, slices), (t, q)), &head) in self.bones.iter().zip(at).zip(&self.head) {
+            if !keep(head) {
+                continue;
+            }
             let l = rotate(qinv(*q), sub(p, *t));
             for s in slices {
                 if l[1] < s.y0 - r * 0.5 || l[1] > s.y1 + r * 0.5 {
@@ -396,7 +415,8 @@ impl Trunk {
     }
 
     /// How far an arm (shoulder, elbow, wrist; the hand's middle) is in the trunk: the deepest
-    /// of points along it, past the shoulder's own joint.
+    /// of points along it, past the shoulder's own joint. The hand and the wrist may touch the
+    /// head (a hand at the chin), the rest of the arm keeps out of it.
     fn arm_depth(&self, at: &[(V, Q)], side: usize, shoulder: V, elbow: V, wrist: V, hand: V) -> f32 {
         let [ru, rf] = self.arm[side];
         let mut d = 0.0f32;
@@ -404,9 +424,9 @@ impl Trunk {
             d = d.max(self.depth(at, add(shoulder, mul(sub(elbow, shoulder), u)), ru));
         }
         for u in [0.33, 0.66, 1.0] {
-            d = d.max(self.depth(at, add(elbow, mul(sub(wrist, elbow), u)), rf));
+            d = d.max(self.depth_in(at, add(elbow, mul(sub(wrist, elbow), u)), rf, |head| !head || u < 0.9));
         }
-        d.max(self.depth(at, hand, rf))
+        d.max(self.depth_in(at, hand, rf, |head| !head))
     }
 }
 
@@ -810,7 +830,7 @@ impl Solver<'_> {
     }
 }
 
-/// The times a clip is re-keyed at: its arm's own keys if it has them, else 30 a second.
+/// The times a clip is re-keyed at: 30 a second, or its arm's own keys if they're denser.
 fn times(a: &Animation, nodes: &[usize]) -> Vec<f32> {
     let dense = a
         .channels
@@ -820,10 +840,12 @@ fn times(a: &Animation, nodes: &[usize]) -> Vec<f32> {
         .map(|c| c.times.clone())
         .unwrap_or_default();
     let end = a.channels.iter().filter_map(|c| c.times.last().copied()).fold(0.0f32, f32::max);
-    if dense.len() >= 2 && (dense.len() as f32) >= end * 20.0 {
+    // Every frame at least: an arm keyed sparser than the body it hangs from (a whirlwind's
+    // spine keyed each frame, its arms each other) swings through the body between its keys.
+    let n = (end * 30.0).round().max(1.0) as usize;
+    if dense.len() > n + 1 {
         return dense;
     }
-    let n = (end * 30.0).round().max(1.0) as usize;
     (0..=n).map(|i| i as f32 / 30.0).collect()
 }
 
@@ -903,12 +925,36 @@ fn elbow_for(h: &Hand, shoulder: V, wrist: V, pole: V, phi: f32) -> (V, V) {
 }
 
 /// How far the wrist may be pushed out of the trunk (m), and what that costs (per m²).
-const PUSHES: [f32; 7] = [0.0, 0.02, 0.04, 0.07, 0.1, 0.14, 0.2];
+const PUSHES: [f32; 9] = [0.0, 0.02, 0.04, 0.07, 0.1, 0.14, 0.2, 0.27, 0.35];
 /// The elbow's swings the trunk pass tries (rad): further than the grip solver's.
 const SWINGS: [f32; 11] = [0.0, -0.3, 0.3, -0.6, 0.6, -0.95, 0.95, -1.3, 1.3, -1.7, 1.7];
 const PUSH_COST: f32 = 30.0;
+/// A held item is kept out of the head at this many of its points.
+const HELD_POINTS: usize = 48;
 /// Frames either side a push holds and fades over.
 const PUSH_HOLD: i32 = 3;
+
+/// What rides `prop` of the `worn` meshes (a held item's skin), as points on the bone at rest:
+/// at most `HELD_POINTS`, spread over it.
+fn held_points(model: &Model, worn: &[usize], prop: usize) -> Vec<V> {
+    let mut points = Vec::new();
+    let (t, q) = rest_world(model, prop);
+    for &i in worn {
+        let n = &model.nodes[i];
+        let (Some(mesh), Some(skin)) = (n.mesh, n.skin) else { continue };
+        for prim in &model.meshes[mesh] {
+            for (k, p) in prim.positions.iter().enumerate() {
+                let (Some(j), Some(w)) = (prim.joints.get(k), prim.weights.get(k)) else { continue };
+                let top = (0..4).max_by(|a, b| w[*a].total_cmp(&w[*b])).unwrap_or(0);
+                if model.skins[skin].get(j[top] as usize) == Some(&prop) {
+                    points.push(rotate(qinv(q), sub(*p, t)));
+                }
+            }
+        }
+    }
+    let step = points.len().div_ceil(HELD_POINTS).max(1);
+    points.into_iter().step_by(step).collect()
+}
 
 /// An arm the trunk pass moves: its hand, its side, and how far it follows the group's push,
 /// frame by frame (a second hand on a haft goes where the haft goes, as far as it holds it).
@@ -916,6 +962,25 @@ struct Mover<'a> {
     h: &'a Hand,
     side: usize,
     follow: Vec<f32>,
+    /// What the hand holds, frame by frame: points of it from the wrist (the hand keeps its
+    /// turn, so they move with the wrist). It keeps out of the head.
+    haft: Option<Vec<Vec<V>>>,
+}
+
+impl Mover<'_> {
+    /// How deep the arm, and what it holds, are in the trunk at frame `i` (the haft in the
+    /// head only: a maul may rest on a shoulder, it doesn't go through a skull). `arm`: the
+    /// shoulder, the elbow, the wrist and the hand's middle.
+    fn depth(&self, trunk: &Trunk, at: &[(V, Q)], i: usize, arm: (V, V, V, V)) -> f32 {
+        let (s, e, w, hp) = arm;
+        let mut d = trunk.arm_depth(at, self.side, s, e, w, hp);
+        if let Some(points) = &self.haft {
+            for o in &points[i] {
+                d = d.max(trunk.head_depth(at, add(w, *o), 0.0));
+            }
+        }
+        d
+    }
 }
 
 /// Keep arms out of the trunk through a clip (`tracks`, keyed at `ts`). The arms of a group
@@ -933,7 +998,18 @@ fn clear_arms(
 ) -> Option<Vec<[Vec<Vec<f32>>; 3]>> {
     let n = ts.len();
     let m = group.len();
-    let mut moves: Vec<(V, Vec<f32>)> = vec![([0.0; 3], vec![0.0; m]); n];
+    // Per frame: the group's push, each arm's elbow swing and its own push (for what it doesn't
+    // follow of the group's: a second hand off the haft).
+    let mut moves: Vec<(V, Vec<f32>, Vec<V>)> = vec![([0.0; 3], vec![0.0; m], vec![[0.0; 3]; m]); n];
+    // Round, level and 45° up and down; straight up and down. An arm over the head is cleared
+    // upward, one across the belly down.
+    let mut ways: Vec<V> = vec![[0.0, 1.0, 0.0], [0.0, -1.0, 0.0]];
+    for k in 0..8 {
+        let ang = k as f32 * std::f32::consts::FRAC_PI_4;
+        for y in [0.0f32, 1.0, -1.0] {
+            ways.push(norm([ang.cos(), y, ang.sin()]));
+        }
+    }
     let mut any = false;
     let joints = |mv: &Mover, t: f32| {
         let h = mv.h;
@@ -947,13 +1023,11 @@ fn clear_arms(
     for (i, &t) in ts.iter().enumerate() {
         let at = trunk.at(tracks, model, t);
         let arms: Vec<(V, V, V, V)> = group.iter().map(|mv| joints(mv, t)).collect();
-        if group.iter().zip(&arms).all(|(mv, &(s, e, w, hp))| trunk.arm_depth(&at, mv.side, s, e, w, hp) <= CONTACT) {
+        if group.iter().zip(&arms).all(|(mv, &(s, e, w, hp))| mv.depth(trunk, &at, i, (s, e, w, hp)) <= CONTACT) {
             continue;
         }
         let mut best = (f32::MAX, [0.0; 3], vec![0.0; m]);
-        for k in 0..8 {
-            let ang = k as f32 * std::f32::consts::FRAC_PI_4;
-            let way = [ang.cos(), 0.0, ang.sin()];
+        for (k, &way) in ways.iter().enumerate() {
             for (pi, &amount) in PUSHES.iter().enumerate() {
                 if pi == 0 && k > 0 {
                     continue;
@@ -967,7 +1041,7 @@ fn clear_arms(
                     for phi in SWINGS {
                         let (e2, w2) = elbow_for(mv.h, s, add(w, follow), sub(e, s), phi);
                         let moved = sub(w2, w);
-                        let deep = trunk.arm_depth(&at, mv.side, s, e2, w2, add(hp, moved));
+                        let deep = mv.depth(trunk, &at, i, (s, e2, w2, add(hp, moved)));
                         // Short of reach, the hand comes off what it holds.
                         let off = len(sub(moved, follow));
                         let c = DEEP * (deep - CONTACT).max(0.0).powi(2)
@@ -984,17 +1058,56 @@ fn clear_arms(
                 }
             }
         }
-        moves[i] = (best.1, best.2);
+        // An arm that only partly follows the group pushes itself clear for the rest.
+        let mut owns = vec![[0.0; 3]; m];
+        for (a, (mv, &(s, e, w, hp))) in group.iter().zip(&arms).enumerate() {
+            let f = mv.follow[i];
+            if f > 0.99 {
+                continue;
+            }
+            let follow = mul(best.1, f);
+            let mut arm = (f32::MAX, [0.0; 3], best.2[a]);
+            for (k, &way) in ways.iter().enumerate() {
+                for (pi, &amount) in PUSHES.iter().enumerate() {
+                    if pi == 0 && k > 0 {
+                        continue;
+                    }
+                    let own = mul(way, amount);
+                    let goal = add(follow, mul(own, 1.0 - f));
+                    for phi in SWINGS {
+                        let (e2, w2) = elbow_for(mv.h, s, add(w, goal), sub(e, s), phi);
+                        let moved = sub(w2, w);
+                        let deep = mv.depth(trunk, &at, i, (s, e2, w2, add(hp, moved)));
+                        let off = len(sub(moved, goal));
+                        let c = DEEP * (deep - CONTACT).max(0.0).powi(2)
+                            + SWIVEL_COST * phi * phi
+                            + PUSH_COST * amount * amount
+                            + PUSH_COST * 4.0 * off * off;
+                        if c < arm.0 {
+                            arm = (c, own, phi);
+                        }
+                    }
+                }
+            }
+            owns[a] = arm.1;
+            best.2[a] = arm.2;
+        }
+        moves[i] = (best.1, best.2, owns);
         any = true;
     }
     if !any {
         return None;
     }
     // Held, then faded, as places: the elbows' and the wrists' moves (what the swings and the
-    // push did), the largest near each frame held, then smoothed.
+    // push did), the largest near each frame held, then smoothed. The moves are the chest's
+    // (in its frame): a body turning fast (a whirlwind) takes them round with it, where the
+    // world's would carry one frame's way out into the next frame's way in.
+    let chest = model.node_by_name("chest");
+    let frame_of = |t: f32| chest.map(|c| tracks.world(model, c, t).1).unwrap_or(ID);
     let arm_moves = |i: usize| -> Vec<(V, V)> {
         let t = ts[i];
-        let (push, phis) = &moves[i];
+        let (push, phis, owns) = &moves[i];
+        let to_chest = qinv(frame_of(t));
         group
             .iter()
             .enumerate()
@@ -1005,8 +1118,10 @@ fn clear_arms(
                     tracks.world(model, h.fore, t).0,
                     tracks.world(model, h.hand, t).0,
                 );
-                let (e2, w2) = elbow_for(h, s, add(w, mul(*push, mv.follow[i])), sub(e, s), phis[a]);
-                (sub(e2, e), sub(w2, w))
+                let f = mv.follow[i];
+                let goal = add(mul(*push, f), mul(owns[a], 1.0 - f));
+                let (e2, w2) = elbow_for(h, s, add(w, goal), sub(e, s), phis[a]);
+                (rotate(to_chest, sub(e2, e)), rotate(to_chest, sub(w2, w)))
             })
             .collect()
     };
@@ -1020,6 +1135,30 @@ fn clear_arms(
                 .fold(&raw[at(i)], |a, b| if size(b) > size(a) { b } else { a })
         })
         .collect();
+    // A frame's arms given their moves (in the chest's frame): the elbow, the wrist, and how deep
+    // the group then is.
+    let place = |i: usize, mv_of: &[(V, V)]| -> (Vec<(V, V)>, f32) {
+        let t = ts[i];
+        let q = frame_of(t);
+        let trunk_at = trunk.at(tracks, model, t);
+        let mut deep = 0.0f32;
+        let placed = group
+            .iter()
+            .zip(mv_of)
+            .map(|(mv, (de, dw))| {
+                let h = mv.h;
+                let s = tracks.world(model, h.upper, t).0;
+                let e = tracks.world(model, h.fore, t).0;
+                let w = tracks.world(model, h.hand, t).0;
+                let hp = tracks.world(model, h.prop, t).0;
+                let (de, dw) = (rotate(q, *de), rotate(q, *dw));
+                let (e2, w2) = elbow_for(h, s, add(w, dw), sub(add(e, de), s), 0.0);
+                deep = deep.max(mv.depth(trunk, &trunk_at, i, (s, e2, w2, add(hp, sub(w2, w)))));
+                (e2, w2)
+            })
+            .collect();
+        (placed, deep)
+    };
     let mut out: Vec<[Vec<Vec<f32>>; 3]> = (0..m).map(|_| Default::default()).collect();
     for (i, &t) in ts.iter().enumerate() {
         let mut sm = vec![([0.0; 3], [0.0; 3]); m];
@@ -1031,14 +1170,19 @@ fn clear_arms(
             }
             sum += wgt;
         }
+        let sm: Vec<(V, V)> = sm.iter().map(|(e, w)| (mul(*e, 1.0 / sum), mul(*w, 1.0 / sum))).collect();
+        // The smoothed moves, unless they'd put the arm in where this frame's own move doesn't
+        // (a neighbour's move, where the arm has swung somewhere else).
+        let (smoothed, deep_sm) = place(i, &sm);
+        let (own, deep_own) = place(i, &raw[i]);
+        let placed = if deep_sm <= CONTACT.max(deep_own + 0.01) { smoothed } else { own };
         for (a, mv) in group.iter().enumerate() {
             let h = mv.h;
-            let (de, dw) = (mul(sm[a].0, 1.0 / sum), mul(sm[a].1, 1.0 / sum));
             let (s, u) = tracks.world(model, h.upper, t);
             let (e, f) = tracks.world(model, h.fore, t);
             let (w, hq) = tracks.world(model, h.hand, t);
             let base = model.nodes[h.upper].parent.map(|p| tracks.world(model, p, t).1).unwrap_or(ID);
-            let (e2, w2) = elbow_for(h, s, add(w, dw), sub(add(e, de), s), 0.0);
+            let (e2, w2) = placed[a];
             let u2 = qmul(between(norm(sub(e, s)), norm(sub(e2, s))), u);
             let f2 = qmul(between(norm(sub(w, e)), norm(sub(w2, e2))), f);
             out[a][0].push(qnorm(qmul(qinv(base), u2)).to_vec());
@@ -1085,6 +1229,7 @@ pub fn apply(model: &mut Model, held: &[&Grasp], worn: &[usize], kind: &dyn Fn(&
         });
     }
     let empty: Vec<Fist> = hands.iter().map(|h| Fist::new(model, h, EMPTY)).collect();
+    let held: Vec<Vec<V>> = hands.iter().map(|h| held_points(model, worn, h.prop)).collect();
     let mut animations = std::mem::take(&mut model.animations);
     for a in &mut animations {
         let Kind::Pose { looping } = kind(&a.name) else { continue };
@@ -1224,15 +1369,35 @@ pub fn apply(model: &mut Model, held: &[&Grasp], worn: &[usize], kind: &dyn Fn(&
         // Arms out of the trunk: what the solver couldn't swing clear, and the free arms.
         // Two hands on one haft go together; every other arm goes alone.
         let second = (0..2).find(|&s| arms[s].is_some() && !items.iter().any(|i| i.side == s));
+        // What the arms carry: its points from each hand's wrist, as solved.
+        let keyed = a.clone();
+        let tracks_keyed = Tracks::new(model, &keyed);
+        let haft = |side: usize| -> Option<Vec<Vec<V>>> {
+            items.iter().find(|i| i.side == side && !i.grasp.strap && !i.grasp.on_hand)?;
+            let h = &hands[side];
+            let points = &held[side];
+            if points.is_empty() {
+                return None;
+            }
+            Some(
+                ts.iter()
+                    .map(|&t| {
+                        let w = tracks_keyed.world(model, h.hand, t).0;
+                        let (p, r) = tracks_keyed.world(model, h.prop, t);
+                        points.iter().map(|o| sub(add(p, rotate(r, *o)), w)).collect()
+                    })
+                    .collect(),
+            )
+        };
         let mut groups: Vec<Vec<Mover>> = Vec::new();
         for side in 0..2 {
             if Some(side) == second {
                 continue;
             }
-            let mut g = vec![Mover { h: &hands[side], side, follow: vec![1.0; ts.len()] }];
+            let mut g = vec![Mover { h: &hands[side], side, follow: vec![1.0; ts.len()], haft: haft(side) }];
             if let Some(s2) = second.filter(|&s2| s2 != side) {
                 let follow = arms[s2].as_ref().map(|v| v.iter().map(|x| x.1).collect()).unwrap_or_default();
-                g.push(Mover { h: &hands[s2], side: s2, follow });
+                g.push(Mover { h: &hands[s2], side: s2, follow, haft: None });
             }
             groups.push(g);
         }
@@ -1428,16 +1593,82 @@ mod tests {
     #[test]
     fn the_arms_keep_out_of_the_trunk() {
         // Lumen's free hand reached into her robe and Rook's swing folded his forearm into his
-        // chest (both a good 14 cm deep): an arm now touches the trunk, at most.
-        for (who, clips) in [("lumen", ["idle", "attack_1"]), ("rook", ["idle", "attack_1"])] {
+        // chest (both a good 14 cm deep); the whirlwind's arm went through the shoulders on every
+        // build (31 cm), Rook's fidget into his chest (21 cm). Through every clip of every
+        // champion, an arm now touches the trunk, at most.
+        let mut worst = Vec::new();
+        for who in ["bastion", "cairn", "ember", "lumen", "marrow", "quill", "rook", "shade", "vesper", "wren"] {
             let m = forged(who);
-            for clip in clips {
+            for a in &m.animations {
                 for side in 0..2 {
-                    let d = deepest(who, &m, clip, side);
-                    assert!(d < 0.08, "{who} {clip}: the {} arm is {d} m into the trunk", ["left", "right"][side]);
+                    let d = deepest(who, &m, &a.name, side);
+                    if d > 0.06 {
+                        worst.push(format!("{who} {} {}: {d:.3} m", a.name, ["l", "r"][side]));
+                    }
                 }
             }
         }
+        assert!(worst.is_empty(), "arms in the trunk: {worst:#?}");
+    }
+
+    /// The deepest what a hand holds goes into the head through a clip (m): the held items'
+    /// skin (what rides a prop bone), sampled 30 times a second.
+    fn held_in_head(who: &str, m: &Model, clip: &str) -> f32 {
+        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art");
+        let text = std::fs::read_to_string(art.join(format!("champions/neo/{who}-neo.champion.ron"))).unwrap();
+        let r = crate::recipe::Recipe::from_text(&text).unwrap();
+        let worn: Vec<usize> = r.looks.outfit.iter().filter_map(|id| m.node_by_name(&format!("part.{id}"))).collect();
+        let trunk = Trunk::read(m, &worn);
+        let props: Vec<usize> = ["prop_l", "prop_r"].iter().filter_map(|n| m.node_by_name(n)).collect();
+        // The held items' points, on their prop bone at rest.
+        let mut held: Vec<(usize, V)> = Vec::new();
+        for &i in &worn {
+            let n = &m.nodes[i];
+            let (Some(mesh), Some(skin)) = (n.mesh, n.skin) else { continue };
+            for prim in &m.meshes[mesh] {
+                for (k, p) in prim.positions.iter().enumerate().step_by(3) {
+                    let (Some(j), Some(w)) = (prim.joints.get(k), prim.weights.get(k)) else { continue };
+                    let top = (0..4).max_by(|a, b| w[*a].total_cmp(&w[*b])).unwrap_or(0);
+                    let Some(&node) = m.skins[skin].get(j[top] as usize) else { continue };
+                    if props.contains(&node) {
+                        let (t, q) = rest_world(m, node);
+                        held.push((node, rotate(qinv(q), sub(*p, t))));
+                    }
+                }
+            }
+        }
+        let a = m.animations.iter().find(|a| a.name == clip).unwrap();
+        let tracks = Tracks::new(m, a);
+        let end = a.channels.iter().filter_map(|c| c.times.last().copied()).fold(0.0f32, f32::max);
+        (0..=(end * 30.0) as usize)
+            .map(|k| {
+                let t = k as f32 / 30.0;
+                let at = trunk.at(&tracks, m, t);
+                held.iter()
+                    .map(|&(node, p)| {
+                        let (pt, pq) = tracks.world(m, node, t);
+                        trunk.head_depth(&at, add(pt, rotate(pq, p)), 0.0)
+                    })
+                    .fold(0.0, f32::max)
+            })
+            .fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn what_a_hand_holds_keeps_out_of_the_head() {
+        // Rook's maul went through his head in his overhead windup (attack_2): a weapon may
+        // brush a jaw or rest by the neck on a shoulder, no more.
+        let mut worst = Vec::new();
+        for who in ["bastion", "cairn", "ember", "lumen", "marrow", "quill", "rook", "shade", "vesper", "wren"] {
+            let m = forged(who);
+            for a in &m.animations {
+                let d = held_in_head(who, &m, &a.name);
+                if d > 0.07 {
+                    worst.push(format!("{who} {}: {d:.3} m", a.name));
+                }
+            }
+        }
+        assert!(worst.is_empty(), "held items in the head: {worst:#?}");
     }
 
     #[test]

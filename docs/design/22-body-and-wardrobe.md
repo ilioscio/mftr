@@ -1406,15 +1406,44 @@ hand, the shields floated off their grips, and Vesper's string hand):
 (under 8 cm at the deepest, from 14), and the string is in the fingers wherever the attack has
 it drawn.
 
+**Every clip, every champion** (fifth pass, 2026-11-17; the owner: make sure the spells and
+emotes are good). Measured through every clip of all ten champions, the trunk pass had left
+the library's `whirlwind` through the shoulders on every build (31 cm), Rook's second fidget in
+his chest (21 cm), and some thirty spells, emotes and attacks 8–20 cm in. Four causes:
+
+1. *Arms keyed sparser than the body.* The pass keyed an arm at the arm's own keys; the
+   whirlwind's arm is keyed every other frame, its spine every frame, so between two arm keys
+   the body had turned 60° on and the arm, eased between its two poses, went through it. The
+   pass keys every frame at least.
+2. *Moves carried round a turning body.* The fix found at one frame was held and faded into
+   its neighbours in the world's frame; a body turning fast took the arm round while the move
+   stayed put. The moves are the chest's now (in its frame), and a frame whose smoothed move
+   would put the arm in where its own move doesn't takes its own.
+3. *A second hand off the haft.* A second hand moved only as far as it followed the haft's
+   push; let go of the haft (Rook's fidget), it couldn't move at all. It pushes itself clear for
+   what it doesn't follow.
+4. *Only level pushes.* The wrist was pushed only round the level: an arm over the shoulders
+   needs up, one across the belly down. The pushes go up and down too (45° and straight), as
+   far as 35 cm.
+
+The neck and the head are the trunk's now too, for the arm (the hand and the wrist may touch
+them: a hand at the chin, at the full draw), and what a hand holds keeps out of the head (Rook's
+maul went through it in his overhead windup), measured on the held item's own skin: a weapon
+may rest on a shoulder, by the neck.
+
+`grip`'s tests: through every clip of all ten champions, an arm is under 6 cm into the trunk
+(4.4 at the deepest) and a held item under 7 cm into the head (6.3, a maul on the shoulder by the
+neck).
+
 **Left:**
 - Weight classes picking the clips.
-- Spells and emotes that cross the arms hard over the chest (Rook's `select`, his fidget, the
-  library's `whirlwind`) still touch or go a little in: the push stops at 20 cm.
+- A held weapon may pass through hair (not part of the head the pass keeps out of: Rook's maul
+  through the back of his hair in his overhead windup).
 - The hand-made champions keep their mitten hands: this is the creator bases' (and so every
   rebuilt champion's).
 - The old block-out `offhand.bow` stays in the catalog for recipes that name it: the forge
   refuses an outfit id it doesn't know.
-- The owner's look at the arms, the bow and the shields.
+- The owner's look at the arms, the bow and the shields, and at the spells and emotes.
 
 ## 7. Open questions for the owner
 
