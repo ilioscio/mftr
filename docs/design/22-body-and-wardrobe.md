@@ -1907,8 +1907,7 @@ stone and bark are a step darker. Two looks moved further:
 - **Cairn's beard** went from near-white to mid grey: repainted with the next lighter grey
   (palette 1) to keep it pale.
 - **Vesper's hair** (palette 27, the darkest orange) went from a strawberry blonde to a copper red.
-  It's left as its swatch says; the brass swatch (59) is the nearest to the old look if the owner
-  wants that back.
+  The owner kept the copper.
 
 Item colors built in Blender are untouched: they were tuned by eye as they render. Glows (the
 signature hue) are untouched too.
