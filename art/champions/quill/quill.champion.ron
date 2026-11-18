@@ -1,5 +1,9 @@
 // Quill as a recipe (20 §12): the official kit, looks on the slim humanoid build.
-// A gangly stargazer: a wide pointed hat, brass goggles, a long navy coat, an orrery staff.
+// A gangly stargazer in the wardrobe's own items (22 §4), in purple: a wide astronomer's hat
+// bending back to a star, brass goggles on its band, a deep purple coat with violet capes and
+// lapels, brass buttons, long star-flecked tails, a belt with a scroll case and a spyglass, tall
+// boots, an orrery staff. A Black woman: deep brown skin (tone 6), tight coils under the hat, a
+// broad nose with a low bridge, full lips, high cheekbones (22 §3.3: a face from the sliders).
 // The kit is a copy of crates/mftr-sim/champions/quill.ron (a test checks they match); the
 // hand-made model in this folder stays what the game shows until the owner prefers this one.
 // Quill: Artillery mage.
@@ -13,12 +17,15 @@ Champion(
     looks: (
         build: "humanoid_slim",
         gender: Feminine,
-        shape: (nose_length: 0.3, face_length: 0.3, eyes_size: 0.2),
+        shape: (face_length: 0.25, head_forehead: 0.35, brow_ridge: -0.1, eyes_size: 0.2, lids_crease: 0.2, cheekbones: 0.45,
+                cheeks_hollow: -0.15, nose_width: 0.6, nose_reach: -0.3, nose_tip: 0.2, nose_hook: -0.2, nose_length: -0.1,
+                mouth_width: 0.25, mouth_lips: 0.35, lips_upper: 0.45, lips_lower: 0.5, lips_bow: 0.35),
         proportions: (height: 0.3, arms: 0.3, legs: 0.2),
-        skin: 0,
-        outfit: ["head.wide_hat", "face.goggles", "torso.coat", "feet.boots", "weapon.staff"],
-        paint: [("head.wide_hat", 0, 45), ("torso.coat", 0, 46)],
-        signature: 240,
+        skin: 6,
+        outfit: ["hair.coils", "head.astronomer_hat", "torso.astral_coat", "shoulders.astral_capes", "waist.astral_belt",
+                 "back.astral_tails", "legs.shadow_leggings", "feet.ranger_boots", "weapon.orrery_staff"],
+        paint: [("hair.coils", 0, 7), ("body", 2, 15)],
+        signature: 255,
         moves: (attack: "quill.attack", q: "quill.q", w: "quill.w", e: "quill.e", r: "quill.r"),
     ),
     name: "Quill",

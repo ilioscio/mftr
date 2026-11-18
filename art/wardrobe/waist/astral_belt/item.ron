@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): an astral belt (Quill's), plates (build.py): brown leather over a coat on
+// a band of the team's color, a square brass buckle, a scroll case at the right hip and a brass
+// spyglass at the left.
+(
+    id: "waist.astral_belt",
+    slot: "waist",
+    name: "Astral belt",
+    layer: "armor",
+    accent: true,
+    rigid: false,
+)

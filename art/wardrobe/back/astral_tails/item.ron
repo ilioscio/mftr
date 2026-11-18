@@ -1,0 +1,16 @@
+// A wardrobe item (22 §4): Quill's coat tails, plates cast from behind onto the body in her coat
+// (build.py): the long deep purple skirts of her coat from under the belt to the shins, widening
+// round the backs of the legs, a vent between them, violet edges, a brass hem, glowing stars above
+// it. A chain down each.
+(
+    id: "back.astral_tails",
+    slot: "back",
+    name: "Astral coat tails",
+    layer: "armor",
+    accent: false,
+    rigid: false,
+    chains: 2,
+    chain_turn: 180,
+    chain_arc: 40,
+    swing: 1.0,
+)
