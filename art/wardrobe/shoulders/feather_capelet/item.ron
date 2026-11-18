@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): a feather capelet (Wren's), plates (build.py): three layers of russet
+// feathers over the shoulders, the middle one darker, each hem cut into feather points, the lowest
+// in a point down the back. Over a tunic: on the armor layer.
+(
+    id: "shoulders.feather_capelet",
+    slot: "shoulders",
+    name: "Feather capelet",
+    layer: "armor",
+    accent: false,
+    rigid: false,
+)

@@ -1822,6 +1822,49 @@ Reviewed in front, three-quarter and profile captures against her old face at th
 - The ancestry presets themselves (§3.3, open question 4): Quill's values are one data point for
   a West African preset, and the presets need reviewers from the communities they depict.
 
+### Wren in the wardrobe (2026-11-18): the ninth official champion, a young Latina
+
+Wren-neo (and the `wren` recipe) is now a young woman of Latin American heritage; the rest of
+the concept stands, a quick, cheeky skirmisher with a bird's look (`art/champions/wren/concept.md`
+still describes the hand-made Wren). She wears five new items over the catalog's ponytail in dark
+brown, Vesper's bracers (their bands painted lime), Shade's leggings in dark brown and Vesper's
+boots. 13,036 triangles in the creator (the cap 14,000; over the 10,000 target).
+
+| Item | How |
+|---|---|
+| `head.feather_crest` | the armory's blades on the slim masculine head, worn on the head bone with `grip_scale`: feathers lying swept back from the crown, lime tips laid over their ends |
+| `shoulders.feather_capelet` | plates: the astral capes' build, three layers, each hem cut into one feather point per two columns (finer points aliased away) |
+| `torso.wren_tunic` | sewn: the ranger's tunic in russet and lime |
+| `waist.feather_belt` | plates: the belt, a fan of closed feather blades at its back, a quiver of bolts at the right hip |
+| `weapon.hand_crossbow` | the armory, in the one-handed weapons' grip frame: the stock along the hand forward from the fist, as the hand-made Wren's lies |
+
+**Her face, from the sliders (§3.3).** Latin American heritage is Indigenous, European and
+African in every mix; she is drawn as one common one, mestiza, and young. Warm brown skin (tone
+4), dark brown eyes (`eyes: (iris: 0)`), full soft brows (`brows: (style: "soft", thick: 7)`),
+dark brown hair. No slider past half its range:
+- **Youth:** larger, more open eyes, a shorter lower face, full cheeks, a soft jaw and chin, a
+  smooth brow.
+- **Nose:** a softly aquiline bridge (`nose_hook` 0.2), a little broad, short.
+- **Mouth:** full lips, the lower fuller.
+
+**A headdress, avoided.** Her first crest stood up round her crown, over a zigzag capelet of
+alternating russet and tan and a fringed tunic: on a brown-skinned woman it read as a stereotyped
+"Native headdress" costume. The crest now lies back like a wren's cap (an ornament in her hair),
+the capelet is plain, darker russet layers. Feathers, beads and fringes on a character of colour
+want this look every time: is it a costume of someone's culture?
+
+**Found on the way:**
+- **The paint palette is lightened as the skin tones were:** its "dark brown" renders mid-brown
+  and its black a cool grey-blue under the rim light, so dark warm hair isn't quite reachable.
+  The iris colors likely are too. Fixing it recolors every painted item in the game: its own
+  change, with captures.
+- The ranger's tunic's pattern has a `CREAM` sleeve color it never uses: its sleeves are the
+  body's color.
+
+**Left:**
+- Seen in creator captures at rest only; the crossbow not seen aimed in her clips.
+- The owner's look, and review by people of the heritage depicted.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

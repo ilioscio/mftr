@@ -1,0 +1,17 @@
+// A wardrobe item (22 §4): a feather crest (Wren's), modelled by build.py: a wren's cap of russet and
+// tan feathers tipped in lime, lying swept back from the crown over the back of the head. Worn on the head bone,
+// rigid, scaled to each base's head (`grip_scale`: the slim masculine head bone it was fitted on),
+// over the hair.
+(
+    id: "head.feather_crest",
+    slot: "head",
+    name: "Feather crest",
+    layer: "accessory",
+    accent: false,
+    rigid: true,
+    grip: "head",
+    grip_at: 0.0,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, -1.0),
+    grip_scale: 0.2352,
+)
