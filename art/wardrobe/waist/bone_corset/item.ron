@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): a bone corset (Marrow's), plates (build.py): black-plum leather from the
+// hips to under the chest over a band of the team's color, a ribcage of bone over its front, a skull
+// lantern with burning eyes hung at the left hip. Over a robe: on the armor layer.
+(
+    id: "waist.bone_corset",
+    slot: "waist",
+    name: "Bone corset",
+    layer: "armor",
+    accent: true,
+    rigid: true,
+)

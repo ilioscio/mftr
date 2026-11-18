@@ -146,6 +146,12 @@ first.
 | `waist.ember_sash` | waist, armor | plates: an ember-red sash over a coat round a team-colored band, a round gold buckle with a flame stone (Ember's) | 480 |
 | `back.ember_tails` | back, armor | plates, cast from behind onto the body in Ember's coat as the moss cloak is: two charcoal tails from under the sash to the backs of the knees, narrowing, a vent between them, ember-red edges, a gold hem; a chain down each (Ember's) | 440 |
 | `feet.ember_boots` | feet, over | plates: Shade's boots' build plain, soot black to under the knee, fuller at the top, a gold hem, closed points past the toes, a shallow gold cap over each knee (Ember's) | 1,068 |
+| `head.marrow_hood` | head, over | plates round the slim masculine head: a deep plum hood set back so the face shows, roomy over the crown, a heavy rolled rim of lighter plum round the opening, its peak drooping over the back of the head to behind the nape; worn on the head bone, scaled to each base's (Marrow's) | 1,048 |
+| `shoulders.grave_shawl` | shoulders, armor | plates, each ray cast in from outside (over the arms, not between them and the chest): grave-grey wool round the neck and over the shoulders, to the chest in front and a long point down the back, its hem torn into points of their own lengths and darker; a bone toggle at the throat (Marrow's) | 956 |
+| `torso.marrow_robe` | torso, over | sewn: the shadow jerkin's pattern with the ember coat's roomy sleeves, plum, over the hips, bound in darker plum (Marrow's) | 1,254 |
+| `waist.bone_corset` | waist, armor | plates: black-plum leather from the hips to under the chest over a team-colored band, a ribcage of bone over its front (a breastbone, four pairs of ribs curving down round the sides, the lower ones opening an arch); a skull lantern with burning eyes on an iron chain at the left hip; rigid (Marrow's) | 1,342 |
+| `legs.rag_skirt` | legs, over | plates, as the bark kilt's slats: eighteen strips of plum, darker plum and grave grey from the hips to the shins, each its own length, torn on a slant, overlapping, flaring clear of the seat; four chains round the hips (Marrow's) | 792 |
+| `weapon.bone_staff` | weapon, held | modelled: a shaft of black wood shod in iron, crooked over the hands and near straight below them, a plum wrap at the grip, a horned skull at its head with magenta fire in its eye sockets and ram's horns, bone charms on cords under it (Marrow's) | 770 |
 
 ## Held items (22 §4.7, BW7)
 

@@ -1724,6 +1724,45 @@ creator (the cap 14,000).
 - The crest reads pale in the creator's light: its glow may want to be less bright.
 - The owner's look.
 
+### Marrow in the wardrobe (2026-11-18): the seventh official champion rebuilt
+
+Marrow-neo (and the `marrow` recipe) now wears six new items after her concept
+(`art/champions/marrow/concept.md`), over the catalog's long hair in grey (hidden under the hood
+but at the face) and Shade's black boots. A deep plum hood set back from her face with a heavy
+rolled rim and a drooping peak, a ragged grave-grey shawl over her shoulders, a plum robe, a
+corset with a ribcage of bone and a skull lantern at her hip, a skirt torn into strips, and a
+crooked staff crowned with a horned skull. 12,143 triangles in the creator (the cap 14,000; over
+the 10,000 target, as Ember is).
+
+| Item | How | Like the hand-made Marrow |
+|---|---|---|
+| `head.marrow_hood` | plates: the shadow hood's build, roomier, its opening wider and higher, the peak's rings drooping back behind the nape; the rim a closed tube laid round the opening's edge | her hood, its rolled rim and drooping peak |
+| `shoulders.grave_shawl` | plates lathed round the neck and shoulders, each ray cast in from outside so below the shoulders it lies over the arms, not between them and the chest; a torn hem, a point down the back, a bone toggle | her ragged cowl and grave-grey shawl |
+| `torso.marrow_robe` | sewn: the shadow jerkin's pattern with the ember coat's roomy sleeves, plum | her plum robe |
+| `waist.bone_corset` | plates: a corset lathed from the hips to under the chest on the team's band; a breastbone and four pairs of ribs as narrow lathed strips curving out and down, the lower ones opening an arch; the skull lantern a few closed domes on a chain | her ribcage corset, belt band and skull lantern |
+| `legs.rag_skirt` | plates: the bark kilt's slats, long and overlapping, each its own length and torn on a slant, hung from a ring stood clear of the seat as well as the hips; chains round the hips | her ragged skirt of tattered strips |
+| `weapon.bone_staff` | modelled with the armory: a black shaft crooked over the hands, a lathed skull with magenta fire in its sockets, ram's horns as bending tubes, bone charms on cords | her staff, skull, horns and charms |
+
+**What it took:**
+- **A skirt in the legs slot.** The torso slot holds the robe and the waist the corset, so the long
+  skirt is a `legs` item on the `over` layer: the corset (`armor`) is pushed clear of its top.
+- **Clear of the seat.** Hung from a ring at the hips, the strips flaring as they fell still cut
+  through the buttocks below it; the ring now stands out as far as the body does anywhere in the
+  25 cm below it, as the flare would carry it.
+- **Over the arms.** A shawl lathed out from the body's middle hugs the chest under the arms; cast
+  in from outside it drapes over them.
+- **The staff's foot.** Crooked all along and longer than the plain staff, its foot swung up to
+  85 mm into her head in her clips (`what_a_hand_holds_keeps_out_of_the_head` allows 70): below
+  the hands it is now as long as the plain staff's and near straight; the crook is over the hands.
+- **The robe** is the ember coat's cut exactly: lowered 4 cm with a wider trim, it let 19 points
+  of a slim masculine base's skin through (the harness allows 12).
+
+**Left:**
+- Seen in creator captures at rest only: the skirt's strips, the shawl and the lantern not seen
+  in her clips (her hunch, her kneeling recall, her staff slam).
+- She stands upright in the creator: her hunch is her clips'.
+- The owner's look.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

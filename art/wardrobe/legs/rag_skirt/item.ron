@@ -1,0 +1,15 @@
+// A wardrobe item (22 §4): a rag skirt (Marrow's), plates (build.py): the long skirt of her robe torn
+// into strips from the hips to the shins, plum, darker plum and grave grey, each its own length,
+// flaring as they fall.
+(
+    id: "legs.rag_skirt",
+    slot: "legs",
+    name: "Rag skirt",
+    layer: "over",
+    accent: false,
+    rigid: false,
+    // Spring-bone chains round the hips (22 §4.5): the long strips carry most of their swing.
+    chains: 4,
+    chain_turn: 45,
+    swing: 0.7,
+)

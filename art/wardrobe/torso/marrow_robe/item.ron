@@ -1,0 +1,13 @@
+// A wardrobe item (22 §4): a plum robe (Marrow's), sewn and simulated (build.py, M1): plum wool
+// from a round neck to the hips, long loose sleeves to the wrist, bound in darker plum. The rag
+// skirt hangs on below it, the bone corset closes over its middle.
+(
+    id: "torso.marrow_robe",
+    slot: "torso",
+    name: "Plum robe",
+    layer: "over",
+    accent: false,
+    rigid: false,
+    // It has sleeves: fitted to the arms too.
+    sleeves: true,
+)
