@@ -253,7 +253,12 @@ impl Catalog {
             let Some(&from) = paint::regions(&base.model, target).get(*region as usize) else {
                 return Err(format!("`{target}` has no paint region {region}"));
             };
-            paint::fill(&mut model, target, from, paint::PALETTE[*color as usize % paint::PALETTE.len()]);
+            paint::fill(
+                &mut model,
+                target,
+                from,
+                paint::linear(paint::PALETTE[*color as usize % paint::PALETTE.len()]),
+            );
         }
         paint::glow(&mut model, looks.signature);
         eyes::apply(&mut model, &looks.eyes.unwrap_or_default(), paint::signature(looks.signature));
@@ -894,8 +899,8 @@ fn skin(model: &mut Model, tone: [f32; 3]) {
 /// paint is replaced by the tone's linear color: a tone renders as its swatch. (Scaled by the
 /// sRGB values, the dark tones rendered as tans: the darkest, a deep brown, as a light one.)
 fn skin_ratio(tone: [f32; 3]) -> [f32; 3] {
-    let lin = |c: f32| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
-    [0, 1, 2].map(|k| lin(tone[k]) / looks::BASE_SKIN[k])
+    let lin = paint::linear(tone);
+    [0, 1, 2].map(|k| lin[k] / looks::BASE_SKIN[k])
 }
 
 /// Copy the library's clips onto `model`, by bone name. Translation tracks (the pelvis's bob,
@@ -2286,7 +2291,7 @@ mod tests {
         l.paint.push(("torso.tunic".into(), 0, 18));
         let f = c.forge("Painted", &l).unwrap();
         let tunic = f.model.nodes.iter().find(|n| n.name == "part.torso.tunic").unwrap().mesh.unwrap();
-        let red = paint::PALETTE[18];
+        let red = paint::linear(paint::PALETTE[18]);
         assert!(f.model.meshes[tunic].iter().flat_map(|p| &p.colors).any(|c| (c[0] - red[0]).abs() < 1e-4));
         // A region that isn't there.
         l.paint = vec![("torso.tunic".into(), 15, 1)];

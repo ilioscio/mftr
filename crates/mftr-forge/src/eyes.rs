@@ -126,7 +126,8 @@ pub fn is_eye_uv(u: [f32; 2]) -> bool {
 pub fn apply(model: &mut Model, eyes: &Eyes, glow: [f32; 3]) {
     let code = (eyes.size.min(SIZE_MAX) + 10 * eyes.sclera.min(2)) as f32;
     let style = eyes.style as u8 as f32;
-    let color = |i: u8| IRIS[i as usize % IRIS.len()];
+    // The irises are colors as the creator's swatches show them (sRGB); vertex colors are linear.
+    let color = |i: u8| crate::paint::linear(IRIS[i as usize % IRIS.len()]);
     let (left, right) = match eyes.style {
         Style::Glow => (glow, glow),
         _ => (color(eyes.iris), color(eyes.right.unwrap_or(eyes.iris))),
@@ -245,8 +246,8 @@ mod tests {
         apply(&mut m, &e, [1.0, 0.0, 0.0]);
         let p = &m.meshes[0][0];
         assert_eq!(p.uvs[0], [UV_BASE + 2.0 + 0.25, 2.0 * 29.0 + 0.75]);
-        assert_eq!(&p.colors[0][..3], &IRIS[6]);
-        assert_eq!(&p.colors[1][..3], &IRIS[4]);
+        assert_eq!(&p.colors[0][..3], &crate::paint::linear(IRIS[6]));
+        assert_eq!(&p.colors[1][..3], &crate::paint::linear(IRIS[4]));
         assert_eq!(p.colors[0][3], 1.0);
         assert_eq!(p.uvs[2], [0.4, 0.6], "skin untouched");
         assert_eq!(p.colors[2], [0.8, 0.6, 0.5, 1.0]);

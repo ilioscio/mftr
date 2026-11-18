@@ -1856,8 +1856,7 @@ want this look every time: is it a costume of someone's culture?
 **Found on the way:**
 - **The paint palette is lightened as the skin tones were:** its "dark brown" renders mid-brown
   and its black a cool grey-blue under the rim light, so dark warm hair isn't quite reachable.
-  The iris colors likely are too. Fixing it recolors every painted item in the game: its own
-  change, with captures.
+  The iris colors likely are too. Fixed after (below: "Paint shows as its swatch").
 - The ranger's tunic's pattern has a `CREAM` sleeve color it never uses: its sleeves are the
   body's color.
 
@@ -1884,3 +1883,32 @@ want this look every time: is it a costume of someone's culture?
      (and two-tone tips).
    - **Helmets:** the hair hides under a helmet. If that reads badly, flattened versions of
      each style for headgear come next.
+
+### Paint shows as its swatch (2026-11-18)
+
+The skin fix's twin. The palette (`paint::PALETTE`) and the iris colors (`eyes::IRIS`) are colors
+as a screen shows them (sRGB): the creator's swatches draw them so. But a fill wrote them into the
+vertex colors as they stood, and vertex colors are linear, so every painted color rendered
+lighter and greyer than its swatch: the palette's black as a mid grey, its darkest brown as a
+light one, the dark brown iris as amber. Now:
+- a fill writes the swatch's linear value (`paint::linear`), and so do the irises;
+- the paint images' texture (brush strokes, decals) carries the `source_color` hint, so its
+  palette bytes are read the same way;
+- the creator's region swatches show a region's built color as the screen does (`paint::shown`),
+  so an unpainted region's swatch matches the model too.
+
+A test pins the round trip and that black writes near black. The skin tones share the one
+conversion.
+
+Every painted champion was captured before and after. Black hair (Ember, Quill) is black now;
+Wren's darkest brown hair is dark brown; Rook's beard a richer brown; trousers and leggings
+painted in the dark rows are dark; Lumen's gold is a fuller gold; Bastion's and Cairn's painted
+stone and bark are a step darker. Two looks moved further:
+- **Cairn's beard** went from near-white to mid grey: repainted with the next lighter grey
+  (palette 1) to keep it pale.
+- **Vesper's hair** (palette 27, the darkest orange) went from a strawberry blonde to a copper red.
+  It's left as its swatch says; the brass swatch (59) is the nearest to the old look if the owner
+  wants that back.
+
+Item colors built in Blender are untouched: they were tuned by eye as they render. Glows (the
+signature hue) are untouched too.
