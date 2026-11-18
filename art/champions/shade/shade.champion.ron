@@ -1,5 +1,9 @@
 // Shade as a recipe (20 §12): the official kit, looks on the slim humanoid build.
-// A lean assassin: a tall hood, a mask, a long dark coat, knives along his forearms.
+// A lean assassin in the wardrobe's clothes (22 §4): a tall indigo hood sweeping back into a
+// point over a black mask with burning violet eyes, a violet scarf streaming behind, an indigo
+// jerkin, a spiked steel guard on his right shoulder, wrapped forearms, a team-colored belt with
+// kunai strapped to his thighs, black leggings into wrapped boots, and a curved blade in each
+// hand, held forward.
 // The kit is a copy of crates/mftr-sim/champions/shade.ron (a test checks they match); the
 // hand-made model in this folder stays what the game shows until the owner prefers this one.
 // Shade: Assassin (melee).
@@ -15,8 +19,8 @@ Champion(
         shape: (cheeks_hollow: 0.5, jaw_width: -0.2),
         proportions: (arms: 0.2, height: 0.1),
         skin: 2,
-        outfit: ["head.hood", "face.mask", "torso.coat", "arms.bracers", "feet.boots", "weapon.dagger"],
-        paint: [("head.hood", 0, 51), ("torso.coat", 0, 6), ("face.mask", 0, 7)],
+        outfit: ["head.shadow_hood", "face.shadow_mask", "torso.shadow_jerkin", "shoulders.shadow_guard", "arms.shadow_wraps", "waist.shadow_belt", "back.shadow_scarf", "legs.shadow_leggings", "feet.shadow_boots", "weapon.shadow_blade", "offhand.shadow_blade"],
+        paint: [],
         signature: 275,
         moves: (attack: "shade.attack", q: "shade.q", w: "shade.w", e: "shade.e", r: "shade.r"),
     ),

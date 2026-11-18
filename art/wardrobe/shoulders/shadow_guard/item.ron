@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): a shadow guard (Shade's), plates (build.py): a spiked dark steel guard
+// on the right shoulder only, three spikes rising up and back, a black strap across the chest
+// and the back to under the left arm. Rigid.
+(
+    id: "shoulders.shadow_guard",
+    slot: "shoulders",
+    name: "Shadow guard",
+    layer: "armor",
+    accent: false,
+    rigid: true,
+)

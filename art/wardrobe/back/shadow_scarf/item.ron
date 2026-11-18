@@ -1,0 +1,17 @@
+// A wardrobe item (22 §4): a shadow scarf (Shade's), plates (build.py): violet
+// cloth wound loose round the neck and two long tails down the back. Over a jerkin: on the armor
+// layer.
+(
+    id: "back.shadow_scarf",
+    slot: "back",
+    name: "Shadow scarf",
+    layer: "armor",
+    accent: false,
+    rigid: false,
+    // A chain down each tail (22 §4.5), from the chest.
+    chains: 2,
+    chain_turn: 180,
+    chain_arc: 20,
+    chain_from: "chest",
+    swing: 1.0,
+)

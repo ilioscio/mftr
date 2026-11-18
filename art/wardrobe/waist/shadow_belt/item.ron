@@ -1,0 +1,10 @@
+// A wardrobe item (22 §4): a shadow belt (Shade's), plates (build.py): black leather round the hips
+// over a band of the team's color, a strap round each thigh with three kunai along the outside.
+(
+    id: "waist.shadow_belt",
+    slot: "waist",
+    name: "Shadow belt",
+    layer: "armor",
+    accent: true,
+    rigid: false,
+)

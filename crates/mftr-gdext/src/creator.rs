@@ -689,7 +689,7 @@ impl MftrCreator {
         GString::from(self.recipe.moves().get(&slot.to_string()))
     }
 
-    /// Put a move on a slot. An attack also equips the weapon its animations hold (when the
+    /// Put a move on a slot. An attack also equips the weapons its animations hold (when the
     /// catalog has it).
     #[func]
     fn set_move(&mut self, slot: GString, id: GString) {
@@ -700,11 +700,9 @@ impl MftrCreator {
         if slot == "attack"
             && let Some((c, _)) = mftr_forge::moves::parse(&id)
         {
-            let (_, part) = mftr_forge::moves::weapon(c);
+            let (_, parts) = mftr_forge::moves::weapon(c);
             self.recipe.looks.outfit.retain(|p| !p.starts_with("weapon.") && !p.starts_with("offhand."));
-            if !part.is_empty() {
-                self.recipe.looks.outfit.push(part.to_string());
-            }
+            self.recipe.looks.outfit.extend(parts.iter().map(|p| p.to_string()));
         }
     }
 

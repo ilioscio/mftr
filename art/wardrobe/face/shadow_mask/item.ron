@@ -1,0 +1,16 @@
+// A wardrobe item (22 §4): a shadow mask (Shade's), modelled by build.py: a smooth black mask over
+// the whole face, two slits of violet burning where the eyes are. Worn on the head bone, rigid,
+// scaled to each base's head (`grip_scale`: the slim masculine head bone it was fitted on).
+(
+    id: "face.shadow_mask",
+    slot: "face",
+    name: "Shadow mask",
+    layer: "accessory",
+    accent: false,
+    rigid: true,
+    grip: "head",
+    grip_at: 0.0,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, -1.0),
+    grip_scale: 0.2352,
+)

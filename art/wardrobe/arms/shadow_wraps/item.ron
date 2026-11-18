@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): shadow wraps (Shade's), plates (build.py): grey-violet cloth wound
+// round each forearm from the elbow to the wrist, black leather bands, a dark steel plate along
+// the outside of each.
+(
+    id: "arms.shadow_wraps",
+    slot: "arms",
+    name: "Shadow wraps",
+    layer: "armor",
+    accent: false,
+    rigid: false,
+)

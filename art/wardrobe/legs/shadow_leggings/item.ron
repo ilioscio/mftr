@@ -1,0 +1,10 @@
+// A wardrobe item (22 §4): shadow leggings (Shade's), sewn and simulated (build.py, M1): close
+// black leggings to the middle of the calf, into the boots.
+(
+    id: "legs.shadow_leggings",
+    slot: "legs",
+    name: "Shadow leggings",
+    layer: "under",
+    accent: false,
+    rigid: false,
+)

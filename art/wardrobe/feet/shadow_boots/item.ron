@@ -1,0 +1,10 @@
+// A wardrobe item (22 §4): shadow boots (Shade's), plates (build.py): soft black leather, two wraps
+// across the foot, shafts wound in wraps to the middle of the calf.
+(
+    id: "feet.shadow_boots",
+    slot: "feet",
+    name: "Shadow boots",
+    layer: "over",
+    accent: false,
+    rigid: false,
+)

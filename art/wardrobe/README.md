@@ -51,7 +51,8 @@ all four humanoid bases (slim and heavy, masculine and feminine) when the bases 
   than the low-poly reference body's facets. *Domes* (an ellipsoid's cap) and *strips* of them
   for pauldrons, their lames and knee cops. See `shoulders/veteran_plate/build.py`. *Ribbons*
   are straps laid on the body as seen from the front (a collar's laces); a face whose color is
-  `None` is left out.
+  `None` is left out. Closed pieces (a spike, a kunai) are finished with `thickness=None`:
+  turned out each on its own, not thickened.
 
 Then rebuild the bases (`art/creator/humanoid_*/build.py --export`). `mftr_blender.wardrobe`
 fits every item to every base:
@@ -118,6 +119,17 @@ first.
 | `back.priestess_tails` | back, armor | sewn: a sky sash round the waist, three white tails finely edged in sky, down the back and behind each hip to above its hem, laid over the skirt; a chain down each (Lumen's) | 1,072 |
 | `feet.priestess_boots` | feet, over | plates: soft ivory leather to above the ankle, thin pale soles, two gold straps across the foot, a gold cuff and anklet (Lumen's) | 1,216 |
 | `weapon.lantern_staff` | weapon, held | modelled: a pale shaft shod and banded in gold, a sun ring with rays round a caged lantern burning sun-white; held as the staff (Lumen's) | 544 |
+| `head.shadow_hood` | head, over | plates round the slim masculine head: a tall indigo hood closed under the chin, a violet rim at the face, sweeping up and back into a point; worn on the head bone, scaled to each base's (Shade's) | 620 |
+| `face.shadow_mask` | face, accessory | plates round the slim masculine face: a smooth black mask from the brow to under the chin, two slits of violet burning at the eyes; worn on the head bone (Shade's) | 284 |
+| `torso.shadow_jerkin` | torso, over | sewn: close indigo cloth, a round neck scooped in front, long sleeves, a hem over the hips, bound in black (Shade's) | 1,242 |
+| `shoulders.shadow_guard` | shoulders, armor | plates: a dark steel dome on the right shoulder only over one lame, steel-rimmed, three spikes rising up and back; a black strap across the chest and back; rigid (Shade's) | 382 |
+| `arms.shadow_wraps` | arms, armor | plates: grey-violet wraps round the forearms between black bands, a dark steel plate along the outside of each (Shade's) | 728 |
+| `waist.shadow_belt` | waist, armor | plates: black leather round the hips over a team-colored band; a strap round each thigh with three kunai, points down (Shade's) | 772 |
+| `back.shadow_scarf` | back, armor | plates: violet cloth rolled round the base of the neck, two long tails laid down the back; a chain down each (Shade's) | 440 |
+| `legs.shadow_leggings` | legs, under | sewn: the wool trousers' pattern, narrow down the leg, black, to the middle of the calf (Shade's) | 1,144 |
+| `feet.shadow_boots` | feet, over | plates: soft black leather, two wraps across the foot, shafts wound in wraps to the middle of the calf (Shade's) | 1,280 |
+| `weapon.shadow_blade` | weapon, held | modelled: a long curved blade held forward past the knuckles over a dark steel guard, its outer edge burning violet, a wrapped grip and a violet stone (Shade's right hand) | 154 |
+| `offhand.shadow_blade` | offhand, held | the shadow blade mirrored, for the left hand (Shade's) | 154 |
 
 ## Held items (22 §4.7, BW7)
 

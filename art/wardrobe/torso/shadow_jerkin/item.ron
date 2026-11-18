@@ -1,0 +1,12 @@
+// A wardrobe item (22 §4): a shadow jerkin (Shade's), sewn and simulated (build.py, M1): close-
+// fitting indigo cloth, a round neck, long sleeves to the wrist, a hem over the hips, bound in black.
+(
+    id: "torso.shadow_jerkin",
+    slot: "torso",
+    name: "Shadow jerkin",
+    layer: "over",
+    accent: false,
+    rigid: false,
+    // It has sleeves: fitted to the arms too.
+    sleeves: true,
+)
