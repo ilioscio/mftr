@@ -1,0 +1,10 @@
+// A wardrobe item (22 §4): bark greaves (Cairn's), plates (build.py): heavy brown leather boots to
+// under the knee, a strap across each foot, and a greave of bark strips over each shin.
+(
+    id: "feet.bark_greaves",
+    slot: "feet",
+    name: "Bark greaves",
+    layer: "over",
+    accent: false,
+    rigid: false,
+)

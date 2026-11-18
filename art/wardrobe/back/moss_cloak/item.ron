@@ -1,0 +1,17 @@
+// A wardrobe item (22 §4, BW6): a moss cloak (Cairn's), plates (build.py): heavy moss-green wool from
+// the shoulders to the calves, its hem torn into points, trimmed in darker moss. On the `back`
+// slot, under a mantle.
+(
+    id: "back.moss_cloak",
+    slot: "back",
+    name: "Moss cloak",
+    layer: "armor",
+    accent: false,
+    rigid: false,
+    // Spring-bone chains (22 §4.5, BW6): the travelling cape's, three down the back.
+    chains: 3,
+    chain_turn: 180,
+    chain_arc: 70,
+    chain_from: "chest",
+    swing: 1.0,
+)

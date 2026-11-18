@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): a stone mantle (Cairn's), plates (build.py): a collar of granite slabs
+// round the base of the neck, a great granite pauldron over each shoulder above a slab down the
+// arm, moss over the tops of them. Rigid.
+(
+    id: "shoulders.stone_mantle",
+    slot: "shoulders",
+    name: "Stone mantle",
+    layer: "armor",
+    accent: false,
+    rigid: true,
+)

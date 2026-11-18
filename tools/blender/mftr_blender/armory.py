@@ -172,6 +172,38 @@ class Kit:
                 self._face((lo[k], hi[k], hi[k2], lo[k2]), color, slot)
         return rings
 
+    def branch(self, path, color, slot="cloth", sides=6, twist=0.0):
+        """A bending tube along `path` [(point, radius)] from its base to its end (an antler's
+        beam and tines, a gnarled staff, a root): each ring across the path, its frame carried
+        along it so the tube doesn't twist; closed at the base, and at the end in a point if its
+        radius is 0. Returns the rings."""
+        pts = [Vector(p) for p, _r in path]
+        n = len(pts)
+        tangents = [(pts[min(i + 1, n - 1)] - pts[max(i - 1, 0)]).normalized() for i in range(n)]
+        u = tangents[0].orthogonal().normalized()
+        rings = []
+        for i, (p, r) in enumerate(zip(pts, (r for _p, r in path))):
+            t = tangents[i]
+            u = (u - t * t.dot(u)).normalized()
+            w = t.cross(u)
+            if r <= 1e-6:
+                rings.append([self.bm.verts.new(p)])
+                continue
+            rings.append([self.bm.verts.new(p + (u * math.cos(twist + 2 * math.pi * k / sides)
+                                                 + w * math.sin(twist + 2 * math.pi * k / sides)) * r)
+                          for k in range(sides)])
+        for lo, hi in zip(rings, rings[1:]):
+            if len(hi) == 1:
+                for k in range(sides):
+                    self._face((lo[k], lo[(k + 1) % sides], hi[0]), color, slot)
+            else:
+                for k in range(sides):
+                    self._face((lo[k], lo[(k + 1) % sides], hi[(k + 1) % sides], hi[k]), color, slot)
+        self._face(list(reversed(rings[0])), color, slot)
+        if len(rings[-1]) > 1:
+            self._face(rings[-1], color, slot)
+        return rings
+
     def gem(self, center, radius, color, slot="emissive", stretch=1.0, turn=None):
         """An octahedron: a cut stone, a crystal (`stretch` lengthens it along its z)."""
         rot = turn or Matrix.Identity(3)

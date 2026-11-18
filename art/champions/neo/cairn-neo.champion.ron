@@ -1,7 +1,11 @@
 // Cairn-neo: Cairn rebuilt in the champion creator, to play next to the hand-made Cairn (20 §12).
 // Generated from art/champions/cairn/cairn.champion.ron with the name changed (a test keeps them in step);
 // load the whole set with `mftr-server --champion-dir art/champions/neo --champions both`.
-// A weathered earth-warden: antlers, a mossy stone mantle, a green cloak and a staff.
+// A weathered earth-warden in the wardrobe's clothes (22 §4): great branching antlers ringed
+// with emerald beads at their roots, a mantle of granite slabs and pauldrons grown over with moss,
+// a bark cuirass with an emerald at the breast, bark bracers, a bark kilt on a team-colored belt,
+// a moss cloak torn at the hem, bark greaves over leather boots, and a gnarled staff whose roots
+// hold a glowing emerald.
 // The kit is a copy of crates/mftr-sim/champions/cairn.ron (a test checks they match); the
 // hand-made model in this folder stays what the game shows until the owner prefers this one.
 // Cairn: Warden: tank and protector (melee).
@@ -18,8 +22,8 @@ Champion(
         shape: (brow_ridge: 1, nose_length: 0.5, nose_width: 0.4, cheeks_hollow: 0.5, chin_length: 0.3, ears_point: 0.4, body_bulk: 0.6, body_belly: 0.3, neck_thickness: 0.6),
         proportions: (height: 0.2, arms: 0.2, hands: 0.3),
         skin: 4,
-        outfit: ["head.horns", "torso.tunic", "shoulders.boulders", "back.cape", "arms.bracers", "legs.greaves", "waist.belt", "weapon.staff"],
-        paint: [("body", 0, 38), ("body", 1, 14), ("torso.tunic", 0, 13), ("back.cape", 0, 35), ("arms.bracers", 0, 12), ("legs.greaves", 0, 12)],
+        outfit: ["beard.full", "head.cairn_antlers", "torso.bark_cuirass", "shoulders.stone_mantle", "arms.bark_bracers", "waist.bark_kilt", "back.moss_cloak", "feet.bark_greaves", "weapon.warden_staff"],
+        paint: [("body", 0, 38), ("body", 1, 14), ("beard.full", 0, 2)],
         signature: 140,
         moves: (attack: "cairn.attack", q: "cairn.q", w: "cairn.w", e: "cairn.e", r: "cairn.r"),
     ),

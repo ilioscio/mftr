@@ -1,0 +1,10 @@
+// A wardrobe item (22 §4): a bark kilt (Cairn's), plates (build.py): a broad leather belt over a
+// band of the team's color, bark slats hanging from it to above the knee, moss over their tops.
+(
+    id: "waist.bark_kilt",
+    slot: "waist",
+    name: "Bark kilt",
+    layer: "armor",
+    accent: true,
+    rigid: false,
+)

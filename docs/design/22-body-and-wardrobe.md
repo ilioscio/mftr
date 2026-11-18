@@ -1635,6 +1635,59 @@ curved blade in each hand held forward. 11,483 triangles in the creator, no pain
 - The jerkin shows its sim's facets; the scarf's tails are flat ribbons, not draped.
 - The owner's look.
 
+### Cairn in the wardrobe (2026-11-17): the fifth official champion rebuilt
+
+Cairn-neo (and the `cairn` recipe) now wears new-system items: eight new ones after his concept
+(`art/champions/cairn/concept.md`) and the catalog's full beard in grey-brown, bald under the
+antlers, bare-legged under the kilt. Great branching antlers of weathered bone with
+emerald beads at their roots, a mantle of granite slabs and pauldrons grown over with moss, a bark
+cuirass with an emerald at the breast, bark bracers, a bark kilt on a team-colored belt, a moss
+cloak torn at the hem, bark greaves over leather boots, and a gnarled staff whose four roots hold
+a glowing emerald. The body keeps his old paint. 13,358 triangles in the creator (the cap
+14,000).
+
+| Item | How | Like the hand-made Cairn |
+|---|---|---|
+| `head.cairn_antlers` | modelled with the armory's new bending tubes (`Kit.branch`) on the heavy masculine head, worn on the head bone with `grip_scale`: a beam out, up and back on each side, three tines, a knobbed burr at the root set with beads | his antlers and their emerald beads |
+| `shoulders.stone_mantle` | plates: slabs lathed over the chest and the back to the neck, each column its own grey and a little more or less proud; a few-sided granite dome over each shoulder above a slab; any face looking up is moss | his mossy stone mantle and pauldrons |
+| `torso.bark_cuirass` | plates: a lathe of bark strips close round the chest and the belly, open under the arms top to bottom; a granite diamond with an emerald at the breastbone | his bark chest plates and chest gem |
+| `arms.bark_bracers` | plates: Shade's wraps' tubes, leather under bark strips open on the inside of the arm | his bark bracers |
+| `waist.bark_kilt` | plates: a belt with the team's band; slats hung from a ring round the hips, each its own strip, length and shade, flaring as they fall to clear the thighs, moss at the tops | his kilt of bark slats and moss, his accent band |
+| `back.moss_cloak` | plates: each column cast from behind onto the body in his cuirass and kilt, hanging straight from the furthest point above it, a torn hem; the travelling cape's chains | his moss-green cloak |
+| `feet.bark_greaves` | plates: Shade's boots' build in brown to under the knee, a bark greave lathed over the front of each shin | his bark greaves |
+| `weapon.warden_staff` | modelled in the staff's grip frame: a wandering shaft (straighter where the hands go), knots, four roots twisting up round the emerald | his gnarled staff and its stone |
+
+**What it took:**
+- **A cloak that isn't sewn.** Sewn from the travelling cape's pattern, a cloak held only at the
+  neck bunched at the hips where the sim left it (the cape does too). Cast onto the body worn with
+  the cuirass and the kilt instead, it falls clear over both. It is cut for them: over other
+  clothes it stands a little off the back.
+- **Bending tubes.** `Kit.branch` sweeps a ring along a path, its frame carried along so it
+  doesn't twist: the antlers' beams and tines, the staff's shaft and roots.
+- **The weapon's mapping.** `moves::weapon` names Cairn's staff, and now Lumen's lantern staff
+  too: picking her attack in the creator had put the plain staff in her hand.
+- **The triangle cap.** First built, he forged to 18,184 triangles, over the 14,000 cap
+  (20 §7.2): his items alone came to about 10,900. The kilt has fewer, plainer slats, the cuirass,
+  bracers, greaves, cloak and mantle fewer rows and sides, and he wears no hair (the concept
+  names a weathered, bearded head and no hairstyle; the antlers rise from the bare brow) and no
+  trousers under the kilt.
+- **The arms test** (`grip`): what's worn is part of the trunk the arms must keep out of. The
+  cuirass wrapped under the arms, and his whirling blow took the right arm 10 cm into it; it is
+  now a front and a back, close to the chest (stood further off, his Q's left arm went 7 cm in).
+  Its rows are fine enough to follow the heavy feminine bust rather than cut across it (the
+  harness: 18 skin points, the limit 12, with fewer).
+- **The cloak over the cuirass.** On the heavy base the cuirass's top edge at the back came
+  through the cloak's top; the cuirass is lower at the back (1.27 m, 1.345 m in front) and the
+  cloak stands 30 mm off what's under it, 75 mm over the shoulder blades.
+
+**The bases' size.** With Cairn's items, about 4.7 MB, under the 7 MiB cap.
+
+**Left:**
+- Seen in creator captures at rest only: the staff not yet seen through his blows, the cloak not
+  swinging.
+- The war paint on his face (the catalog has no face paint yet).
+- The owner's look.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): bark bracers (Cairn's), plates (build.py): a leather sleeve round each
+// forearm, bound at the elbow and the wrist, strips of bark laid lengthwise over all but the
+// inside of the arm.
+(
+    id: "arms.bark_bracers",
+    slot: "arms",
+    name: "Bark bracers",
+    layer: "armor",
+    accent: false,
+    rigid: false,
+)
