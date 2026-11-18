@@ -134,8 +134,37 @@ def process(path):
             c["sampler"] = renum[c["sampler"]]
         anim["channels"] = channels
     weights = _quantize_weights(doc, arrays)
+    colors = _quantize_colors(doc, arrays)
     _rewrite(path, doc, arrays)
-    return {"keys_before": before, "keys_after": after, "channels_at_rest_dropped": dropped, "weights_quantized": weights}
+    return {"keys_before": before, "keys_after": after, "channels_at_rest_dropped": dropped, "weights_quantized": weights,
+            "colors_quantized": colors}
+
+
+def _quantize_colors(doc, arrays):
+    """Vertex colors as normalized bytes, not shorts (4 bytes a vertex, not 8: the creator bases'
+    catalog grows with every rebuilt champion). A paint region is a color of its own, told apart
+    from the others at a thousandth (`mftr_forge::paint`); a 1/255 step keeps them apart, and the
+    occlusion in the alpha doesn't need finer. Returns how many accessors were converted."""
+    done = set()
+    for mesh in doc.get("meshes", []):
+        for prim in mesh["primitives"]:
+            i = prim["attributes"].get("COLOR_0")
+            if i is None or i in done:
+                continue
+            acc = doc["accessors"][i]
+            if acc["componentType"] == 5123:
+                c = np.asarray(arrays[i], dtype=np.float64) / 65535.0
+            elif acc["componentType"] == 5126:
+                c = np.asarray(arrays[i], dtype=np.float64)
+            else:
+                continue
+            arrays[i] = np.floor(c.clip(0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+            acc["componentType"] = 5121
+            acc["normalized"] = True
+            acc.pop("min", None)
+            acc.pop("max", None)
+            done.add(i)
+    return len(done)
 
 
 def _quantize_weights(doc, arrays):

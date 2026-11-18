@@ -1,7 +1,8 @@
 // Rook-neo: Rook rebuilt in the champion creator, to play next to the hand-made Rook (20 §12).
 // Generated from art/champions/rook/rook.champion.ron with the name changed (a test keeps them in step);
 // load the whole set with `mftr-server --champion-dir art/champions/neo --champions both`.
-// A grizzled veteran in slab pauldrons and a crimson tabard, a maul in his fists.
+// A grizzled veteran, shaved bald, a braided beard: crimson-lacquered pauldrons and an iron
+// breastplate over a padded gambeson, a long crimson tabard, heavy boots, a maul in his fists.
 // The kit is a copy of crates/mftr-sim/champions/rook.ron (a test checks they match); the
 // hand-made model in this folder stays what the game shows until the owner prefers this one.
 // Rook: Bruiser (melee).
@@ -17,8 +18,8 @@ Champion(
         shape: (jaw_width: 0.8, chin_reach: 0.4, chin_length: 0.2, brow_ridge: 0.9, nose_width: 0.5, nose_hook: 0.4, cheekbones: 0.3, cheeks_hollow: 0.3, eyes_size: -0.4, body_bulk: 0.4, body_shoulders: 0.6, body_muscle: 0.4, neck_thickness: 1),
         proportions: (legs: -0.2, arms: 0.3, head: -0.2, hands: 0.5),
         skin: 3,
-        outfit: ["hair.short", "shoulders.slabs", "torso.tunic", "arms.gauntlets", "legs.greaves", "feet.boots", "waist.belt", "weapon.maul"],
-        paint: [("body", 0, 4), ("torso.tunic", 0, 18), ("hair.short", 0, 2)],
+        outfit: ["beard.braided", "torso.veteran_gambeson", "shoulders.veteran_plate", "arms.gauntlets", "waist.veteran_tabard", "legs.wool_trousers", "feet.veteran_boots", "weapon.maul"],
+        paint: [("body", 0, 4), ("beard.braided", 0, 13), ("legs.wool_trousers", 0, 6), ("legs.wool_trousers", 1, 15)],
         signature: 355,
         moves: (attack: "rook.attack", q: "rook.q", w: "rook.w", e: "rook.e", r: "rook.r"),
     ),

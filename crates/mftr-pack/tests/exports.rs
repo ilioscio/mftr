@@ -204,7 +204,7 @@ fn malformed_containers_are_rejected() {
     assert_error(&validate(&glb[..glb.len() - 4], &side), "length");
     assert_error(&validate(b"not a glb at all", &side), "glTF 2.0 binary");
     let mut huge = glb.clone();
-    huge.resize(5 * 1024 * 1024, 0);
+    huge.resize(mftr_pack::glb::MAX_GLB_BYTES + 1, 0);
     assert_error(&validate(&huge, &side), "cap");
     // An accessor pointing past its buffer view.
     let bad = edit_json(&glb, |j| j.replacen("\"byteOffset\":0,", "\"byteOffset\":99999999,", 1));

@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): a priestess's bodice (Lumen's), sewn and simulated (build.py, M1):
+// fitted white linen on narrow straps to just below the waist, edged in ivory. Under a collar and
+// a skirt: on the `under` layer, so they're pushed clear of it.
+(
+    id: "torso.priestess_bodice",
+    slot: "torso",
+    name: "Priestess's bodice",
+    layer: "under",
+    accent: false,
+    rigid: false,
+)

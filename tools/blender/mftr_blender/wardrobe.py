@@ -503,7 +503,7 @@ def _place_grip(obj, armature, info):
     unless it brings bones of its own: `mftr_bones` on the item object, [(name, head, tail,
     parent)] in its grip frame ("grip" the hand), added to the rig, and its vertex groups (a
     "grip" group for what rides the hand). A bow's limbs and string, named as the official
-    champion's, so its clips' channels for them play on it."""
+    champion's, so its clips' channels for them play on it. `grip_scale`: see `place`."""
     import json
     bone = armature.data.bones[info["grip"]]
     up = Vector(info.get("grip_up", (0.0, 1.0, 0.0))).normalized()
@@ -525,8 +525,12 @@ def _place_grip(obj, armature, info):
         at = m.inverted() @ (armature.matrix_world @ prop.head_local) - up * info.get("grasp_at", 0.0)
         held = prop.name
 
+    # Worn rather than held (a circlet on the head): modelled round a bone `grip_scale` long, and
+    # scaled to this base's (a heavy build's head is a fifth bigger).
+    k = bone.length / info["grip_scale"] if info.get("grip_scale") else 1.0
+
     def place(c):
-        c = Vector(c)
+        c = Vector(c) * k
         return m @ (at + side * c.x + back * c.y + up * c.z)
 
     for v in obj.data.vertices:
@@ -638,6 +642,9 @@ def fit_items(armature, body, gender, room=1.0):
             # What hangs below the hips swings on spring-bone chains (22 §4.5, BW6).
             chains.hang_cloth(obj, armature, info["id"], int(info["chains"]), info.get("chain_turn", 45.0),
                               info.get("swing", 1.0), info.get("chain_from", "pelvis"), info.get("chain_arc"))
+            # The chains take up to four bones a vertex, so a helper can drop out at one vertex and
+            # stay on its neighbour (a long skirt's, below the hip): smoothed again around them.
+            body_rig.limit_steps(obj, max_step=0.28, rounds=240)
         parts.transfer_shape_keys(body, obj)
         made.append((info["id"], info["slot"], info["name"], [], bool(info["accent"]), mesh.triangle_count(obj), 0,
                      {"covers": True, "rigid": bool(info["rigid"]), "layer": info["layer"]}))

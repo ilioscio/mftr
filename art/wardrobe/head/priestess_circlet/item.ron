@@ -1,0 +1,17 @@
+// A wardrobe item (22 §4): a priestess's circlet and halo (Lumen's), modelled by build.py: a gold
+// band round the brow with a sun stone at the forehead, and a double halo of sun gold floating
+// behind the head. Worn on the head bone, rigid, scaled to each base's head (`grip_scale`: the
+// slim feminine head bone it was fitted on).
+(
+    id: "head.priestess_circlet",
+    slot: "head",
+    name: "Priestess's circlet",
+    layer: "accessory",
+    accent: false,
+    rigid: true,
+    grip: "head",
+    grip_at: 0.0,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, -1.0),
+    grip_scale: 0.228,
+)

@@ -1445,6 +1445,146 @@ neck).
   refuses an outfit id it doesn't know.
 - The owner's look at the arms, the bow and the shields, and at the spells and emotes.
 
+### Rook in the wardrobe (2026-11-17): the second official champion rebuilt
+
+Rook-neo (and the `rook` recipe) now wears new-system items only: four new ones, beside the
+catalog's gauntlets, wool trousers, braided beard and maul. Shaved bald, as the hand-made Rook.
+
+| Item | How | Like the hand-made Rook |
+|---|---|---|
+| `torso.veteran_gambeson` | sewn: padded brown, a high round neck, long sleeves to the wrist, bound in dark leather | his gambeson, at the arms and the belly |
+| `shoulders.veteran_plate` | plates: an iron breastplate and a dark backplate, open at the sides, a brass-rimmed gorget, crimson-lacquered pauldrons domed over the shoulders with brass rims, two lames each; rigid | his barrel breastplate, gorget and slab pauldrons |
+| `waist.veteran_tabard` | sewn: crimson panels front and back to the knee from a band at the waist, open at the sides, a darker hem, lined; a chain down each panel | his long tabard |
+| `feet.veteran_boots` | plates: heavy leather from heel to toe and up to under the knee, two iron bands, an iron toe cap, thick soles, domed knee cops | his heavy boots and knee cops |
+
+Trousers dark, beard grey-brown. The plate is on the `shoulders` slot so the gambeson keeps the
+torso one; the tabard is on the `armor` layer so the forge pushes it clear of the gambeson's
+hem (items on one layer aren't pushed apart).
+
+**Plates, a new way to make an item** (`mftr_blender.plates`). The first plate and boots were
+shells of the reference body's skin, and came out ragged: the CC0 body is low-poly (3,201
+vertices), so a region cut from it has its facets' sawtooth edges, and decimating it to its
+budget before painting it ran its bands across the triangles diagonally. A plate is instead
+built on its own grid:
+- *lathed* round an upright axis through the body (the torso's middle, a leg's): ring by ring,
+  rays out from the axis find the skin; each point stands its lift off it, the distances smoothed
+  across the grid (a plate, not the muscles under it) and never inside the skin;
+- a *tube* round a path through the body that needn't be upright: the boot's foot, heel to toe,
+  capped at both ends; a ray that meets no skin within its reach stops there (up the heel,
+  inside the leg);
+- *domes* (an ellipsoid's cap, cut where it should end: a pauldron short on the neck side, so it
+  stands clear of the trapezius) and *strips* of them (the lames).
+Edges and bands are the grid's rows and columns: straight. `shell.Shell` also takes `cuts` now
+(the body cut finer first).
+
+**Sleeves to the wrist.** The sleeved shirt's sleeve line ran from the shoulder toward a wrist
+at (0.469, 0.956), outside the reference arm: fine for a short sleeve, but a long one was sewn
+round empty air and fell away. Measured on the CC0 body, the forearm's middle is at x 0.25 at
+1.2 m and 0.345 at the wrist; a long sleeve also needs the arm's girth (about 30 cm round), not
+a shirt cuff's.
+
+**The bases' size.** With Rook's items the bases reached 4.03–4.09 MB, a hair under the 4 MiB
+container cap. Vertex colors are now written as normalized bytes, not shorts
+(`mftr_blender.glb._quantize_colors`, as the skin weights were): a paint region is a color of
+its own, told apart at a thousandth, and a 1/255 step keeps them apart. The bases are
+3.69–3.76 MB with Rook's items (after the triangle cut below).
+
+**The triangle cap.** First built, Rook-neo came to 16,128 triangles, over the creator's 14,000
+(20 §7.2); the four items were brought down to about 1,600–1,800 each, and he is
+13,589 now: under the cap, over the 5,000–10,000 target.
+
+**Left:**
+- The sewn trims (a hem's darker band) are jagged: they are the faces near the open edge of a
+  decimated sim mesh. A trim cut along its line would be cleaner, for every sewn item.
+- The pauldrons ride the shoulders' weights; the hand-made Rook's ride the clavicle whole.
+- The gambeson's sleeves are roomy and faceted on the heavy build; a slimmer sleeve (7.2 cm
+  across) fell off the arm in the sim.
+- Seen in creator captures at rest only, not in a match or in motion.
+- The owner's look.
+
+### Lumen in the wardrobe (2026-11-17): the third official champion rebuilt
+
+Lumen-neo (and the `lumen` recipe) now wears new-system items only: eight new ones, beside the
+catalog's ponytail, painted gold. Like the hand-made Lumen: a halo, a sky collar laced in gold
+over a white bodice, bell sleeves, a long white skirt hemmed in gold with three tails streaming
+from a sky sash, ivory boots strapped in gold (her sandals, below), a lantern staff.
+
+| Item | How | Like the hand-made Lumen |
+|---|---|---|
+| `head.priestess_circlet` | modelled round the slim feminine base's head: a gold band at the brow, higher at the back, a sun stone in a gold setting; a double halo of sun gold floating behind the head | her circlet and halo |
+| `torso.priestess_bodice` | sewn: white linen on narrow straps to just below the waist, edged in ivory; the `under` layer, so the collar and the skirt clear it | her fitted bodice |
+| `shoulders.priestess_collar` | plates: a sky collar round the neck and over the shoulders, a gold rim, a sun stone; gold laces down the front in a V to a second stone at the waist | her sky collar, gold V and sun stones |
+| `arms.priestess_sleeves` | plates: gold armlets on the biceps; ivory sleeves belling open from the elbow to the wrist, a gold band at the top and a sky hem | her armlets and bell sleeves |
+| `waist.priestess_skirt` | sewn: white linen from the waist to mid-shin, flaring, a gold hem; four chains | her underskirt |
+| `back.priestess_tails` | sewn: a sky sash round the waist and three white tails finely edged in sky, down the back and behind each hip to above its hem, laid over the skirt; a chain down each | her dress's three tails |
+| `feet.priestess_boots` | plates: soft ivory leather to above the ankle, thin pale soles, two gold straps across the foot, a gold cuff and anklet | her gold anklets; not her sandals (below) |
+| `weapon.lantern_staff` | modelled: a pale shaft shod and banded in gold, a sun ring with rays round a caged lantern burning sun-white; held as the staff, so her clips aim it | her lantern staff |
+
+**What it took:**
+- **A head item.** The reference body has no head of its own to fit to (each base's head is
+  authored), so the circlet is worn on the `head` bone as a held item is on its hand, rigid, and
+  scaled to each base's head by that bone's length (`grip_scale` in its `item.ron`: the heavy
+  masculine head is a fifth bigger than the slim feminine one it was fitted on). The band stands
+  16 mm off the skin to clear hair drawn back over the skull; the halo stands far enough behind
+  the head that the forge's hair hiding (22 §7 item 5) leaves the hair under it.
+- **Clean trims, for every sewn item.** A trim was the faces near an open edge, so on a decimated
+  sim mesh it ran as a sawtooth (Rook's tabard, every hem). Now the faces are cut along the trim's
+  own line, a set width from the edges (`sewing._cut_trims`), and the trim runs smooth beside
+  the hem. The cut also showed an old waste: the trim is split off for its color, and that split
+  was taken for an opening, lined and rimmed. Only the garment's real openings are now
+  (`_line(openings=…)`); the bodice came down from 1,820 to 1,214 triangles at one budget. The catalog's other
+  sewn items keep their saved meshes until they are sewn again.
+- **One garment over another.** The tails must hang over the skirt's flare, further out than the
+  forge's layering pushes (2 cm, `wardrobe::MAX_PUSH`). With the skirt as a collider in the sim,
+  the tails caught on it and bunched at the waist (and the skirt, sewn over the bodice that way,
+  came out at the knee). So a garment `over` another is simulated on the body alone and then laid
+  over it: each point out along its level line from the body's middle to 8 mm past the other's
+  outside.
+- **Plates:** *ribbons* (straps laid on the body seen from the front: the collar's laces); a
+  face whose color is `None` is left out; `armory.Kit.ring` (a torus: the halo, the staff's sun
+  ring).
+- **Sandals didn't pass.** Built first as a sole and straps of a tube round the foot, they failed
+  the harness (22 §4.8) on the slim masculine base: 95 skin points through them, the limit 12,
+  where the sole's edges met the toes and the heel and the instep strap crossed the steep top of
+  the foot. Raising them off the skin, dropping the sole's ends and the heel cup, moving the
+  straps: still 40–50. Closed, like the veteran's boots, they pass, so she wears soft ivory boots
+  with gold straps and anklets. Open footwear needs the fitting to keep a strap's shape over a
+  foot it wasn't made on.
+- **The harness on the sleeves.** Armlets level with the armpit let the chest beside the arm
+  through on the slim masculine base; on the biceps below it, they pass.
+- **Helpers after the chains.** A long skirt's chains take up to four bones a vertex, so a body
+  helper dropped out at one vertex below the hip and stayed on its neighbour (`body_hip_r`
+  jumping 0.36 across an edge, over 21 §1.4's 0.35): a hanging item's helper weights are smoothed
+  again after its chains.
+
+**The bases' size.** With Lumen's items the bases reached 4.00–4.06 MB, about 130 KB under the
+old 4 MiB container cap. The owner chose detail over slimming for now: the glb container cap
+(`mftr_pack::glb::MAX_GLB_BYTES`) and the base budget (`rules::BASE_BYTES_BUDGET`) are both
+7 MiB (2026-11-17), room for about forty more champions' worth of items at Lumen's ~65 KB a base.
+Bases ship with the game and never cross the network, and one base's meshes are shared by every
+champion built on it, so the cost is install size and a little load time. Slimming (normals as
+bytes, or the catalog split out of the bases) stays open for later.
+
+**The look, second pass.** The owner's first look in the creator found three faults:
+- *The tails' sky edging read heavy:* a 22 mm trim on 75 mm tails left them more blue than white.
+  It is 10 mm now.
+- *The middle tail looked short:* the tails ran past the skirt's hem, and there the middle one
+  folded up between the calves. All three now end above the hem, the middle one longest, so the
+  gold hem shows below them.
+- *The bodice showed through the collar at the back:* its neckline rose to 1.44 m, over the
+  collar's top (1.425 m). It now ends level with that top at the sides and at 1.41 m at the
+  back, inside the collar's 16 mm lift. Lower (1.405 m) the slim masculine base's skin came
+  through it (32 pokes), and at 1.418 m the heavy feminine base's shoulders did (13).
+
+**Left:**
+- Seen in creator captures at rest only (13,900 triangles), not in a match or in motion; the
+  tails' and skirt's chains not yet seen swinging.
+- The circlet is fitted to one head and scaled: a face sculpted far from it may meet the band.
+- Sandals: the fitting to keep open footwear's straps in shape (above).
+- The catalog's other sewn items to be sewn again for clean trims (Vesper's, Rook's, the tunic,
+  the skirt…): their looks change a little, for the owner to see.
+- The owner's look.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

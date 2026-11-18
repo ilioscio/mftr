@@ -1,0 +1,14 @@
+// A wardrobe item (22 §4): a priestess's underskirt (Lumen's), sewn and simulated (build.py, M1):
+// white linen from the waist to mid-shin, flaring, a gold hem.
+(
+    id: "waist.priestess_skirt",
+    slot: "waist",
+    name: "Priestess's skirt",
+    layer: "over",
+    accent: false,
+    rigid: false,
+    // Spring-bone chains round the hips (22 §4.5): the long hem carries most of their swing.
+    chains: 4,
+    chain_turn: 45,
+    swing: 0.7,
+)

@@ -28,6 +28,14 @@ all four humanoid bases (slim and heavy, masculine and feminine) when the bases 
   A panel may have its own color (`sewing.Panel(color=…)`): a ranger's tunic's cream sleeves on
   its green body. Each color is a paint region of its own.
 
+  The trims are cut along their own line, a set width from the open edges, so they run smooth
+  beside the hem; only the garment's real openings are lined and rimmed, not the trim's line.
+
+  A garment worn over another (`Garment(over=[…])`: a skirt's tails over the skirt) is
+  simulated on the body alone and then laid over it, each point out along its level line from
+  the body's middle to just past the other's outside: as colliders in the sim, the tails caught
+  on the skirt and bunched at the waist.
+
 - **Modelled** (armour, accessories): model it in Blender around `body_male` and save it as
   `item.blend`, the object named `item`. A hard object can also be built by its `build.py`
   (the ranger's quiver), its strap laid on the body's surface.
@@ -35,6 +43,15 @@ all four humanoid bases (slim and heavy, masculine and feminine) when the bases 
 - **Shells** (boots, bracers, gloves: close-fitting, not cloth): a region of the reference
   body's own skin, lifted off it, smoothed, enveloping the body under it, thickened and colored
   by region (`mftr_blender.shell`). The item's `build.py` says which region and how.
+
+- **Plates** (breastplates, gorgets, a boot's shaft, pauldrons, knee cops: hard, standing off the
+  body): `mftr_blender.plates`. *Lathed* round an upright axis through the body, or a *tube*
+  round a path through it (a foot, heel to toe): rings of rays find the skin, each point stood
+  off it, smoothed into a plate; its edges and bands are the grid's rows, straight lines rather
+  than the low-poly reference body's facets. *Domes* (an ellipsoid's cap) and *strips* of them
+  for pauldrons, their lames and knee cops. See `shoulders/veteran_plate/build.py`. *Ribbons*
+  are straps laid on the body as seen from the front (a collar's laces); a face whose color is
+  `None` is left out.
 
 Then rebuild the bases (`art/creator/humanoid_*/build.py --export`). `mftr_blender.wardrobe`
 fits every item to every base:
@@ -88,7 +105,19 @@ first.
 | `back.ranger_quiver` | back, accessory | modelled: leather, steel bands, teal-fletched arrows, a strap across the chest; held on the chest (Vesper's) | 545 |
 | `feet.ranger_boots` | feet, over | shell: knee-high leather, a flared cuff, an ankle strap, dark soles (Vesper's) | 1,372 |
 | `arms.ranger_bracers` | arms, over | shell: leather forearms, two teal bands, flaring at the elbow (Vesper's) | 864 |
+| `torso.veteran_gambeson` | torso, over | sewn: padded brown, a high neck, long sleeves to the wrist, bound in dark leather (Rook's) | 1,638 |
+| `shoulders.veteran_plate` | shoulders, armor | plates: an iron breastplate and backplate, open at the sides, a gorget, crimson-lacquered pauldrons with brass rims over two lames each; rigid (Rook's) | 1,632 |
+| `waist.veteran_tabard` | waist, armor | sewn: long crimson panels front and back from a band at the waist, open at the sides, lined; two chains (Rook's) | 1,584 |
+| `feet.veteran_boots` | feet, over | plates: heavy leather tubes from heel to toe and shafts to under the knee, two iron bands, an iron toe cap, thick soles, domed iron knee cops (Rook's) | 1,896 |
 | `offhand.ranger_bow` | offhand, held | modelled: a tall recurve, flat wide limbs, a leather grip between silver bands with a teal stone, silver caps, teal-glowing tips, the string; bones that draw with Vesper's shots (Vesper's) | 472 |
+| `head.priestess_circlet` | head, accessory | modelled round the slim feminine head: a gold band at the brow, a sun stone in a gold setting, a double halo of sun gold floating behind the head; worn on the head bone, scaled to each base's (Lumen's) | 440 |
+| `torso.priestess_bodice` | torso, under | sewn: white linen on narrow straps to just below the waist, edged in ivory (Lumen's) | 1,065 |
+| `shoulders.priestess_collar` | shoulders, armor | plates: a sky collar round the neck and over the shoulders, a gold rim, a sun stone; gold laces down the front in a V to a second stone at the waist; rigid (Lumen's) | 664 |
+| `arms.priestess_sleeves` | arms, over | plates: gold armlets on the biceps; ivory sleeves belling open from the elbow to the wrist, a gold band, a sky hem (Lumen's) | 576 |
+| `waist.priestess_skirt` | waist, over | sewn: white linen from the waist to mid-shin, flaring, a gold hem; four chains round the hips (Lumen's) | 1,148 |
+| `back.priestess_tails` | back, armor | sewn: a sky sash round the waist, three white tails finely edged in sky, down the back and behind each hip to above its hem, laid over the skirt; a chain down each (Lumen's) | 1,072 |
+| `feet.priestess_boots` | feet, over | plates: soft ivory leather to above the ankle, thin pale soles, two gold straps across the foot, a gold cuff and anklet (Lumen's) | 1,216 |
+| `weapon.lantern_staff` | weapon, held | modelled: a pale shaft shod and banded in gold, a sun ring with rays round a caged lantern burning sun-white; held as the staff (Lumen's) | 544 |
 
 ## Held items (22 §4.7, BW7)
 
@@ -101,6 +130,7 @@ origin, +Z along it (a blade's point, a bow's upper limb), +Y its back (a bow's 
 | `grip` | the bone it is placed by (`hand_l`, `hand_r`, `forearm_l`); without `grasp_radius` it rides that bone alone, rigid |
 | `grip_at` | where along that bone the grip sits, as a fraction of its length |
 | `grip_up`, `grip_back` | where the item's +Z and +Y point, in the bone's own frame (+Y along the bone) |
+| `grip_scale` | worn rather than held (a circlet on the `head` bone): the length of the bone it was modelled round; it is scaled to each base's bone |
 
 An item **gripped in the fist** adds (22 §4.7, "Hands that hold"):
 

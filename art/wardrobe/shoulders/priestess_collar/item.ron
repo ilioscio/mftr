@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): a priestess's collar (Lumen's), plates (build.py): sky blue round the
+// neck and over the shoulders, rimmed in gold, a sun stone at its front, and two gold laces down
+// the bodice in a V to a second stone at the waist. Over a bodice or a tunic: on the armor layer.
+(
+    id: "shoulders.priestess_collar",
+    slot: "shoulders",
+    name: "Priestess's collar",
+    layer: "armor",
+    accent: false,
+    rigid: true,
+)
