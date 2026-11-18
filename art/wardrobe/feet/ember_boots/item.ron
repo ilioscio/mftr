@@ -1,0 +1,10 @@
+// A wardrobe item (22 §4): Ember's boots, plates (build.py): slim soot-black leather to under the
+// knee, pointed toes, thin soles, a gold hem at the top and a gold plate domed over each knee.
+(
+    id: "feet.ember_boots",
+    slot: "feet",
+    name: "Ember boots",
+    layer: "over",
+    accent: false,
+    rigid: false,
+)

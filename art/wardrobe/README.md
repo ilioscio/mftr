@@ -139,6 +139,13 @@ first.
 | `back.moss_cloak` | back, armor | plates, cast from behind onto the body in Cairn's cuirass and kilt: moss-green wool from under the mantle to the calves, hanging straight from the furthest point above, its hem torn into points; three chains (Cairn's) | 584 |
 | `feet.bark_greaves` | feet, over | plates: brown leather boots to under the knee, a strap across the foot, a greave of bark strips over each shin (Cairn's) | 1,352 |
 | `weapon.warden_staff` | weapon, held | modelled: a gnarled, wandering shaft of dark wood, knotted, wrapped at the grip, four twisted roots at its head holding a glowing emerald (Cairn's) | 628 |
+| `head.flame_crest` | head, accessory | modelled (the armory's bending tubes) on the slim masculine head: tongues of fire from the hairline to behind the crown, sweeping up and back, white-hot at the roots to ember red at the tips; worn on the head bone, scaled to each base's, over a buzz cut (Ember's) | 880 |
+| `shoulders.ember_collar` | shoulders, armor | plates: a band round the neck's base with a gold brooch; tall soot-black petals rising round the back of the neck and flaring clear of the head, lined in ember red, cut into flame-like points; ember-red lapels in a V and two rows of gold buttons; rigid (Ember's) | 1,136 |
+| `torso.ember_coat` | torso, over | sewn: the shadow jerkin's pattern a little longer, charcoal, long sleeves, edged in ember red, roomier sleeves (Ember's) | 1,254 |
+| `arms.ember_sleeves` | arms, armor | plates: the priestess's sleeves without the armlets, flaring wider: charcoal bells from the elbow, a gold band at the top, the ember-red lining and a glowing cuff at the hem (Ember's) | 576 |
+| `waist.ember_sash` | waist, armor | plates: an ember-red sash over a coat round a team-colored band, a round gold buckle with a flame stone (Ember's) | 480 |
+| `back.ember_tails` | back, armor | plates, cast from behind onto the body in Ember's coat as the moss cloak is: two charcoal tails from under the sash to the backs of the knees, narrowing, a vent between them, ember-red edges, a gold hem; a chain down each (Ember's) | 440 |
+| `feet.ember_boots` | feet, over | plates: Shade's boots' build plain, soot black to under the knee, fuller at the top, a gold hem, closed points past the toes, a shallow gold cap over each knee (Ember's) | 1,068 |
 
 ## Held items (22 §4.7, BW7)
 

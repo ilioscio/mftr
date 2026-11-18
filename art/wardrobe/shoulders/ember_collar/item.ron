@@ -1,0 +1,12 @@
+// A wardrobe item (22 §4): an ember collar (Ember's), plates (build.py): tall soot-black petals
+// flaring behind the head, lined in ember red, cut into flame-like points; a band at the neck's
+// base with a gold brooch; ember-red lapels in a V and two rows of gold buttons. Over a coat: on
+// the armor layer.
+(
+    id: "shoulders.ember_collar",
+    slot: "shoulders",
+    name: "Ember collar",
+    layer: "armor",
+    accent: false,
+    rigid: true,
+)

@@ -1,0 +1,17 @@
+// A wardrobe item (22 §4): a flame crest (Ember's), modelled by build.py: burning hair, tongues of
+// fire from the hairline to behind the crown sweeping up and back, white-hot at the roots, ember red
+// at the tips. Worn on the head bone, rigid, scaled to each base's head (`grip_scale`: the slim
+// masculine head bone it was fitted on); worn over a buzz cut.
+(
+    id: "head.flame_crest",
+    slot: "head",
+    name: "Flame crest",
+    layer: "accessory",
+    accent: false,
+    rigid: true,
+    grip: "head",
+    grip_at: 0.0,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, -1.0),
+    grip_scale: 0.2352,
+)

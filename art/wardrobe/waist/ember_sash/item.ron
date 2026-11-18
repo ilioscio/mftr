@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): an ember sash (Ember's), plates (build.py): ember-red cloth round the
+// waist over a coat, a band of the team's color round its middle, a round gold buckle set with a
+// flame stone.
+(
+    id: "waist.ember_sash",
+    slot: "waist",
+    name: "Ember sash",
+    layer: "armor",
+    accent: true,
+    rigid: false,
+)

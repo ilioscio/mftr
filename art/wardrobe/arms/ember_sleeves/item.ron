@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): Ember's bell sleeves, plates (build.py): open charcoal sleeves belling
+// wide from the elbow to the wrist over a coat's sleeve, a gold band at the top, the ember-red
+// lining turned back at the hem and a cuff of glowing embers.
+(
+    id: "arms.ember_sleeves",
+    slot: "arms",
+    name: "Ember sleeves",
+    layer: "armor",
+    accent: false,
+    rigid: false,
+)
