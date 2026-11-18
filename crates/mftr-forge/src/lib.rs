@@ -871,7 +871,7 @@ fn len(v: [f32; 3]) -> f32 {
 /// shading (a darker nose, cavity) stays.
 fn skin(model: &mut Model, tone: [f32; 3]) {
     let Some(slot) = model.materials.iter().position(|m| m == "skin") else { return };
-    let ratio = [tone[0] / looks::BASE_SKIN[0], tone[1] / looks::BASE_SKIN[1], tone[2] / looks::BASE_SKIN[2]];
+    let ratio = skin_ratio(tone);
     for prims in &mut model.meshes {
         for p in prims.iter_mut().filter(|p| p.material == Some(slot)) {
             for (v, c) in p.colors.iter_mut().enumerate() {
@@ -886,6 +886,16 @@ fn skin(model: &mut Model, tone: [f32; 3]) {
             }
         }
     }
+}
+
+/// How much each channel of the base's skin is scaled to show `tone`. The tones are colors as a
+/// screen shows them (sRGB, as the creator's swatches draw them); vertex colors are linear, and
+/// the bases are painted in `BASE_SKIN` as it stands (times their baked shading). So the base's
+/// paint is replaced by the tone's linear color: a tone renders as its swatch. (Scaled by the
+/// sRGB values, the dark tones rendered as tans: the darkest, a deep brown, as a light one.)
+fn skin_ratio(tone: [f32; 3]) -> [f32; 3] {
+    let lin = |c: f32| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+    [0, 1, 2].map(|k| lin(tone[k]) / looks::BASE_SKIN[k])
 }
 
 /// Copy the library's clips onto `model`, by bone name. Translation tracks (the pelvis's bob,
@@ -978,6 +988,23 @@ mod tests {
 
     fn head_top(m: &Model) -> f32 {
         m.meshes.iter().flatten().flat_map(|p| p.positions.iter().map(|v| v[1])).fold(f32::MIN, f32::max)
+    }
+
+    #[test]
+    fn a_skin_tone_shows_as_its_swatch_does() {
+        // The base's skin recolored for a tone, shown on a screen (sRGB), is the tone's swatch:
+        // the darkest natural tone, a deep brown, renders as one.
+        let srgb = |c: f32| if c <= 0.0031308 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+        for tone in &looks::SKIN_TONES {
+            let r = skin_ratio(*tone);
+            for k in 0..3 {
+                let shown = srgb(looks::BASE_SKIN[k] * r[k]);
+                assert!((shown - tone[k]).abs() < 1e-4, "{tone:?}");
+            }
+        }
+        // The natural tones darken step by step.
+        let light = |t: &[f32; 3]| skin_ratio(*t).iter().sum::<f32>();
+        assert!(looks::SKIN_TONES[..8].windows(2).all(|w| light(&w[1]) < light(&w[0])));
     }
 
     #[test]

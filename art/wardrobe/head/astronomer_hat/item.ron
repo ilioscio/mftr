@@ -1,0 +1,17 @@
+// A wardrobe item (22 §4): an astronomer's hat (Quill's), modelled by build.py: a wide brim and a
+// tall deep purple crown bending back to a point, a violet band, brass goggles with glowing lenses
+// on it, a star burning at the tip. Worn on the head bone, rigid, scaled to each base's head
+// (`grip_scale`: the slim masculine head bone it was fitted on); the hair hides under it.
+(
+    id: "head.astronomer_hat",
+    slot: "head",
+    name: "Astronomer's hat",
+    layer: "over",
+    accent: false,
+    rigid: true,
+    grip: "head",
+    grip_at: 0.0,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, -1.0),
+    grip_scale: 0.2352,
+)

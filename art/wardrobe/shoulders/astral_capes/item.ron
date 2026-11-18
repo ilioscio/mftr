@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): astral capes (Quill's), plates (build.py): two short violet capes, one
+// over the other, over the shoulders, hemmed in darker violet; violet lapels in a V and two rows of
+// brass buttons. Over a coat: on the armor layer.
+(
+    id: "shoulders.astral_capes",
+    slot: "shoulders",
+    name: "Astral capes",
+    layer: "armor",
+    accent: false,
+    rigid: false,
+)

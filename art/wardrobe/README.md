@@ -152,6 +152,12 @@ first.
 | `waist.bone_corset` | waist, armor | plates: black-plum leather from the hips to under the chest over a team-colored band, a ribcage of bone over its front (a breastbone, four pairs of ribs curving down round the sides, the lower ones opening an arch); a skull lantern with burning eyes on an iron chain at the left hip; rigid (Marrow's) | 1,342 |
 | `legs.rag_skirt` | legs, over | plates, as the bark kilt's slats: eighteen strips of plum, darker plum and grave grey from the hips to the shins, each its own length, torn on a slant, overlapping, flaring clear of the seat; four chains round the hips (Marrow's) | 792 |
 | `weapon.bone_staff` | weapon, held | modelled: a shaft of black wood shod in iron, crooked over the hands and near straight below them, a plum wrap at the grip, a horned skull at its head with magenta fire in its eye sockets and ram's horns, bone charms on cords under it (Marrow's) | 770 |
+| `head.astronomer_hat` | head, over | modelled (the armory's lathes and bending tube) round the slim masculine head: a wide deep purple brim, a tall crown bending back to a point, a violet band, brass goggles with glowing lenses on it, a star at the tip, leaning back; worn on the head bone, scaled to each base's (Quill's) | 794 |
+| `shoulders.astral_capes` | shoulders, armor | plates, the grave shawl's build: two short violet capes, the upper one shorter and further out, hemmed in darker violet; violet lapels in a V and two rows of brass buttons (Quill's) | 1,304 |
+| `torso.astral_coat` | torso, over | sewn: the ember coat's cut, deep purple bound in violet (Quill's) | 1,254 |
+| `waist.astral_belt` | waist, armor | plates: brown leather on a team-colored band, a square brass buckle, a leather scroll case at the right hip and a brass spyglass at the left (Quill's) | 560 |
+| `back.astral_tails` | back, armor | plates, cast from behind onto the body in Quill's coat as the ember tails are: the coat's long skirts from under the belt to the shins, widening, a vent, violet edges, a brass hem, glowing stars above it; a chain down each (Quill's) | 784 |
+| `weapon.orrery_staff` | weapon, held | modelled: a dark wooden shaft shod and banded in brass, a leather grip, three brass rings crossing round a glowing star and two little planets on them; its foot the plain staff's length (Quill's) | 750 |
 
 ## Held items (22 §4.7, BW7)
 

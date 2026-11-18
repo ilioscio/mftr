@@ -537,7 +537,8 @@ presets and drags carry it.
 - **Per brow** (`looks.brows`, 0–10, 5 the style as drawn): thickness, length, arch, peak (toward
   the nose or the temple), tilt, gap and height. **Each brow its own shape** gives the right one
   its own settings, for asymmetry. Old recipes read the default.
-- **Color:** the brows stay the body's paint region 3, as recipes painted them before. The Brows
+- **Color:** the brows stay the body's paint region 3, as recipes painted them before (now 2:
+  `brows::color_region` finds it; see Quill, 2026-11-18). The Brows
   panel's swatches set that fill.
 - **Departs from §3.1:** no density slider. A sparse brow needs the skin's color behind the
   strokes, which needs transparency or another color per vertex. The strokes' contrast stands in
@@ -1762,6 +1763,64 @@ the 10,000 target, as Ember is).
   in her clips (her hunch, her kneeling recall, her staff slam).
 - She stands upright in the creator: her hunch is her clips'.
 - The owner's look.
+
+### Quill in the wardrobe (2026-11-18): the eighth official champion, and dark skin
+
+Quill-neo (and the `quill` recipe) is now a Black woman, and her navy and indigo are purple and
+violet; the rest of her concept stands (`art/champions/quill/concept.md` still describes the
+hand-made Quill). She wears six new items over the catalog's coils, Shade's leggings and Vesper's
+boots: a wide astronomer's hat bending back to a star, brass goggles on its band, a deep purple
+coat with two violet capes, violet lapels and brass buttons, long star-flecked tails, a belt
+with a scroll case and a spyglass, and an orrery staff. Her signature is violet (255). 12,700
+triangles in the creator (the cap 14,000; over the 10,000 target).
+
+| Item | How |
+|---|---|
+| `head.astronomer_hat` | the armory's pieces on the slim masculine head, worn on the head bone with `grip_scale`: a lathed brim and band, the crown a bending tube, the goggles rings and lenses, the star two stones; the whole hat leans back 17° |
+| `shoulders.astral_capes` | plates: the grave shawl's build (each ray cast in from outside), two capes; the lapels and buttons the ember collar's |
+| `torso.astral_coat` | sewn: the ember coat's cut, purple |
+| `waist.astral_belt` | plates: the ember sash's belt; the scroll case and the spyglass closed tubes |
+| `back.astral_tails` | plates: the ember tails' build, longer and widening to the shins, stars as small glowing diamonds just off the cloth |
+| `weapon.orrery_staff` | the armory: the plain staff's shaft, three crossing rings, two planets, a star |
+
+**Dark skin rendered as tan (fixed).** The skin tones (`looks::SKIN_TONES`) are colors as a
+screen shows them: the creator's swatches draw them so. But the forge scaled the base's linear
+vertex colors by the tones' plain ratios, so the dark tones rendered far lighter than their
+swatches: the darkest natural tone, a deep brown, as a light tan, and tones 5 to 7 nearly alike.
+No tone could show a deeply dark-skinned person. Now `skin_ratio` replaces the base's paint with
+the tone's linear color (times the base's baked shading): each tone renders as its swatch, and
+the eight natural tones run from fair to very dark. A test pins it. Every forged champion's skin
+moves to its swatch: tones 0 to 2 a little darker than before, 3 to 7 clearly darker.
+
+**Her face, from the sliders (§3.3).** The aim is a realistic face of West African descent, not
+a type: features vary widely among Black people, and a caricature is what to avoid. So no slider
+goes past half its range, and the changes are the ones that most often set such a face apart
+from the default:
+- **Nose:** broader (`nose_width` 0.6), a lower bridge (`nose_reach` −0.3, `nose_hook` −0.2), a
+  slightly upturned tip showing the nostrils (`nose_tip` 0.2).
+- **Mouth:** fuller lips, the lower fuller than the upper (`lips_upper` 0.45, `lips_lower` 0.5,
+  `mouth_lips` 0.35), a marked cupid's bow (`lips_bow` 0.35), a little wider.
+- **Brow and eyes:** a rounder, more upright forehead (`head_forehead` 0.35), a smoother brow
+  ridge, eyes a little larger with a defined crease.
+- **Cheeks:** high cheekbones, full cheeks.
+
+Reviewed in front, three-quarter and profile captures against her old face at the same tone.
+
+**Found on the way:**
+- **The brows' paint region is 2, not 3**, on every humanoid base now: a recipe painting
+  `("body", 3, …)` paints nothing, silently.
+- **The default brow color is a light grey-brown** that stands out pale on dark skin. Quill's
+  are painted dark brown; the default should follow the hair, or darken with the skin.
+- **Form on very dark skin reads weakly** in the flat, unlit-specular style: real dark skin shows
+  its form through sheen. A soft skin sheen would help every tone.
+- **A wide brim casts a hard band of shadow** over the eyes; the hat sits high and leans back so
+  her face shows.
+
+**Left:**
+- Seen in creator captures at rest only.
+- The owner's look: the face, the skin tone, the purple.
+- The ancestry presets themselves (§3.3, open question 4): Quill's values are one data point for
+  a West African preset, and the presets need reviewers from the communities they depict.
 
 ## 7. Open questions for the owner
 
