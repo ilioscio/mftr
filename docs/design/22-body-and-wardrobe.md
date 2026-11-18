@@ -1688,6 +1688,42 @@ a glowing emerald. The body keeps his old paint. 13,358 triangles in the creator
 - The war paint on his face (the catalog has no face paint yet).
 - The owner's look.
 
+### Ember in the wardrobe (2026-11-18): the sixth official champion rebuilt
+
+Ember-neo (and the `ember` recipe) now wears seven new items after his concept
+(`art/champions/ember/concept.md`), over the catalog's buzz cut in soot black and Shade's black
+leggings. A crest of flame sweeping up and back, a tall collar of soot-black petals lined in ember
+red flaring behind his head, a charcoal coat with ember-red lapels, gold buttons and tails, bell
+sleeves with glowing cuffs, an ember-red sash on the team's band, and pointed boots with gold
+knee plates. His hands stay bare: the fire in his palms is his effects'. 10,994 triangles in the
+creator (the cap 14,000).
+
+| Item | How | Like the hand-made Ember |
+|---|---|---|
+| `head.flame_crest` | modelled with the armory's bending tubes on the slim masculine head, worn on the head bone with `grip_scale`: eleven tongues from the hairline to behind the crown, each in three lengths, white-hot, flame and ember, every step dimmer so the signature's glow keeps the roots brightest | his burning hair |
+| `shoulders.ember_collar` | plates: a band lathed round the neck's base with a gold brooch; petals rising from its top ring round the back, standing further out as they climb, a red lining sheet just inside the black, the top cut into points; lapels as ribbons, buttons as small domes | his tall flared collar, lapels, buttons and brooch |
+| `torso.ember_coat` | sewn: the shadow jerkin's pattern a little longer, roomier sleeves, charcoal edged in ember red | his charcoal coat and its red lining |
+| `arms.ember_sleeves` | plates: the priestess's bell sleeves without the armlets, wider, a red band and a glowing cuff at the hem | his bell sleeves and glowing cuffs |
+| `waist.ember_sash` | plates: a sash lathed round the waist over the coat on the team's band, a gold buckle with a flame stone | his accent band |
+| `back.ember_tails` | plates: the moss cloak's build (each column cast from behind onto the body in his coat, hanging from the furthest point above it), cut into two tails narrowing to the knees, with a chain each | his coat tails on their chain |
+| `feet.ember_boots` | plates: Shade's boots' build, plain and fuller toward the top, closed points past the toes, shallow gold caps over the knees | his pointed boots and gold knee plates |
+
+**What it took:**
+- **Glows take the signature's hue** (`paint::glow`), keeping only their brightness: the crest's
+  three colors become one orange, so each step is also dimmer than the last.
+- **The harness** (skin through an item at rest, 12 points at most): the collar's band rose into
+  a slim base's jaw at the throat (it now dips 35 mm there), and its petals ran too close to the
+  back of the skull (they stand 25 mm off the band and flare 20 cm out). The coat's sleeves, the
+  jerkin's, hugged a heavy base's deltoids (16 points); they are cut roomier.
+- **Tails, not a sewn coat.** The long coat is sewn whole (3,292 triangles); a fitted coat and two
+  cast tails are about half that, and the tails swing on their own chains.
+
+**Left:**
+- Seen in creator captures at rest only: the tails not swinging, the collar not seen against his
+  head turning in his clips.
+- The crest reads pale in the creator's light: its glow may want to be less bright.
+- The owner's look.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

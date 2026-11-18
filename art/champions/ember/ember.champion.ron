@@ -1,5 +1,7 @@
 // Ember as a recipe (20 §12): the official kit, looks on the slim humanoid build.
-// A cocky pyromancer: a burning crest of hair, a tall ember-lined collar, a charcoal coat.
+// A cocky pyromancer in the wardrobe's own items (22 §4): a crest of flame over a buzz cut, a tall
+// collar of soot-black petals lined in ember red, a charcoal coat with ember-red lapels and tails,
+// bell sleeves with glowing cuffs, a sash in the team's color, pointed boots with gold knee plates.
 // The kit is a copy of crates/mftr-sim/champions/ember.ron (a test checks they match); the
 // hand-made model in this folder stays what the game shows until the owner prefers this one.
 // Ember: Skillshot mage.
@@ -14,8 +16,9 @@ Champion(
         shape: (cheekbones: 0.5, chin_reach: 0.3, eyes_size: 0.2, brow_ridge: -0.3),
         proportions: (head: 0.1, arms: 0.1),
         skin: 1,
-        outfit: ["hair.mohawk", "shoulders.mantle", "torso.coat", "arms.bracers", "feet.boots", "waist.belt"],
-        paint: [("hair.mohawk", 0, 25), ("shoulders.mantle", 0, 18), ("torso.coat", 0, 6)],
+        outfit: ["hair.buzz", "head.flame_crest", "torso.ember_coat", "shoulders.ember_collar", "arms.ember_sleeves",
+                 "waist.ember_sash", "back.ember_tails", "legs.shadow_leggings", "feet.ember_boots"],
+        paint: [("hair.buzz", 0, 7)],
         signature: 25,
         moves: (attack: "ember.attack", q: "ember.q", w: "ember.w", e: "ember.e", r: "ember.r"),
     ),
