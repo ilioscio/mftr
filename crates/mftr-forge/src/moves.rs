@@ -98,7 +98,9 @@ pub fn weapon(champion: ChampionId) -> (&'static str, &'static [&'static str]) {
         ChampionId::Vesper => ("bow", &["offhand.ranger_bow"]),
         ChampionId::Rook => ("heavy", &["weapon.maul"]),
         ChampionId::Shade => ("blades", &["weapon.shadow_blade", "offhand.shadow_blade"]),
-        ChampionId::Lumen | ChampionId::Quill | ChampionId::Cairn | ChampionId::Marrow => ("staff", &["weapon.staff"]),
+        ChampionId::Lumen => ("staff", &["weapon.lantern_staff"]),
+        ChampionId::Cairn => ("staff", &["weapon.warden_staff"]),
+        ChampionId::Quill | ChampionId::Marrow => ("staff", &["weapon.staff"]),
         ChampionId::Wren => ("crossbow", &[]),
         _ => ("unarmed", &[]),
     }

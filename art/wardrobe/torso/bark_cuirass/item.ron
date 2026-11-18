@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): a bark cuirass (Cairn's), plates (build.py): strips of bark round the
+// chest and the belly on a leather band, open under the arms, an emerald in a granite boss at the
+// breastbone. Rigid; worn bare-armed.
+(
+    id: "torso.bark_cuirass",
+    slot: "torso",
+    name: "Bark cuirass",
+    layer: "over",
+    accent: false,
+    rigid: true,
+)

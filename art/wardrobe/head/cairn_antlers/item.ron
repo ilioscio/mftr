@@ -1,0 +1,17 @@
+// A wardrobe item (22 §4): warden's antlers (Cairn's), modelled by build.py: great branching
+// antlers of weathered bone from the brow, three tines on each beam, emerald beads round the
+// roots. Worn on the head bone, rigid, scaled to each base's head (`grip_scale`: the heavy
+// masculine head bone it was fitted on).
+(
+    id: "head.cairn_antlers",
+    slot: "head",
+    name: "Warden's antlers",
+    layer: "accessory",
+    accent: false,
+    rigid: true,
+    grip: "head",
+    grip_at: 0.0,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, -1.0),
+    grip_scale: 0.275,
+)

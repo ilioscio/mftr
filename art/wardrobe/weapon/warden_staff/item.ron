@@ -1,0 +1,22 @@
+// A wardrobe item (22 §4.7, BW7): Cairn's warden's staff, held, modelled by build.py in its grip
+// frame: a gnarled dark wooden shaft, four twisted roots at its head holding a glowing emerald.
+(
+    id: "weapon.warden_staff",
+    slot: "weapon",
+    name: "Warden's staff",
+    accent: false,
+    rigid: true,
+    // Its weapon class and weight class (22 §4.7: the weight will pick the clip set).
+    class: "staff",
+    weight: "medium",
+    // Held as the staff is (Cairn's clips aim it).
+    grip: "hand_r",
+    grip_at: 0.55,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, 1.0),
+    // Gripped in the fist (22 §4.7), round: the hand may sit any way round it.
+    grasp_radius: 0.022,
+    grasp_at: 0.0,
+    grasp_span: (-0.5, 0.85),
+    grasp_edge: false,
+)

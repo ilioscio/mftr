@@ -52,7 +52,8 @@ all four humanoid bases (slim and heavy, masculine and feminine) when the bases 
   for pauldrons, their lames and knee cops. See `shoulders/veteran_plate/build.py`. *Ribbons*
   are straps laid on the body as seen from the front (a collar's laces); a face whose color is
   `None` is left out. Closed pieces (a spike, a kunai) are finished with `thickness=None`:
-  turned out each on its own, not thickened.
+  turned out each on its own, not thickened. Held and head items are modelled with the armory's
+  `Kit` (`mftr_blender.armory`); `Kit.branch` bends a tube along a path (an antler, a root).
 
 Then rebuild the bases (`art/creator/humanoid_*/build.py --export`). `mftr_blender.wardrobe`
 fits every item to every base:
@@ -130,6 +131,14 @@ first.
 | `feet.shadow_boots` | feet, over | plates: soft black leather, two wraps across the foot, shafts wound in wraps to the middle of the calf (Shade's) | 1,280 |
 | `weapon.shadow_blade` | weapon, held | modelled: a long curved blade held forward past the knuckles over a dark steel guard, its outer edge burning violet, a wrapped grip and a violet stone (Shade's right hand) | 154 |
 | `offhand.shadow_blade` | offhand, held | the shadow blade mirrored, for the left hand (Shade's) | 154 |
+| `head.cairn_antlers` | head, accessory | modelled (the armory's bending tubes) on the heavy masculine head: great branching antlers of weathered bone from the brow, three tines on each beam, emerald beads set in a burr at each root; worn on the head bone, scaled to each base's (Cairn's) | 640 |
+| `shoulders.stone_mantle` | shoulders, armor | plates: granite slabs over the chest and the back up to the neck, a granite pauldron over each shoulder above a slab, moss over whatever looks up; rigid (Cairn's) | 840 |
+| `torso.bark_cuirass` | torso, over | plates: strips of bark close round the chest and the belly on a leather band, open under the arms top to bottom (the arms pass there), lower at the back (under a cloak's top), an emerald in a granite boss at the breastbone; rigid (Cairn's) | 936 |
+| `arms.bark_bracers` | arms, armor | plates: a leather sleeve round each forearm, bound at both ends, strips of bark over all but its inside (Cairn's) | 904 |
+| `waist.bark_kilt` | waist, armor | plates: a broad leather belt over a team-colored band; bark slats hanging from it to above the knee, each its own shade and length, flaring clear of the thighs, moss over their tops (Cairn's) | 832 |
+| `back.moss_cloak` | back, armor | plates, cast from behind onto the body in Cairn's cuirass and kilt: moss-green wool from under the mantle to the calves, hanging straight from the furthest point above, its hem torn into points; three chains (Cairn's) | 584 |
+| `feet.bark_greaves` | feet, over | plates: brown leather boots to under the knee, a strap across the foot, a greave of bark strips over each shin (Cairn's) | 1,352 |
+| `weapon.warden_staff` | weapon, held | modelled: a gnarled, wandering shaft of dark wood, knotted, wrapped at the grip, four twisted roots at its head holding a glowing emerald (Cairn's) | 628 |
 
 ## Held items (22 §4.7, BW7)
 
