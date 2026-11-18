@@ -1,0 +1,19 @@
+// A wardrobe item (22 §4): a russet tunic (Wren's), sewn and simulated (build.py, M1): the ranger's
+// tunic's pattern in russet, to the upper thigh, flared and V-necked, over cream sleeves to the
+// elbow, trimmed in lime.
+(22 §4): a ranger's tunic (Vesper's), sewn and simulated (build.py, M1):
+// forest green to the upper thigh over cream sleeves, trimmed in teal.
+(
+    id: "torso.wren_tunic",
+    slot: "torso",
+    name: "Russet tunic",
+    layer: "over",
+    accent: false,
+    rigid: false,
+    // It has sleeves: fitted to the arms too.
+    sleeves: true,
+    // Spring-bone chains round the hips (22 §4.5): the flared hem carries half its swing.
+    chains: 4,
+    chain_turn: 45,
+    swing: 0.5,
+)

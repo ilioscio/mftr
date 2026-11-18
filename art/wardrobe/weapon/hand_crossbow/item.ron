@@ -1,0 +1,23 @@
+// A wardrobe item (22 §4.7, BW7): Wren's hand crossbow, held, modelled by build.py in its grip
+// frame: a wooden stock along the hand, an iron prod with lime tips, a crank, a bolt with glowing
+// lime fletching.
+(
+    id: "weapon.hand_crossbow",
+    slot: "weapon",
+    name: "Hand crossbow",
+    accent: false,
+    rigid: true,
+    // Its weapon class and weight class (22 §4.7: the weight will pick the clip set).
+    class: "crossbow",
+    weight: "light",
+    // Held along the right hand, as the hand-made Wren's lies (Wren's clips aim it with the fist).
+    grip: "hand_r",
+    grip_at: 0.55,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, 1.0),
+    // Gripped in the fist (22 §4.7): the stock's radius there; round, the hand may sit any way.
+    grasp_radius: 0.019,
+    grasp_at: 0.0,
+    grasp_span: (-0.05, 0.05),
+    grasp_edge: false,
+)

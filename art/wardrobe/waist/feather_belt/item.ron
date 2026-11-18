@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): a feather belt (Wren's), plates (build.py): leather on a band of the
+// team's color, an iron buckle, a fan of russet and tan tail feathers tipped in lime at the back, a
+// quiver of lime-fletched bolts at the right hip.
+(
+    id: "waist.feather_belt",
+    slot: "waist",
+    name: "Feather belt",
+    layer: "armor",
+    accent: true,
+    rigid: false,
+)

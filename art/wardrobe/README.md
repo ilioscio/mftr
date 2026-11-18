@@ -158,6 +158,11 @@ first.
 | `waist.astral_belt` | waist, armor | plates: brown leather on a team-colored band, a square brass buckle, a leather scroll case at the right hip and a brass spyglass at the left (Quill's) | 560 |
 | `back.astral_tails` | back, armor | plates, cast from behind onto the body in Quill's coat as the ember tails are: the coat's long skirts from under the belt to the shins, widening, a vent, violet edges, a brass hem, glowing stars above it; a chain down each (Quill's) | 784 |
 | `weapon.orrery_staff` | weapon, held | modelled: a dark wooden shaft shod and banded in brass, a leather grip, three brass rings crossing round a glowing star and two little planets on them; its foot the plain staff's length (Quill's) | 750 |
+| `head.feather_crest` | head, accessory | modelled (the armory's blades) on the slim masculine head: a wren's cap of russet and tan feathers tipped in lime, lying swept back from the crown over the back of the head; worn on the head bone, scaled to each base's (Wren's) | 288 |
+| `shoulders.feather_capelet` | shoulders, armor | plates, the astral capes' build: three layers of dark russet feathers over the shoulders, each hem cut into feather points, the lowest in a point down the back (Wren's) | 1,200 |
+| `torso.wren_tunic` | torso, over | sewn: the ranger's tunic's pattern in russet, trimmed in lime; four chains round the hips (Wren's) | 1,570 |
+| `waist.feather_belt` | waist, armor | plates: leather on a team-colored band, an iron buckle, a fan of russet and tan tail feathers tipped in lime at the back, a quiver of bolts with glowing lime fletching at the right hip (Wren's) | 780 |
+| `weapon.hand_crossbow` | weapon, held | modelled: a wooden stock along the hand forward from the fist, an iron prod swept back with lime tips, the string, a crank, a bolt with glowing lime fletching (Wren's right hand) | 222 |
 
 ## Held items (22 §4.7, BW7)
 

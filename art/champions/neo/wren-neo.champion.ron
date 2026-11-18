@@ -1,7 +1,10 @@
 // Wren-neo: Wren rebuilt in the champion creator, to play next to the hand-made Wren (20 §12).
 // Generated from art/champions/wren/wren.champion.ron with the name changed (a test keeps them in step);
 // load the whole set with `mftr-server --champion-dir art/champions/neo --champions both`.
-// A small, quick birdman: a feathered crest, a russet tunic, a capelet of feathers.
+// A small, quick bird-woman in the wardrobe's own items (22 §4): a wren's cap of russet feathers
+// swept back, a capelet of feathers, a russet tunic, a belt with a fan of tail feathers and a quiver of
+// bolts, a hand crossbow. A young Latina: warm brown skin (tone 4), dark brown hair in a ponytail,
+// dark brown eyes, full brows, a softly aquiline nose, full cheeks (22 §3.3: a face from the sliders).
 // The kit is a copy of crates/mftr-sim/champions/wren.ron (a test checks they match); the
 // hand-made model in this folder stays what the game shows until the owner prefers this one.
 // Wren: Skirmisher: mobile ranged physical damage.
@@ -14,12 +17,18 @@ Champion(
     format: 0,
     looks: (
         build: "humanoid_slim",
-        gender: Masculine,
-        shape: (nose_reach: 0.6, nose_hook: 0.6, eyes_size: 0.4, chin_reach: -0.4),
+        gender: Feminine,
+        shape: (eyes_size: 0.5, lids_crease: 0.1, lids_open: 0.15, cheekbones: 0.4, cheeks_hollow: -0.35, face_length: -0.3,
+                jaw_width: -0.15, jaw_corners: -0.2, chin_length: -0.15, brow_ridge: -0.3, head_forehead: 0.3, nose_length: -0.2,
+                nose_width: 0.25, nose_reach: 0.05, nose_hook: 0.2, nose_tip: 0.05, mouth_width: 0.1, mouth_lips: 0.4,
+                lips_upper: 0.35, lips_lower: 0.45, lips_bow: 0.3),
+        eyes: (iris: 0),
+        brows: (style: "soft", thick: 7),
         proportions: (height: -0.3, legs: 0.2),
-        skin: 3,
-        outfit: ["hair.mohawk", "torso.tunic", "back.cape", "arms.bracers", "feet.boots", "waist.belt"],
-        paint: [("hair.mohawk", 0, 33), ("torso.tunic", 0, 27), ("back.cape", 0, 12)],
+        skin: 4,
+        outfit: ["hair.ponytail", "head.feather_crest", "torso.wren_tunic", "shoulders.feather_capelet", "waist.feather_belt",
+                 "arms.ranger_bracers", "legs.shadow_leggings", "feet.ranger_boots", "weapon.hand_crossbow"],
+        paint: [("hair.ponytail", 0, 15), ("body", 2, 15), ("legs.shadow_leggings", 0, 15), ("arms.ranger_bracers", 1, 33)],
         signature: 85,
         moves: (attack: "wren.attack", q: "wren.q", w: "wren.w", e: "wren.e", r: "wren.r"),
     ),
