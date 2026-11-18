@@ -1,0 +1,11 @@
+// A wardrobe item (22 §4): a grave shawl (Marrow's), plates (build.py): ragged grave-grey wool round
+// the neck and over the shoulders, to the chest in front and a long point down the back, its hem
+// torn and darker; a bone toggle at the throat. Over a robe: on the armor layer.
+(
+    id: "shoulders.grave_shawl",
+    slot: "shoulders",
+    name: "Grave shawl",
+    layer: "armor",
+    accent: false,
+    rigid: false,
+)

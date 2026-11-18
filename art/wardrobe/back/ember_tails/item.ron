@@ -1,0 +1,15 @@
+// A wardrobe item (22 §4): Ember's coat tails, plates cast from behind onto the body in his coat
+// (build.py): two long charcoal tails from under the sash to the backs of the knees, a vent between
+// them, their edges showing the ember-red lining, a gold hem. A chain down each.
+(
+    id: "back.ember_tails",
+    slot: "back",
+    name: "Coat tails",
+    layer: "armor",
+    accent: false,
+    rigid: false,
+    chains: 2,
+    chain_turn: 180,
+    chain_arc: 40,
+    swing: 1.0,
+)

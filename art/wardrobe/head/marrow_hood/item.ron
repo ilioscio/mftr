@@ -1,0 +1,17 @@
+// A wardrobe item (22 §4): a grave hood (Marrow's), modelled by build.py: a deep plum hood set back
+// so the face shows, a heavy rolled rim round its opening, its peak drooping behind the nape. Worn
+// on the head bone, rigid, scaled to each base's head (`grip_scale`: the slim masculine head bone it
+// was fitted on); the hair hides under it.
+(
+    id: "head.marrow_hood",
+    slot: "head",
+    name: "Grave hood",
+    layer: "over",
+    accent: false,
+    rigid: true,
+    grip: "head",
+    grip_at: 0.0,
+    grip_up: (0.0, 1.0, 0.0),
+    grip_back: (0.0, 0.0, -1.0),
+    grip_scale: 0.2352,
+)

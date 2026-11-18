@@ -1,5 +1,7 @@
 // Marrow as a recipe (20 §12): the official kit, looks on the slim humanoid build.
-// A bent bone-witch: a plum hood, a shawl, a long robe, a crooked staff.
+// A bent bone-witch in the wardrobe's own items (22 §4): a deep plum hood with a rolled rim, a
+// ragged grave-grey shawl, a plum robe, a corset of bone ribs with a skull lantern at her hip, a
+// skirt torn into strips, black boots, a crooked staff crowned with a horned skull.
 // The kit is a copy of crates/mftr-sim/champions/marrow.ron (a test checks they match); the
 // hand-made model in this folder stays what the game shows until the owner prefers this one.
 // Marrow: Battlemage: short-range sustained magic.
@@ -16,8 +18,9 @@ Champion(
         shape: (nose_length: 0.7, nose_hook: 0.8, chin_length: 0.5, cheeks_hollow: 0.6, brow_ridge: 0.4),
         proportions: (height: -0.3, head: 0.2),
         skin: 8,
-        outfit: ["head.hood", "shoulders.mantle", "torso.robe", "weapon.staff"],
-        paint: [("head.hood", 0, 54), ("torso.robe", 0, 55), ("shoulders.mantle", 0, 6)],
+        outfit: ["hair.long", "head.marrow_hood", "shoulders.grave_shawl", "torso.marrow_robe", "waist.bone_corset",
+                 "legs.rag_skirt", "feet.shadow_boots", "weapon.bone_staff"],
+        paint: [("hair.long", 0, 2)],
         signature: 310,
         moves: (attack: "marrow.attack", q: "marrow.q", w: "marrow.w", e: "marrow.e", r: "marrow.r"),
     ),
