@@ -137,6 +137,7 @@ func _ready() -> void:
 	portraits = preload("res://scripts/portraits.gd").new()
 	add_child(portraits)
 	portraits.setup(func(c: String): return _portrait_model(c), champion_model, CHAMPION_COLORS)
+	portraits.ready_for = _model_ready
 	portraits.rendered.connect(_on_portrait)
 	portraits.rendered.connect(ItemIcons.on_rendered)
 	ItemIcons.renderer = portraits
@@ -146,6 +147,11 @@ func _ready() -> void:
 	add_child(sfx)
 	client = MatchClient.new()
 	add_child(client)
+	# The champions forged from their recipes take seconds each: start them all now, on
+	# worker threads, so champion select and the match find them done.
+	for n in client.champion_names():
+		if not FileAccess.file_exists(_champion_pack(n)):
+			MftrModel.forge_start(_art_root(), n)
 	updates = preload("res://scripts/updates.gd").new()
 	add_child(updates)
 	updates.checked.connect(func(_info):
@@ -592,10 +598,22 @@ func _art_path(rel: String) -> String:
 ## A champion's own pack (`art/champions/<id>/export/<id>.glb`, A4) if it ships one and it
 ## validates (Bastion), else its model forged from its looks (the creator, CR2): a custom
 ## champion's file, or an official champion's recipe (the redesigns, doc 22), else the template. Built once per champion.
+## Where a champion's exported model would be (Bastion's); the rest are forged.
+func _champion_pack(champion: String) -> String:
+	var id := champion.to_lower()
+	return _art_path("champions/%s/export/%s.glb" % [id, id])
+
+
+## Whether `_model_for(champion)` would return without waiting on a forge.
+func _model_ready(key: String) -> bool:
+	if key.contains(":") or champion_models.has(key) or FileAccess.file_exists(_champion_pack(key)):
+		return true
+	return MftrModel.forge_ready(_art_root(), key)
+
+
 func _model_for(champion: String) -> MftrModel:
 	if not champion_models.has(champion):
-		var id := champion.to_lower()
-		var path := _art_path("champions/%s/export/%s.glb" % [id, id])
+		var path := _champion_pack(champion)
 		var own: MftrModel = MftrModel.load(path) if FileAccess.file_exists(path) else null
 		if own == null:
 			own = MftrModel.forge(_art_root(), champion)

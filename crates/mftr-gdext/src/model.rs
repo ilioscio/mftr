@@ -45,6 +45,53 @@ pub(crate) fn catalog(art: &str) -> Option<Arc<mftr_forge::Catalog>> {
     c.clone()
 }
 
+/// A forge's result once done: the pack, `None` for a file without looks, or the error.
+type Forged = Result<Option<Arc<mftr_pack::Loaded>>, String>;
+type ForgeSlot = Arc<(std::sync::Mutex<Option<Forged>>, std::sync::Condvar)>;
+
+/// Forges started, by champion and champion file (a custom champion's file can differ from one
+/// server to the next).
+static FORGES: std::sync::Mutex<Option<std::collections::HashMap<(String, String), ForgeSlot>>> =
+    std::sync::Mutex::new(None);
+
+/// The slot `champion`'s forge fills, starting it on a worker thread the first time; `None`
+/// with no champion file to forge from.
+fn start_forge(art: &str, champion: &str) -> Option<ForgeSlot> {
+    let text = mftr_client::champion_file(champion)
+        .or_else(|| mftr_forge::official_recipe(std::path::Path::new(art), champion))?;
+    let mut all = FORGES.lock().unwrap_or_else(|e| e.into_inner());
+    let key = (champion.to_string(), text.clone());
+    if let Some(slot) = all.get_or_insert_with(Default::default).get(&key) {
+        return Some(slot.clone());
+    }
+    let slot: ForgeSlot = Arc::new((std::sync::Mutex::new(None), std::sync::Condvar::new()));
+    all.as_mut().expect("made above").insert(key, slot.clone());
+    let (art, name, out) = (art.to_string(), champion.to_string(), slot.clone());
+    std::thread::spawn(move || {
+        let r = forge_now(&art, &name, &text);
+        *out.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+        out.1.notify_all();
+    });
+    Some(slot)
+}
+
+fn forge_now(art: &str, champion: &str, text: &str) -> Forged {
+    let Some(looks) = mftr_forge::looks::of_champion_file(text).map_err(|e| format!("its looks: {e}"))? else {
+        return Ok(None);
+    };
+    let cat = catalog_quiet(art)?;
+    cat.forge(champion, &looks).map(|p| Some(Arc::new(p)))
+}
+
+/// `catalog` for a worker thread: the error comes back instead of going to Godot's log.
+fn catalog_quiet(art: &str) -> Result<Arc<mftr_forge::Catalog>, String> {
+    let mut c = CATALOG.lock().unwrap_or_else(|e| e.into_inner());
+    if c.is_none() {
+        *c = Some(Arc::new(mftr_forge::Catalog::load(std::path::Path::new(art)).map_err(|e| format!("catalog: {e}"))?));
+    }
+    Ok(c.clone().expect("loaded above"))
+}
+
 impl MftrModel {
     /// A model of a pack built here (the creator's preview, CR3).
     pub(crate) fn from_pack(pack: Arc<mftr_pack::Loaded>) -> Gd<MftrModel> {
@@ -74,25 +121,42 @@ impl MftrModel {
     /// Forge the model of `champion` from its champion file's looks and the catalog under `art`
     /// (CR2, `mftr-forge`): a server's custom champion's file, else an official champion's recipe
     /// (`art/champions/<id>/<id>.champion.ron`, the redesigns); `null` with no file or no looks.
+    /// Forging takes seconds, so it runs on a worker thread and is kept: one already started
+    /// (`forge_start`) is waited for here, only for what's left of it.
     #[func]
     fn forge(art: GString, champion: GString) -> Option<Gd<MftrModel>> {
-        let text = mftr_client::champion_file(&champion.to_string())
-            .or_else(|| mftr_forge::official_recipe(std::path::Path::new(&art.to_string()), &champion.to_string()))?;
-        let looks = match mftr_forge::looks::of_champion_file(&text) {
-            Ok(Some(l)) => l,
-            Ok(None) => return None,
-            Err(e) => {
-                godot_error!("MFTR {champion}'s looks: {e}");
-                return None;
+        let slot = start_forge(&art.to_string(), &champion.to_string())?;
+        let (lock, done) = &*slot;
+        let mut r = lock.lock().unwrap_or_else(|e| e.into_inner());
+        while r.is_none() {
+            r = done.wait(r).unwrap_or_else(|e| e.into_inner());
+        }
+        match r.as_ref().expect("waited for") {
+            Ok(Some(pack)) => {
+                let pack = pack.clone();
+                Some(Gd::from_init_fn(|base| MftrModel { base, pack, regions: false }))
             }
-        };
-        let cat = catalog(&art.to_string())?;
-        match cat.forge(&champion.to_string(), &looks) {
-            Ok(pack) => Some(Gd::from_init_fn(|base| MftrModel { base, pack: Arc::new(pack), regions: false })),
+            Ok(None) => None,
             Err(e) => {
                 godot_error!("MFTR {champion} couldn't be forged: {e}");
                 None
             }
+        }
+    }
+
+    /// Start forging `champion` on a worker thread (see `forge`), if it has looks to forge
+    /// and isn't started yet: the client does this for the whole roster as it opens.
+    #[func]
+    fn forge_start(art: GString, champion: GString) {
+        start_forge(&art.to_string(), &champion.to_string());
+    }
+
+    /// Whether `forge` would return at once: the forge is done, or there's nothing to forge.
+    #[func]
+    fn forge_ready(art: GString, champion: GString) -> bool {
+        match start_forge(&art.to_string(), &champion.to_string()) {
+            None => true,
+            Some(slot) => slot.0.lock().unwrap_or_else(|e| e.into_inner()).is_some(),
         }
     }
 
