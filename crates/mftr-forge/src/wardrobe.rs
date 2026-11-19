@@ -709,8 +709,9 @@ pub fn check_bodies(c: &crate::Catalog, sliders: bool) -> Vec<Check> {
                 }
                 for (name, shape) in bodies {
                     let looks = Looks { outfit: ids.clone(), shape, ..base.clone() };
-                    let Ok(f) = c.forge("Check", &looks) else { continue };
-                    let m = &f.model;
+                    // At rest: the clips (most of a forge) don't move what's measured.
+                    let Ok(m) = c.forge_at_rest(&looks) else { continue };
+                    let m = &m;
                     let pos = crate::face::skinned(m);
                     let body: Vec<usize> =
                         m.nodes.iter().filter(|n| !n.name.starts_with("part.")).filter_map(|n| n.mesh).collect();
