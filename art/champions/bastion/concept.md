@@ -26,7 +26,8 @@ that shows through their gaps: the ice holds him together. The owner's notes on 
 - **A face:** stern brow stones angled down to the middle, slit eyes under them, a nose stone,
   a heavy jaw with a beard of icicles, pushed forward from the shoulders.
 
-About 9,300 triangles (was 5,000); same bones, clips, effects and sounds.
+Every shard and icicle is rooted in the stone it grows from (its first point sunk into it); the
+icicle beard follows the jaw's curve under it. About 9,900 triangles (was 5,000); same bones, clips, effects and sounds.
 
 ## Palette (14 §4)
 
