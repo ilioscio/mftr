@@ -32,10 +32,13 @@ from mftr_blender.mesh import box_part, path_part, rock_part  # noqa: E402
 STONE = (0.24, 0.22, 0.21)
 STONE_LIGHT = (0.32, 0.30, 0.27)
 STONE_DARK = (0.13, 0.12, 0.12)
-MOSS = (0.16, 0.27, 0.10)
 IRON = (0.11, 0.11, 0.13)
-ICE = (0.36, 0.78, 1.0)
-ICE_DEEP = (0.10, 0.40, 0.88)
+# Ice as ice, not magic: pale, lit like the stone (not glowing), white with rime where it's thin
+# or catches the frost; only his eyes glow.
+ICE = (0.50, 0.72, 0.86)
+ICE_DEEP = (0.26, 0.48, 0.66)
+FROST = (0.82, 0.88, 0.92)
+GLOW = (0.62, 0.90, 1.0)
 ACCENT = (0.18, 0.52, 0.95)
 
 # Hulking (14 §2.2): low hips and short legs, the neck below the shoulder line, very broad and
@@ -73,14 +76,27 @@ def cluster(bone, base, out, length, width, colors=(None, None, None), seed=0):
     parts = []
     for k, (spread, lf, wf) in enumerate(((-0.45, 0.62, 0.7), (0.0, 1.0, 1.0), (0.5, 0.74, 0.78))):
         d = (o + side * spread * 0.6 + up * (0.15 * ((k + seed) % 2) - 0.05)).normalized()
-        L, W = length * lf, width * wf
+        L, W = length * lf * 0.85, width * wf * 1.4
         if isinstance(base[0], str):
             pts = [(base[0], base[1], tuple(Vector(base[2] if len(base) > 2 else (0, 0, 0)) + d * f * L)) for f in (0.0, 0.45, 0.85, 1.0)]
         else:
             pts = [tuple(Vector(base) + d * f * L) for f in (0.0, 0.45, 0.85, 1.0)]
-        col = ICE if (k + seed) % 2 == 0 else ICE_DEEP
-        parts.append(path_part(bone, pts, 6, [(W, W * 0.85), (W * 0.95, W * 0.8), (W * 0.55, W * 0.5), (0, 0)], "emissive", col))
+        col = (ICE, FROST, ICE_DEEP)[(k + seed) % 3]
+        parts.append(path_part(bone, pts, 6, [(W, W * 0.85), (W * 0.95, W * 0.8), (W * 0.55, W * 0.5), (0, 0)], "cloth", col))
     return parts
+
+
+def icicles(bone, roots, colors=(FROST, ICE)):
+    """Icicles hanging straight down from `roots` ((bone point or armature point), length, width)."""
+    out = []
+    for i, (root, length, width) in enumerate(roots):
+        if isinstance(root[0], str):
+            b, t, off = root
+            pts = [(b, t, off), (b, t, (off[0], off[1], off[2] - length * 0.55)), (b, t, (off[0], off[1], off[2] - length))]
+        else:
+            pts = [root, (root[0], root[1], root[2] - length * 0.55), (root[0], root[1], root[2] - length)]
+        out.append(path_part(bone, pts, 4, [(width, width), (width * 0.6, width * 0.6), (0, 0)], "cloth", colors[i % len(colors)]))
+    return out
 
 
 def _center():
@@ -91,14 +107,12 @@ def _center():
         lump("spine_01", sp((0, 0, 1.18)), (0.58, 0.46, 0.30), STONE),
         lump("spine_02", sp((0, 0.02, 1.40)), (0.84, 0.62, 0.40), STONE),
         # the chest's top as interlocking chipped stones over an ice core.
-        rock_part("chest", sp((0, 0.06, 1.58)), (0.70, 0.60, 0.30), STONE_LIGHT, moss=MOSS, seed=21, cuts=5),
+        rock_part("chest", sp((0, 0.06, 1.58)), (0.70, 0.60, 0.30), STONE_LIGHT, moss=FROST, seed=21, cuts=5),
         rock_part("chest", sp((0.20, -0.10, 1.55)), (0.36, 0.34, 0.26), STONE, seed=22, cuts=4),
         rock_part("chest", sp((-0.20, -0.10, 1.55)), (0.36, 0.34, 0.26), STONE, seed=23, cuts=4, flip=True),
         *cluster("chest", sp((0.0, -0.18, 1.62)), (0.0, -0.6, 0.8), 0.12, 0.035, seed=3),
-        # The crystal core in his chest, set in an iron ring.
-        path_part("chest", [sp((0, -0.26, 1.44)), sp((0, -0.38, 1.44)), sp((0, -0.48, 1.44))], 6,
-                  [(.15, .19), (.13, .16), (0, 0)], "emissive", ICE, ref=(1, 0, 0)),
-        path_part("chest", [sp((0, -0.25, 1.44)), sp((0, -0.30, 1.44))], 8, [(.19, .22), (.19, .22)], "metal", IRON, ref=(1, 0, 0)),
+        # The ice heart: a chunk of old ice set into his chest, frosted over, flush with the stone.
+        rock_part("chest", sp((0, -0.33, 1.45)), (0.30, 0.12, 0.24), ICE, moss=FROST, seed=24, cuts=5),
         # Rock lumps across the back and belly.
         lump("spine_02", sp((0.22, 0.25, 1.30)), (0.20, 0.14, 0.18), STONE_DARK, rot=(10, 20, 15)),
         lump("spine_01", sp((0.18, 0.20, 1.12)), (0.16, 0.12, 0.14), STONE, rot=(-10, 10, 25)),
@@ -107,17 +121,17 @@ def _center():
         lump("spine_01", sp((0.10, -0.22, 1.14)), (0.20, 0.12, 0.14), STONE_LIGHT, rot=(5, 15, -10)),
         # Crystals growing from his back: the silhouette's spikes.
         path_part("chest", [sp((0.08, 0.22, 1.55)), sp((0.14, 0.42, 1.85)), sp((0.17, 0.50, 2.02))], 5,
-                  [(.08, .07), (.05, .045), (0, 0)], "emissive", ICE_DEEP),
+                  [(.08, .07), (.05, .045), (0, 0)], "cloth", ICE_DEEP),
         path_part("chest", [sp((-0.12, 0.24, 1.50)), sp((-0.22, 0.46, 1.74)), sp((-0.28, 0.54, 1.86))], 5,
-                  [(.07, .06), (.045, .04), (0, 0)], "emissive", ICE),
+                  [(.07, .06), (.045, .04), (0, 0)], "cloth", ICE),
         path_part("spine_02", [sp((0.02, 0.26, 1.34)), sp((0.04, 0.50, 1.52)), sp((0.05, 0.60, 1.60))], 5,
-                  [(.06, .05), (.035, .03), (0, 0)], "emissive", ICE_DEEP),
+                  [(.06, .05), (.035, .03), (0, 0)], "cloth", ICE_DEEP),
         path_part("chest", [sp((0.24, 0.20, 1.60)), sp((0.36, 0.38, 1.80)), sp((0.41, 0.44, 1.88))], 5,
-                  [(.06, .05), (.035, .03), (0, 0)], "emissive", ICE),
+                  [(.06, .05), (.035, .03), (0, 0)], "cloth", ICE),
         path_part("chest", [sp((-0.30, 0.18, 1.58)), sp((-0.42, 0.34, 1.82)), sp((-0.47, 0.40, 1.92))], 5,
-                  [(.07, .06), (.04, .035), (0, 0)], "emissive", ICE_DEEP),
+                  [(.07, .06), (.04, .035), (0, 0)], "cloth", ICE_DEEP),
         path_part("spine_02", [sp((-0.18, 0.28, 1.28)), sp((-0.26, 0.50, 1.38)), sp((-0.29, 0.58, 1.42))], 5,
-                  [(.05, .045), (.03, .025), (0, 0)], "emissive", ICE),
+                  [(.05, .045), (.03, .025), (0, 0)], "cloth", ICE),
         lump("pelvis", sp((0.18, -0.20, 0.92)), (0.16, 0.10, 0.14), STONE_LIGHT, rot=(0, 10, 20)),
         lump("pelvis", sp((-0.16, -0.21, 0.94)), (0.15, 0.10, 0.13), STONE, rot=(0, -12, -15)),
         # Crystal clusters across his back.
@@ -138,22 +152,24 @@ def _left():
         # Boulder shoulders standing above his head, moss on top, a crystal from each.
         # the shoulder a heap of chipped boulders, an ice seam glowing
         # where they meet the arm.
-        rock_part("clavicle_l", ("clavicle_l", 1.0, (0.12, 0.02, 0.12)), (0.60, 0.56, 0.40), STONE_LIGHT, moss=MOSS, seed=11, cuts=5),
+        rock_part("clavicle_l", ("clavicle_l", 1.0, (0.12, 0.02, 0.12)), (0.60, 0.56, 0.40), STONE_LIGHT, moss=FROST, seed=11, cuts=5),
         rock_part("clavicle_l", ("clavicle_l", 1.0, (0.30, 0.02, -0.06)), (0.34, 0.40, 0.34), STONE, seed=12, cuts=4),
         rock_part("clavicle_l", ("clavicle_l", 0.4, (0.0, 0.08, 0.08)), (0.34, 0.40, 0.26), STONE_DARK, seed=13, cuts=4),
         rock_part("clavicle_l", ("clavicle_l", 1.0, (0.10, -0.20, 0.0)), (0.26, 0.20, 0.24), STONE, seed=14, cuts=3),
         *cluster("clavicle_l", ("clavicle_l", 1.0, (0.22, -0.16, -0.06)), (0.5, -0.8, 0.3), 0.11, 0.03, seed=2),
+        *icicles("clavicle_l", [(("clavicle_l", 1.0, (0.06, -0.20, -0.04)), 0.14, 0.025), (("clavicle_l", 1.0, (0.18, -0.18, -0.10)), 0.10, 0.02),
+                                (("clavicle_l", 1.0, (0.36, -0.06, -0.20)), 0.16, 0.028), (("clavicle_l", 1.0, (0.40, 0.10, -0.18)), 0.11, 0.022)]),
         path_part("clavicle_l", [("clavicle_l", 1.0, (0.12, 0.10, 0.30)), ("clavicle_l", 1.0, (0.20, 0.22, 0.56)),
-                                 ("clavicle_l", 1.0, (0.24, 0.27, 0.70))], 6, [(.09, .08), (.05, .045), (0, 0)], "emissive", ICE),
+                                 ("clavicle_l", 1.0, (0.24, 0.27, 0.70))], 6, [(.09, .08), (.05, .045), (0, 0)], "cloth", ICE),
         path_part("clavicle_l", [("clavicle_l", 1.0, (0.24, 0.04, 0.22)), ("clavicle_l", 1.0, (0.40, 0.10, 0.40)),
-                                 ("clavicle_l", 1.0, (0.46, 0.12, 0.47))], 5, [(.06, .05), (.035, .03), (0, 0)], "emissive", ICE_DEEP),
+                                 ("clavicle_l", 1.0, (0.46, 0.12, 0.47))], 5, [(.06, .05), (.035, .03), (0, 0)], "cloth", ICE_DEEP),
         path_part("clavicle_l", [("clavicle_l", 1.0, (0.02, 0.16, 0.24)), ("clavicle_l", 1.0, (0.04, 0.34, 0.42)),
-                                 ("clavicle_l", 1.0, (0.05, 0.40, 0.48))], 5, [(.05, .045), (.03, .025), (0, 0)], "emissive", ICE),
+                                 ("clavicle_l", 1.0, (0.05, 0.40, 0.48))], 5, [(.05, .045), (.03, .025), (0, 0)], "cloth", ICE),
         *cluster("clavicle_l", ("clavicle_l", 1.0, (0.30, 0.0, 0.06)), (1.0, 0.1, 0.5), 0.24, 0.05, seed=1),
         # arms of chipped stones over a glowing ice core that shows
         # through the gaps, the forearms swelling toward the fists.
-        (ua, (ua, 0), (ua, 1), 8, [(0, .13, .13), (.5, .14, .14), (1, .12, .12)], "emissive", ICE_DEEP),
-        (fa, (fa, 0), (fa, 1), 8, [(0, .12, .12), (.5, .14, .14), (1, .15, .15)], "emissive", ICE_DEEP),
+        (ua, (ua, 0), (ua, 1), 8, [(0, .13, .13), (.5, .14, .14), (1, .12, .12)], "cloth", ICE_DEEP),
+        (fa, (fa, 0), (fa, 1), 8, [(0, .12, .12), (.5, .14, .14), (1, .15, .15)], "cloth", ICE_DEEP),
         rock_part(ua, (ua, 0.22), (0.34, 0.32, 0.32), STONE, seed=31, cuts=4),
         rock_part(ua, (ua, 0.70), (0.30, 0.30, 0.30), STONE_DARK, seed=32, cuts=4),
         rock_part(fa, (fa, 0.28), (0.32, 0.30, 0.30), STONE_LIGHT, seed=33, cuts=4),
@@ -170,7 +186,7 @@ def _left():
         *cluster(fa, (fa, 0.5, (0.04, 0.12, 0.02)), (0.3, 1.0, 0.4), 0.26, 0.045, seed=0),
         # Short stumpy legs and boulder feet.
         # Legs: chipped stones over the ice core, as the arms.
-        (th, sp((0.10, 0, 1.00)), (th, 1), 8, [(0, .14, .14), (1, .12, .12)], "emissive", ICE_DEEP),
+        (th, sp((0.10, 0, 1.00)), (th, 1), 8, [(0, .14, .14), (1, .12, .12)], "cloth", ICE_DEEP),
         rock_part(th, (th, 0.30), (0.40, 0.38, 0.34), STONE_DARK, seed=61, cuts=4),
         rock_part(th, (th, 0.78), (0.32, 0.32, 0.28), STONE, seed=62, cuts=4),
         lump(ca, (ca, 0.02, (0, -0.07, 0)), (0.24, 0.12, 0.20), STONE_LIGHT),
@@ -181,7 +197,7 @@ def _left():
         *cluster(th, (th, 0.1, (0.12, 0.02, 0.0)), (1.0, 0.2, 0.3), 0.18, 0.04, seed=1),
         lump("foot_l", ("foot_l", 0.2, (0.10, 0.04, 0.06)), (0.12, 0.14, 0.12), STONE_LIGHT, rot=(0, 15, 20)),
         lump("pelvis", sp((0.22, 0.06, 1.02)), (0.12, 0.18, 0.16), STONE, rot=(0, 20, 0)),
-        (ca, (ca, 0), (ca, 1), 8, [(0, .12, .12), (1, .14, .14)], "emissive", ICE_DEEP),
+        (ca, (ca, 0), (ca, 1), 8, [(0, .12, .12), (1, .14, .14)], "cloth", ICE_DEEP),
         rock_part(ca, (ca, 0.40), (0.34, 0.34, 0.32), STONE, seed=63, cuts=4),
         rock_part(ca, (ca, 0.78), (0.38, 0.38, 0.24), STONE_DARK, seed=64, cuts=4),
         lump("foot_l", ("foot_l", 0.45, (0, 0, 0.02)), (0.28, 0.36, 0.18), STONE_DARK, grow=1.0),
@@ -192,13 +208,19 @@ def _left():
 def _head():
     hb = "head"
     return [
-        # A small chipped head sunk between the shoulders, under an overhanging brow stone, two
-        # deep-set ice eyes glowing beneath it; a jaw stone below.
-        rock_part(hb, sp((0, -0.05, 1.73)), (0.32, 0.32, 0.30), STONE_LIGHT, seed=71, cuts=4),
-        rock_part(hb, sp((0, -0.15, 1.83)), (0.40, 0.14, 0.10), STONE_DARK, seed=72, cuts=3, rot=(-12, 0, 0)),
-        rock_part(hb, sp((0, -0.14, 1.65)), (0.26, 0.16, 0.12), STONE, seed=73, cuts=3),
-        box_part(hb, sp((0.07, -0.235, 1.765)), (0.09, 0.04, 0.05), "emissive", ICE, rot=(0, 0, -12)),
-        box_part(hb, sp((-0.07, -0.235, 1.765)), (0.09, 0.04, 0.05), "emissive", ICE, rot=(0, 0, 12)),
+        # A craggy face pushed forward from the shoulders: two brow stones angled down to the
+        # middle (stern), deep sockets with small cold eyes in them, a broad nose stone, a heavy
+        # jaw, and a beard of icicles hanging from it.
+        rock_part(hb, sp((0, -0.140, 1.760)), (0.34, 0.30, 0.30), STONE_LIGHT, moss=FROST, seed=71, cuts=4),
+        rock_part(hb, sp((0, -0.230, 1.650)), (0.36, 0.20, 0.14), STONE, seed=73, cuts=4),
+        rock_part(hb, sp((0.085, -0.270, 1.845)), (0.18, 0.12, 0.08), STONE_DARK, moss=FROST, seed=74, cuts=3, rot=(-10, 0, -16)),
+        rock_part(hb, sp((-0.085, -0.270, 1.845)), (0.18, 0.12, 0.08), STONE_DARK, moss=FROST, seed=74, cuts=3, rot=(-10, 0, 16), flip=True),
+        rock_part(hb, sp((0, -0.305, 1.755)), (0.09, 0.10, 0.13), STONE, seed=75, cuts=3),
+        box_part(hb, sp((0, -0.265, 1.795)), (0.26, 0.04, 0.07), "cloth", STONE_DARK, bevel=0.3),
+        box_part(hb, sp((0.072, -0.284, 1.808)), (0.07, 0.03, 0.022), "emissive", GLOW, rot=(0, 0, -16)),
+        box_part(hb, sp((-0.072, -0.284, 1.808)), (0.07, 0.03, 0.022), "emissive", GLOW, rot=(0, 0, 16)),
+        *icicles(hb, [(sp((x, -0.31, 1.62)), L, w) for x, L, w in
+                      ((-0.12, 0.10, 0.022), (-0.06, 0.15, 0.026), (0.0, 0.19, 0.03), (0.06, 0.14, 0.026), (0.12, 0.09, 0.02))]),
         lump("neck", sp((0, 0, 1.60)), (0.24, 0.24, 0.12), STONE_DARK),
         # A crown of crystal breaking through the back of his skull.
         *cluster(hb, sp((0.0, 0.04, 1.86)), (0.0, 0.35, 1.0), 0.22, 0.04, seed=1),
