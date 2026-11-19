@@ -148,10 +148,25 @@ func _ready() -> void:
 	client = MatchClient.new()
 	add_child(client)
 	# The champions forged from their recipes take seconds each: start them all now, on
-	# worker threads, so champion select and the match find them done.
+	# worker threads, kept in the player's data folder between launches (D78). When any has to
+	# be built (after an update), a screen covers the menu until they're done.
+	MftrModel.set_forge_cache(OS.get_user_data_dir().path_join("forged"))
+	var forged := []
 	for n in client.champion_names():
 		if not FileAccess.file_exists(_champion_pack(n)):
 			MftrModel.forge_start(_art_root(), n)
+			forged.append(n)
+	if not forged.is_empty():
+		var layer := CanvasLayer.new()
+		layer.layer = 90
+		add_child(layer)
+		var screen = preload("res://scripts/forge_screen.gd").new()
+		screen.art_root = _art_root()
+		screen.portraits = portraits
+		screen.colors = CHAMPION_COLORS
+		layer.add_child(screen)
+		screen.watch(forged)
+		screen.finished.connect(layer.queue_free)
 	updates = preload("res://scripts/updates.gd").new()
 	add_child(updates)
 	updates.checked.connect(func(_info):
@@ -748,7 +763,7 @@ var shopkeepers: Node3D                   # the shops beside the fountains (shop
 func _update_shot(delta: float) -> void:
 	if _shot_path != "" and _shot_menu:
 		_shot_timer += delta
-		if _shot_timer > 1.2:
+		if _shot_timer > maxf(1.2, _shot_at):  # later with --shot-at (the forge screen, say)
 			get_viewport().get_texture().get_image().save_png(_shot_path)
 			print("MFTR: saved screenshot to ", _shot_path)
 			get_tree().quit()

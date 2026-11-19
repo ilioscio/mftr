@@ -47,16 +47,34 @@ pub(crate) fn catalog(art: &str) -> Option<Arc<mftr_forge::Catalog>> {
 
 /// A forge's result once done: the pack, `None` for a file without looks, or the error.
 type Forged = Result<Option<Arc<mftr_pack::Loaded>>, String>;
-type ForgeSlot = Arc<(std::sync::Mutex<Option<Forged>>, std::sync::Condvar)>;
+
+/// One champion's forge: its state (`FORGE_*`) and, once done, its result.
+pub(crate) struct ForgeSlot {
+    state: std::sync::atomic::AtomicU8,
+    result: std::sync::Mutex<Option<Forged>>,
+    done: std::sync::Condvar,
+}
+
+/// Looking for it in the cache on disk.
+const FORGE_CHECKING: u8 = 1;
+/// Not in the cache (or stale): forging it, seconds.
+const FORGE_BUILDING: u8 = 2;
+const FORGE_DONE: u8 = 3;
 
 /// Forges started, by champion and champion file (a custom champion's file can differ from one
 /// server to the next).
-static FORGES: std::sync::Mutex<Option<std::collections::HashMap<(String, String), ForgeSlot>>> =
-    std::sync::Mutex::new(None);
+type Forges = std::collections::HashMap<(String, String), Arc<ForgeSlot>>;
+static FORGES: std::sync::Mutex<Option<Forges>> = std::sync::Mutex::new(None);
+
+/// Where forged models are kept between launches (`MftrModel.set_forge_cache`); none: not kept.
+static FORGE_CACHE: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+/// The art a forge reads, fingerprinted once per run (see `art_fingerprint`).
+static ART_PRINT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// The slot `champion`'s forge fills, starting it on a worker thread the first time; `None`
 /// with no champion file to forge from.
-fn start_forge(art: &str, champion: &str) -> Option<ForgeSlot> {
+fn start_forge(art: &str, champion: &str) -> Option<Arc<ForgeSlot>> {
     let text = mftr_client::champion_file(champion)
         .or_else(|| mftr_forge::official_recipe(std::path::Path::new(art), champion))?;
     let mut all = FORGES.lock().unwrap_or_else(|e| e.into_inner());
@@ -64,15 +82,92 @@ fn start_forge(art: &str, champion: &str) -> Option<ForgeSlot> {
     if let Some(slot) = all.get_or_insert_with(Default::default).get(&key) {
         return Some(slot.clone());
     }
-    let slot: ForgeSlot = Arc::new((std::sync::Mutex::new(None), std::sync::Condvar::new()));
+    let slot = Arc::new(ForgeSlot {
+        state: std::sync::atomic::AtomicU8::new(FORGE_CHECKING),
+        result: std::sync::Mutex::new(None),
+        done: std::sync::Condvar::new(),
+    });
     all.as_mut().expect("made above").insert(key, slot.clone());
     let (art, name, out) = (art.to_string(), champion.to_string(), slot.clone());
+    let cache = FORGE_CACHE.lock().unwrap_or_else(|e| e.into_inner()).clone();
     std::thread::spawn(move || {
-        let r = forge_now(&art, &name, &text);
-        *out.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
-        out.1.notify_all();
+        let r = forge_kept(&art, &name, &text, cache.as_deref(), &out);
+        *out.result.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+        out.state.store(FORGE_DONE, std::sync::atomic::Ordering::Release);
+        out.done.notify_all();
     });
     Some(slot)
+}
+
+/// The forge, through the cache: a kept model built from the same code, art and recipe is
+/// read back; otherwise it's forged and kept for next time.
+fn forge_kept(art: &str, champion: &str, text: &str, cache: Option<&std::path::Path>, slot: &ForgeSlot) -> Forged {
+    let Some(dir) = cache else {
+        slot.state.store(FORGE_BUILDING, std::sync::atomic::Ordering::Release);
+        return forge_now(art, champion, text);
+    };
+    let print = ART_PRINT.get_or_init(|| art_fingerprint(std::path::Path::new(art)));
+    let recipe = mftr_pack::cache::fnv1a64(text.as_bytes());
+    let key = format!("{}|{print}|{recipe:016x}", env!("MFTR_FORGE_BUILD"));
+    // One file per champion and recipe: a custom champion of the same name doesn't evict it.
+    let stem = format!("{}-{recipe:016x}", champion.to_lowercase());
+    let path = dir.join(format!("{stem}.forged"));
+    if let Ok(bytes) = std::fs::read(&path)
+        && let Ok(pack) = mftr_pack::cache::read(&bytes, &key)
+    {
+        return Ok(Some(Arc::new(pack)));
+    }
+    slot.state.store(FORGE_BUILDING, std::sync::atomic::Ordering::Release);
+    let r = forge_now(art, champion, text);
+    if let Ok(Some(pack)) = &r {
+        // Written aside, then moved over: a half-written file is never read as a whole one.
+        let tmp = dir.join(format!("{stem}.forged.tmp"));
+        let _ = std::fs::create_dir_all(dir)
+            .and_then(|_| std::fs::write(&tmp, mftr_pack::cache::write(pack, &key)))
+            .and_then(|_| std::fs::rename(&tmp, &path));
+    }
+    r
+}
+
+/// The art the forge reads (the biped library, the creator bases and their parts, the
+/// champions' move packs): every file's path, size and time, hashed. A self-update replaces
+/// the art folder, so it changes this and the champions are rebuilt once.
+fn art_fingerprint(art: &std::path::Path) -> String {
+    fn walk(dir: &std::path::Path, out: &mut Vec<(String, u64, u128)>, art: &std::path::Path) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out, art);
+                continue;
+            }
+            // Sources (Blender files, build scripts, notes) aren't what the game reads.
+            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if matches!(ext, "blend" | "blend1" | "py" | "md") {
+                continue;
+            }
+            let Ok(m) = e.metadata() else { continue };
+            let t = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos());
+            let rel = p.strip_prefix(art).unwrap_or(&p).to_string_lossy().replace('\\', "/");
+            out.push((rel, m.len(), t));
+        }
+    }
+    let mut all = Vec::new();
+    for d in ["library", "creator", "wardrobe", "champions"] {
+        walk(&art.join(d), &mut all, art);
+    }
+    all.sort();
+    let mut bytes = Vec::new();
+    for (p, len, t) in &all {
+        bytes.extend_from_slice(p.as_bytes());
+        bytes.extend_from_slice(&len.to_le_bytes());
+        bytes.extend_from_slice(&t.to_le_bytes());
+    }
+    format!("{:016x}", mftr_pack::cache::fnv1a64(&bytes))
 }
 
 fn forge_now(art: &str, champion: &str, text: &str) -> Forged {
@@ -87,7 +182,8 @@ fn forge_now(art: &str, champion: &str, text: &str) -> Forged {
 fn catalog_quiet(art: &str) -> Result<Arc<mftr_forge::Catalog>, String> {
     let mut c = CATALOG.lock().unwrap_or_else(|e| e.into_inner());
     if c.is_none() {
-        *c = Some(Arc::new(mftr_forge::Catalog::load(std::path::Path::new(art)).map_err(|e| format!("catalog: {e}"))?));
+        let cat = mftr_forge::Catalog::load(std::path::Path::new(art)).map_err(|e| format!("catalog: {e}"))?;
+        *c = Some(Arc::new(cat));
     }
     Ok(c.clone().expect("loaded above"))
 }
@@ -126,10 +222,9 @@ impl MftrModel {
     #[func]
     fn forge(art: GString, champion: GString) -> Option<Gd<MftrModel>> {
         let slot = start_forge(&art.to_string(), &champion.to_string())?;
-        let (lock, done) = &*slot;
-        let mut r = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut r = slot.result.lock().unwrap_or_else(|e| e.into_inner());
         while r.is_none() {
-            r = done.wait(r).unwrap_or_else(|e| e.into_inner());
+            r = slot.done.wait(r).unwrap_or_else(|e| e.into_inner());
         }
         match r.as_ref().expect("waited for") {
             Ok(Some(pack)) => {
@@ -154,10 +249,24 @@ impl MftrModel {
     /// Whether `forge` would return at once: the forge is done, or there's nothing to forge.
     #[func]
     fn forge_ready(art: GString, champion: GString) -> bool {
+        matches!(Self::forge_state(art, champion), 0 | 3)
+    }
+
+    /// Where `champion`'s forge is: 0 nothing to forge, 1 looking in the cache, 2 forging
+    /// (not kept, or kept from other code, art or recipe), 3 done. The launch screen shows
+    /// while any is 2.
+    #[func]
+    fn forge_state(art: GString, champion: GString) -> i64 {
         match start_forge(&art.to_string(), &champion.to_string()) {
-            None => true,
-            Some(slot) => slot.0.lock().unwrap_or_else(|e| e.into_inner()).is_some(),
+            None => 0,
+            Some(slot) => slot.state.load(std::sync::atomic::Ordering::Acquire) as i64,
         }
+    }
+
+    /// Keep forged models in `dir` between launches (the player's data folder), from now on.
+    #[func]
+    fn set_forge_cache(dir: GString) {
+        *FORGE_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::path::PathBuf::from(dir.to_string()));
     }
 
     /// Loads and validates `<id>.glb` and its `<id>.anims.ron` (an absolute path). `null` if it

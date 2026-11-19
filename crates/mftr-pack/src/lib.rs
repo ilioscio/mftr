@@ -7,6 +7,7 @@
 
 pub mod animator;
 pub mod body;
+pub mod cache;
 pub mod champion;
 pub mod face;
 pub mod glb;
