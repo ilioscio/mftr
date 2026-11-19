@@ -8,7 +8,8 @@ use mftr_pack::glb::Model;
 
 /// The shared palette (D70): 64 colors, tuned dark enough for the arena's sun (14 §4). Eight
 /// families of eight, light to dark: neutrals, browns, reds, oranges and golds, greens, teals and
-/// blues, violets and magentas, metals.
+/// blues, violets and magentas, metals. Each is a color as a screen shows it (sRGB), as the
+/// creator's swatches draw it; a fill writes its [`linear`] value, as vertex colors are.
 pub const PALETTE: [[f32; 3]; 64] = [
     // Neutrals.
     [0.82, 0.80, 0.76],
@@ -84,6 +85,18 @@ pub const PALETTE: [[f32; 3]; 64] = [
     [0.22, 0.23, 0.26],
 ];
 
+/// `c`, a color as a screen shows it (sRGB), as a vertex color (linear): what the shader takes
+/// and the screen shows as `c` again. Written as it stands, a dark swatch rendered far lighter
+/// (the palette's black as a mid grey).
+pub fn linear(c: [f32; 3]) -> [f32; 3] {
+    c.map(|c| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) })
+}
+
+/// A vertex color (linear) as a screen shows it (sRGB): [`linear`]'s inverse.
+pub fn shown(c: [f32; 3]) -> [f32; 3] {
+    c.map(|c| if c <= 0.0031308 { c * 12.92 } else { 1.055 * c.max(0.0).powf(1.0 / 2.4) - 0.055 })
+}
+
 /// Material slots a fill never touches: skin (its tone), the team accent (05 §1.3), emissive
 /// (the signature).
 const UNPAINTED: [&str; 4] = ["skin", "accent", "accent_glow", "emissive"];
@@ -138,7 +151,7 @@ pub fn regions(model: &Model, target: &str) -> Vec<[f32; 3]> {
 }
 
 /// Fill the region of `target` whose color is `from` (from [`regions`] of the unpainted model)
-/// with `color`, keeping each vertex's occlusion (alpha).
+/// with `color` (a vertex color: a palette color's [`linear`] value), keeping each vertex's occlusion (alpha).
 pub fn fill(model: &mut Model, target: &str, from: [f32; 3], color: [f32; 3]) {
     let unpainted: Vec<usize> =
         model.materials.iter().enumerate().filter(|(_, m)| UNPAINTED.contains(&m.as_str())).map(|(i, _)| i).collect();
@@ -206,5 +219,15 @@ mod tests {
         assert_eq!(signature(0), signature(360));
         let teal = signature(175);
         assert!(teal[1] > teal[0] && teal[2] > teal[0]);
+    }
+
+    #[test]
+    fn a_swatch_is_written_linear_and_shown_as_itself() {
+        for c in PALETTE {
+            let back = shown(linear(c));
+            assert!((0..3).all(|k| (back[k] - c[k]).abs() < 1e-4), "{c:?}");
+        }
+        // The palette's black is near black once written, not the mid grey it rendered as.
+        assert!(linear(PALETTE[7]).iter().all(|c| *c < 0.01));
     }
 }

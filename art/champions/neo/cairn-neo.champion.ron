@@ -23,7 +23,7 @@ Champion(
         proportions: (height: 0.2, arms: 0.2, hands: 0.3),
         skin: 4,
         outfit: ["beard.full", "head.cairn_antlers", "torso.bark_cuirass", "shoulders.stone_mantle", "arms.bark_bracers", "waist.bark_kilt", "back.moss_cloak", "feet.bark_greaves", "weapon.warden_staff"],
-        paint: [("body", 0, 38), ("body", 1, 14), ("beard.full", 0, 2)],
+        paint: [("body", 0, 38), ("body", 1, 14), ("beard.full", 0, 1)],
         signature: 140,
         moves: (attack: "cairn.attack", q: "cairn.q", w: "cairn.w", e: "cairn.e", r: "cairn.r"),
     ),

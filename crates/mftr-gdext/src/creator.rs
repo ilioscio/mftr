@@ -573,7 +573,9 @@ impl MftrCreator {
             .enumerate()
             .map(|(i, c)| {
                 let filled = self.recipe.looks.paint.iter().find(|(t, r, _)| *t == target && *r as usize == i);
-                let c = filled.map_or(*c, |(_, _, k)| mftr_forge::paint::PALETTE[*k as usize]);
+                // As a screen shows it: a fill's swatch, or the built color (a vertex color, linear).
+                let c =
+                    filled.map_or(mftr_forge::paint::shown(*c), |(_, _, k)| mftr_forge::paint::PALETTE[*k as usize]);
                 Color::from_rgb(c[0], c[1], c[2])
             })
             .collect()

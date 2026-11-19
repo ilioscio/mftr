@@ -18,8 +18,9 @@ uniform float glow_white = 0.35;
 uniform vec3 identity : source_color = vec3(1.0);
 uniform float identity_mix = 0.0;
 // A forged champion's brush strokes and decals: RGBA, alpha 0 where unpainted. Palette values
-// are stored as they are in vertex colors, so no sRGB hint.
-uniform sampler2D paint : filter_nearest, repeat_disable;
+// are colors as the swatches show them (sRGB), so the hint reads them back as linear, as a
+// fill's vertex colors are written.
+uniform sampler2D paint : source_color, filter_nearest, repeat_disable;
 uniform bool has_paint = false;
 // 1 on the frame a hit lands, fading to 0 within ~3 frames.
 uniform float flash = 0.0;

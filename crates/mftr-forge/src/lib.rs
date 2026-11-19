@@ -231,35 +231,7 @@ impl Catalog {
     /// Build the champion `name` as `looks` describes it.
     pub fn forge(&self, name: &str, looks: &Looks) -> Result<Loaded, String> {
         let key = looks.base_key();
-        let base = self.base(&key).ok_or(format!("no base `{key}` in the catalog"))?;
-        let sliders = self.sliders(&key);
-        for (id, _) in &looks.shape {
-            if !sliders.contains(id) {
-                return Err(format!("`{key}` has no slider `{id}`"));
-            }
-        }
-        let mut model = base.model.clone();
-        dress(&mut model, self.parts(&key), &looks.outfit)?;
-        shape(&mut model, looks);
-        // The brows' strips (22 §3.1), in the base's bind pose like the morphs.
-        brows::apply(&mut model, &looks.brows.unwrap_or_default());
-        if !looks.sculpt.is_empty() {
-            let welds = self.welds(&key).ok_or(format!("no base `{key}`"))?;
-            sculpt::apply(&mut model, &base.model, welds, &looks.sculpt);
-        }
-        proportion(&mut model, &looks.proportions);
-        skin(&mut model, looks::SKIN_TONES[looks.skin as usize % looks::SKIN_TONES.len()]);
-        for (target, region, color) in &looks.paint {
-            let Some(&from) = paint::regions(&base.model, target).get(*region as usize) else {
-                return Err(format!("`{target}` has no paint region {region}"));
-            };
-            paint::fill(&mut model, target, from, paint::PALETTE[*color as usize % paint::PALETTE.len()]);
-        }
-        paint::glow(&mut model, looks.signature);
-        eyes::apply(&mut model, &looks.eyes.unwrap_or_default(), paint::signature(looks.signature));
-        let worn: Vec<image::Image> =
-            looks.images.iter().filter(|i| i.target == "body" || looks.outfit.contains(&i.target)).cloned().collect();
-        image::apply(&mut model, &worn);
+        let (mut model, base) = self.dressed(looks)?;
         let scale = looks.proportions.factor(0) * looks.proportions.factor(1).sqrt();
         let (clips, vfx, sounds) = if base.library.clips.is_empty() {
             // A humanoid: the shared biped library, then the moves' clips from their champions.
@@ -311,27 +283,7 @@ impl Catalog {
                 None => grip::Kind::Pose { looping: false },
             });
         }
-        // The face last (21 §2.3): clips were retargeted from the bones' unsculpted rest. The
-        // face sliders add their presets to the recipe's own face (21 §2.7).
-        if model.node_by_name("face_forehead").is_some()
-            && let Some(face) = face::compose(looks.face.as_ref(), &looks.shape)
-        {
-            face::bake(&mut model, &face);
-        }
-        // The body likewise (21 §9): its helpers' deltas are relative to the proportioned rest,
-        // and its sliders are presets on them. Rigid parts then settle on the body.
-        if body::rigged(&model) {
-            if let Some(b) = body::compose(looks.body.as_ref(), &looks.shape) {
-                face::bake(&mut model, &b);
-            }
-            let rigid: Vec<&str> = self
-                .parts(&key)
-                .iter()
-                .filter(|p| p.rigid && looks.outfit.contains(&p.id))
-                .map(|p| p.id.as_str())
-                .collect();
-            body::settle_rigid(&mut model, &rigid);
-        }
+        self.settle(&mut model, looks);
         let side = sidecar::Sidecar {
             id: name.to_string(),
             kind: "champion".to_string(),
@@ -342,6 +294,83 @@ impl Catalog {
         };
         let library = pose::Library::new(&model, &side)?;
         Ok(Loaded { kind: "champion".to_string(), model, library, vfx, sounds })
+    }
+
+    /// `looks` at rest, without its clips: the body, its outfit, shape, paint and face, as
+    /// [`Catalog::forge`] builds them before the clips go on (and the grip pass, which only
+    /// keys them). What the wardrobe harness measures (22 §4.8): retargeting and gripping every
+    /// clip was nearly all of a forge's time, and the harness forges every item and pair.
+    pub fn forge_at_rest(&self, looks: &Looks) -> Result<Model, String> {
+        let (mut model, _) = self.dressed(looks)?;
+        self.settle(&mut model, looks);
+        Ok(model)
+    }
+
+    /// The base dressed, shaped, proportioned and painted: a forge before its clips.
+    fn dressed(&self, looks: &Looks) -> Result<(Model, &Loaded), String> {
+        let key = looks.base_key();
+        let base = self.base(&key).ok_or(format!("no base `{key}` in the catalog"))?;
+        let sliders = self.sliders(&key);
+        for (id, _) in &looks.shape {
+            if !sliders.contains(id) {
+                return Err(format!("`{key}` has no slider `{id}`"));
+            }
+        }
+        let mut model = base.model.clone();
+        dress(&mut model, self.parts(&key), &looks.outfit)?;
+        shape(&mut model, looks);
+        // The brows' strips (22 §3.1), in the base's bind pose like the morphs.
+        brows::apply(&mut model, &looks.brows.unwrap_or_default());
+        if !looks.sculpt.is_empty() {
+            let welds = self.welds(&key).ok_or(format!("no base `{key}`"))?;
+            sculpt::apply(&mut model, &base.model, welds, &looks.sculpt);
+        }
+        proportion(&mut model, &looks.proportions);
+        skin(&mut model, looks::SKIN_TONES[looks.skin as usize % looks::SKIN_TONES.len()]);
+        for (target, region, color) in &looks.paint {
+            let Some(&from) = paint::regions(&base.model, target).get(*region as usize) else {
+                return Err(format!("`{target}` has no paint region {region}"));
+            };
+            paint::fill(
+                &mut model,
+                target,
+                from,
+                paint::linear(paint::PALETTE[*color as usize % paint::PALETTE.len()]),
+            );
+        }
+        paint::glow(&mut model, looks.signature);
+        eyes::apply(&mut model, &looks.eyes.unwrap_or_default(), paint::signature(looks.signature));
+        let worn: Vec<image::Image> =
+            looks.images.iter().filter(|i| i.target == "body" || looks.outfit.contains(&i.target)).cloned().collect();
+        image::apply(&mut model, &worn);
+        Ok((model, base))
+    }
+
+    /// A forge's last steps, on the rest pose: the face and body helpers baked, rigid parts
+    /// settled on the body.
+    fn settle(&self, model: &mut Model, looks: &Looks) {
+        let key = looks.base_key();
+        // The face last (21 §2.3): clips were retargeted from the bones' unsculpted rest. The
+        // face sliders add their presets to the recipe's own face (21 §2.7).
+        if model.node_by_name("face_forehead").is_some()
+            && let Some(face) = face::compose(looks.face.as_ref(), &looks.shape)
+        {
+            face::bake(model, &face);
+        }
+        // The body likewise (21 §9): its helpers' deltas are relative to the proportioned rest,
+        // and its sliders are presets on them. Rigid parts then settle on the body.
+        if body::rigged(model) {
+            if let Some(b) = body::compose(looks.body.as_ref(), &looks.shape) {
+                face::bake(model, &b);
+            }
+            let rigid: Vec<&str> = self
+                .parts(&key)
+                .iter()
+                .filter(|p| p.rigid && looks.outfit.contains(&p.id))
+                .map(|p| p.id.as_str())
+                .collect();
+            body::settle_rigid(model, &rigid);
+        }
     }
 }
 
@@ -894,8 +923,8 @@ fn skin(model: &mut Model, tone: [f32; 3]) {
 /// paint is replaced by the tone's linear color: a tone renders as its swatch. (Scaled by the
 /// sRGB values, the dark tones rendered as tans: the darkest, a deep brown, as a light one.)
 fn skin_ratio(tone: [f32; 3]) -> [f32; 3] {
-    let lin = |c: f32| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
-    [0, 1, 2].map(|k| lin(tone[k]) / looks::BASE_SKIN[k])
+    let lin = paint::linear(tone);
+    [0, 1, 2].map(|k| lin[k] / looks::BASE_SKIN[k])
 }
 
 /// Copy the library's clips onto `model`, by bone name. Translation tracks (the pelvis's bob,
@@ -1799,10 +1828,11 @@ mod tests {
                     "{build}: no `{clip}`"
                 );
             }
+            // Every slider takes, at rest: a slider shapes the body, not the clips.
             for s in c.sliders(&key) {
                 let mut l = looks.clone();
                 l.set_slider(&s, 1.0);
-                c.forge("Anyone", &l).unwrap_or_else(|e| panic!("{build} {s}: {e}"));
+                c.forge_at_rest(&l).unwrap_or_else(|e| panic!("{build} {s}: {e}"));
             }
         }
     }
@@ -1948,6 +1978,23 @@ mod tests {
         let low = |p: &[f32; 3]| p[1] < 0.3;
         assert_eq!(count(&b, &high), count(&d, &high));
         assert_eq!(count(&b, &low), count(&d, &low));
+    }
+
+    #[test]
+    fn a_forge_at_rest_is_the_forge_without_its_clips() {
+        // The harness measures the still forge (22 §4.8): it must be the full forge's rest.
+        let c = catalog();
+        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art");
+        for who in ["wren", "rook"] {
+            let text = std::fs::read_to_string(art.join(format!("champions/neo/{who}-neo.champion.ron"))).unwrap();
+            let r = recipe::Recipe::from_text(&text).unwrap();
+            let full = c.forge(&r.name, &r.looks).unwrap().model;
+            let still = c.forge_at_rest(&r.looks).unwrap();
+            assert!(still.animations.is_empty());
+            assert_eq!(face::skinned(&full), face::skinned(&still), "{who}");
+            let colors = |m: &Model| m.meshes.iter().flatten().map(|p| p.colors.clone()).collect::<Vec<_>>();
+            assert_eq!(colors(&full), colors(&still), "{who}");
+        }
     }
 
     #[test]
@@ -2286,7 +2333,7 @@ mod tests {
         l.paint.push(("torso.tunic".into(), 0, 18));
         let f = c.forge("Painted", &l).unwrap();
         let tunic = f.model.nodes.iter().find(|n| n.name == "part.torso.tunic").unwrap().mesh.unwrap();
-        let red = paint::PALETTE[18];
+        let red = paint::linear(paint::PALETTE[18]);
         assert!(f.model.meshes[tunic].iter().flat_map(|p| &p.colors).any(|c| (c[0] - red[0]).abs() < 1e-4));
         // A region that isn't there.
         l.paint = vec![("torso.tunic".into(), 15, 1)];
