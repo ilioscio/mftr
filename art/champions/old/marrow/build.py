@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Marrow (rebuilt for 14): the generator for her model and clips.
 
-    blender -b --python art/champions/marrow/build.py -- --out art/champions/marrow/marrow.blend
+    blender -b --python art/champions/old/marrow/build.py -- --out art/champions/old/marrow/marrow.blend
 
 A hooded bone-witch (14 §5): a bent crone in a deep plum hood that frames her face, its peak
 drooping down her back and its cowl over her shoulders; a ribcage corset over her robe, a ragged
@@ -20,7 +20,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "blender")))
+sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "..", "tools", "blender")))
 
 from mathutils import Vector  # noqa: E402
 

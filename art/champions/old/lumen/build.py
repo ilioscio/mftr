@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Lumen (rebuilt for 14): the generator for her model and clips.
 
-    blender -b --python art/champions/lumen/build.py -- --out art/champions/lumen/lumen.blend
+    blender -b --python art/champions/old/lumen/build.py -- --out art/champions/old/lumen/lumen.blend
 
 A wind-blown dress (14 §5): a serene light-priestess who rides the air. A fitted bodice laced in
 gold, an underskirt cut to mid-shin, and three long tails of the dress (one down her back, one
@@ -21,7 +21,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "blender")))
+sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "..", "tools", "blender")))
 
 from mathutils import Vector  # noqa: E402
 

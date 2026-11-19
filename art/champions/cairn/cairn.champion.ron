@@ -5,7 +5,7 @@
 // a moss cloak torn at the hem, bark greaves over leather boots, and a gnarled staff whose roots
 // hold a glowing emerald.
 // The kit is a copy of crates/mftr-sim/champions/cairn.ron (a test checks they match); the
-// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// game shows this model (0.21.0); the hand-made original is kept in art/champions/old/cairn.
 // Cairn: Warden: tank and protector (melee).
 // Warden: slows to peel, a shield for an ally, a delayed root, and a delayed knock-up around
 // itself to hold a choke.

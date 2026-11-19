@@ -34,6 +34,16 @@ use mftr_pack::{Loaded, pose, sidecar};
 
 pub use looks::Looks;
 
+/// An official champion's recipe (`art/champions/<id>/<id>.champion.ron`): what the game forges
+/// for a champion that ships no hand-made pack in its own folder (doc 22, "The redesigns are the
+/// champions"). The hand-made originals are kept in `art/champions/old/<id>`; Bastion still ships
+/// his. `None` for a name that isn't one of the official ten, or without the file.
+pub fn official_recipe(art: &Path, name: &str) -> Option<String> {
+    let c = mftr_sim::ChampionId::ALL.iter().find(|c| c.def().name.eq_ignore_ascii_case(name))?;
+    let id = c.def().name.to_lowercase();
+    std::fs::read_to_string(art.join(format!("champions/{id}/{id}.champion.ron"))).ok()
+}
+
 /// What the forge builds from: the bases it has (each with its catalog parts) and the clip
 /// library.
 pub struct Catalog {
@@ -137,8 +147,10 @@ impl Catalog {
         let mut packs = Vec::new();
         for c in mftr_sim::ChampionId::ALL {
             let id = c.def().name.to_lowercase();
-            let path = art.join(format!("champions/{id}/export/{id}.glb"));
-            if path.exists() {
+            // The hand-made packs bring the moves' clips, effects and sounds: in `old/` for the
+            // champions the game now forges from their recipes, in the champion's folder for Bastion.
+            let paths = [format!("champions/old/{id}/export/{id}.glb"), format!("champions/{id}/export/{id}.glb")];
+            if let Some(path) = paths.iter().map(|p| art.join(p)).find(|p| p.exists()) {
                 packs.push((c, mftr_pack::load_file(&path)?));
             }
         }
@@ -1838,22 +1850,32 @@ mod tests {
     }
 
     #[test]
-    fn the_neo_set_matches_the_recipes_under_new_names() {
-        // art/champions/neo: the official ten rebuilt, to play beside the hand-made ones.
-        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art/champions");
+    fn the_redesigns_are_the_champions_and_the_originals_are_kept() {
+        // The nine redesigns are what the game shows: no hand-made pack in their folders, so the
+        // client forges their recipes; the originals' packs are in `old/` and still bring the
+        // moves' clips. Bastion keeps his own pack, and his neo recipe stays in step.
+        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art");
         let c = catalog();
         for champ in mftr_sim::ChampionId::ALL {
-            let id = champ.def().name.to_lowercase();
-            let neo = std::fs::read_to_string(art.join(format!("neo/{id}-neo.champion.ron"))).unwrap();
-            let src = std::fs::read_to_string(art.join(format!("{id}/{id}.champion.ron"))).unwrap();
-            let (n, r) = (recipe::Recipe::from_text(&neo).unwrap(), recipe::Recipe::from_text(&src).unwrap());
-            assert_eq!(n.name, format!("{}-neo", champ.def().name));
-            assert_eq!(n.looks, r.looks, "{id}: regenerate art/champions/neo from the recipe");
-            assert_eq!(mftr_sim::champion::ChampionDef { name: champ.def().name, ..n.kit }, *champ.def(), "{id}");
-            assert!(n.problems().is_empty(), "{id}: {:?}", n.problems());
-            assert_eq!(mftr_pack::champion::validate_text(&neo).errors(), 0, "{id}");
-            c.forge(&n.name, &n.looks).unwrap();
+            let (name, id) = (champ.def().name, champ.def().name.to_lowercase());
+            let own = art.join(format!("champions/{id}/export/{id}.glb"));
+            let text = official_recipe(&art, &name.to_uppercase()).unwrap_or_else(|| panic!("{id}: no recipe"));
+            let r = recipe::Recipe::from_text(&text).unwrap();
+            // (A recipe under an official name is the creator's problem only, not the game's.)
+            assert_eq!(mftr_sim::champion::ChampionDef { name, ..r.kit }, *champ.def(), "{id}");
+            if id == "bastion" {
+                assert!(own.exists(), "Bastion keeps his hand-made model");
+                let neo = std::fs::read_to_string(art.join("champions/neo/bastion-neo.champion.ron")).unwrap();
+                let n = recipe::Recipe::from_text(&neo).unwrap();
+                assert_eq!((n.name.as_str(), &n.looks), ("Bastion-neo", &r.looks), "regenerate bastion-neo");
+                continue;
+            }
+            assert!(!own.exists(), "{id}: a pack in its folder would hide the redesign");
+            assert!(art.join(format!("champions/old/{id}/export/{id}.glb")).exists(), "{id}: the original is kept");
+            assert!(!art.join(format!("champions/neo/{id}-neo.champion.ron")).exists(), "{id}: neo is retired");
+            c.forge(name, &r.looks).unwrap();
         }
+        assert!(official_recipe(&art, "Grumble").is_none(), "custom names aren't official");
     }
 
     #[test]
@@ -1986,7 +2008,7 @@ mod tests {
         let c = catalog();
         let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art");
         for who in ["wren", "rook"] {
-            let text = std::fs::read_to_string(art.join(format!("champions/neo/{who}-neo.champion.ron"))).unwrap();
+            let text = std::fs::read_to_string(art.join(format!("champions/{who}/{who}.champion.ron"))).unwrap();
             let r = recipe::Recipe::from_text(&text).unwrap();
             let full = c.forge(&r.name, &r.looks).unwrap().model;
             let still = c.forge_at_rest(&r.looks).unwrap();
@@ -2209,11 +2231,10 @@ mod tests {
 
     #[test]
     fn a_recipe_from_before_the_face_rig_gets_its_face_from_the_bones() {
-        // FR3: Cairn-neo's recipe was written for the face morphs (`brow_ridge: 1`, `nose_length:
+        // FR3: Cairn's recipe was written for the face morphs (`brow_ridge: 1`, `nose_length:
         // 0.5`…). It loads unchanged, and its face sliders now move the face bones' rest.
-        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/neo");
-        let r =
-            recipe::Recipe::from_text(&std::fs::read_to_string(art.join("cairn-neo.champion.ron")).unwrap()).unwrap();
+        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/cairn");
+        let r = recipe::Recipe::from_text(&std::fs::read_to_string(art.join("cairn.champion.ron")).unwrap()).unwrap();
         assert!(r.looks.face.is_none());
         let m = catalog().forge(&r.name, &r.looks).unwrap().model;
         let moved = |name: &str| {
@@ -2378,9 +2399,8 @@ mod tests {
     fn the_ranger_bow_draws_with_vespers_shots() {
         // BW7: the bow brings the hand-made Vesper's bow bones, and her attack's baked draw
         // plays on them (by name), so the string comes back to her fingers.
-        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/neo");
-        let r =
-            recipe::Recipe::from_text(&std::fs::read_to_string(art.join("vesper-neo.champion.ron")).unwrap()).unwrap();
+        let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/vesper");
+        let r = recipe::Recipe::from_text(&std::fs::read_to_string(art.join("vesper.champion.ron")).unwrap()).unwrap();
         let m = catalog().forge(&r.name, &r.looks).unwrap().model;
         for b in ["extra_bow_1", "extra_bow_2", "extra_bow_3", "extra_bow_4", "extra_string_1", "extra_string_2"] {
             let node = m.node_by_name(b).unwrap_or_else(|| panic!("no {b}"));

@@ -317,7 +317,7 @@ pub struct ClientSession {
     rules: mftr_sim::world::Rules,
     /// Requested in the hello (the server picks when `None`).
     champion_request: Option<ChampionId>,
-    /// A champion asked for by name that isn't known yet: a server's custom one (`Rook-neo`),
+    /// A champion asked for by name that isn't known yet: a server's custom one (`Grumble`),
     /// resolved once its file has been fetched with the roster (CR1d).
     champion_name: Option<String>,
     /// Token to resume a dropped session with (0 = none), and the one from our Welcome.

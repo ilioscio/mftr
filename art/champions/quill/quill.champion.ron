@@ -5,7 +5,7 @@
 // boots, an orrery staff. A Black woman: deep brown skin (tone 6), tight coils under the hat, a
 // broad nose with a low bridge, full lips, high cheekbones (22 §3.3: a face from the sliders).
 // The kit is a copy of crates/mftr-sim/champions/quill.ron (a test checks they match); the
-// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// game shows this model (0.21.0); the hand-made original is kept in art/champions/old/quill.
 // Quill: Artillery mage.
 // Artillery mage: long-range poke from behind the line, a slowing field, a hop back, and a
 // channeled lance of starlight that burns the first enemy in its path.

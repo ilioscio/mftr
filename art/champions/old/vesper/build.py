@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Vesper (rebuilt for 14): the generator for her model and clips.
 
-    blender -b --python art/champions/vesper/build.py -- --out art/champions/vesper/vesper.blend
+    blender -b --python art/champions/old/vesper/build.py -- --out art/champions/old/vesper/vesper.blend
 
 A huge recurve bow and a long one-sided cloak (14 §5): a ranger in athletic heroic proportions,
 the bow taller than her shoulders with teal-glowing tips, a quiver of teal-fletched arrows rising
@@ -19,7 +19,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "blender")))
+sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "..", "tools", "blender")))
 
 import bpy  # noqa: E402
 from mathutils import Matrix, Quaternion, Vector  # noqa: E402

@@ -1512,7 +1512,7 @@ mod tests {
 
     fn forged(who: &str) -> Model {
         let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art");
-        let text = std::fs::read_to_string(art.join(format!("champions/neo/{who}-neo.champion.ron"))).unwrap();
+        let text = std::fs::read_to_string(art.join(format!("champions/{who}/{who}.champion.ron"))).unwrap();
         let r = crate::recipe::Recipe::from_text(&text).unwrap();
         crate::Catalog::load(&art).unwrap().forge(&r.name, &r.looks).unwrap().model
     }
@@ -1571,7 +1571,7 @@ mod tests {
     /// The deepest an arm goes into the trunk through a clip (m), sampled 30 times a second.
     fn deepest(who: &str, m: &Model, clip: &str, side: usize) -> f32 {
         let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art");
-        let text = std::fs::read_to_string(art.join(format!("champions/neo/{who}-neo.champion.ron"))).unwrap();
+        let text = std::fs::read_to_string(art.join(format!("champions/{who}/{who}.champion.ron"))).unwrap();
         let r = crate::recipe::Recipe::from_text(&text).unwrap();
         let worn: Vec<usize> = r.looks.outfit.iter().filter_map(|id| m.node_by_name(&format!("part.{id}"))).collect();
         let trunk = Trunk::read(m, &worn);
@@ -1615,7 +1615,7 @@ mod tests {
     /// skin (what rides a prop bone), sampled 30 times a second.
     fn held_in_head(who: &str, m: &Model, clip: &str) -> f32 {
         let art = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../art");
-        let text = std::fs::read_to_string(art.join(format!("champions/neo/{who}-neo.champion.ron"))).unwrap();
+        let text = std::fs::read_to_string(art.join(format!("champions/{who}/{who}.champion.ron"))).unwrap();
         let r = crate::recipe::Recipe::from_text(&text).unwrap();
         let worn: Vec<usize> = r.looks.outfit.iter().filter_map(|id| m.node_by_name(&format!("part.{id}"))).collect();
         let trunk = Trunk::read(m, &worn);

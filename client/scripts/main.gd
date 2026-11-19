@@ -590,8 +590,8 @@ func _art_path(rel: String) -> String:
 
 
 ## A champion's own pack (`art/champions/<id>/export/<id>.glb`, A4) if it ships one and it
-## validates, else its model forged from its champion file's looks (the creator, CR2), else the
-## template. Built once per champion.
+## validates (Bastion), else its model forged from its looks (the creator, CR2): a custom
+## champion's file, or an official champion's recipe (the redesigns, doc 22), else the template. Built once per champion.
 func _model_for(champion: String) -> MftrModel:
 	if not champion_models.has(champion):
 		var id := champion.to_lower()

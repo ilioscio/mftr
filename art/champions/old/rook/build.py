@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Rook (A6, rebuilt for 14): the generator for his model and clips.
 
-    blender -b --python art/champions/rook/build.py -- --out art/champions/rook/rook.blend
+    blender -b --python art/champions/old/rook/build.py -- --out art/champions/old/rook/rook.blend
 
 A block on legs (14 §5): a grizzled veteran on the `biped` bones in heroic brute proportions
 (short thick legs, a barrel chest, slab pauldrons standing above a head sunk into an iron
@@ -23,7 +23,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
+ROOT = os.path.normpath(os.path.join(HERE, "..", "..", "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "tools", "blender"))
 
 import bpy  # noqa: E402

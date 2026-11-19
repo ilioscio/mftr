@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Quill (rebuilt for 14): the generator for her model and clips.
 
-    blender -b --python art/champions/quill/build.py -- --out art/champions/quill/quill.blend
+    blender -b --python art/champions/old/quill/build.py -- --out art/champions/old/quill/quill.blend
 
 A tall pointed hat and a long coat (14 §5): a gangly stargazer-scholar under a wide-brimmed,
 pointed astronomer's hat with brass goggles on its band, a long navy coat flecked with stars at
@@ -18,7 +18,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "blender")))
+sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "..", "tools", "blender")))
 
 from mathutils import Vector  # noqa: E402
 

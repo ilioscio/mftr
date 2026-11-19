@@ -5,7 +5,7 @@
 // kunai strapped to his thighs, black leggings into wrapped boots, and a curved blade in each
 // hand, held forward.
 // The kit is a copy of crates/mftr-sim/champions/shade.ron (a test checks they match); the
-// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// game shows this model (0.21.0); the hand-made original is kept in art/champions/old/shade.
 // Shade: Assassin (melee).
 // Assassin: a lunge in, a slowing fan of blades, a quick dash out, and a lunging execution.
 // Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability
