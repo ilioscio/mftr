@@ -1,5 +1,5 @@
 // Bastion's VFX (A6, 14 §4): ice blue. His fists land with a white star, ice shards and frost
-// cracks; the grapple flies on an ice-cored hook; Bulwark rings him in frost; Tremor cracks the
+// cracks; the grapple is his own fist flung out on his arm, its stones strung on the ice core; Bulwark rings him in frost; Tremor cracks the
 // ground and sends a shock to the area's edge; Upheaval heaves ice and stone up in a column.
 // Instances of the client's VFX kit (05 §5.1); hand-authored next to the export; validated by
 // `mftr-tools pack validate`.
@@ -12,7 +12,7 @@
 
         // Q Grapple: frost off the fist, the hook in flight, ice on the catch.
         (event: "q.release", kit: "flare", ramp: [(0.92, 0.98, 1.0), (0.55, 0.88, 1.0), (0.20, 0.52, 0.90)], count: 10, speed: 3.0),
-        (event: "q.projectile", kit: "grab", ramp: [(0.86, 0.97, 1.0), (0.40, 0.80, 1.0), (0.30, 0.28, 0.26)]),
+        (event: "q.projectile", kit: "grab", ramp: [(0.86, 0.97, 1.0), (0.56, 0.72, 0.84), (0.52, 0.50, 0.47)]),
         (event: "q.impact", kit: "flash", ramp: [(1.0, 1.0, 1.0), (0.70, 0.94, 1.0), (0.26, 0.62, 0.96)], count: 6),
         (event: "q.impact", kit: "burst", ramp: [(0.92, 0.98, 1.0), (0.55, 0.88, 1.0), (0.20, 0.52, 0.90)], count: 12, speed: 3.0),
 

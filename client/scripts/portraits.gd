@@ -29,6 +29,7 @@ const ACCENT := Color(0.78, 0.65, 0.38)  # a neutral gold where team colors woul
 const SLOTS := ["skin", "cloth", "metal", "emissive", "accent", "accent_glow"]
 
 var _model_for: Callable                 # champion -> MftrModel
+var ready_for: Callable                  # champion -> whether its model is ready without waiting
 var _template: MftrModel                 # the shared template (wears the identity color)
 var _colors := {}                        # champion -> identity color
 var _cache := {}                         # champion -> { bust, round, small, full }
@@ -67,8 +68,16 @@ func prepare(champions: Array) -> void:
 
 
 func _process(_delta: float) -> void:
-	if not _busy and not _queue.is_empty():
-		_render(_queue.pop_front())
+	if _busy or _queue.is_empty():
+		return
+	# The first whose model is ready: one still forging (seconds) waits its turn rather than
+	# freezing the screen.
+	for i in _queue.size():
+		if not ready_for.is_valid() or ready_for.call(_queue[i]):
+			var c: String = _queue[i]
+			_queue.remove_at(i)
+			_render(c)
+			return
 
 
 func _render(champion: String) -> void:

@@ -302,6 +302,102 @@ func _slash(spec: Dictionary, pos: Vector3, dir: Vector3, radius: float, n: int,
 			p.y = maxf(p.y, 0.05)
 			_emit(p, o * speed, life * (0.7 + 0.3 * thick), size * (0.6 + 0.6 * thick), ramp, 0.0, 0.0, 0.8)
 
+## The grapple hand's size (m) for a projectile of hitbox `radius` (m).
+func grab_size(radius: float) -> float:
+	return minf(radius * 1.6, 0.42)
+
+
+## A chipped block: a box of `size` at `at`, turned by `rot` (radians), under `parent`.
+func _lump(parent: Node3D, size: Vector3, at: Vector3, rot: Vector3, mat: Material) -> MeshInstance3D:
+	var m := MeshInstance3D.new()
+	var b := BoxMesh.new()
+	b.size = size
+	m.mesh = b
+	m.material_override = mat
+	m.position = at
+	m.rotation = rot
+	parent.add_child(m)
+	return m
+
+
+## The grapple's stretched arm from the caster's wrist to the flying hand: a core in the
+## ramp's middle color with chipped links of the hand's stone strung along it, every `GAP` m.
+## Made once (`grab_arm`), restrung each frame (`string_arm`) between two world points.
+const ARM_GAP := 0.19
+
+func grab_arm(spec: Dictionary, s: float) -> Node3D:
+	var ramp: PackedColorArray = spec.ramp
+	var arm := Node3D.new()
+	arm.name = "Arm"
+	arm.top_level = true
+	var core_mat := StandardMaterial3D.new()
+	core_mat.albedo_color = ramp[1] if ramp.size() > 1 else ramp[0]
+	core_mat.roughness = 0.35
+	var core := MeshInstance3D.new()
+	core.name = "Core"
+	var cm := CylinderMesh.new()
+	cm.top_radius = s * 0.11
+	cm.bottom_radius = s * 0.11
+	cm.height = 1.0
+	cm.radial_segments = 6
+	cm.rings = 1
+	core.mesh = cm
+	core.material_override = core_mat
+	arm.add_child(core)
+	var stone := StandardMaterial3D.new()
+	stone.albedo_color = ramp[ramp.size() - 1] if ramp.size() > 2 else ramp[0]
+	stone.roughness = 0.95
+	arm.set_meta("stone", stone)
+	arm.set_meta("s", s)
+	return arm
+
+
+func string_arm(arm: Node3D, a: Vector3, b: Vector3, t: float) -> void:
+	var span := b - a
+	var length := span.length()
+	var s: float = arm.get_meta("s")
+	var core: MeshInstance3D = arm.get_node("Core")
+	core.visible = length > 0.02
+	if not core.visible:
+		return
+	var dir := span / length
+	# A basis whose Y runs along the span (the cylinder's axis).
+	var side := dir.cross(Vector3.UP)
+	if side.length() < 0.01:
+		side = Vector3.RIGHT
+	side = side.normalized()
+	var along := Basis(side, dir, side.cross(dir))
+	core.global_transform = Transform3D(along.scaled_local(Vector3(1, length, 1)), (a + b) * 0.5)
+	var n := int(length / ARM_GAP)
+	var links: Array = arm.get_meta("links", [])
+	while links.size() < n:
+		var k := links.size()
+		# Each link its own chipped stone, with a smaller one wedged beside it: sizes, shades and
+		# turns from its place in the arm, so no two read alike.
+		var h := float((k * 37) % 11) / 11.0
+		var g := float((k * 53 + 5) % 7) / 7.0
+		var base: Material = arm.get_meta("stone")
+		var mat: StandardMaterial3D = base.duplicate()
+		mat.albedo_color = base.albedo_color.darkened(0.25 * g) if k % 2 == 0 else base.albedo_color.lightened(0.12 * g)
+		var m := _lump(arm, Vector3(s * (0.36 + 0.18 * h), s * (0.30 + 0.14 * (1.0 - h)), s * (0.34 + 0.14 * g)),
+			Vector3.ZERO, Vector3.ZERO, mat)
+		var chip := _lump(m, Vector3(s * 0.22, s * 0.18, s * 0.20), Vector3(s * (0.16 - 0.3 * g), s * 0.10, s * (0.12 - 0.24 * h)),
+			Vector3(0.5 + h, 0.7 * g, 0.4), mat)
+		chip.name = "Chip"
+		m.set_meta("turn", Vector3(0.9 * h - 0.45, float(k) * 1.7, 0.5 - 1.0 * g))
+		links.append(m)
+	arm.set_meta("links", links)
+	for k in links.size():
+		var l: MeshInstance3D = links[k]
+		l.visible = k < n
+		if not l.visible:
+			continue
+		# Spaced evenly from the wrist, a slight sway along the arm as it flies.
+		var f := (float(k) + 0.5) / float(n)
+		var sway := side * sin(f * PI) * sin(t * 9.0 + f * 6.0) * s * 0.10
+		l.global_transform = Transform3D(along * Basis.from_euler(l.get_meta("turn")), a + span * f + sway)
+
+
 ## A projectile's style (`arrow`, `net`, `orb`): decorations inside its gameplay-sized body,
 ## plus a trail of pixel sparks behind it. `radius` (m) is the projectile's hitbox radius.
 func decorate(node: Node3D, spec: Dictionary, radius: float, lift := 0.35) -> void:
@@ -312,48 +408,45 @@ func decorate(node: Node3D, spec: Dictionary, radius: float, lift := 0.35) -> vo
 	mat.albedo_color = ramp[0]
 	match kit:
 		"grab":
-			# An open hand reaching for the target, fingers spread, inside the body's width; the
-			# caller strings a chain back to the caster (14 §4.4: a grapple reads as an arm).
+			# The caster's own hand flying out on the end of the stretched arm (14 §4.4: a grapple
+			# reads as an arm): chipped blocks for a palm, fingers reaching forward and a thumb, lit
+			# like the world, the arm's core showing at the wrist. The caller hides the caster's real
+			# hand and strings the arm back to the wrist (`grab_arm`).
 			var hand := Node3D.new()
 			hand.name = "Grab"
 			hand.position = Vector3(0, lift, 0)
-			var s := minf(radius * 1.6, 0.42)
-			var palm_mat := StandardMaterial3D.new()
-			palm_mat.albedo_color = ramp[ramp.size() - 1] if ramp.size() > 2 else ramp[0]
-			var glow := StandardMaterial3D.new()
-			glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			glow.albedo_color = ramp[1] if ramp.size() > 1 else ramp[0]
-			var palm := MeshInstance3D.new()
-			var pb := BoxMesh.new()
-			pb.size = Vector3(s * 0.55, s * 0.22, s * 0.6)
-			palm.mesh = pb
-			palm.material_override = palm_mat
-			hand.add_child(palm)
+			var s := grab_size(radius)
+			var stone := StandardMaterial3D.new()
+			stone.albedo_color = ramp[ramp.size() - 1] if ramp.size() > 2 else ramp[0]
+			stone.roughness = 0.95
+			var core := StandardMaterial3D.new()
+			core.albedo_color = ramp[1] if ramp.size() > 1 else ramp[0]
+			core.roughness = 0.35
+			_lump(hand, Vector3(s * 0.62, s * 0.34, s * 0.66), Vector3.ZERO, Vector3(0.10, 0.0, 0.06), stone)
+			_lump(hand, Vector3(s * 0.36, s * 0.26, s * 0.40), Vector3(-s * 0.06, s * 0.16, 0.0), Vector3(0.0, 0.5, 0.2), stone)
 			for k in 4:
-				var f := MeshInstance3D.new()
-				var fb := BoxMesh.new()
-				fb.size = Vector3(s * 0.42, s * 0.12, s * 0.11)
-				f.mesh = fb
-				f.material_override = palm_mat
-				var spread := (float(k) - 1.5) * 0.28
-				f.position = Vector3(s * 0.45, 0.0, (float(k) - 1.5) * s * 0.15)
-				f.rotation = Vector3(0, -spread, 0)
-				hand.add_child(f)
-			var thumb := MeshInstance3D.new()
-			var tb := BoxMesh.new()
-			tb.size = Vector3(s * 0.3, s * 0.12, s * 0.12)
-			thumb.mesh = tb
-			thumb.material_override = palm_mat
-			thumb.position = Vector3(s * 0.12, 0.0, s * 0.38)
-			thumb.rotation = Vector3(0, -0.9, 0)
-			hand.add_child(thumb)
-			var core := MeshInstance3D.new()
-			var cb := BoxMesh.new()
-			cb.size = Vector3(s * 0.2, s * 0.24, s * 0.2)
-			core.mesh = cb
-			core.material_override = glow
-			core.position = Vector3(-s * 0.1, s * 0.08, 0)
-			hand.add_child(core)
+				var z := (float(k) - 1.5) * s * 0.17
+				var spread := (float(k) - 1.5) * 0.22
+				var root := Vector3(s * 0.40, 0.0, z)
+				_lump(hand, Vector3(s * 0.26, s * 0.17, s * 0.15), root, Vector3(0.05 * k, -spread, -0.15), stone)
+				# The tip curls down a little, reaching to close.
+				var tip := root + Vector3(cos(spread) * s * 0.24, -s * 0.05, -sin(spread) * s * 0.24)
+				_lump(hand, Vector3(s * 0.22, s * 0.14, s * 0.13), tip, Vector3(-0.04 * k, -spread, -0.55), stone)
+			_lump(hand, Vector3(s * 0.30, s * 0.17, s * 0.17), Vector3(s * 0.16, -s * 0.02, s * 0.42), Vector3(0.2, -0.9, 0.0), stone)
+			# The arm's core where the wrist was.
+			var wrist := MeshInstance3D.new()
+			wrist.name = "Wrist"
+			var wm := CylinderMesh.new()
+			wm.top_radius = s * 0.16
+			wm.bottom_radius = s * 0.16
+			wm.height = s * 0.4
+			wm.radial_segments = 6
+			wm.rings = 1
+			wrist.mesh = wm
+			wrist.material_override = core
+			wrist.position = Vector3(-s * 0.40, 0.0, 0.0)
+			wrist.rotation = Vector3(0, 0, PI * 0.5)
+			hand.add_child(wrist)
 			node.add_child(hand)
 		"arrow":
 			# A thin bright shaft along the flight direction (+X in missile space), never wider

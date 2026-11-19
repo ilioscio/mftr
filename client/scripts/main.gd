@@ -137,6 +137,7 @@ func _ready() -> void:
 	portraits = preload("res://scripts/portraits.gd").new()
 	add_child(portraits)
 	portraits.setup(func(c: String): return _portrait_model(c), champion_model, CHAMPION_COLORS)
+	portraits.ready_for = _model_ready
 	portraits.rendered.connect(_on_portrait)
 	portraits.rendered.connect(ItemIcons.on_rendered)
 	ItemIcons.renderer = portraits
@@ -146,6 +147,26 @@ func _ready() -> void:
 	add_child(sfx)
 	client = MatchClient.new()
 	add_child(client)
+	# The champions forged from their recipes take seconds each: start them all now, on
+	# worker threads, kept in the player's data folder between launches (D78). When any has to
+	# be built (after an update), a screen covers the menu until they're done.
+	MftrModel.set_forge_cache(OS.get_user_data_dir().path_join("forged"))
+	var forged := []
+	for n in client.champion_names():
+		if not FileAccess.file_exists(_champion_pack(n)):
+			MftrModel.forge_start(_art_root(), n)
+			forged.append(n)
+	if not forged.is_empty():
+		var layer := CanvasLayer.new()
+		layer.layer = 90
+		add_child(layer)
+		var screen = preload("res://scripts/forge_screen.gd").new()
+		screen.art_root = _art_root()
+		screen.portraits = portraits
+		screen.colors = CHAMPION_COLORS
+		layer.add_child(screen)
+		screen.watch(forged)
+		screen.finished.connect(layer.queue_free)
 	updates = preload("res://scripts/updates.gd").new()
 	add_child(updates)
 	updates.checked.connect(func(_info):
@@ -592,10 +613,22 @@ func _art_path(rel: String) -> String:
 ## A champion's own pack (`art/champions/<id>/export/<id>.glb`, A4) if it ships one and it
 ## validates (Bastion), else its model forged from its looks (the creator, CR2): a custom
 ## champion's file, or an official champion's recipe (the redesigns, doc 22), else the template. Built once per champion.
+## Where a champion's exported model would be (Bastion's); the rest are forged.
+func _champion_pack(champion: String) -> String:
+	var id := champion.to_lower()
+	return _art_path("champions/%s/export/%s.glb" % [id, id])
+
+
+## Whether `_model_for(champion)` would return without waiting on a forge.
+func _model_ready(key: String) -> bool:
+	if key.contains(":") or champion_models.has(key) or FileAccess.file_exists(_champion_pack(key)):
+		return true
+	return MftrModel.forge_ready(_art_root(), key)
+
+
 func _model_for(champion: String) -> MftrModel:
 	if not champion_models.has(champion):
-		var id := champion.to_lower()
-		var path := _art_path("champions/%s/export/%s.glb" % [id, id])
+		var path := _champion_pack(champion)
 		var own: MftrModel = MftrModel.load(path) if FileAccess.file_exists(path) else null
 		if own == null:
 			own = MftrModel.forge(_art_root(), champion)
@@ -730,7 +763,7 @@ var shopkeepers: Node3D                   # the shops beside the fountains (shop
 func _update_shot(delta: float) -> void:
 	if _shot_path != "" and _shot_menu:
 		_shot_timer += delta
-		if _shot_timer > 1.2:
+		if _shot_timer > maxf(1.2, _shot_at):  # later with --shot-at (the forge screen, say)
 			get_viewport().get_texture().get_image().save_png(_shot_path)
 			print("MFTR: saved screenshot to ", _shot_path)
 			get_tree().quit()
@@ -2959,6 +2992,7 @@ func _side_color(side: String) -> Color:
 
 ## Missiles (D14): a slim bright core with a faint, always-visible sheath at the *true*
 ## hitbox width, so what you see is what can hit you. Hard CC adds a ring accent (05 §1).
+const HideBones := preload("res://scripts/hide_bones.gd")
 var missile_nodes := {}                 # key -> Node3D
 
 # The champion's style for a projectile's body and an area's inside (14 §4.4): the first
@@ -3054,17 +3088,12 @@ func _update_missiles() -> void:
 				for e in _effects(champ, action, "projectile"):
 					vfx.decorate(node, e, float(m.radius) * UNITS_TO_METERS)
 					if e.kit == "grab" and owner != null:
-						# The chain from the caster's fist to the hand, restrung every frame.
-						var chain := MeshInstance3D.new()
-						chain.name = "Chain"
-						var cb := BoxMesh.new()
-						cb.size = Vector3(1, 0.05, 0.05)
-						chain.mesh = cb
-						var ramp: PackedColorArray = e.ramp
-						chain.material_override = _unshaded(ramp[ramp.size() - 1] if ramp.size() > 2 else ramp[0])
-						chain.top_level = true
-						node.add_child(chain)
+						# The caster's arm stretched out to the flying hand, restrung every frame; their
+						# own hand hidden while it's out (14 §4.4).
+						var arm: Node3D = vfx.grab_arm(e, vfx.grab_size(float(m.radius) * UNITS_TO_METERS))
+						node.add_child(arm)
 						node.set_meta("chain_owner", owner)
+						_hold_hand(owner, true)
 				node.set_meta("vfx", [champ, action])
 		var node: Node3D = missile_nodes[key]
 		var dir: Vector2 = m.dir
@@ -3072,19 +3101,14 @@ func _update_missiles() -> void:
 		node.rotation = Vector3(0, -atan2(dir.y, dir.x), 0)
 		if node.has_meta("chain_owner"):
 			var owner_node = node.get_meta("chain_owner")
-			var chain: MeshInstance3D = node.get_node_or_null("Chain")
-			if chain != null and is_instance_valid(owner_node):
-				var a: Vector3 = _socket_world(owner_node, "socket_projectile")
-				var b: Vector3 = world + Vector3(0, 0.35, 0)
-				var mid := (a + b) * 0.5
-				var span := b - a
-				chain.global_position = mid
-				chain.scale = Vector3(maxf(span.length(), 0.01), 1, 1)
-				chain.global_rotation = Vector3(0, -atan2(span.z, span.x), atan2(span.y, Vector2(span.x, span.z).length()))
+			var arm: Node3D = node.get_node_or_null("Arm")
+			if arm != null and is_instance_valid(owner_node):
+				arm.visible = true
+				vfx.string_arm(arm, _grab_root(owner_node), _grab_wrist(node), Time.get_ticks_msec() * 0.001)
 		node.get_node("Body").visible = not m.impact
 		node.get_node("Impact").visible = m.impact
 		for c in node.get_children():
-			if c.name != "Body" and c.name != "Impact":
+			if c.name != "Body" and c.name != "Impact" and c.name != "Arm" and c.name != "Grab":
 				c.visible = not m.impact
 		if m.impact and node.has_meta("vfx") and not node.has_meta("impacted"):
 			node.set_meta("impacted", true)
@@ -3097,8 +3121,94 @@ func _update_missiles() -> void:
 		mat.set_shader_parameter("dim", 0.35 if m.unconfirmed else 1.0)
 	for key in missile_nodes.keys():
 		if not seen.has(key):
-			missile_nodes[key].queue_free()
+			var gone: Node3D = missile_nodes[key]
+			if gone.has_meta("chain_owner"):
+				if gone.has_meta("impacted") or not _grabbing(gone.get_meta("chain_owner"), gone):
+					_reel_in(gone)
+				else:
+					# A prediction its confirmation replaced: the confirmed one carries on.
+					_hold_hand(gone.get_meta("chain_owner"), false)
+			gone.queue_free()
 			missile_nodes.erase(key)
+	_update_reels()
+
+
+## Whether `owner` has a grapple out other than `except`.
+func _grabbing(owner, except: Node3D) -> bool:
+	for n in missile_nodes.values():
+		if n != except and n.get_meta("chain_owner", null) == owner and not n.is_queued_for_deletion():
+			return true
+	return false
+
+
+## Where a grappler's stretched arm leaves them: the wrist, the hidden hand's root.
+func _grab_root(owner) -> Vector3:
+	return _socket_world(owner, "hand_r")
+
+
+## Where the grapple's flying hand meets its arm: the back of the hand, in world space.
+func _grab_wrist(node: Node3D) -> Vector3:
+	var hand: Node3D = node.get_node_or_null("Grab")
+	if hand == null:
+		return node.global_position + Vector3(0, 0.35, 0)
+	var wrist: Node3D = hand.get_node_or_null("Wrist")
+	return wrist.global_position if wrist != null else hand.global_position
+
+
+## Hides (`on`) or shows again a grappler's own right hand while its stand-in flies.
+func _hold_hand(body, on: bool) -> void:
+	if body == null or not is_instance_valid(body) or not body.has_meta("rig"):
+		return
+	var skel: Skeleton3D = body.get_meta("rig").skeleton
+	if skel == null:
+		return
+	var h = HideBones.on(skel)
+	if on:
+		h.hold("hand_r")
+	else:
+		h.release("hand_r")
+
+
+var _reels := []                        # grapples pulling back in: {arm, hand, owner, from, t}
+const REEL_SECONDS := 0.22
+
+
+## A grapple that's done: its arm and hand pull back in to the caster's wrist, then the real
+## hand shows again.
+func _reel_in(node: Node3D) -> void:
+	var owner_node = node.get_meta("chain_owner")
+	var arm: Node3D = node.get_node_or_null("Arm")
+	var hand: Node3D = node.get_node_or_null("Grab")
+	if arm == null or hand == null or not is_instance_valid(owner_node):
+		_hold_hand(owner_node, false)
+		return
+	var at := hand.global_transform
+	var wrist := _grab_wrist(node)
+	node.remove_child(arm)
+	node.remove_child(hand)
+	add_child(arm)
+	add_child(hand)
+	hand.global_transform = at
+	hand.visible = true
+	arm.visible = true
+	_reels.append({"arm": arm, "hand": hand, "owner": owner_node, "from": at.origin, "wrist": wrist - at.origin, "t": 0.0})
+
+
+func _update_reels() -> void:
+	for r in _reels.duplicate():
+		r.t += get_process_delta_time()
+		var owner_node = r.owner
+		if r.t >= REEL_SECONDS or not is_instance_valid(owner_node):
+			r.arm.queue_free()
+			r.hand.queue_free()
+			_hold_hand(owner_node, false)
+			_reels.erase(r)
+			continue
+		var a := _grab_root(owner_node)
+		var f: float = r.t / REEL_SECONDS
+		var p: Vector3 = r.from.lerp(a - r.wrist, f * f)
+		r.hand.global_position = p
+		vfx.string_arm(r.arm, a, p + r.wrist, Time.get_ticks_msec() * 0.001)
 
 
 ## Delayed ground AoE telegraph (05 §1): the outline appears at cast and the inside fills

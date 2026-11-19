@@ -10,9 +10,24 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
   - **E Tremor:** a slowing stomp around him.
   - **R Upheaval:** a delayed area that knocks up everyone in it (ultimate, hard CC).
 - **Personality in three words:** steadfast, patient, immovable.
-- **Shape (14 §2):** *a boulder*. Hulking proportions on the `biped` bones (`SHAPE` in `build.py`: low hips and short legs, the neck below the shoulder line, ×1.45 wide, ×1.35 deep, shoulders pushed out 16 cm, long arms, hands ×1.9), about 2.1 m to the shoulders' crystals' tips. Boulder shoulders stand above a small block head with a glowing visor slit; ice crystals grow from his back, his shoulders and his forearms; a crystal core is set in his chest; boulder fists; stumpy legs on boulder feet.
+- **Shape (14 §2):** *a boulder*. Hulking proportions on the `biped` bones (`SHAPE` in `build.py`: low hips and short legs, the neck below the shoulder line, ×1.45 wide, ×1.35 deep, shoulders pushed out 16 cm, long arms, hands ×1.9), about 2.1 m to the shoulders' crystals' tips. Boulder shoulders stand above a craggy face (stern brow stones, slit eyes glowing cold, a nose stone, a heavy jaw with a beard of icicles); ice crystals grow from his back, his shoulders and his forearms; a crystal core is set in his chest; boulder fists; stumpy legs on boulder feet.
 - **Weapon:** his fists. A chain wound round the right fist ends in the grapple's hook.
 - **Gait (14 §3.6):** heavy: wide feet, a deep bob, a strong lean, his fists swinging like pendulums.
+
+**The stone pass (2026-11-19).** Rebuilt from chipped stones (`rock_part`, the jungle monsters'
+stones) in place of boxes and rings, to sit beside the redesigned champions: heaps of boulders on
+the shoulders, interlocking stones on the chest, and arms and legs of stones around a core of ice
+that shows through their gaps: the ice holds him together. The owner's notes on the first pass:
+- **Ice reads as ice, not magic:** pale and lit like the stone (no glow), white rime on the
+  upturned faces in place of the moss, icicles hanging under the shoulders and from the jaw.
+  Only his eyes glow.
+- **No forward crystal on the chest:** the cone that stuck out of it is gone; a chunk of
+  frosted ice sits flush in the stone instead.
+- **A face:** stern brow stones angled down to the middle, slit eyes under them, a nose stone,
+  a heavy jaw with a beard of icicles, pushed forward from the shoulders.
+
+Every shard and icicle is rooted in the stone it grows from (its first point sunk into it); the
+icicle beard follows the jaw's curve under it. About 9,900 triangles (was 5,000); same bones, clips, effects and sounds.
 
 ## Palette (14 §4)
 
@@ -20,9 +35,9 @@ Signature: **ice blue** (205°). Warm granite neutrals, so the ice reads against
 
 | Slot | Colors |
 |---|---|
-| cloth | granite in three shades (0.13–0.32), moss (0.16, 0.27, 0.10) |
+| cloth | granite in three shades (0.13–0.32); ice (0.50, 0.72, 0.86), deep ice (0.26, 0.48, 0.66), rime (0.82, 0.88, 0.92) |
 | metal | iron chain, bands and the core's setting (0.11, 0.11, 0.13) |
-| emissive | ice (0.36, 0.78, 1.0) and deep ice (0.10, 0.40, 0.88): the crystals, the chest core, the visor |
+| emissive | his eyes only (0.62, 0.90, 1.0) |
 | accent | a band around his hips |
 
 ## Weight (14 §3)
