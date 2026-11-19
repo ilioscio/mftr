@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Cairn (rebuilt for 14): the generator for his model and clips.
 
-    blender -b --python art/champions/cairn/build.py -- --out art/champions/cairn/cairn.blend
+    blender -b --python art/champions/old/cairn/build.py -- --out art/champions/old/cairn/cairn.blend
 
 Antlers and a mossy stone mantle (14 §5): a weathered earth-warden, broad and heavy, great
 branching antlers rising from his brow, a mantle of mossy stone slabs over his shoulders, bark
@@ -17,7 +17,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "blender")))
+sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "..", "tools", "blender")))
 
 from mathutils import Vector  # noqa: E402
 

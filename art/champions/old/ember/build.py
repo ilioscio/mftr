@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Ember (rebuilt for 14): the generator for his model and clips.
 
-    blender -b --python art/champions/ember/build.py -- --out art/champions/ember/ember.blend
+    blender -b --python art/champions/old/ember/build.py -- --out art/champions/old/ember/ember.blend
 
 A flame (14 §5): a cocky pyromancer, top-heavy and slim. Burning hair sweeps up and back from his
 head, framed by a tall flared collar of soot-black petals lined with ember red; bell sleeves
@@ -17,7 +17,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "blender")))
+sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "..", "tools", "blender")))
 
 from mftr_blender import champion, clips, head, rig  # noqa: E402
 from mftr_blender.champion import arm, feet, hand  # noqa: E402

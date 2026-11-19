@@ -1217,7 +1217,7 @@ def lineup(out):
     xs = [-4.2, -2.55, -0.85, 0.85, 2.55, 4.2]
     refs = {
         "minion": os.path.join(ROOT, "art", "minions", "melee", "export", "melee.glb"),
-        "rook": os.path.join(ROOT, "art", "champions", "rook", "export", "rook.glb"),
+        "rook": os.path.join(ROOT, "art", "champions", "old", "rook", "export", "rook.glb"),
     }
     for k, x in zip(order, xs):
         if k in refs:
@@ -1260,7 +1260,7 @@ def gameplay(out):
         build_keeper(sc, key, (x, 0.6, 0), 0.0, stall=True)
     TEAM = ALLY
     _import_glb(sc, os.path.join(ROOT, "art", "minions", "melee", "export", "melee.glb"), (-3.6, -2.6, 0), 0.0, accent=ALLY)
-    _import_glb(sc, os.path.join(ROOT, "art", "champions", "rook", "export", "rook.glb"), (-0.2, -2.4, 0), 0.0, accent=ALLY)
+    _import_glb(sc, os.path.join(ROOT, "art", "champions", "old", "rook", "export", "rook.glb"), (-0.2, -2.4, 0), 0.0, accent=ALLY)
     pitch = math.radians(56)
     d = 18.5
     look = Vector((0, 0, 0.5))

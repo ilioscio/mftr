@@ -4,7 +4,7 @@
 // a long white skirt hemmed in gold with three tails from a sky sash, ivory boots strapped in
 // gold, and a lantern staff.
 // The kit is a copy of crates/mftr-sim/champions/lumen.ron (a test checks they match); the
-// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// game shows this model (0.21.0); the hand-made original is kept in art/champions/old/lumen.
 // Lumen: Enchanter.
 // Enchanter: heals and shields allies, a slowing poke, and a delayed rooting halo.
 // Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability

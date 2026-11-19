@@ -2,7 +2,7 @@
 // A grizzled veteran, shaved bald, a braided beard: crimson-lacquered pauldrons and an iron
 // breastplate over a padded gambeson, a long crimson tabard, heavy boots, a maul in his fists.
 // The kit is a copy of crates/mftr-sim/champions/rook.ron (a test checks they match); the
-// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// game shows this model (0.21.0); the hand-made original is kept in art/champions/old/rook.
 // Rook: Bruiser (melee).
 // Bruiser: a cleave, a missing-health heal, a slowing lunge, and a slowing shockwave.
 // Numbers are *(start)* values. Stats are level 1 and gain `growth` each level (02 §1); ability

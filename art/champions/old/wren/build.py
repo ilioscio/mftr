@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Wren (rebuilt for 14): the generator for his model and clips.
 
-    blender -b --python art/champions/wren/build.py -- --out art/champions/wren/wren.blend
+    blender -b --python art/champions/old/wren/build.py -- --out art/champions/old/wren/wren.blend
 
 A feather crest and a short cape of feathers (14 §5): a lethal birdman, small and quick, with a
 tall crest of lime-tipped feathers swept back from his head, a capelet of layered feathers on an
@@ -19,7 +19,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "blender")))
+sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "..", "tools", "blender")))
 
 from mathutils import Matrix, Vector  # noqa: E402
 

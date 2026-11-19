@@ -4,7 +4,7 @@
 // bolts, a hand crossbow. A young Latina: warm brown skin (tone 4), dark brown hair in a ponytail,
 // dark brown eyes, full brows, a softly aquiline nose, full cheeks (22 §3.3: a face from the sliders).
 // The kit is a copy of crates/mftr-sim/champions/wren.ron (a test checks they match); the
-// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// game shows this model (0.21.0); the hand-made original is kept in art/champions/old/wren.
 // Wren: Skirmisher: mobile ranged physical damage.
 // Skirmisher: a quick poke, slowing caltrops, a pounce onto a target, and a wide volley of
 // arrows.

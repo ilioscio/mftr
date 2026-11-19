@@ -172,7 +172,7 @@ fn main() -> std::io::Result<()> {
                 champion_files.push(std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}")));
             }
             "--champion-dir" => {
-                // Every `*.champion.ron` in a folder (art/champions/neo: the official ten rebuilt).
+                // Every `*.champion.ron` in a folder (e.g. art/champions/examples).
                 let dir = args.next().expect("--champion-dir needs a folder");
                 let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
                     .unwrap_or_else(|e| panic!("{dir}: {e}"))

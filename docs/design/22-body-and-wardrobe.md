@@ -1864,6 +1864,26 @@ want this look every time: is it a costume of someone's culture?
 - Seen in creator captures at rest only; the crossbow not seen aimed in her clips.
 - The owner's look, and review by people of the heritage depicted.
 
+
+### The redesigns are the champions (2026-11-18, 0.21.0)
+
+The owner compared the nine wardrobe rebuilds with the hand-made originals, side by side from the
+gameplay camera, and made the rebuilds the champions. Bastion stays hand-made, waiting on the
+non-humanoid scope call.
+- **The originals are kept** in `art/champions/old/<id>/` (their `build.py`, `.blend`,
+  `sounds.ron` and `export/`). The game no longer shows them, but their packs still lend the
+  recipes' moves their ability clips, effects and sounds, so they ship in the client's `art/` and
+  the forge's catalog loads them from there (Bastion's from his own folder).
+- **The game forges an official champion from its recipe** (`art/champions/<id>/<id>.champion.ron`,
+  which now ships with the client) when its folder holds no hand-made pack:
+  `mftr_forge::official_recipe`, called by the client's `MftrModel.forge` after a server's custom
+  champion files. A pack in `<id>/export/` would take the recipe's place again; only Bastion's does.
+- **The neo set is retired.** `art/champions/neo` held the recipes under other names
+  (`Rook-neo` …) so they could play next to the originals; with the recipes the champions, the
+  copies went. `bastion-neo` stays, as Bastion's recipe is still the one to try beside him.
+- A test checks it: the nine have no pack in their folders, their originals are in `old/`, their
+  neo copies are gone, their recipes carry the official kits and forge; Bastion keeps his pack.
+
 ## 7. Open questions for the owner
 
 1. **Realistic over stylized topology** (§1.1), with heroic proportions from the rig: agreed?

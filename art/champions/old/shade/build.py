@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Shade (rebuilt for 14): the generator for his model and clips.
 
-    blender -b --python art/champions/shade/build.py -- --out art/champions/shade/shade.blend
+    blender -b --python art/champions/old/shade/build.py -- --out art/champions/old/shade/shade.blend
 
 A blade (14 §5): a lean assassin, always hunched forward, under a tall pointed hood with violet
 eyes burning out of a mask, a long scarf streaming behind him on an `extra_scarf` chain, and two
@@ -17,7 +17,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "blender")))
+sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "..", "tools", "blender")))
 
 from mathutils import Vector  # noqa: E402
 

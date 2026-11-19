@@ -157,7 +157,7 @@ fn continue_keeps_the_action_showing_and_is_nothing_alone() {
 }
 
 fn vesper() -> Library {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/vesper/export/vesper.glb");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/old/vesper/export/vesper.glb");
     mftr_pack::load_file(&path).expect("Vesper's pack loads").library
 }
 
@@ -285,7 +285,7 @@ fn minions_flinch_when_hit_and_finish_their_swings() {
 }
 
 fn rook() -> Library {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/rook/export/rook.glb");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/old/rook/export/rook.glb");
     mftr_pack::load_file(&path).expect("Rook's pack loads").library
 }
 
@@ -336,7 +336,7 @@ fn actions_announce_their_fire_once_even_when_cut_at_the_windup_or_instant() {
 #[test]
 fn a_kit_with_several_dashes_plays_each_ones_clips() {
     // A10: Shade has three (Shadow Step, Veil Step, Execution); the drive's slot picks the set.
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/shade/export/shade.glb");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../art/champions/old/shade/export/shade.glb");
     let lib = mftr_pack::load_file(&path).unwrap().library;
     for (slot, name) in [(0u8, "q_start"), (2, "e_start"), (3, "r_start")] {
         let mut anim = Animator::new(&lib);

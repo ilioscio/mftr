@@ -52,16 +52,16 @@ fn committed_exports_are_clean() {
     let mut files: Vec<String> = [
         "rigs/export/biped_v1.glb",
         "library/biped/export/biped_library.glb",
-        "champions/vesper/export/vesper.glb",
-        "champions/rook/export/rook.glb",
-        "champions/ember/export/ember.glb",
+        "champions/old/vesper/export/vesper.glb",
+        "champions/old/rook/export/rook.glb",
+        "champions/old/ember/export/ember.glb",
         "champions/bastion/export/bastion.glb",
-        "champions/lumen/export/lumen.glb",
-        "champions/shade/export/shade.glb",
-        "champions/quill/export/quill.glb",
-        "champions/cairn/export/cairn.glb",
-        "champions/marrow/export/marrow.glb",
-        "champions/wren/export/wren.glb",
+        "champions/old/lumen/export/lumen.glb",
+        "champions/old/shade/export/shade.glb",
+        "champions/old/quill/export/quill.glb",
+        "champions/old/cairn/export/cairn.glb",
+        "champions/old/marrow/export/marrow.glb",
+        "champions/old/wren/export/wren.glb",
     ]
     .map(String::from)
     .to_vec();
@@ -348,7 +348,7 @@ fn committed_vfx_load_and_cover_the_kit() {
     for phase in ["release", "impact", "detonate", "start", "land"] {
         assert!(lib.contains(&format!("*.{phase}")), "library lacks *.{phase}");
     }
-    let vesper = events("champions/vesper/export/vesper.glb");
+    let vesper = events("champions/old/vesper/export/vesper.glb");
     for event in ["attack.projectile", "q.projectile", "w.projectile", "w.detonate", "e.start", "r.projectile"] {
         assert!(vesper.iter().any(|e| e == event), "vesper lacks {event}");
     }
@@ -377,7 +377,7 @@ fn committed_sounds_decode_and_cover_the_kit() {
     for event in ["cc.hard", "unit.death", "unit.respawn", "*.impact", "*.cast"] {
         assert!(lib.iter().any(|e| e == event), "library lacks {event}");
     }
-    let vesper = events("champions/vesper/export/vesper.glb");
+    let vesper = events("champions/old/vesper/export/vesper.glb");
     for action in ["attack", "q", "w", "r"] {
         for phase in ["cast", "release"] {
             let event = format!("{action}.{phase}");
@@ -394,16 +394,16 @@ fn generated_sounds_are_built_from_the_current_recipe() {
     // Edit a `sounds.ron` and forget `mftr-tools sfx build`, and this fails.
     for (recipe, binding) in [
         ("library/biped/sounds.ron", "library/biped/export/biped_library.sfx.ron"),
-        ("champions/vesper/sounds.ron", "champions/vesper/export/vesper.sfx.ron"),
-        ("champions/rook/sounds.ron", "champions/rook/export/rook.sfx.ron"),
-        ("champions/ember/sounds.ron", "champions/ember/export/ember.sfx.ron"),
+        ("champions/old/vesper/sounds.ron", "champions/old/vesper/export/vesper.sfx.ron"),
+        ("champions/old/rook/sounds.ron", "champions/old/rook/export/rook.sfx.ron"),
+        ("champions/old/ember/sounds.ron", "champions/old/ember/export/ember.sfx.ron"),
         ("champions/bastion/sounds.ron", "champions/bastion/export/bastion.sfx.ron"),
-        ("champions/lumen/sounds.ron", "champions/lumen/export/lumen.sfx.ron"),
-        ("champions/shade/sounds.ron", "champions/shade/export/shade.sfx.ron"),
-        ("champions/quill/sounds.ron", "champions/quill/export/quill.sfx.ron"),
-        ("champions/cairn/sounds.ron", "champions/cairn/export/cairn.sfx.ron"),
-        ("champions/marrow/sounds.ron", "champions/marrow/export/marrow.sfx.ron"),
-        ("champions/wren/sounds.ron", "champions/wren/export/wren.sfx.ron"),
+        ("champions/old/lumen/sounds.ron", "champions/old/lumen/export/lumen.sfx.ron"),
+        ("champions/old/shade/sounds.ron", "champions/old/shade/export/shade.sfx.ron"),
+        ("champions/old/quill/sounds.ron", "champions/old/quill/export/quill.sfx.ron"),
+        ("champions/old/cairn/sounds.ron", "champions/old/cairn/export/cairn.sfx.ron"),
+        ("champions/old/marrow/sounds.ron", "champions/old/marrow/export/marrow.sfx.ron"),
+        ("champions/old/wren/sounds.ron", "champions/old/wren/export/wren.sfx.ron"),
     ] {
         let text = std::fs::read_to_string(art(recipe)).unwrap();
         let file = mftr_pack::sfx::parse(&std::fs::read_to_string(art(binding)).unwrap()).unwrap();

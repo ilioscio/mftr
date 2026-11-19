@@ -39,15 +39,23 @@ fi
 copy_packs() {
   local dest="$1"
   rm -rf "$dest"
-  for d in art/library/*/export art/champions/*/export art/minions/*/export art/monsters/*/export art/shopkeepers/*/export art/props/*/export art/items/*/export art/items/icons art/creator/*/export; do
+  for d in art/library/*/export art/champions/*/export art/champions/old/*/export art/minions/*/export art/monsters/*/export art/shopkeepers/*/export art/props/*/export art/items/*/export art/items/icons art/creator/*/export; do
     [ -d "$d" ] || continue
     mkdir -p "$dest/${d#art/}"
     cp -R "$d/." "$dest/${d#art/}/"
   done
   [ -f "$dest/library/biped/export/biped_library.glb" ] || { echo "packs missing from $dest" >&2; exit 1; }
+  # The official champions' recipes (doc 22): the game forges the redesigns from them (the
+  # hand-made originals in champions/old ship only for the clips, effects and sounds they lend).
+  for f in art/champions/*/*.champion.ron; do
+    case "$f" in art/champions/examples/*|art/champions/neo/*|art/champions/_template/*) continue ;; esac
+    mkdir -p "$dest/$(dirname "${f#art/}")"
+    cp "$f" "$dest/${f#art/}"
+  done
+  [ -f "$dest/champions/rook/rook.champion.ron" ] || { echo "recipes missing from $dest" >&2; exit 1; }
   # Every pack the repo exports ships (the rigs are references for authoring, not the game's): a
   # new kind of pack left off the list above fails here instead of shipping placeholders.
-  for d in art/*/*/export; do
+  for d in art/*/*/export art/champions/old/*/export; do
     case "$d" in art/rigs/*) continue ;; esac
     [ -d "$dest/${d#art/}" ] || { echo "$d is not packaged: add it to copy_packs" >&2; exit 1; }
   done

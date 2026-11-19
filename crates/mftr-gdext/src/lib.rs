@@ -442,7 +442,7 @@ impl MatchClient {
         let name = name.to_string();
         self.champion_request = ChampionId::by_name(&name);
         // Not known here: perhaps one of the server's custom champions, known once its files
-        // are fetched (`Rook-neo`). Kept, and the server picks if it never turns up.
+        // are fetched (`Grumble`). Kept, and the server picks if it never turns up.
         self.champion_name = (self.champion_request.is_none() && !name.is_empty()).then_some(name);
         true
     }

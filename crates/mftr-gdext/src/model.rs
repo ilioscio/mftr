@@ -72,10 +72,12 @@ impl MftrModel {
     }
 
     /// Forge the model of `champion` from its champion file's looks and the catalog under `art`
-    /// (CR2, `mftr-forge`): `null` for a champion with no file or no looks.
+    /// (CR2, `mftr-forge`): a server's custom champion's file, else an official champion's recipe
+    /// (`art/champions/<id>/<id>.champion.ron`, the redesigns); `null` with no file or no looks.
     #[func]
     fn forge(art: GString, champion: GString) -> Option<Gd<MftrModel>> {
-        let text = mftr_client::champion_file(&champion.to_string())?;
+        let text = mftr_client::champion_file(&champion.to_string())
+            .or_else(|| mftr_forge::official_recipe(std::path::Path::new(&art.to_string()), &champion.to_string()))?;
         let looks = match mftr_forge::looks::of_champion_file(&text) {
             Ok(Some(l)) => l,
             Ok(None) => return None,

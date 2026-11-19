@@ -3,7 +3,7 @@
 // ragged grave-grey shawl, a plum robe, a corset of bone ribs with a skull lantern at her hip, a
 // skirt torn into strips, black boots, a crooked staff crowned with a horned skull.
 // The kit is a copy of crates/mftr-sim/champions/marrow.ron (a test checks they match); the
-// hand-made model in this folder stays what the game shows until the owner prefers this one.
+// game shows this model (0.21.0); the hand-made original is kept in art/champions/old/marrow.
 // Marrow: Battlemage: short-range sustained magic.
 // Battlemage: a draining nova to fight in close, a rooting skillshot, a self heal, and a large
 // slowing area to win extended fights.
