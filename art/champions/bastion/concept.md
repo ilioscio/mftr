@@ -10,9 +10,16 @@ Status: **rebuilt for [14](../../../docs/design/14-champion-art-direction.md)** 
   - **E Tremor:** a slowing stomp around him.
   - **R Upheaval:** a delayed area that knocks up everyone in it (ultimate, hard CC).
 - **Personality in three words:** steadfast, patient, immovable.
-- **Shape (14 §2):** *a boulder*. Hulking proportions on the `biped` bones (`SHAPE` in `build.py`: low hips and short legs, the neck below the shoulder line, ×1.45 wide, ×1.35 deep, shoulders pushed out 16 cm, long arms, hands ×1.9), about 2.1 m to the shoulders' crystals' tips. Boulder shoulders stand above a small block head with a glowing visor slit; ice crystals grow from his back, his shoulders and his forearms; a crystal core is set in his chest; boulder fists; stumpy legs on boulder feet.
+- **Shape (14 §2):** *a boulder*. Hulking proportions on the `biped` bones (`SHAPE` in `build.py`: low hips and short legs, the neck below the shoulder line, ×1.45 wide, ×1.35 deep, shoulders pushed out 16 cm, long arms, hands ×1.9), about 2.1 m to the shoulders' crystals' tips. Boulder shoulders stand above a small head (two ice eyes under a brow stone); ice crystals grow from his back, his shoulders and his forearms; a crystal core is set in his chest; boulder fists; stumpy legs on boulder feet.
 - **Weapon:** his fists. A chain wound round the right fist ends in the grapple's hook.
 - **Gait (14 §3.6):** heavy: wide feet, a deep bob, a strong lean, his fists swinging like pendulums.
+
+**The stone pass (2026-11-19).** Rebuilt from chipped stones (`rock_part`, the jungle monsters'
+stones) in place of boxes and rings, to sit beside the redesigned champions: heaps of boulders on
+the shoulders, interlocking stones on the chest, and arms and legs of stones around a glowing ice
+core that shows through their gaps: the ice holds him together. Moss grows on the upturned faces of
+the shoulders and chest top. About 8,900 triangles (was 5,000); same bones, clips, effects and
+sounds.
 
 ## Palette (14 §4)
 

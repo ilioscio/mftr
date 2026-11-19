@@ -56,13 +56,15 @@ def spin(pose, deg):
 
 
 def mirrored(left):
-    """A left-side part list plus its mirror: lofted tuples, `box_part`s and `path_part`s."""
+    """A left-side part list plus its mirror: lofted tuples, `box_part`s, `path_part`s and `rock_part`s."""
     out = list(left)
     for p in left:
         if callable(p) and hasattr(p, "mftr_box"):
             out += mesh.box_pair(*p.mftr_box)[1:]
         elif callable(p) and hasattr(p, "mftr_path"):
             out += mesh.path_pair(*p.mftr_path)[1:]
+        elif callable(p) and hasattr(p, "mftr_rock"):
+            out.append(mesh.mirror(p))
         elif not callable(p):
             out.append(mesh._mirror_part(p))
     return out
