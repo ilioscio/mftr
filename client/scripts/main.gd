@@ -2605,7 +2605,7 @@ func _dress_map(geo: Dictionary) -> void:
 		atmosphere.queue_free()
 	atmosphere = preload("res://scripts/atmosphere.gd").new()
 	add_child(atmosphere)
-	atmosphere.setup(geo.size / 2.0 * UNITS_TO_METERS, season.get("motes", "pollen"))
+	atmosphere.setup(geo.size / 2.0 * UNITS_TO_METERS, season.get("motes", "pollen"), season.get("clouds", 0.4))
 	var view: Node3D = MapView.new()
 	view.name = "MapView"
 	add_child(view)

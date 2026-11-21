@@ -60,7 +60,9 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
   fill (shade reads blue, not grey), a filmic tonemap with a gentle grade, bloom on what glows,
   and haze only toward the far edge of the view. Cloud shadows drift across the map: a shared
   shader include (`clouds.gdshaderinc`) dims the sun, not the fill, on terrain, props and
-  champions alike, procedurally (no textures). The season's motes (pollen, leaves, snow) float
+  champions alike, procedurally (no textures): puffy patches about 15 m across with soft edges,
+  changing shape as they drift at a walk, over as much of the map as the season's cloud cover
+  says (D80). The season's motes (pollen, leaves, snow) float
   near the camera, braziers burn, and a vignette darkens the corners ([15 §7](15-map-art-direction.md#7-light-and-shaders)).
   Shadows, bloom, and clouds with motes can each be turned off in Settings → Graphics, where the
   season can be chosen too.

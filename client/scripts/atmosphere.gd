@@ -6,17 +6,19 @@ extends Node3D
 ## The cloud shadows live in the map's shaders (clouds.gdshaderinc): they dim the sun on
 ## terrain, props and champions alike; this node only moves the wind and sets their strength.
 
-const WIND := Vector2(0.55, 0.22)        # meters per second
-const CLOUD_STRENGTH := 0.42             # how much of the sun the thickest cloud takes
+const WIND := Vector2(1.6, 0.65)         # meters per second: a walk, slower than a champion
+const CLOUD_STRENGTH := 0.55             # how much of the sun the thickest cloud takes
 
 var _drift := Vector2.ZERO
 var _clouds := true
 var _motes: GPUParticles3D
 
 
-## `motes`: the season's ("pollen", "leaves", "snow").
-func setup(_map_center_m: Vector2, motes := "pollen") -> void:
+## `motes`: the season's ("pollen", "leaves", "snow"); `cover`: how much of the map is under
+## cloud, about 0.2 (fair) to 1 (overcast).
+func setup(_map_center_m: Vector2, motes := "pollen", cover := 0.4) -> void:
 	RenderingServer.global_shader_parameter_set("cloud_strength", CLOUD_STRENGTH)
+	RenderingServer.global_shader_parameter_set("cloud_cover", cover)
 	_motes = GPUParticles3D.new()
 	_motes.amount = 90
 	_motes.lifetime = 9.0

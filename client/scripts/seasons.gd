@@ -32,6 +32,7 @@ const SUMMER := {
 	"substitute": {},
 	"life": ["flowers", "butterflies", "lily_pads", "frogs", "fireflies"],
 	"motes": "pollen",
+	"clouds": 0.35,  # cloud cover (atmosphere.gd): fair-weather cumulus, sun between
 }
 
 const AUTUMN := {
@@ -58,6 +59,7 @@ const AUTUMN := {
 	"substitute": {},
 	"life": ["lily_pads", "fireflies"],
 	"motes": "leaves",
+	"clouds": 0.5,  # cloud cover (atmosphere.gd): more cloud than sun
 }
 
 const WINTER := {
@@ -89,6 +91,7 @@ const WINTER := {
 	"snow": 1.0,
 	"life": [],
 	"motes": "snow",
+	"clouds": 0.55,  # cloud cover (atmosphere.gd): a grey sky, broken
 }
 
 
