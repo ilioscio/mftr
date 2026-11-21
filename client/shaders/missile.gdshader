@@ -82,10 +82,13 @@ void fragment() {
 		float fletch = step(0.75, behind) * step(0.0, 1.0 - behind) * (1.0 - smoothstep(0.0, 0.1, abs(ay - (behind - 0.75) * 2.4)));
 		core = max(core, fletch);
 	}
-	vec3 c = color * (0.55 + 0.45 * fade);
+	// The body glows softly, densest down its middle (D79: light, not a flat band); the core is
+	// hot enough to bloom. The sheath stays exact at the hitbox's edge.
+	body_a *= 0.4 + 0.6 * (1.0 - ay * ay);
+	vec3 c = color * (0.75 + 0.6 * fade);
 	float a = body_a + 0.5 * edge * (0.35 + 0.65 * fade);
 	c = mix(c, edge_color, edge * 0.85);
-	c = mix(c, core_color, clamp(core + lead, 0.0, 1.0));
+	c = mix(c, core_color * 1.8, clamp(core + lead, 0.0, 1.0));
 	a = max(a, clamp(core + lead, 0.0, 1.0));
 	if (hard_cc > 0.5 && x < 0.0) {
 		float chevron = step(0.5, fract((-x + abs(y) * 0.9) / (radius * 0.9) - TIME * 3.0));

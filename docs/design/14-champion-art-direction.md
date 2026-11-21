@@ -44,7 +44,7 @@ The standard biped is ~7½ heads; ours become **~6 heads** (the head scaled up ~
 ~1.35× and feet ~1.25× of realistic, and limbs at least **0.08 m thick** (≥ 5 px at the gameplay
 camera) except deliberately thin ones. Shoulders follow the character: brutes ≥ 3 head-widths,
 casters may stay narrow if something else (a hat, sleeves, a halo) widens the top. Height varies
-by champion (1.7–2.3 m) within the footprint rule of [10 §2](10-characters-and-animation.md#2-character-visual-style-faceted-ps1).
+by champion (1.7–2.3 m) within the footprint rule of [10 §2](10-characters-and-animation.md#2-character-visual-style).
 
 ### 2.3 Break the tube
 
@@ -177,7 +177,7 @@ The kit gains (05 §5): **`slash`**, an arc smear in front of the champion along
 frames; **`flash`**, a 2–3 frame star at the impact point; **`crack`**, radial ground lines that
 linger; **`pillar`**, a short vertical streak (landings, dash arrivals); **`shock`**, a ring that
 expands to a radius; **`rocks`**, stones dropped across an area; **`rain`**, a volley that keeps
-falling for seconds. All pixel-style, all colored by the ramp.
+falling for seconds. All colored by the ramp; since D79 they're soft, glowing and smooth ([23](23-effects.md)).
 
 ### 4.4 Projectiles and indicators in character
 

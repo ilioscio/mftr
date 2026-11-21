@@ -18,7 +18,7 @@ This is a living document. Each file covers one area. Record decisions in [DECIS
 | 07 | [Hosting, Identity & Trust](07-hosting-and-trust.md) | Self-hosting, lobby, identity, anti-cheat stance, federation path |
 | 08 | [Roadmap](08-roadmap.md) | Milestones with exit criteria |
 | 09 | [Naming & Legal](09-naming-and-legal.md) | Legally distinct names, licensing, IP hygiene |
-| 10 | [Characters & Animation](10-characters-and-animation.md) | Faceted PS1 style, facing, action timing contract, the full animation set, rig standard, Blender pipeline, pilots |
+| 10 | [Characters & Animation](10-characters-and-animation.md) | Visual style (stylized, faceted, modern-lit), facing, action timing contract, the full animation set, rig standard, Blender pipeline, pilots |
 | 11 | [Content Packs & Mods](11-content-packs-and-mods.md) | Server-pushed packs, threat model, data-only format, validation, signatures, cache |
 | 14 | [Champion Art Direction](14-champion-art-direction.md) | Silhouette and heroic proportions, weight (blow timing, holds, grips), signature colors in model and effects, the roster's briefs |
 | 15 | [Map Art Direction](15-map-art-direction.md) | The painted ground from each map's data, cliffs, structures and their fall, light, life, seasons |
@@ -29,6 +29,7 @@ This is a living document. Each file covers one area. Record decisions in [DECIS
 | 20 | [Champion Creator](20-champion-creator.md) | Players (and we) make champions: builds, sculpted face and body sliders, clothes, paint, movesets, a priced balance budget, recipes built at load by `mftr-forge` |
 | 21 | [Face Rig](21-face-rig.md) | Bone-driven face sculpting: an authored ~1,100-vertex head on 24 face bones, drag-to-sculpt with region highlighting, faces baked into rest at load; the same for the body next |
 | 22 | [Body, Eyes and Wardrobe](22-body-and-wardrobe.md) | The quality upgrade: a CC0 artist-made body on one topology for all four humanoid bases, real eyes that blink and look, brows and lips as features, a wardrobe pipeline that fits every body, and generative tools reconsidered |
+| 23 | [Effects](23-effects.md) | Modern VFX (D79): procedural particles and ribbons, light that blooms, fire, lightning and lasers, the effects gallery, and the road to a particle editor |
 | — | [Decisions & Open Questions](DECISIONS.md) | Decision log and unresolved questions |
 
 ### Reference analyses

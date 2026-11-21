@@ -16,21 +16,28 @@ How champions look, move and animate, and the pipeline that builds them. This ex
 6. **One rig standard, many champions.** Shared bone names make shared clips (CC states, generic casts) and community templates possible (§7).
 7. **Same pipeline for everyone.** First-party champions are built as content packs ([11](11-content-packs-and-mods.md)), so the mod path is never a second-class copy.
 
-## 2. Character visual style ("faceted PS1")
+## 2. Character visual style
 
-Decided with the owner (D48). The reference is a reduced-poly reimagining of the genre: faceted, flat-shaded, chunky shapes, with crunchy pixel-art VFX.
+Decided with the owner (D48), and loosened by D79. The reference is the genre's own modern look,
+reimagined at a small size: bold, stylized, heroic forms (14), faceted where facets read well,
+lit and shaded like a modern game, with soft, glowing effects ([23](23-effects.md)).
+
+This section first called the look "faceted PS1", with crunchy pixel-art effects. That was a
+starting point, not a ceiling: since D79, nothing here is held back to look old. What still
+binds is what serves the pillars: **readability** (05 §1) and **size** (the budgets in the
+table). The retro touches live on only as optional settings.
 
 | Aspect | Rule |
 |---|---|
-| Geometry | **5,000–8,000 triangles** per champion including weapons *(start; doubled by D59)*, hard cap 12,000. Large forms are blocky and faceted. Detail comes from silhouette and color blocking, not geometry. |
-| Shading | **Faceted** (flat per triangle), computed in the shader from screen-space derivatives so meshes stay smooth-indexed (fewer vertices, smaller files). Toon ramp with 2–3 bands, rim light and object-space detail noise ([05 §2](05-art-and-assets.md#2-procedural-materials)). |
+| Geometry | **5,000–8,000 triangles** per champion including weapons *(start; doubled by D59)*, hard cap 12,000. Bold, stylized forms; detail comes first from silhouette and color blocking. The cap is a size and frame-rate budget, not a look: spend it where it reads. |
+| Shading | **Faceted** by default (flat per triangle), computed in the shader from screen-space derivatives so meshes stay smooth-indexed (fewer vertices, smaller files); smooth where a form reads better that way (D79). Toon ramp with 2–3 bands, rim light and object-space detail noise ([05 §2](05-art-and-assets.md#2-procedural-materials)). |
 | Color | **Vertex colors**: RGB = albedo, A = baked cavity/AO. No texture maps. A palette of ≤ 12 colors per champion. |
 | Materials | At most 4 material slots from a fixed set: `skin`, `cloth`, `metal`, `emissive`, plus `accent` (the team-accent region, tinted ally/enemy at runtime, [05 §1.3](05-art-and-assets.md#1-readability-rules-non-negotiable)) and `accent_glow` (the team color, glowing: minions' eyes and orbs, A5). Each slot maps to a parameter set of the one champion shader. |
 | Silhouette | Identifiable from silhouette alone at default zoom (05 §1.5). Weapon and head shapes do most of the work. Each champion's `concept.md` states its silhouette class. |
 | Scale | 1 Blender unit = 1 m = 100 u. A standard biped stands **~1.9 m** (190 u) *(start)*. At idle, the model's footprint spans 0.8–1.6× the gameplay hitbox diameter (130 u at the default 65 u radius), so what you see is what can be hit. |
-| VFX | **Pixel style:** particles and sprites snap to a screen-space pixel grid with nearest filtering, use 4–6 color ramps per effect, and animate "on twos" (stepped at 15–20 fps). **Exception:** gameplay-relevant edges (hitbox sheaths, telegraphs) stay smooth, exact and full rate. Readability beats style. |
+| VFX | **Modern** ([23](23-effects.md), D79, replacing D48's pixel style): soft procedural particles and ribbons (fire, lightning, lasers, smears, smoke), light over 1 that blooms, colors blended through each effect's ramp, smooth motion at the frame rate. Gameplay-relevant edges (hitbox sheaths, telegraphs) stay exact. Readability beats style. |
 | Environment | Faceted geometry plus nearest-filtered procedural noise quantized to world-space "texels" (~4 cm) for the crunchy ground and stone look, with no textures. |
-| PS1 extras | Vertex snapping, affine warping and dithering are **optional settings, off by default**. |
+| Retro extras | Vertex snapping, affine warping and dithering are **optional settings, off by default**: a choice for players who like the PS1 look, not the style's reference. |
 
 ## 3. Facing
 
