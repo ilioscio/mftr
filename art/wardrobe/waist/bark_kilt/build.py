@@ -24,13 +24,13 @@ from mathutils.bvhtree import BVHTree  # noqa: E402
 
 from mftr_blender import cc0_body, plates  # noqa: E402
 
-LEATHER = ((0.30, 0.20, 0.12), "cloth")
-LEATHER_DARK = ((0.18, 0.12, 0.07), "cloth")
+LEATHER = ((0.20, 0.13, 0.072), "cloth")
+LEATHER_DARK = ((0.12, 0.075, 0.042), "cloth")
 ACCENT = ((0.50, 0.50, 0.50), "accent")
-BARK = [((0.26, 0.18, 0.12), "cloth"), ((0.33, 0.24, 0.16), "cloth"), ((0.15, 0.10, 0.07), "cloth"),
-        ((0.22, 0.15, 0.10), "cloth")]
-MOSS = ((0.16, 0.30, 0.10), "cloth")
-MOSS_DARK = ((0.09, 0.18, 0.06), "cloth")
+# Vertex colors are linear; the tones sit close, and the grain (`plates.grain`) does the rest.
+BARK = [((0.150, 0.088, 0.048), "cloth"), ((0.185, 0.112, 0.064), "cloth"), ((0.115, 0.066, 0.037), "cloth"),
+        ((0.135, 0.078, 0.043), "cloth")]
+MOSS = ((0.070, 0.150, 0.040), "cloth")
 
 # The belt's rows (m up): dark leather, the team's band, leather, dark leather.
 BELT = [0.950, 0.968, 0.990, 1.025, 1.045]
@@ -90,12 +90,13 @@ def build():
             mid = (zs[r] + zs[r + 1]) / 2
             for c in range(1):
                 if mid > MOSS_TO:
-                    col = MOSS if (s + c) % 3 else MOSS_DARK
+                    col = MOSS
                 else:
                     col = BARK[s % 4]
                 f = sm.faces.new((grid[r][c], grid[r][c + 1], grid[r + 1][c + 1], grid[r + 1][c]))
                 sfaces[f] = col
     objs.append(plates.finish(sm, sfaces, lambda c: Vector((centre.x, centre.y, c.z)), 0.008, "slats"))
+    plates.grain(objs[-1], plates.BARK_GRAIN)
     bpy.data.objects.remove(body)
     plates.save(objs, os.path.join(HERE, "item.blend"))
 

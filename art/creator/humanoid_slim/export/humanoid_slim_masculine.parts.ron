@@ -45,7 +45,7 @@
         (id: "hair.short", slot: "hair", name: "Short hair", hides: [], accent: false, triangles: 1276),
         (id: "hair.swept", slot: "hair", name: "Swept", hides: [], accent: false, triangles: 1485),
         (id: "hair.swept_ponytail", slot: "hair", name: "Swept ponytail", hides: [], accent: false, triangles: 1916),
-        (id: "hair.topknot", slot: "hair", name: "Topknot", hides: [], accent: false, triangles: 1655),
+        (id: "hair.topknot", slot: "hair", name: "Topknot", hides: [], accent: false, triangles: 1647),
         (id: "beard.braided", slot: "beard", name: "Braided beard", hides: [], accent: false, triangles: 1008),
         (id: "beard.full", slot: "beard", name: "Full beard", hides: [], accent: false, triangles: 1001),
         (id: "beard.goatee", slot: "beard", name: "Goatee", hides: [], accent: false, triangles: 958),

@@ -25,10 +25,11 @@ from mathutils.bvhtree import BVHTree  # noqa: E402
 
 from mftr_blender import cc0_body, plates  # noqa: E402
 
-BARK = ((0.26, 0.18, 0.12), "cloth")
-BARK_LIGHT = ((0.33, 0.24, 0.16), "cloth")
-BARK_DARK = ((0.15, 0.10, 0.07), "cloth")
-LEATHER = ((0.30, 0.20, 0.12), "cloth")
+# Vertex colors are linear; the tones sit close, and the grain (`plates.grain`) does the rest.
+BARK = ((0.150, 0.088, 0.048), "cloth")
+BARK_LIGHT = ((0.185, 0.112, 0.064), "cloth")
+BARK_DARK = ((0.115, 0.066, 0.037), "cloth")
+LEATHER = ((0.20, 0.13, 0.072), "cloth")
 GRANITE = ((0.30, 0.30, 0.28), "metal")
 EMERALD = ((0.30, 1.0, 0.55), "emissive")
 
@@ -91,6 +92,7 @@ def build():
     plates.lathe(bm, faces, tree, ROWS, [angle(c) for c in range(COLS)], z_at,
                  lambda z: plates.ray_centre(tree, z, (0.0, 0.0)), lift, color, smooth=4)
     obj = plates.finish(bm, faces, lambda c: Vector((0.0, 0.0, c.z)), 0.008, "cuirass")
+    plates.grain(obj, plates.BARK_GRAIN)
     # The boss: on the front's skin at its height, out past the bark.
     o = Vector((0.0, 0.0, GEM_Z))
     hit, _n, _i, _d = tree.ray_cast(o, Vector((0.0, -1.0, 0.0)))

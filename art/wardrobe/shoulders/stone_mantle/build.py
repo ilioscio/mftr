@@ -31,11 +31,12 @@ from mathutils.bvhtree import BVHTree  # noqa: E402
 
 from mftr_blender import cc0_body, plates  # noqa: E402
 
+# Vertex colors are linear; the tones sit close, and the grain (`plates.grain`) does the rest.
 GRANITE = ((0.30, 0.30, 0.28), "metal")
-GRANITE_LIGHT = ((0.38, 0.37, 0.34), "metal")
-GRANITE_DARK = ((0.18, 0.18, 0.17), "metal")
-MOSS = ((0.16, 0.30, 0.10), "cloth")
-MOSS_DARK = ((0.09, 0.18, 0.06), "cloth")
+GRANITE_LIGHT = ((0.34, 0.335, 0.31), "metal")
+GRANITE_DARK = ((0.25, 0.25, 0.235), "metal")
+MOSS = ((0.070, 0.150, 0.040), "cloth")
+MOSS_DARK = ((0.050, 0.110, 0.028), "cloth")
 MOSS_UP = 0.62
 
 # The collar: from over the chest and the shoulder blades up to the neck's base.
@@ -113,6 +114,7 @@ def build():
         return Vector((0.0, -0.01, c.z))
 
     obj = plates.finish(bm, faces, inside, 0.012, "mantle")
+    plates.grain(obj, plates.STONE_GRAIN)
     del collar_faces
     bpy.data.objects.remove(body)
     plates.save([obj], os.path.join(HERE, "item.blend"))

@@ -10,7 +10,7 @@ all four humanoid bases (slim and heavy, masculine and feminine) when the bases 
 | File | What |
 |---|---|
 | `item.ron` | `id` (`<slot>.<name>`), `slot`, `name`, `layer` (`under`, `over`, `armor`, `accessory`), `accent` (it shows the team color), `rigid` (a plate: little of the body's growth); `sleeves` (a torso item with sleeves, fitted to the arms too); `hold` (a bone: what stands off the body, like a quiver's arrows, rides it whole rather than following the arm under it); for a hanging item, its spring-bone chains (below); for a **held** item (a weapon), `grip` and its frame (below) |
-| `item.blend` | One mesh object, `item`, authored around the **reference body**: `body_male` in `art/creator/bodies/body_source.blend`, standing as it is there. Faces use materials named for the material slots (`cloth`, `metal`, `accent`…); the color attribute `Col` holds its paint regions. |
+| `item.blend` | One mesh object, `item`, authored around the **reference body**: `body_male` in `art/creator/bodies/body_source.blend`, standing as it is there. Faces use materials named for the material slots (`cloth`, `metal`, `accent`…); the color attribute `Col` holds its paint regions (linear colors: 0.26 shows as a pale 0.55), its alpha the occlusion. Vary a surface with grain in the alpha (`plates.grain`), not with more colors: each distinct color is a region the creator repaints. |
 | `build.py` | Optional: what makes `item.blend`. A sewn garment's pattern (`mftr_blender.sewing`). |
 
 ## Making one

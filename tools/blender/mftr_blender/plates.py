@@ -272,6 +272,29 @@ def finish(bm, faces, inside, thickness, name="plates"):
     return obj
 
 
+# Grain kinds for `grain`: cells per meter across (x, y) and along (z), and how deep it goes.
+BARK_GRAIN = ((16.0, 16.0, 2.5), 0.45)     # streaks running up and down, like a trunk's
+STONE_GRAIN = ((9.0, 9.0, 9.0), 0.4)       # blotches, the same every way
+
+
+def grain(obj, kind, seed=0.0):
+    """Bark's or stone's grain in the occlusion alpha, not the color (D80): a smooth noise over
+    the object's points darkens it in streaks or blotches. A color is a paint region (each
+    distinct one the creator can repaint), so the variation lives in the alpha, which a repaint
+    keeps, and the item keeps few regions. Per point, so it flows across faces and their seams
+    instead of changing face by face."""
+    from mathutils import noise
+    (cx, cy, cz), depth = kind
+    attr = obj.data.color_attributes["Col"]
+    for i, v in enumerate(obj.data.vertices):
+        p = obj.matrix_world @ v.co
+        q = Vector((p.x * cx + seed, p.y * cy + seed * 1.7, p.z * cz + seed * 0.3))
+        n = (noise.noise(q) + 0.5 * noise.noise(q * 2.13 + Vector((5.2, 1.3, 7.9)))) / 1.5
+        t = min(1.0, max(0.0, 0.5 + 0.8 * n))
+        c = attr.data[i].color
+        attr.data[i].color = (c[0], c[1], c[2], c[3] * (1.0 - depth * t))
+
+
 def save(objs, out_path):
     """`objs` joined into one object, `item`, saved alone as `out_path` (an item's `item.blend`).
     Returns its triangles."""

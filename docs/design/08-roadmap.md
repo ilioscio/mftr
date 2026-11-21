@@ -1750,8 +1750,11 @@ The face moves to bones ([21](21-face-rig.md), D76), with an authored head and d
   filtered with smooth edges. The cliffs stay cut.
 - **Docs:** 10 §2, 05, 15, 21, 22 and the README follow; the retro settings, never built, are
   dropped.
-- **Left:** Cairn's bark and stone parts vary their vertex colors face by face, which reads as a
-  patchwork even when smooth; an art pass on those parts.
+- **Cairn's parts** (bark cuirass, kilt, bracers, greaves, stone mantle) no longer read as a
+  patchwork: their tones sit close and a smooth grain in the occlusion alpha (`plates.grain`)
+  streaks the bark and blotches the stone, so the creator still sees three bark regions to
+  repaint. Bark, leather and moss were darkened: vertex colors are linear, and the old values
+  showed as pale tan and lime.
 
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
