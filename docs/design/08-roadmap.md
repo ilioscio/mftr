@@ -1759,7 +1759,10 @@ The face moves to bones ([21](21-face-rig.md), D76), with an authored head and d
 - **Cloud shadows that read:** they were there but too broad and faint to notice (24 m noise
   cells, soft over meters, 42% of the sun at most, 0.6 m/s). Now puffy patches about 15 m
   across with soft edges, gaps of sun between, 55% of the sun under the thickest, drifting at
-  1.7 m/s and changing shape as they go (a slower field bends them). How much of the map they
+  1.7 m/s and changing shape as they go (the finer octaves drift slower). Simplex noise with an
+  integer hash: value noise's square lattice drew straight sides and diamond corners, Perlin's
+  pinched edges into points, and a `fract(sin())` hash loses precision as the wind's offset
+  grows over a long match. How much of the map they
   cover is a global, `cloud_cover`, set per season (summer 0.35, autumn 0.5, winter 0.55), so
   an overcast or stormy map can push it up later.
 - **Slink's "bats":** the shopkeepers' bake rotated each bone's scale as if it were a direction,
