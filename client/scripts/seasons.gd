@@ -123,6 +123,10 @@ static func resolve(choice: String, map_season: String, date: Dictionary, hemisp
 	return for_date(date, hemisphere if hemisphere in ["north", "south"] else default_hemisphere())
 
 
+## The sky's fill (its colors are brighter than the old flat fill's average) scaled to match.
+const SKY_FILL_SCALE := 1.35
+
+
 static func get_season(name: String) -> Dictionary:
 	match name:
 		"autumn":
@@ -134,8 +138,32 @@ static func get_season(name: String) -> Dictionary:
 
 ## The light: the sun, the sky fill, the grade and the haze.
 static func apply_light(s: Dictionary, e: Environment, sun: DirectionalLight3D) -> void:
+	# The fill comes from a sky (D80): the sky's blue from above, the haze at the horizon, and
+	# the ground's own color bounced up from below, so a face turned up reads cooler than one
+	# turned down, as outdoors. The background stays the plain color (no sky is ever seen).
+	var pal: Dictionary = s.get("ground", {})
+	var grass: Color = pal.get("grass_mid", Color(0.2, 0.3, 0.15))
+	var dirt: Color = pal.get("dirt", Color(0.4, 0.3, 0.2))
+	var bounce: Color = grass.lerp(dirt, 0.35).lerp(s.sun_color, 0.15)
+	if s.get("snow", 0.0) > 0.5:
+		bounce = Color(0.7, 0.74, 0.8)
+	var mat := ProceduralSkyMaterial.new()
+	mat.sky_top_color = s.sky_fill
+	mat.sky_horizon_color = s.haze
+	mat.sky_curve = 0.12
+	mat.ground_horizon_color = s.haze.lerp(bounce, 0.5)
+	mat.ground_bottom_color = bounce
+	mat.ground_curve = 0.06
+	mat.sun_angle_max = 0.0
+	mat.use_debanding = false
+	var sky := Sky.new()
+	sky.sky_material = mat
+	sky.radiance_size = Sky.RADIANCE_SIZE_32
+	e.sky = sky
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	e.ambient_light_sky_contribution = 1.0
 	e.ambient_light_color = s.sky_fill
-	e.ambient_light_energy = s.sky_fill_energy
+	e.ambient_light_energy = s.sky_fill_energy * SKY_FILL_SCALE
 	e.tonemap_exposure = s.exposure
 	e.adjustment_contrast = s.contrast
 	e.adjustment_saturation = s.saturation

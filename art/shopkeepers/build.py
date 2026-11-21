@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools", "blender"))
 
 import bmesh  # noqa: E402
 import bpy  # noqa: E402
-from mathutils import Quaternion, Vector  # noqa: E402
+from mathutils import Matrix, Quaternion, Vector  # noqa: E402
 
 import concepts as C  # noqa: E402
 import motion as M  # noqa: E402
@@ -321,7 +321,11 @@ def bake(kp, arm, rig, name, seq, loop=False):
             prev = q
             rq.append(q)
             lc.append(Mi @ l)
-            sc.append(Vector([abs(x) for x in Mi @ s]))
+            # A scale is a matrix, not a direction: rotating the vector (1, 1, 1) into a bone whose
+            # rest is turned 45° gave (1, 0, 1.41), which flattened Slink's left hand and flung
+            # its children metres (the "bats"). Its lengths along the bone's own axes instead.
+            Sm = Mi @ Matrix.Diagonal(s) @ M3
+            sc.append(Vector([Sm.col[i].length for i in range(3)]))
         moved = lambda vals, rest: any((Vector(v) - Vector(rest)).length > 1e-5 for v in vals)
         for path, data, k, rest in (("rotation_quaternion", rq, 4, (1, 0, 0, 0)), ("location", lc, 3, (0, 0, 0)), ("scale", sc, 3, (1, 1, 1))):
             if not moved([tuple(v) for v in data], rest):

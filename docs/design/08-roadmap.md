@@ -1750,6 +1750,16 @@ The face moves to bones ([21](21-face-rig.md), D76), with an authored head and d
   filtered with smooth edges. The cliffs stay cut.
 - **Docs:** 10 §2, 05, 15, 21, 22 and the README follow; the retro settings, never built, are
   dropped.
+- **Light:** the fill comes from a sky (its blue from above, the haze at the horizon, the
+  ground's color bounced up from below) instead of one flat color, so a face turned up reads
+  cooler than one turned down; shadows are a little fuller. Units on the ground darken a soft
+  disc under themselves (contact shadows in the ground shader, the 32 nearest the camera:
+  decals on the Mobile renderer stop at 8 per mesh). A sun with an angular size (soft
+  contact-hardening shadows) was tried and dropped: it put out the metal's highlight.
+- **Slink's "bats":** the shopkeepers' bake rotated each bone's scale as if it were a direction,
+  so a uniform scale on a bone turned 45° came out (1, 0, 1.41); Slink's left hand collapsed and
+  its fingers, thumb and dagger were flung metres for single frames. The scale is now taken as
+  a matrix (`art/shopkeepers/build.py`) and Slink is rebuilt.
 - **Cairn's parts** (bark cuirass, kilt, bracers, greaves, stone mantle) no longer read as a
   patchwork: their tones sit close and a smooth grain in the occlusion alpha (`plates.grain`)
   streaks the bark and blotches the stone, so the creator still sees three bark regions to

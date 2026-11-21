@@ -31,6 +31,10 @@ uniform vec3 mud : source_color = vec3(0.24, 0.21, 0.15);
 uniform vec4 lamps[16];
 uniform vec4 lamp_colors[16];
 uniform int lamp_count = 0;
+// Contact shadows (D80, `map_view.gd`): units on the ground as (x, z, radius, strength) in meters.
+// A soft disc of occlusion under each, deepest at its feet, so what stands reads as standing.
+uniform vec4 occluders[32];
+uniform int occluder_count = 0;
 
 // Sandboxes without a control map: 0, a diagonal lane (the M1 arena) and a 1 m grid.
 uniform float lane_mode = 0.0;
@@ -135,6 +139,13 @@ void fragment() {
 		float grid = 1.0 - smoothstep(0.47, 0.5, max(g.x, g.y));
 		ground *= 1.0 - 0.06 * (1.0 - grid);
 	}
+	float open = 1.0;
+	for (int i = 0; i < occluder_count; i++) {
+		vec4 o = occluders[i];
+		float d = distance(p, o.xy) / max(o.z, 0.05);
+		open *= 1.0 - 0.42 * o.w * (1.0 - smoothstep(0.15, 1.25, d));
+	}
+	ground *= open;
 	ALBEDO = w_fogged(ground, world_pos);
 	ROUGHNESS = 1.0;
 	// The lamps' pools: light falling off with the square of the distance's share of the reach.
