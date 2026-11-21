@@ -614,40 +614,64 @@ impl MftrModel {
             self.pack.model.meshes.iter().flatten().zip(region_of.map(Some).chain(std::iter::repeat(None)))
         {
             let n = prim.positions.len();
-            let normals = smooth_normals(&prim.positions, &prim.indices);
+            // Shading normals smooth across gentle bends and crisp at creases (D80): a vertex
+            // on a crease is split, one copy per side. `src` is each new vertex's original.
+            let sm = auto_smooth(&prim.positions, &prim.indices, CREASE_COS);
+            let src = &sm.source;
             let mut arrays = VarArray::new();
             arrays.resize(ArrayType::MAX.ord() as usize, &Variant::nil());
-            let verts: PackedVector3Array = prim.positions.iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect();
-            let norms: PackedVector3Array = normals.iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect();
+            let verts: PackedVector3Array = src
+                .iter()
+                .map(|&v| {
+                    let p = prim.positions[v as usize];
+                    Vector3::new(p[0], p[1], p[2])
+                })
+                .collect();
+            let norms: PackedVector3Array = sm.normals.iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect();
+            // The outline hull grows along the welded smooth normal, carried as the tangent so it
+            // skins with the mesh: grown along the split normals, the hull would crack at creases.
+            let hull: PackedFloat32Array = sm.hull.iter().flat_map(|h| [h[0], h[1], h[2], 1.0]).collect();
             arrays.set(ArrayType::VERTEX.ord() as usize, &verts.to_variant());
             arrays.set(ArrayType::NORMAL.ord() as usize, &norms.to_variant());
+            arrays.set(ArrayType::TANGENT.ord() as usize, &hull.to_variant());
             if prim.colors.len() == n {
-                let colors: PackedColorArray =
-                    prim.colors.iter().map(|c| Color::from_rgba(c[0], c[1], c[2], c[3])).collect();
+                let colors: PackedColorArray = src
+                    .iter()
+                    .map(|&v| {
+                        let c = prim.colors[v as usize];
+                        Color::from_rgba(c[0], c[1], c[2], c[3])
+                    })
+                    .collect();
                 arrays.set(ArrayType::COLOR.ord() as usize, &colors.to_variant());
             }
             if prim.uvs.len() == n {
-                let uvs: PackedVector2Array = prim.uvs.iter().map(|u| Vector2::new(u[0], u[1])).collect();
+                let uvs: PackedVector2Array = src
+                    .iter()
+                    .map(|&v| {
+                        let u = prim.uvs[v as usize];
+                        Vector2::new(u[0], u[1])
+                    })
+                    .collect();
                 arrays.set(ArrayType::TEX_UV.ord() as usize, &uvs.to_variant());
             }
             if let Some(r) = reg.filter(|r| r.len() == n && r.iter().any(|&x| x > 0)) {
-                let uv2: PackedVector2Array = r.iter().map(|&x| Vector2::new(x as f32 / 256.0, 0.0)).collect();
+                let uv2: PackedVector2Array =
+                    src.iter().map(|&v| Vector2::new(r[v as usize] as f32 / 256.0, 0.0)).collect();
                 arrays.set(ArrayType::TEX_UV2.ord() as usize, &uv2.to_variant());
             }
             if skinned && prim.joints.len() == n && prim.weights.len() == n {
                 let map = &lib.joint_to_bone;
-                let bones: PackedInt32Array = prim
-                    .joints
+                let bones: PackedInt32Array = src
                     .iter()
-                    .flat_map(|j| j.map(|x| map.get(x as usize).copied().unwrap_or(0) as i32))
+                    .flat_map(|&v| prim.joints[v as usize].map(|x| map.get(x as usize).copied().unwrap_or(0) as i32))
                     .collect();
-                let weights: PackedFloat32Array = prim.weights.iter().flat_map(|w| *w).collect();
+                let weights: PackedFloat32Array = src.iter().flat_map(|&v| prim.weights[v as usize]).collect();
                 arrays.set(ArrayType::BONES.ord() as usize, &bones.to_variant());
                 arrays.set(ArrayType::WEIGHTS.ord() as usize, &weights.to_variant());
             }
             // glTF fronts are counter-clockwise; Godot's are clockwise.
             let index: PackedInt32Array =
-                prim.indices.chunks(3).flat_map(|t| [t[0] as i32, t[2] as i32, t[1] as i32]).collect();
+                sm.indices.chunks(3).flat_map(|t| [t[0] as i32, t[2] as i32, t[1] as i32]).collect();
             arrays.set(ArrayType::INDEX.ord() as usize, &index.to_variant());
             mesh.add_surface_from_arrays(PrimitiveType::TRIANGLES, &arrays);
         }
@@ -661,28 +685,175 @@ fn transform(t: &Trs) -> Transform3D {
     Transform3D::new(basis, Vector3::new(t.t[0], t.t[1], t.t[2]))
 }
 
-/// Area-weighted vertex normals. Shading stays faceted (derivatives in the shader); these only
-/// grow the outline hull.
-fn smooth_normals(pos: &[[f32; 3]], idx: &[u32]) -> Vec<[f32; 3]> {
-    let mut n = vec![[0.0f32; 3]; pos.len()];
+/// The angle past which two faces meet at a crease rather than a bend (D80): 60°. A limb's
+/// eight-sided ring (45° a side) shades round; a plate's edge, a blade's or a rock's stays sharp.
+const CREASE_COS: f32 = 0.5;
+
+/// A mesh's shading normals, smooth where faces bend and split at creases.
+struct Smoothed {
+    /// Per new vertex: the original vertex it copies.
+    source: Vec<u32>,
+    /// Per new vertex: its shading normal.
+    normals: Vec<[f32; 3]>,
+    /// Per new vertex: the smooth normal of every face round its position, creases and seams
+    /// alike (the outline hull's).
+    hull: Vec<[f32; 3]>,
+    /// The triangles over the new vertices.
+    indices: Vec<u32>,
+}
+
+fn normalized(v: [f32; 3]) -> [f32; 3] {
+    let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if l > 1e-12 { [v[0] / l, v[1] / l, v[2] / l] } else { [0.0, 1.0, 0.0] }
+}
+
+/// Each corner's normal is the angle-weighted sum of the faces round its *position* (so a color
+/// or UV seam, where the mesh splits vertices, doesn't show in the light) that meet its own face
+/// within the crease angle. Corners of one vertex that come out the same share it; the rest
+/// split it.
+fn auto_smooth(pos: &[[f32; 3]], idx: &[u32], crease_cos: f32) -> Smoothed {
+    use std::collections::HashMap;
+    // Weld by position (0.1 mm).
+    let mut weld_of: HashMap<[i32; 3], u32> = HashMap::new();
+    let weld: Vec<u32> = pos
+        .iter()
+        .map(|p| {
+            let k = [(p[0] * 1e4).round() as i32, (p[1] * 1e4).round() as i32, (p[2] * 1e4).round() as i32];
+            let next = weld_of.len() as u32;
+            *weld_of.entry(k).or_insert(next)
+        })
+        .collect();
+    // Each face's unit normal, and its angle at each corner: a face counts toward a corner's
+    // normal by the angle it spans there, so how a quad happens to be split into triangles
+    // doesn't lean the normal toward one side.
+    let mut unit = Vec::with_capacity(idx.len() / 3);
+    let mut angles = Vec::with_capacity(idx.len() / 3);
     for t in idx.chunks(3) {
-        let (a, b, c) = (pos[t[0] as usize], pos[t[1] as usize], pos[t[2] as usize]);
-        let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-        let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let p = [pos[t[0] as usize], pos[t[1] as usize], pos[t[2] as usize]];
+        let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        let (u, v) = (sub(p[1], p[0]), sub(p[2], p[0]));
         let f = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
-        for &i in t {
-            for k in 0..3 {
-                n[i as usize][k] += f[k];
+        let degenerate = f[0] * f[0] + f[1] * f[1] + f[2] * f[2] < 1e-18;
+        unit.push(normalized(f));
+        let corner = |k: usize| {
+            if degenerate {
+                return 0.0;
+            }
+            let (e1, e2) = (normalized(sub(p[(k + 1) % 3], p[k])), normalized(sub(p[(k + 2) % 3], p[k])));
+            (e1[0] * e2[0] + e1[1] * e2[1] + e1[2] * e2[2]).clamp(-1.0, 1.0).acos()
+        };
+        angles.push([corner(0), corner(1), corner(2)]);
+    }
+    // The faces round each welded position, with their angle there.
+    let mut round: Vec<Vec<(u32, f32)>> = vec![Vec::new(); weld_of.len()];
+    for (f, t) in idx.chunks(3).enumerate() {
+        for (k, &i) in t.iter().enumerate() {
+            let w = &mut round[weld[i as usize] as usize];
+            if !w.iter().any(|&(g, _)| g == f as u32) {
+                w.push((f as u32, angles[f][k]));
             }
         }
     }
-    for v in &mut n {
-        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-        if l > 0.0 {
-            *v = [v[0] / l, v[1] / l, v[2] / l];
-        } else {
-            *v = [0.0, 1.0, 0.0];
+    let sum = |faces: &mut dyn Iterator<Item = (u32, f32)>| {
+        let mut s = [0.0f32; 3];
+        for (g, a) in faces {
+            let n = unit[g as usize];
+            s = [s[0] + n[0] * a, s[1] + n[1] * a, s[2] + n[2] * a];
+        }
+        s
+    };
+    let hull_of: Vec<[f32; 3]> = round.iter().map(|fs| normalized(sum(&mut fs.iter().copied()))).collect();
+    let mut out =
+        Smoothed { source: Vec::new(), normals: Vec::new(), hull: Vec::new(), indices: Vec::with_capacity(idx.len()) };
+    let mut made: HashMap<(u32, [i16; 3]), u32> = HashMap::new();
+    for (f, t) in idx.chunks(3).enumerate() {
+        let nf = unit[f];
+        for &i in t {
+            let w = weld[i as usize] as usize;
+            let near = |&(g, _): &(u32, f32)| {
+                let ng = unit[g as usize];
+                nf[0] * ng[0] + nf[1] * ng[1] + nf[2] * ng[2] >= crease_cos
+            };
+            let s = sum(&mut round[w].iter().copied().filter(near));
+            let n = if s == [0.0; 3] { nf } else { normalized(s) };
+            let key = (i, [(n[0] * 4096.0) as i16, (n[1] * 4096.0) as i16, (n[2] * 4096.0) as i16]);
+            let next = out.source.len() as u32;
+            let v = *made.entry(key).or_insert_with(|| {
+                out.source.push(i);
+                out.normals.push(n);
+                out.hull.push(hull_of[w]);
+                next
+            });
+            out.indices.push(v);
         }
     }
-    n
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A cube with its 8 corners shared: every edge is a 90° crease, so each corner splits in
+    /// three, one per face, each normal its face's.
+    #[test]
+    fn a_cube_keeps_its_edges() {
+        let pos: Vec<[f32; 3]> =
+            (0..8).map(|i| [(i & 1) as f32, ((i >> 1) & 1) as f32, ((i >> 2) & 1) as f32]).collect();
+        let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+        let idx: Vec<u32> = quads.iter().flat_map(|q| [q[0], q[1], q[2], q[0], q[2], q[3]]).collect();
+        let s = auto_smooth(&pos, &idx, CREASE_COS);
+        assert_eq!(s.source.len(), 24);
+        for n in &s.normals {
+            assert!(n.iter().filter(|c| c.abs() > 0.999).count() == 1, "{n:?} isn't a face's normal");
+        }
+        // The hull's normal is the corner's diagonal, the same for all three copies.
+        for (v, h) in s.source.iter().zip(&s.hull) {
+            let p = pos[*v as usize];
+            for k in 0..3 {
+                assert_eq!(h[k].signum(), p[k] * 2.0 - 1.0);
+            }
+        }
+    }
+
+    /// A tube of eight sides (45° between neighbours) shades round: no vertex splits, and a
+    /// side's corners point outward along the ring, not along the side's face.
+    #[test]
+    fn an_octagonal_tube_shades_round() {
+        let ring = |y: f32| -> Vec<[f32; 3]> {
+            (0..8)
+                .map(|i| {
+                    let a = i as f32 * std::f32::consts::TAU / 8.0;
+                    [a.cos(), y, a.sin()]
+                })
+                .collect()
+        };
+        let pos: Vec<[f32; 3]> = ring(0.0).into_iter().chain(ring(1.0)).collect();
+        let mut idx = Vec::new();
+        for i in 0..8u32 {
+            let j = (i + 1) % 8;
+            idx.extend([i, i + 8, j + 8, i, j + 8, j]);
+        }
+        let s = auto_smooth(&pos, &idx, CREASE_COS);
+        assert_eq!(s.source.len(), 16);
+        for (v, n) in s.source.iter().zip(&s.normals) {
+            let p = pos[*v as usize];
+            assert!((n[0] - p[0]).abs() < 1e-4 && n[1].abs() < 1e-4 && (n[2] - p[2]).abs() < 1e-4, "{n:?} at {p:?}");
+        }
+    }
+
+    /// A color seam (the same position split into two vertices) doesn't show in the light: both
+    /// copies get the normal of every face round the position.
+    #[test]
+    fn a_seam_is_smooth() {
+        // Two triangles folded 30° along x, the fold's vertices doubled.
+        let (c, s30) = (30f32.to_radians().cos(), 30f32.to_radians().sin());
+        let pos =
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 0.0, 1.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, -s30, -c]];
+        let idx = vec![0, 2, 1, 3, 4, 5];
+        let s = auto_smooth(&pos, &idx, CREASE_COS);
+        let at = |v: u32| s.normals[s.source.iter().position(|&x| x == v).unwrap()];
+        assert_eq!(at(0), at(3));
+        assert_eq!(at(1), at(4));
+    }
 }

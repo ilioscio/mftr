@@ -1064,7 +1064,7 @@ func _build_world() -> void:
 	sun.directional_shadow_split_1 = 0.4
 	add_child(sun)
 	Seasons.apply_light(Seasons.SUMMER, e, sun)
-	sun.shadow_opacity = 0.8
+	sun.shadow_opacity = 0.9
 
 	# A soft vignette over the view (15 §7): the corners darker, the fight brighter.
 	var vig_layer := CanvasLayer.new()
@@ -1448,6 +1448,7 @@ func _make_champion(color: Color, champion: String) -> Node3D:
 			_part(body, sphere, Vector3(0.45, 0.55, 0), _unshaded(Color(1.0, 0.7, 0.3)))
 	body.material_override = m
 	var outline := _outline_material(color)
+	outline.set_shader_parameter("hull_in_tangent", false)
 	m.next_pass = outline
 	body.set_meta("outline", outline)
 	body.set_meta("flash_mats", [m])
@@ -2063,6 +2064,7 @@ func _process(delta: float) -> void:
 	if playing and own_body == null and not spectating:
 		own_champion = own_status.get("champion", "")
 		own_body = _make_champion(OWN_COLOR, own_champion)
+		own_body.set_meta("occlude_r", CHAMPION_RADIUS_U * UNITS_TO_METERS)
 		add_child(own_body)
 	if own_body != null:
 		var dead: bool = own_status.get("dead", false)
@@ -2090,6 +2092,7 @@ func _process(delta: float) -> void:
 			caster.get_meta("rig").animator.pulse(int(c.slot))
 	_update_remotes(delta)
 	_update_life()
+	_update_occluders()
 	_update_hover()
 	_update_missiles()
 	_update_areas()
@@ -2129,6 +2132,19 @@ func _update_life() -> void:
 		if b.visible and not b.has_meta("prop"):
 			points.append(b.position)
 	_life.disturb(points)
+
+
+## The units standing on the ground, for its contact shadows (`MapView.occluders`, D80).
+func _update_occluders() -> void:
+	var view := get_node_or_null("MapView")
+	if view == null:
+		return
+	var out := PackedVector4Array()
+	for b in [own_body] + remote_bodies.values():
+		if b != null and is_instance_valid(b) and b.visible and b.has_meta("occlude_r"):
+			var p: Vector3 = b.global_position
+			out.append(Vector4(p.x, p.z, b.get_meta("occlude_r"), 1.0))
+	view.occluders = out
 
 
 ## The rig moves the look point (edge, keys, drag, lock, Space); the camera frames it (D13).
@@ -2255,6 +2271,9 @@ func _update_remotes(delta: float) -> void:
 				b.add_child(_make_slow_indicator())
 			add_child(b)
 			remote_bodies[id] = b
+			# What stands on the ground darkens it a little under itself (contact shadow, D80).
+			if u.kind in ["champion", "monster"] or u.minion:
+				b.set_meta("occlude_r", float(u.radius) * UNITS_TO_METERS)
 		var body: Node3D = remote_bodies[id]
 		var p := _to_world(u.pos)
 		if u.kind == "relic":
@@ -2586,7 +2605,7 @@ func _dress_map(geo: Dictionary) -> void:
 		atmosphere.queue_free()
 	atmosphere = preload("res://scripts/atmosphere.gd").new()
 	add_child(atmosphere)
-	atmosphere.setup(geo.size / 2.0 * UNITS_TO_METERS, season.get("motes", "pollen"))
+	atmosphere.setup(geo.size / 2.0 * UNITS_TO_METERS, season.get("motes", "pollen"), season.get("clouds", 0.4))
 	var view: Node3D = MapView.new()
 	view.name = "MapView"
 	add_child(view)

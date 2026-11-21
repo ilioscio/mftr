@@ -19,25 +19,27 @@ How champions look, move and animate, and the pipeline that builds them. This ex
 ## 2. Character visual style
 
 Decided with the owner (D48), and loosened by D79. The reference is the genre's own modern look,
-reimagined at a small size: bold, stylized, heroic forms (14), faceted where facets read well,
-lit and shaded like a modern game, with soft, glowing effects ([23](23-effects.md)).
+reimagined at a small size: bold, stylized, heroic forms (14), smooth where they bend and crisp
+where they crease, lit and shaded like a modern game, with soft, glowing effects
+([23](23-effects.md)). Since D80 the shaders match: nothing is drawn flat-faceted or in pixel
+squares any more.
 
 This section first called the look "faceted PS1", with crunchy pixel-art effects. That was a
 starting point, not a ceiling: since D79, nothing here is held back to look old. What still
 binds is what serves the pillars: **readability** (05 §1) and **size** (the budgets in the
-table). The retro touches live on only as optional settings.
+table). The retro touches (vertex snapping, affine warping, dithering) were never built; D80
+drops them.
 
 | Aspect | Rule |
 |---|---|
 | Geometry | **5,000–8,000 triangles** per champion including weapons *(start; doubled by D59)*, hard cap 12,000. Bold, stylized forms; detail comes first from silhouette and color blocking. The cap is a size and frame-rate budget, not a look: spend it where it reads. |
-| Shading | **Faceted** by default (flat per triangle), computed in the shader from screen-space derivatives so meshes stay smooth-indexed (fewer vertices, smaller files); smooth where a form reads better that way (D79). Toon ramp with 2–3 bands, rim light and object-space detail noise ([05 §2](05-art-and-assets.md#2-procedural-materials)). |
+| Shading | **Smooth across bends, crisp at creases** (D80): the client computes normals as it builds the mesh (`MftrModel`), smooth over every face within 60° of a corner's own and split past that, so a sleeve or a cheek rounds and a plate's edge, a blade or a rock stays cut. Files still carry no normals. A soft light with a stylized shoulder (the shadowed side never goes black), a rim light, and a highlight with a sky sheen on the `metal` slot. |
 | Color | **Vertex colors**: RGB = albedo, A = baked cavity/AO. No texture maps. A palette of ≤ 12 colors per champion. |
 | Materials | At most 4 material slots from a fixed set: `skin`, `cloth`, `metal`, `emissive`, plus `accent` (the team-accent region, tinted ally/enemy at runtime, [05 §1.3](05-art-and-assets.md#1-readability-rules-non-negotiable)) and `accent_glow` (the team color, glowing: minions' eyes and orbs, A5). Each slot maps to a parameter set of the one champion shader. |
 | Silhouette | Identifiable from silhouette alone at default zoom (05 §1.5). Weapon and head shapes do most of the work. Each champion's `concept.md` states its silhouette class. |
 | Scale | 1 Blender unit = 1 m = 100 u. A standard biped stands **~1.9 m** (190 u) *(start)*. At idle, the model's footprint spans 0.8–1.6× the gameplay hitbox diameter (130 u at the default 65 u radius), so what you see is what can be hit. |
 | VFX | **Modern** ([23](23-effects.md), D79, replacing D48's pixel style): soft procedural particles and ribbons (fire, lightning, lasers, smears, smoke), light over 1 that blooms, colors blended through each effect's ramp, smooth motion at the frame rate. Gameplay-relevant edges (hitbox sheaths, telegraphs) stay exact. Readability beats style. |
-| Environment | Faceted geometry plus nearest-filtered procedural noise quantized to world-space "texels" (~4 cm) for the crunchy ground and stone look, with no textures. |
-| Retro extras | Vertex snapping, affine warping and dithering are **optional settings, off by default**: a choice for players who like the PS1 look, not the style's reference. |
+| Environment | Props shade like the champions (smooth bends, crisp creases); the cliffs stay cut, flat per face. Procedural noise at fine scale for the ground's and stone's grain, soft (no pixel squares), with no textures. |
 
 ## 3. Facing
 
@@ -263,7 +265,7 @@ optional: smear (scale-only, for 1-frame smears)
 ```
 
 - **~30 deforming bones plus extras and sockets; ≤ 64 total**, hard cap 120 (a creator base's catalog parts' chains aside: the forge keeps the worn parts', 22 §4.5). The creator's sculpt bones (24 face bones, 21 §1.3; 24 body helpers, 21 §9.1) don't count toward the 64: no clip keys them, and they're baked into the rest. Fingers are "mittens": one bone for the fingers and one for the thumb, which fits the faceted style.
-- **Weights:** at most **2 influences** per vertex *(start)*, hard cap 4. Armor plates are rigid (1 influence), the authentic PS1 look and the crispest facets.
+- **Weights:** at most **2 influences** per vertex *(start)*, hard cap 4. Armor plates are rigid (1 influence), which keeps their edges crisp.
 - **Props** (weapons) are separate meshes parented to `prop_l`/`prop_r`, so they can be thrown, swapped or hidden by clips.
 - **Axes:** the character faces **−Y in Blender** (looking at you in Front view), which exports to glTF +Z = Godot's `MODEL_FRONT`. Z is up. The rest pose is an A-pose.
 - `socket_projectile` is where projectiles spawn (bow nock, muzzle, casting focus). `socket_overhead` sets the health-bar height. `socket_chest` is the impact point.
@@ -307,7 +309,7 @@ Claude's MCP session can drive all of steps 2–5, and a human can take over any
 ### 8.3 Export
 
 `blender -b art/champions/<id>/<id>.blend --python tools/blender/run.py -- export --id <id> --kind champion` (or the add-on button) writes:
-- **`<id>.glb`**: one skinned mesh plus prop meshes, vertex colors, the material-slot names, every clip (one action per NLA track) sampled at 30 fps, and no images, normals or UVs (shading is faceted from screen-space derivatives). It's deterministic: the same `.blend` gives the same bytes.
+- **`<id>.glb`**: one skinned mesh plus prop meshes, vertex colors, the material-slot names, every clip (one action per NLA track) sampled at 30 fps, and no images, normals or UVs (the client computes the normals, crisp at creases: §2). It's deterministic: the same `.blend` gives the same bytes.
 - **`<id>.anims.ron`**: per clip, the frame count, loop flag, layer (`full`, `upper`, `additive`), markers and authored stride speed (locomotion). glTF has no markers, so they travel in this sidecar.
 - **Key reduction** at export (tolerance 0.1° / 0.5 mm *(start)*), and channels that never leave rest are dropped: **a missing channel means "at rest"** for the runtime. The runtime stores animations in Godot's compressed form.
 

@@ -115,6 +115,10 @@ cloud_strength={
 "type": "float",
 "value": 0.0
 }
+cloud_cover={
+"type": "float",
+"value": 0.4
+}
 
 [rendering]
 

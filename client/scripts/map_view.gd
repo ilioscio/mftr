@@ -33,6 +33,10 @@ var road_segments := PackedVector4Array()
 var _lamps := []
 var _ground_mat: ShaderMaterial
 const LAMPS_DRAWN := 16
+## Units on the ground, (x, z, radius, strength) in meters, set by main each frame: the ground
+## shader darkens a soft disc under the nearest OCCLUDERS_DRAWN (contact shadows, D80).
+var occluders := PackedVector4Array()
+const OCCLUDERS_DRAWN := 32
 static var _glow_spots := {}              # prop id -> [[local position, color, "fire"|"glow"|"crystal"]]
 static var _fire_mat: ParticleProcessMaterial
 static var _fire_mesh: QuadMesh
@@ -353,7 +357,7 @@ static func soft_dot() -> GradientTexture2D:
 
 ## Each frame: the lamps nearest to what the camera looks at, to the ground shader.
 func _process(_delta: float) -> void:
-	if _ground_mat == null or _lamps.is_empty():
+	if _ground_mat == null:
 		return
 	var cam := get_viewport().get_camera_3d()
 	if cam == null:
@@ -362,6 +366,9 @@ func _process(_delta: float) -> void:
 	var look := cam.global_position
 	if fwd.y < -0.01:
 		look += fwd * (-look.y / fwd.y)
+	_upload_occluders(look)
+	if _lamps.is_empty():
+		return
 	var near := []
 	for l in _lamps:
 		var marker: Node3D = l[0]
@@ -385,6 +392,18 @@ func _process(_delta: float) -> void:
 	_ground_mat.set_shader_parameter("lamps", pos)
 	_ground_mat.set_shader_parameter("lamp_colors", col)
 	_ground_mat.set_shader_parameter("lamp_count", mini(near.size(), LAMPS_DRAWN))
+
+
+func _upload_occluders(look: Vector3) -> void:
+	var list := Array(occluders)
+	if list.size() > OCCLUDERS_DRAWN:
+		list.sort_custom(func(a, b): return Vector2(a.x - look.x, a.y - look.z).length_squared() < Vector2(b.x - look.x, b.y - look.z).length_squared())
+		list.resize(OCCLUDERS_DRAWN)
+	var packed := PackedVector4Array(list)
+	var n := packed.size()
+	packed.resize(OCCLUDERS_DRAWN)
+	_ground_mat.set_shader_parameter("occluders", packed)
+	_ground_mat.set_shader_parameter("occluder_count", n)
 
 
 ## CSGPolygon3D extrudes along local -Z; rotating +90° about X lays the polygon on the ground

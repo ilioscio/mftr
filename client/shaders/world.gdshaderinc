@@ -38,6 +38,23 @@ float w_noise(vec2 p) {
 	           mix(w_hash(i + vec2(0.0, 1.0)), w_hash(i + vec2(1.0, 1.0)), u.x), u.y);
 }
 
+// Fine grain (D80): smooth value noise at about `cells` per meter, two octaves turned against
+// each other, so close up it's a soft mottle and never a grid of squares.
+float w_grain(vec2 p, float cells) {
+	const mat2 turn = mat2(vec2(0.8, 0.6), vec2(-0.6, 0.8));
+	return 0.6 * w_noise(p * cells) + 0.4 * w_noise(turn * p * cells * 2.1 + 31.0);
+}
+
+// Round specks: in a grid of `cells` per meter, a dot of `size` (share of a cell) at a jittered
+// spot in the cells whose hash passes `keep`. 1 inside a dot, soft at its edge.
+float w_specks(vec2 p, float cells, float size, float keep) {
+	vec2 g = p * cells;
+	vec2 i = floor(g);
+	vec2 o = 0.25 + 0.5 * w_hash2(i + 11.0);
+	float d = length(g - i - o);
+	return step(1.0 - keep, w_hash(i + 5.0)) * (1.0 - smoothstep(size * 0.6, size, d));
+}
+
 float w_fbm(vec2 p) {
 	// Each octave turned (~37°) so the value noise's grid never lines up into squares.
 	const mat2 turn = mat2(vec2(0.8, 0.6), vec2(-0.6, 0.8));

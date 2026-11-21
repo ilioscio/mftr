@@ -1,8 +1,9 @@
-// Champion models (10 §2, "faceted PS1"): flat shading from screen-space derivatives, vertex
-// colors as albedo (alpha = baked occlusion), a three-band toon ramp so neighbouring facets
-// step visibly, a soft rim, the team accent on the `accent` slot (05 §1.3), and the impact
-// flash (10 §4.4). One material per surface; `slot` says which. No textures, but for the
-// champion creator's paint images (D70, CR5b): palette colors over the vertex colors, nearest.
+// Champion models (10 §2, D80): the mesh's own normals, smooth across bends and crisp at
+// creases (`MftrModel`), vertex colors as albedo (alpha = baked occlusion), a soft light with a
+// stylized shoulder, a highlight on metal, a soft rim, the team accent on the `accent` slot
+// (05 §1.3), and the impact flash (10 §4.4). One material per surface; `slot` says which. No
+// textures, but for the champion creator's paint images (D70, CR5b): palette colors over the
+// vertex colors.
 shader_type spatial;
 render_mode specular_disabled;
 #include "res://shaders/clouds.gdshaderinc"
@@ -20,7 +21,7 @@ uniform float identity_mix = 0.0;
 // A forged champion's brush strokes and decals: RGBA, alpha 0 where unpainted. Palette values
 // are colors as the swatches show them (sRGB), so the hint reads them back as linear, as a
 // fill's vertex colors are written.
-uniform sampler2D paint : source_color, filter_nearest, repeat_disable;
+uniform sampler2D paint : source_color, filter_linear, repeat_disable;
 uniform bool has_paint = false;
 // 1 on the frame a hit lands, fading to 0 within ~3 frames.
 uniform float flash = 0.0;
@@ -109,10 +110,6 @@ vec3 eye_color(vec2 e, vec3 iris, float pupil, int style, int code, out float gl
 
 void fragment() {
 	cloud_sun = cloud_shade((INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz);
-	// Faceted: one normal per triangle, from the derivatives of the view-space position.
-	if (eye_style < 0 && lip == 0) {
-		NORMAL = normalize(cross(dFdy(VERTEX), dFdx(VERTEX)));
-	}
 	if (eye_style >= 0) {
 		vec2 e = vec2(UV.x - 2.0 - 2.0 * float(eye_style), UV.y - 2.0 * float(eye_code)) * 2.0 - 1.0;
 		float glow;
@@ -158,8 +155,10 @@ void fragment() {
 		c *= mix(0.86, 1.08, stroke) * mix(0.84, 1.1, shade);
 		c *= mix(0.78, 1.0, smoothstep(0.0, 0.3, along)) * mix(1.0, 1.12, smoothstep(0.6, 1.0, along));
 	} else if (has_paint && slot <= 2) {
+		// Filtered, with unpainted texels clear (0): the color is the sample over its alpha,
+		// and the alpha's middle is the stroke's edge, smooth instead of stair-stepped (D80).
 		vec4 p = texture(paint, UV);
-		c = mix(c, p.rgb, p.a);
+		c = mix(c, p.rgb / max(p.a, 0.001), smoothstep(0.3, 0.7, p.a));
 	}
 	if (slot == 4) {
 		c = team_accent * (0.75 + 0.25 * dot(COLOR.rgb, vec3(0.3333)));
@@ -172,6 +171,14 @@ void fragment() {
 	ROUGHNESS = 1.0;
 	RIM = 0.25;
 	RIM_TINT = 0.5;
+	if (slot == 2) {
+		// Metal: a little darker under its highlight (light()), and the sky's sheen at
+		// grazing angles, so steel reads as steel and not as painted clay.
+		ALBEDO *= 0.82;
+		float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
+		EMISSION += vec3(0.42, 0.5, 0.62) * fres * 0.22 * mix(0.6, 1.0, COLOR.a);
+		RIM = 0.4;
+	}
 	EMISSION = (slot == 3 ? c * 0.9 : (slot == 5 ? c * 1.4 : vec3(0.0))) + vec3(flash);
 	if (region >= 0 && region == active_region) {
 		EMISSION += highlight * 0.32;
@@ -185,17 +192,21 @@ void fragment() {
 }
 
 void light() {
-	// Three bands: lit, half-lit, shadowed. Faces a few degrees apart land in different bands.
+	// A soft light with a stylized shoulder: the shadowed side never goes black (0.38), and the
+	// lit side fills a little early, so forms read at the gameplay camera.
 	float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
-	float band = ndl > 0.7 ? 1.0 : (ndl > 0.35 ? 0.68 : 0.38);
+	float band = 0.38 + 0.62 * smoothstep(0.02, 0.8, ndl);
 	if (eye_style >= 0) {
-		// An eye: soft and bright, never banded (a band across an iris reads as a lid).
+		// An eye: soft and bright (a shadow across an iris reads as a lid).
 		band = 0.7 + 0.3 * ndl;
-	} else if (slot == 0) {
-		// Skin: the same range, continuous. A sculpted face's facets are small and a few
-		// degrees apart, and hard bands scattered them into a mosaic; this keeps the facets
-		// and lets the light follow the brow, cheekbones and jaw.
-		band = 0.38 + 0.62 * smoothstep(0.08, 0.85, ndl);
 	}
-	DIFFUSE_LIGHT += band * ATTENUATION * LIGHT_COLOR / PI * (LIGHT_IS_DIRECTIONAL ? cloud_sun : 1.0);
+	float sun = LIGHT_IS_DIRECTIONAL ? cloud_sun : 1.0;
+	DIFFUSE_LIGHT += band * ATTENUATION * LIGHT_COLOR / PI * sun;
+	if (slot == 2 && eye_style < 0) {
+		// Metal's highlight: a crisp hot spot in a broad glow, tinted by the metal's color.
+		vec3 h = normalize(LIGHT + VIEW);
+		float nh = clamp(dot(NORMAL, h), 0.0, 1.0);
+		float hi = smoothstep(0.5, 0.8, pow(nh, 40.0)) * 0.85 + pow(nh, 6.0) * 0.16;
+		SPECULAR_LIGHT += hi * mix(vec3(1.0), ALBEDO / max(max(ALBEDO.r, ALBEDO.g), max(ALBEDO.b, 0.05)), 0.45) * ATTENUATION * LIGHT_COLOR * 0.55 * sun * step(0.0, dot(NORMAL, LIGHT));
+	}
 }

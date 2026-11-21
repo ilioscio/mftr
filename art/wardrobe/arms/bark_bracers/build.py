@@ -23,9 +23,10 @@ from mathutils.bvhtree import BVHTree  # noqa: E402
 
 from mftr_blender import cc0_body, plates  # noqa: E402
 
-LEATHER = ((0.30, 0.20, 0.12), "cloth")
-LEATHER_DARK = ((0.18, 0.12, 0.07), "cloth")
-BARK = [((0.26, 0.18, 0.12), "cloth"), ((0.33, 0.24, 0.16), "cloth"), ((0.15, 0.10, 0.07), "cloth")]
+LEATHER = ((0.20, 0.13, 0.072), "cloth")
+LEATHER_DARK = ((0.12, 0.075, 0.042), "cloth")
+# Vertex colors are linear; the tones sit close, and the grain (`plates.grain`) does the rest.
+BARK = [((0.150, 0.088, 0.048), "cloth"), ((0.185, 0.112, 0.064), "cloth"), ((0.115, 0.066, 0.037), "cloth")]
 
 # The left forearm's middle, elbow to wrist (the priestess's sleeves' line, measured on the CC0
 # male); the right mirrors it. Rows between stations: which are leather bands.
@@ -66,6 +67,7 @@ def build():
         return Vector(min(mids, key=lambda p: (Vector(p) - c).length))
     objs.append(plates.finish(bm, faces, inside, 0.004, "leather"))
     objs.append(plates.finish(pm, pfaces, inside, 0.006, "bark"))
+    plates.grain(objs[-1], plates.BARK_GRAIN)
     bpy.data.objects.remove(body)
     plates.save(objs, os.path.join(HERE, "item.blend"))
 

@@ -24,10 +24,11 @@ from mathutils.bvhtree import BVHTree  # noqa: E402
 
 from mftr_blender import cc0_body, plates  # noqa: E402
 
-BLACK = ((0.30, 0.20, 0.12), "cloth")      # the boots' leather
+BLACK = ((0.20, 0.13, 0.072), "cloth")      # the boots' leather
 SOLE = ((0.12, 0.08, 0.05), "cloth")
-WRAP = ((0.18, 0.12, 0.07), "cloth")       # straps and bands
-BARK = [((0.26, 0.18, 0.12), "cloth"), ((0.33, 0.24, 0.16), "cloth"), ((0.15, 0.10, 0.07), "cloth")]
+WRAP = ((0.12, 0.075, 0.042), "cloth")     # straps and bands
+# Vertex colors are linear; the tones sit close, and the grain (`plates.grain`) does the rest.
+BARK = [((0.150, 0.088, 0.048), "cloth"), ((0.185, 0.112, 0.064), "cloth"), ((0.115, 0.066, 0.037), "cloth")]
 
 # The foot's middle, heel to toes (the veteran's boots': the CC0 male's right foot).
 FOOT = [(0.180, 0.095, 0.045), (0.186, 0.04, 0.045), (0.210, -0.005, 0.036), (0.226, -0.05, 0.026),
@@ -131,6 +132,7 @@ def build():
                      lambda r, c: GREAVE_LIFT + 0.003 * (c % 2), lambda r, c: BARK[c % 3] if front(c) else None,
                      smooth=4)
     objs.append(plates.finish(bm, faces, lambda c: leg_centre(tree, c.z, math.copysign(1.0, c.x)), 0.006, "greaves"))
+    plates.grain(objs[-1], plates.BARK_GRAIN)
     bpy.data.objects.remove(body)
     plates.save(objs, os.path.join(HERE, "item.blend"))
 

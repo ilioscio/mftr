@@ -22,7 +22,7 @@ Signature: **emerald** (135°).
 | Slot | Colors |
 |---|---|
 | skin | weathered (0.62, 0.44, 0.32) |
-| cloth | bark (0.26, 0.18, 0.12 / 0.15, 0.10, 0.07), granite (0.30, 0.30, 0.28 / 0.18, 0.18, 0.17), moss (0.16, 0.30, 0.10 / 0.09, 0.18, 0.06), antler bone (0.62, 0.56, 0.44), leather (0.30, 0.20, 0.12), grey-brown hair |
+| cloth | bark (0.150, 0.088, 0.048, with 0.185 / 0.115 tones), granite (0.30, 0.30, 0.28 / 0.25), moss (0.07, 0.15, 0.04), antler bone (0.62, 0.56, 0.44), leather (0.20, 0.13, 0.072), grey-brown hair. Vertex colors are linear (D80): the bark's first values showed as a pale tan. The bark's and stone's variation is grain in the occlusion alpha (`plates.grain`), not more colors |
 | emissive | emerald (0.30, 1.0, 0.55) and deep emerald (0.06, 0.62, 0.30): the staff's stone, the beads, the paint, a chest gem |
 | accent | a band at his belt |
 

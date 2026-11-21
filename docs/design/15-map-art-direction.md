@@ -7,7 +7,8 @@ procedural materials) and sits beside [14](14-champion-art-direction.md) (the ch
 The map is where every match happens, so it has to look finished. It also has to be honest
 (05 §1: the ground and scenery are the lowest-contrast layer), it has to work for **every map
 the map editor makes** ([12](12-map-editor.md), D56), and it has to take **seasonal variants**.
-The style stays ours: faceted low-poly models, procedural materials, no texture files. What makes
+The style stays ours: low-poly models (smooth bends, crisp creases, D80), procedural materials,
+no texture files. What makes
 it feel modern is the light and the shaders, not more polygons.
 
 ## 1. Rules
@@ -22,7 +23,7 @@ it feel modern is the light and the shaders, not more polygons.
 3. **Nothing floats.** Props stand on the ground at the height they're placed on; scenery along a
    cliff sits at the foot of its face or set back from its top edge, never across the drop.
 4. **Light carries the finish.** Ambient occlusion, cool shadows, a warm key, local lights and
-   a vignette give depth at the top-down camera; models stay intentionally low-poly and faceted.
+   a vignette give depth at the top-down camera; models stay intentionally low-poly.
 5. **Alive, sparingly.** Small life (butterflies, frogs, lily pads, flowers, fireflies) placed
    from the map's features, a detail every few screens, never on the lane's fighting space.
 6. **Seasons are data.** A season is a palette and a set of substitutions, not new code: every

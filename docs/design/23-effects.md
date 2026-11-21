@@ -119,7 +119,8 @@ dropped.
 - **Telegraphs and hitbox sheaths** stay exact and full-rate, in the team's colors (05 §1).
 - **Readability first:** effects are tuned at the gameplay camera, not up close. Interiors may
   glow; edges stay crisp.
-- **No textures** (05 §2's texture policy): shapes come from math, not images.
+- **No textures** (05 §2's texture policy): shapes come from math, not images. (The seasonal
+  motes' soft dots are drawn into small textures as the client starts, D80: nothing ships.)
 
 ## 7. Reviewing effects: the gallery
 
