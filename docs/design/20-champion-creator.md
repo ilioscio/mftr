@@ -172,7 +172,7 @@ Free sculpting (§5.3) works on the body too, with the same bounds.
 
 - **Readable size.** Height *(start)* 1.5–2.6 m for humanoids (14 §2.2's heroic range, widened),
   and limbs at least 0.06 m across (14 §2.3).
-- **The footprint rule** ([10 §2](10-characters-and-animation.md#2-character-visual-style-faceted-ps1)):
+- **The footprint rule** ([10 §2](10-characters-and-animation.md#2-character-visual-style)):
   the model's footprint stays 0.8–1.6× the gameplay hitbox. The **hitbox follows the body**:
   the creator derives a hitbox size class (small / medium / large) from the finished shape, and
   balance prices it (§9.3). A giant is easier to hit, and a gnome costs points.

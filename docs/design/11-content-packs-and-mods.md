@@ -33,7 +33,7 @@ Godot has the same trap. Its native resources (`.tscn`, `.tres`, `.res`, `.scn`)
 | Model and animations | glTF **binary subset**: meshes, vertex colors, one skin, animations | No images, no external URIs, no extensions, no cameras or lights |
 | Markers | `.anims.ron` | [10 §4.5](10-characters-and-animation.md#45-markers) |
 | Map props | glTF binary subset, kind `prop` | Static models on a one-bone `prop` rig (`root`, plus up to 8 `part_*` bones), no clips, the champion material slots (`accent` optional), ≤ 12,000 triangles: structures, trees, rocks, platforms |
-| Materials | RON | Slot → parameters of the **built-in** champion shader ([10 §2](10-characters-and-animation.md#2-character-visual-style-faceted-ps1)) |
+| Materials | RON | Slot → parameters of the **built-in** champion shader ([10 §2](10-characters-and-animation.md#2-character-visual-style)) |
 | VFX | RON | Instances of the built-in **VFX kit** (05 §5) with parameters; sizes come from the gameplay data |
 | Audio | Ogg Vorbis + `.sfx.ron` | Mono or stereo, 8–48 kHz, ≤ 3 s per sound; bound to events by `<id>.sfx.ron` (§3.2) |
 | Icons | SVG **subset** | Paths, solid fills and gradients; no scripts, images, fonts, external references or filters |

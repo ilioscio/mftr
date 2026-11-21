@@ -17,13 +17,33 @@ pub const MAX_EFFECTS: usize = 64;
 pub const MAX_PER_EVENT: usize = 4;
 pub const MAX_COUNT: u32 = 48;
 pub const MAX_LIFETIME: f32 = 1.5;
-/// A `rain` keeps falling across its area for its lifetime: a volley lasts longer.
+/// A `rain` keeps falling and a `fire` keeps burning across its area for its lifetime: they last
+/// longer.
 pub const MAX_RAIN_LIFETIME: f32 = 4.0;
+/// Kits that go on across their area for their lifetime (`MAX_RAIN_LIFETIME`).
+pub const SUSTAINED_KITS: &[&str] = &["rain", "fire"];
 
 /// Particle kits (any phase but `projectile`).
 pub const PARTICLE_KITS: &[&str] = &[
-    "flare", "burst", "ring", "dust", "trail", "slash", "flash", "crack", "pillar", "shock", "rocks", "rain", "vortex",
-    "embers", "shards", "smoke", "motes",
+    "flare",
+    "burst",
+    "ring",
+    "dust",
+    "trail",
+    "slash",
+    "flash",
+    "crack",
+    "pillar",
+    "shock",
+    "rocks",
+    "rain",
+    "vortex",
+    "embers",
+    "shards",
+    "smoke",
+    "motes",
+    "fire",
+    "lightning",
 ];
 /// Projectile styles (the `projectile` phase): they decorate and color the gameplay-sized body;
 /// its sheath keeps the team's color (14 §4.4).
@@ -47,7 +67,8 @@ pub struct VfxFile {
 pub struct Effect {
     pub event: String,
     pub kit: String,
-    /// 2–6 colors (RGB, 0–1), from birth to death (pixel-style ramps, 10 §2).
+    /// 2–6 colors (RGB, 0–1), from birth to death, blended smoothly (23 §3): the first is the
+    /// hottest, and a bright one there glows.
     pub ramp: Vec<(f32, f32, f32)>,
     /// Particles (particle kits).
     #[nserde(default)]
@@ -121,7 +142,7 @@ pub fn check(f: &VfxFile) -> Vec<String> {
         if e.speed.is_some_and(|s| !(0.0..=12.0).contains(&s)) {
             out.push(at("speed 0–12 m/s".into()));
         }
-        let max_life = if e.kit == "rain" { MAX_RAIN_LIFETIME } else { MAX_LIFETIME };
+        let max_life = if SUSTAINED_KITS.contains(&e.kit.as_str()) { MAX_RAIN_LIFETIME } else { MAX_LIFETIME };
         if e.lifetime.is_some_and(|l| !(0.02..=max_life).contains(&l)) {
             out.push(at(format!("lifetime 0.02–{max_life} s")));
         }

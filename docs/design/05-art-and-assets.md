@@ -1,6 +1,6 @@
 # 05 — Art & Assets
 
-**Direction:** stylized low-poly models, flat or cel-shaded, with **materials generated procedurally in shaders** from noise, gradients and geometry data. Bitmap textures are the exception and need justification.
+**Direction:** stylized, modern-lit models in the genre's bold shapes, flat or cel-shaded, with **materials generated procedurally in shaders** from noise, gradients and geometry data, and soft, glowing effects ([23](23-effects.md)). Bitmap textures are the exception and need justification. Polygon counts are a size budget, not a retro look (D79).
 
 The style serves two goals, in this order:
 1. **Readability:** gameplay must be legible at a glance in a 10-champion teamfight.
@@ -69,40 +69,38 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
     captures keep the window they started with.
   - **Anti-aliasing:** MSAA 4× (the default), MSAA 2×, FXAA or off. Without it, the edges of
     the faceted models stair-step; with it, they're smooth. It doesn't touch the art's intended
-    chunkiness: the pixel particles, the ground's texels and the flat-shaded facets. MSAA 4× cost
+    chunkiness: the ground's texels and the flat-shaded facets. MSAA 4× cost
     about 10 % of the frame rate in a 1080p capture. The portraits and the map editor's view
     always use MSAA 4×.
   - **Render scale (50–150 %):** the world's resolution as a share of the window's, scaled
     bilinearly. Under 100 % is faster and softer; over 100 % supersamples, and is costly (the
     pixels go as the square). FSR needs the Forward+ renderer, and we use Mobile. The HUD always
-    draws at the window's own resolution, and the pixel particles keep one block per 540 lines of
-    the render.
+    draws at the window's own resolution.
 
 ## 4. Champions
 
 Full specification: **[10 — Characters & Animation](10-characters-and-animation.md)**. In short:
 
-- "Faceted PS1" low-poly meshes, **5,000–8,000 triangles** (cap 12,000; D59), with vertex colors and ≤ 4 material slots including the team accent; no texture maps (D48).
+- Stylized faceted meshes ([10 §2](10-characters-and-animation.md#2-character-visual-style), D79), **5,000–8,000 triangles** (cap 12,000; D59), with vertex colors and ≤ 4 material slots including the team accent; no texture maps (D48).
 - Shading: faceted toon ramp + rim light + team-accent region + procedural detail noise in object space.
 - Skeletal animation on a shared rig standard, with the **complete animation set** per champion (~35–45 clips: locomotion, attacks, every ability phase, CC poses, recall, death, emotes), timed by the sim's action contract. Exported as glTF plus a marker sidecar, and shipped inside content packs ([11](11-content-packs-and-mods.md)).
 - Optional **outline** pass (inverted hull or post-process) to strengthen silhouettes. A user setting.
 
 ## 5. VFX
 
-- Mostly **shader-driven meshes**: ribbons, cones, disks and spheres with scrolling noise, dissolves and SDF masks, plus GPU particles for sparks and dust.
-- **Pixel style** (D48): particles snap to a screen-pixel grid with nearest filtering and short color ramps, and animate on twos. Gameplay edges and telegraphs stay smooth and exact.
+- **Modern** ([23](23-effects.md), D79): procedural particles (glows, sparks, flames, smoke, shards, stars, ground rings) and ribbons (lightning, lasers, swing smears, cracks, columns of light), all drawn by shaders with no texture files; light over 1 that blooms; colors blended through each effect's ramp; motion at the frame rate. Gameplay edges and telegraphs stay exact. (D48's pixel style, snapped to screen pixels and stepped on twos, is retired.)
 - Each ability VFX reads its **gameplay shape from content data** (width, radius, length, duration), so it can't drift from the hitbox.
 - A VFX "kit" library (impact, trail, burst, zone edge, ground warning) gives consistent grammar and saves size.
 
 ### 5.1 The kit (A4b)
-The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gdshader`). Packs only pick kits and tune them, in `<id>.vfx.ron` ([11 §3.1](11-content-packs-and-mods.md#31-vfx-files)).
+The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/vfx_particle.gdshader`, `client/shaders/vfx_ribbon.gdshader`; how it draws: [23](23-effects.md)). Packs only pick kits and tune them, in `<id>.vfx.ron` ([11 §3.1](11-content-packs-and-mods.md#31-vfx-files)).
 
 | Kit | Phase | What it draws |
 |---|---|---|
 | `flare` | `release` | A spark at the projectile socket and a spray along the shot |
 | `burst` | `impact`, `detonate`, `fire` | Sparks that fly out and fall |
-| `ring` | `impact`, `detonate`, `fire` | Pixels on the area's edge, at the **radius from gameplay data**, drifting outward |
-| `dust` | `start`, `land`, `detonate` | Slow, growing ground puffs |
+| `ring` | `impact`, `detonate`, `fire` | A ring of light on the area's edge, at the **radius from gameplay data**, glimmers rising off it |
+| `dust` | `start`, `land`, `detonate` | Slow, swelling puffs that hug the ground, lit by the sun |
 | `trail` | `projectile` | Sparks shed behind the projectile |
 | `arrow`, `net`, `orb` | `projectile` | A style *inside* the projectile's gameplay body (a shaft, a spinning frame, nothing) plus a trail behind it |
 | `wave`, `shard`, `beam`, `bones`, `flame`, `bolt` | `projectile` | The body's shape in the missile shader ([14 §4.4](14-champion-art-direction.md#44-projectiles-and-indicators-in-character)): a crescent wave, a jagged shard, a long beam (its trail stretched to 400–900 u), a rattle of bone spurs, a licking flame, a fat bolt; the body is the champion's color, the sheath the team's |
@@ -114,8 +112,10 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 | `pillar` | `land`, `fire`, `detonate` | A column of light rising from the ground |
 | `shock` | `fire`, `detonate`, `land` | A ring expanding from the center to the **gameplay radius** over its lifetime |
 | `rocks` | `detonate`, `land`, `fire` | Stones dropped from above across the radius, landing with a bounce |
-| `rain` | `detonate` | A volley that keeps falling across the area for its lifetime (up to 4 s): streaks of arrows, each a short line of pixels |
-| `vortex` | `release`, `fire`, `start` | Power drawn in: a helix of pixels rising round the point and tightening |
+| `rain` | `detonate` | A volley that keeps falling across the area for its lifetime (up to 4 s): streaks of arrows that die where they land, kicking up dust |
+| `vortex` | `release`, `fire`, `start` | Power drawn in: streaks wound on a helix rising round the point and tightening |
+| `fire` | `detonate`, `fire`, `land`, `impact` | A fire burning across the area for its lifetime (up to 4 s): flames licking up off the ground, embers, smoke over it, a glow on the ground; fiercest at first |
+| `lightning` | `detonate`, `fire`, `impact`, `land` | `count` bolts from the sky onto points across the area (the first at once): forked, flickering, each with a flash, a scorch and sparks |
 | `embers` | any | Sparks lifting off and drifting, cooling through the ramp |
 | `shards` | `impact`, `detonate`, `fire` | Crystals bursting out and up, then falling hard |
 | `smoke` | `start`, `fire`, `detonate` | Puffs that swell and rise slowly and hang (a smoke bomb, a vanishing) |
@@ -123,11 +123,11 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
 | any particle kit | `travel` | Streamed off a dashing champion every step until the dash lands, so a quarter-second dash leaves a visible path |
 | `plain`, `cracks`, `rocks`, `frost`, `flames`, `bones`, `stars`, `arrows`, `sigil`, `shadow` | `telegraph` | The *inside* of a delayed area's ground indicator, in the champion's colors (its outline keeps the team's): cracks that spread, rock shadows that grow, frost, flames, strewn bones, stars, arrowheads, a turning sigil, a pool of shadow |
 
-- **Pixel style:** all particles share one MultiMesh of camera-facing squares whose corners snap to a grid of the render's pixels (2 px at 1080p; one block per 540 lines at any size or render scale). They step at **20 Hz** ("on twos") and walk their 2–6 color ramp in whole steps, with no blending.
+- **How it draws** ([23](23-effects.md)): particles are procedural shapes in two MultiMeshes (what covers, then what glows), ribbons are strips rebuilt each frame; both move at the frame rate, their colors blended through the 2–6 color ramp, the hot ones over 1 so they bloom. A `beam` is also a laser down its length and a `flame` sheds licks of fire; a `burst` of a dark ramp throws debris, not sparks.
 - **Honest sizes:** projectile kits can't set a size. Shafts and frames are fitted inside the body's gameplay width, and trails only fall *behind* it (§1.1). Rings take the area's radius from the render state.
 - **`fire`** (A6): when an action's animation passes its `fire` marker. It is centered and sized for novas, at reach in front for melee blows and slams, and at the chest otherwise; any particle kit plays there (10 §6).
 - **Events:** the client fires `<action>.<phase>`. It finds the action from the kit: an area's or missile's radius is matched against the owner's abilities (augment-widened too), bolts are `attack`, and dashes are the kit's dash slot. A champion's own `action.phase` wins, then its `*.phase`, then the shared library's (`biped_library.vfx.ron`).
-- **Caps:** ≤ 48 particles per effect, ≤ 4 effects per event, ≤ 64 effects per pack, lifetimes ≤ 1.5 s (a `rain` ≤ 4 s), and 2,048 live particles client-wide.
+- **Caps:** ≤ 48 particles per effect, ≤ 4 effects per event, ≤ 64 effects per pack, lifetimes ≤ 1.5 s (a `rain` or `fire` ≤ 4 s), 2,048 live particles and 64 ribbons client-wide.
 
 ## 6. UI
 
@@ -175,8 +175,7 @@ The client's built-in kit (`client/scripts/vfx.gd`, `client/shaders/pixel_vfx.gd
   scaled by the window's height over 1080 (never below 1) times the player's share
   (`main.gd` `_apply_hud_scale`, the window's content scale). So 100 % takes the same share of
   the screen at 1080p, 1440p and 4K, and text stays sharp. The world isn't scaled: it always
-  renders at the window's full resolution, and so do the pixel particles' blocks and the map
-  editor's Actual view. Windows under 1080 lines still shrink the bottom panel, down to 0.7.
+  renders at the window's full resolution, and so does the map editor's Actual view. Windows under 1080 lines still shrink the bottom panel, down to 0.7.
 - **The cursor** is a steel gauntlet in the genre's tradition, pointing up and to the left. It
   is rendered in Blender from the in-game hand (`art/ui/cursor/build.py`), not drawn:
   - **The gauntlet** (`mftr_blender.gauntlet`): a flared cuff with gilt trim, a back plate,

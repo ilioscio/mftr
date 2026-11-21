@@ -113,7 +113,7 @@ var vfx: Node3D
 var _vfx_tables := {}                    # champion name -> { event: [effect] }
 var _vfx_recent := {}                    # dedupe key -> time (a prediction and its confirmation)
 const PARTICLE_KITS := ["flare", "burst", "ring", "dust", "slash", "flash", "crack", "pillar", "shock", "rocks", "rain",
-		"vortex", "embers", "shards", "smoke", "motes"]
+		"vortex", "embers", "shards", "smoke", "motes", "fire", "lightning"]
 # A4c: the SFX player and each champion's sounds by event, from its pack's `<id>.sfx.ron`,
 # falling back to the shared library's (as the VFX do).
 var sfx: Node3D
@@ -329,6 +329,17 @@ func _ready() -> void:
 		elif args[i] == "--lineup" and i + 1 < args.size():
 			_lineup = args[i + 1]
 			i += 1
+		elif args[i] == "--vfx-gallery" and i + 1 < args.size():
+			_gallery = args[i + 1]
+			if _lineup == "":
+				_lineup = "none"
+			i += 1
+		elif args[i] == "--vfx-gap" and i + 1 < args.size():
+			_gallery_gap = float(args[i + 1])
+			i += 1
+		elif args[i] == "--vfx-every" and i + 1 < args.size():
+			_gallery_every = float(args[i + 1])
+			i += 1
 		elif args[i] == "--lineup-turn" and i + 1 < args.size():
 			_lineup_turn = float(args[i + 1])
 			i += 1
@@ -501,6 +512,8 @@ func _start_lineup() -> void:
 	var entries := _lineup.split(",")
 	for e in entries:
 		var spec := e.strip_edges()
+		if spec == "none":
+			continue
 		var at := -1.0
 		if "@" in spec:
 			at = float(spec.get_slice("@", 1))
@@ -535,10 +548,14 @@ func _start_lineup() -> void:
 		r.body.position.x -= x / 2.0
 	_lineup_center = center
 	_place_camera(center)
+	if _gallery != "":
+		_start_gallery(center)
 
 
 func _update_lineup(delta: float) -> void:
 	_lineup_t += delta
+	if _gallery != "":
+		_update_gallery()
 	if _lineup_move > 0.0:
 		var ahead := Vector3(sin(deg_to_rad(_lineup_turn)), 0.0, cos(deg_to_rad(_lineup_turn))) * _lineup_move * delta
 		for r in _lineup_rows:
@@ -573,6 +590,89 @@ func _update_lineup(delta: float) -> void:
 	if _lineup_frame >= _shot_seq:
 		print("MFTR: saved %d frames" % _shot_seq)
 		get_tree().quit()
+
+
+## ---- The effects gallery (23 §7) ---------------------------------------------------------
+## `--vfx-gallery "ember:w.detonate@1.6,lumen:e.projectile,kit:lightning#210@1.2"`: effects
+## played over and over in a row of stations on the ground, under the game's light and camera
+## (a lineup's, so `--lineup` can stand champions beside them and `--shot…` captures it). An entry
+## is a champion's event (`champion:action.phase`: its particle effects there, or for
+## `projectile` its missile flying across the station) or a kit (`kit:<name>`, in the ramp of a
+## hue, `#degrees`); `@metres` is the area's radius. Every station fires together, every
+## `--vfx-every` seconds (2.5), `--vfx-gap` metres apart (4.6).
+var _gallery := ""
+var _gallery_every := 2.5
+var _gallery_stations := []               # [{at, src, radius, flights: [{node, t}]}]
+var _gallery_next := 0.3
+var _gallery_gap := 4.6                  # `--vfx-gap M`: between stations
+
+
+func _start_gallery(center: Vector3) -> void:
+	var entries := _gallery.split(",")
+	var x0 := -_gallery_gap * float(entries.size() - 1) / 2.0
+	for k in entries.size():
+		var e := entries[k].strip_edges()
+		var radius := 1.6
+		if "@" in e:
+			radius = float(e.get_slice("@", 1))
+			e = e.get_slice("@", 0)
+		_gallery_stations.append({"at": center + Vector3(x0 + _gallery_gap * k, 0, 0.6), "src": e, "radius": radius, "flights": []})
+
+
+func _gallery_ramp(hue: float) -> PackedColorArray:
+	var c := Color.from_hsv(hue / 360.0, 0.85, 1.0)
+	return PackedColorArray([Color(1, 1, 0.95).lerp(c, 0.15), c.lightened(0.15), c, c.darkened(0.55)])
+
+
+func _update_gallery() -> void:
+	var now := _lineup_t
+	for st in _gallery_stations:
+		for fl in st.flights.duplicate():
+			var t: float = now - float(fl.t)
+			var node: Node3D = fl.node
+			node.position = st.at + Vector3(-2.6 + t * 9.0, 0, 0)
+			if node.position.x > st.at.x + 2.0:
+				var parts: PackedStringArray = st.src.split(":")
+				var ev: PackedStringArray = parts[1].split(".")
+				_vfx_play(parts[0], ev[0], "impact", node.position + Vector3(0, 0.4, 0), Vector3.RIGHT, float(st.radius), "")
+				node.queue_free()
+				st.flights.erase(fl)
+	if now < _gallery_next:
+		return
+	_gallery_next = now + _gallery_every
+	var pk: Dictionary = vfx.peak() if vfx.has_method("peak") else {"particles": 0, "ribbons": 0, "ms": 0.0}
+	print("MFTR vfx: peak %d particles, %d ribbons, %.2f ms a frame, %d fps" % [pk.particles, pk.ribbons, pk.ms, Engine.get_frames_per_second()])
+	for st in _gallery_stations:
+		var src: String = st.src
+		var at: Vector3 = st.at
+		var r: float = st.radius
+		if src.begins_with("kit:"):
+			var kit := src.substr(4)
+			var hue := 25.0
+			if "#" in kit:
+				hue = float(kit.get_slice("#", 1))
+				kit = kit.get_slice("#", 0)
+			var lift := 0.9 if kit in ["flare", "burst", "flash", "shards", "vortex"] else 0.0
+			vfx.play({"kit": kit, "ramp": _gallery_ramp(hue)}, at + Vector3(0, lift, 0), Vector3.RIGHT, r)
+			continue
+		var parts := src.split(":")
+		if parts.size() < 2:
+			continue
+		var ev := parts[1].split(".")
+		var champ: String = parts[0]
+		var action: String = ev[0]
+		var phase: String = ev[1] if ev.size() > 1 else "fire"
+		if phase == "projectile":
+			var node := _make_missile("ally", r * 100.0 if r < 1.6 else 60.0, false, champ, action)
+			add_child(node)
+			node.position = at + Vector3(-2.6, 0, 0)
+			_vfx_play(champ, action, "release", node.position + Vector3(0, 0.9, 0), Vector3.RIGHT, 0.0, "")
+			for e in _effects(champ, action, "projectile"):
+				vfx.decorate(node, e, (r * 100.0 if r < 1.6 else 60.0) * UNITS_TO_METERS)
+			st.flights.append({"node": node, "t": now})
+			continue
+		var lift := 0.0 if phase in ["detonate", "land", "start", "telegraph"] else 0.9
+		_vfx_play(champ, action, phase, at + Vector3(0, lift, 0), Vector3.RIGHT, r, "")
 
 
 ## The shared template from `art/` (A3), validated by `mftr-pack` on load (11 §4). Missing or

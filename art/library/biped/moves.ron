@@ -200,6 +200,21 @@
         ],
     ),
     (
+        id: "storm_call",
+        about: "Thrusts both arms to the sky and calls bolts of lightning down onto the ground before them.",
+        clip: "move_meteor_call",
+        sounds_like: "bastion.r",
+        ability: (name: "Storm Call", cooldown_ms: 12000,
+                  effect: Area(windup_ms: 400, range: 850, radius: 200, delay_ms: 850, damage: (kind: Magic, base: 85, ap_ratio: 0.6)),
+                  reaction: Burst, per_rank: (damage: 40, cooldown_ms: 1000)),
+        effects: [
+            (phase: "release", kit: "vortex", ramp: [(0.92, 0.96, 1.0), (0.55, 0.72, 1.0), (0.25, 0.32, 0.85)], count: 22, speed: 2.2, lifetime: 0.4),
+            (phase: "telegraph", kit: "sigil", ramp: [(0.8, 0.9, 1.0), (0.35, 0.5, 0.95)]),
+            (phase: "detonate", kit: "lightning", ramp: [(0.96, 0.98, 1.0), (0.6, 0.78, 1.0), (0.3, 0.4, 0.95)], count: 3, lifetime: 0.6),
+            (phase: "detonate", kit: "shock", ramp: [(0.9, 0.95, 1.0), (0.5, 0.7, 1.0), (0.25, 0.35, 0.8)]),
+        ],
+    ),
+    (
         id: "earthsplitter",
         about: "Heaves the weapon high in both hands and brings it down, splitting the ground in a line.",
         clip: "move_earthsplitter",

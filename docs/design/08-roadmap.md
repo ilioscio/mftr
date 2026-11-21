@@ -1720,6 +1720,25 @@ The face moves to bones ([21](21-face-rig.md), D76), with an authored head and d
   official ten stay costless until the owner says otherwise. Grumble runs on rage. Bots don't
   plan around costs yet: a cast they can't pay is simply refused.
 
+## VX — Modern effects ([23](23-effects.md), D79)
+
+### VX slice 1 status (2026-11-20): ✅ built
+- **The style, reworded** (D79): the look is the genre's own modern one at a small size, no
+  longer "faceted PS1" ([10 §2](10-characters-and-animation.md#2-character-visual-style)); the
+  budgets stay as budgets, the retro touches as optional settings.
+- **Particles** in eight procedural shapes (glow, spark, flame, smoke, shard, star, ground ring,
+  ground disc), two layers with premultiplied blending, ramps blended in linear light, light
+  over 1 that blooms, soft against the scene, moving at the frame rate; bounce, splat, dust
+  puffs and twinkle. Simulated in Rust (`MftrParticles`): about 1 ms a frame for the whole kit at
+  1,100 live particles in a debug build, against 2.3–3.5 ms in GDScript.
+- **Ribbons:** lightning, lasers, swing smears, ground cracks, columns of light.
+- **New kits** `fire` and `lightning`; `beam`s carry a laser, `flame`s shed licks of fire, every
+  projectile a glow at its head; projectile bodies' cores bloom. Ember's Cinder Bloom erupts in
+  fire; the creator gains Storm Call (`lib.storm_call`), three bolts of lightning.
+- **The effects gallery** (`--vfx-gallery`) for reviews and cost checks.
+- **Left:** look knobs in `vfx.ron`, then the particle editor in the creator; telegraph interiors;
+  better fire; mesh debris; quality settings ([23 §8](23-effects.md#8-next)).
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.
