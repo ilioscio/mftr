@@ -102,7 +102,7 @@ the gameplay camera they read as holes.
 ### 2.1 The eyeball
 
 - A sphere of about 120 triangles per eye on its own material slot, **`eye`**, shaded smooth
-  (the one smooth surface on a faceted model: the face is read through the eyes).
+  (the face is read through the eyes).
 - **The iris and pupil are drawn by the shader per pixel**, from each vertex's position on the
   ball (carried in `UV`):
   - the sclera, a soft limbal ring;
@@ -551,7 +551,7 @@ blocky corners. Now:
 - Each ring is set on one outline, its upper and lower lips meeting at the corners, on the
   head's own surface. The source's corner loops run unevenly, and that forked the corners.
 - The mouth is 20% wider than the source's seam.
-- The lips are smooth-shaded, the one smooth skin on the faceted face.
+- The lips are smooth-shaded (since D80, like the rest of the face).
 - The shader draws their gradient (`UV` = 12 + across, 3 + up): darker where they meet, fullest
   in each lip's middle, a sheen on the lower lip.
 - The skin tone tints them, so darker skin has darker lips.

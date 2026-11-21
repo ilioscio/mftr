@@ -1739,6 +1739,20 @@ The face moves to bones ([21](21-face-rig.md), D76), with an authored head and d
 - **Left:** look knobs in `vfx.ron`, then the particle editor in the creator; telegraph interiors;
   better fire; mesh debris; quality settings ([23 §8](23-effects.md#8-next)).
 
+### VX slice 2 status (2026-11-21): ✅ built — the look pass (D80)
+- **Champions, minions, monsters, shopkeepers and props** shade smooth across bends and crisp at
+  creases: normals computed as the client builds each mesh, split past 60°. The outline hull
+  grows along the welded smooth normal, so it doesn't crack at the creases.
+- **Light:** a soft ramp with a stylized shoulder in place of three hard bands; metal gets a
+  highlight under the sun and a sky sheen at grazing angles.
+- **No pixel squares:** the ground's and walls' grain is soft noise, the grass blades soft
+  streaks, the flowers round specks; the seasonal motes are soft dots; creator paint strokes are
+  filtered with smooth edges. The cliffs stay cut.
+- **Docs:** 10 §2, 05, 15, 21, 22 and the README follow; the retro settings, never built, are
+  dropped.
+- **Left:** Cairn's bark and stone parts vary their vertex colors face by face, which reads as a
+  patchwork even when smooth; an art pass on those parts.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

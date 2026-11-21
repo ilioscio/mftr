@@ -2,7 +2,7 @@
 // paving and water, chosen by the map's ground control map (baked per map from its own data,
 // `mftr_client::ground`), so every map the editor makes is painted like an official one. Every
 // boundary is broken with noise: grass tongues over the dirt, loose slabs off the paving, ragged
-// banks. Chunky texels keep it with the faceted models (10 §2); low contrast keeps gameplay on
+// banks. A soft fine grain gives it texture up close (D80); low contrast keeps gameplay on
 // top (05 §1). The season (15 §9) sets every color. No textures besides the baked control map.
 shader_type spatial;
 render_mode diffuse_lambert, specular_disabled;
@@ -35,8 +35,6 @@ uniform int lamp_count = 0;
 // Sandboxes without a control map: 0, a diagonal lane (the M1 arena) and a 1 m grid.
 uniform float lane_mode = 0.0;
 uniform float lane_width = 9.0;
-// The size of a "texel" of grain, in meters.
-uniform float texel = 0.0625;
 
 varying vec3 world_pos;
 
@@ -72,7 +70,7 @@ vec3 paving_color(vec2 p, vec2 q, float grain, float amount, vec3 under, out flo
 	float edge = 1.0 - smoothstep(0.3, 1.0, amount);
 	float keep = step(edge * 0.95, slab_id * 0.9 + 0.1);
 	covered = keep;
-	vec3 joint_col = mix(paving_dark * 0.55, grass_dark, smoothstep(0.2, 0.7, edge + w_hash(q) * 0.3));
+	vec3 joint_col = mix(paving_dark * 0.55, grass_dark, smoothstep(0.2, 0.7, edge + w_grain(q, 14.0) * 0.3));
 	vec3 col = mix(slab, joint_col, joint);
 	return mix(under, col, keep);
 }
@@ -80,8 +78,8 @@ vec3 paving_color(vec2 p, vec2 q, float grain, float amount, vec3 under, out flo
 void fragment() {
 	cloud_sun = cloud_shade(world_pos);
 	vec2 p = world_pos.xz;
-	vec2 q = floor(p / texel) * texel;     // chunky texels
-	float grain = w_hash(q);
+	vec2 q = p;
+	float grain = w_grain(p, 14.0);
 	vec3 ground;
 	if (control_on) {
 		// Sample the control map with a warped lookup, so its edges wander like a painter's.

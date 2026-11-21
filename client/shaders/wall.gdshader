@@ -35,7 +35,7 @@ void fragment() {
 	NORMAL = normalize((VIEW_MATRIX * vec4(wn, 0.0)).xyz);
 	vec3 n = abs(wn);
 	vec2 p = n.y > 0.6 ? world_pos.xz : (n.x > n.z ? world_pos.zy : world_pos.xy);
-	vec2 q = floor(p * 16.0) / 16.0;                // chunky texels, like the ground
+	vec2 q = p;
 	float f = w_fbm(q * 1.7);
 	float strata = smoothstep(0.42, 0.58, fract(world_pos.y * 2.2 + f * 0.8));
 	vec3 c = mix(rock_dark, rock, smoothstep(0.25, 0.75, f));
@@ -53,14 +53,14 @@ void fragment() {
 		// The top is the ground's grass: the forest stands on it. Meters in from the edge decide
 		// the lip and the gloom.
 		vec2 pt = world_pos.xz;
-		vec2 qt = floor(pt * 16.0) / 16.0;
+		vec2 qt = pt;
 		float inside = 3.0;
 		if (control_on) {
 			vec2 warp = vec2(w_fbm(pt * 0.3) - 0.5, w_fbm(pt * 0.3 + 9.0) - 0.5) * 1.6;
 			inside = clamp(1.0 - texture(control, (pt + warp) / map_size).a * 2.0, 0.0, 1.0) * 10.0;
 		}
 		float gloom = smoothstep(0.6, 3.0, inside) * 0.85;
-		c = grass_color(pt, qt, w_hash(qt), gloom);
+		c = grass_color(pt, qt, w_grain(pt, 14.0), gloom);
 		float lip = 1.0 - smoothstep(0.35, 0.9, inside + (w_fbm(qt * 2.0) - 0.5) * 0.4);
 		c *= 1.0 + lip * 0.12;
 	}

@@ -1,8 +1,8 @@
-// Map props (structures, trees, rocks; `art/props`): the champions' look (10 §2, "faceted PS1")
-// so the map and its characters belong together: flat facets from screen-space derivatives,
-// vertex colors as albedo (alpha = baked occlusion), the three-band toon ramp, the team color on
-// `accent` and `accent_glow`. A fine world-space grain stands in for texture (05 §3), and the
-// fog of war darkens what our team doesn't see.
+// Map props (structures, trees, rocks; `art/props`): the champions' look (10 §2, D80) so the map
+// and its characters belong together: the mesh's normals, smooth across bends and crisp at
+// creases (a rock stays cut, a canopy rounds), vertex colors as albedo (alpha = baked
+// occlusion), the team color on `accent` and `accent_glow`. A soft world-space grain stands in
+// for texture (05 §3), and the fog of war darkens what our team doesn't see.
 shader_type spatial;
 render_mode specular_disabled;
 #include "res://shaders/clouds.gdshaderinc"
@@ -40,6 +40,16 @@ float hash(vec3 p) {
 	return float(v.x >> 8u) / 16777215.0;
 }
 
+// Smooth value noise over `hash`'s lattice.
+float grain(vec3 p) {
+	vec3 i = floor(p);
+	vec3 f = fract(p);
+	vec3 u = f * f * (3.0 - 2.0 * f);
+	float a = mix(mix(hash(i), hash(i + vec3(1, 0, 0)), u.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), u.x), u.y);
+	float b = mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), u.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), u.x), u.y);
+	return mix(a, b, u.z);
+}
+
 vec3 fogged(vec3 c, vec3 wp) {
 	if (fog_on < 0.5 || fog_size.x <= 0.0) {
 		return c;
@@ -63,7 +73,6 @@ void vertex() {
 
 void fragment() {
 	cloud_sun = cloud_shade(world_pos);
-	NORMAL = normalize(cross(dFdy(VERTEX), dFdx(VERTEX)));
 	vec3 c = COLOR.rgb * tint;
 	if (slot == 4) {
 		c = team_accent * (0.5 + 0.5 * dot(COLOR.rgb, vec3(0.3333)));
@@ -71,8 +80,8 @@ void fragment() {
 		c = mix(team_accent, vec3(1.0), 0.2);
 	}
 	if (slot < 3) {
-		// Grain: chunky world-space speckle (≈ 6 cm cells), like a low-resolution texture.
-		float g = hash(floor(world_pos * 16.0));
+		// Grain: a soft world-space mottle (≈ 6 cm), like a fine texture.
+		float g = grain(world_pos * 16.0);
 		if (snow > 0.0) {
 			// Snow settles on the facets that look up, ragged at its edge.
 			float up = (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).y;
@@ -92,6 +101,7 @@ void fragment() {
 
 void light() {
 	float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
-	float band = ndl > 0.7 ? 1.0 : (ndl > 0.35 ? 0.68 : 0.38);
+	// The champions' soft light with its stylized shoulder (champion_model.gdshader).
+	float band = 0.38 + 0.62 * smoothstep(0.02, 0.8, ndl);
 	DIFFUSE_LIGHT += band * ATTENUATION * LIGHT_COLOR / PI * (LIGHT_IS_DIRECTIONAL ? cloud_sun : 1.0);
 }

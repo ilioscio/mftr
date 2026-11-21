@@ -47,8 +47,8 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
 - Elemental-wyrm terrain changes are shader parameter sets plus a few prop variants, not new textures.
 - **As built on The Bridge:** the structures, landmarks and scenery are map props (kind `prop`,
   [11 §3](11-content-packs-and-mods.md#3-what-a-pack-may-contain)), built by scripts in `art/props`
-  with `mftr_blender.prop` in the champions' faceted style (every face its own shade, the team
-  color on `accent`). Turrets are round stone towers, the Gatehouse a gate between two towers, the
+  with `mftr_blender.prop` in the champions' style (smooth bends and crisp creases, D80; the
+  team color on `accent`). Turrets are round stone towers, the Gatehouse a gate between two towers, the
   Base a crystal shrine, all in the paving's stone with the team color in their crystals, banners
   and runes; the fountain is a platform, relics float over pads, and structures collapse into
   rubble. The client scatters the scenery from a fixed seed in batches (pines on the cliffs and
@@ -68,8 +68,7 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
   - **Window:** borderless fullscreen (the default), exclusive fullscreen or windowed. Scripted
     captures keep the window they started with.
   - **Anti-aliasing:** MSAA 4× (the default), MSAA 2×, FXAA or off. Without it, the edges of
-    the faceted models stair-step; with it, they're smooth. It doesn't touch the art's intended
-    chunkiness: the ground's texels and the flat-shaded facets. MSAA 4× cost
+    the models stair-step; with it, they're smooth. MSAA 4× cost
     about 10 % of the frame rate in a 1080p capture. The portraits and the map editor's view
     always use MSAA 4×.
   - **Render scale (50–150 %):** the world's resolution as a share of the window's, scaled
@@ -81,8 +80,8 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
 
 Full specification: **[10 — Characters & Animation](10-characters-and-animation.md)**. In short:
 
-- Stylized faceted meshes ([10 §2](10-characters-and-animation.md#2-character-visual-style), D79), **5,000–8,000 triangles** (cap 12,000; D59), with vertex colors and ≤ 4 material slots including the team accent; no texture maps (D48).
-- Shading: faceted toon ramp + rim light + team-accent region + procedural detail noise in object space.
+- Stylized low-poly meshes ([10 §2](10-characters-and-animation.md#2-character-visual-style), D79), **5,000–8,000 triangles** (cap 12,000; D59), with vertex colors and ≤ 4 material slots including the team accent; no texture maps (D48).
+- Shading (D80): normals smooth across bends and crisp at creases, a soft light with a stylized shoulder, rim light, a highlight on metal, the team-accent region and procedural detail noise.
 - Skeletal animation on a shared rig standard, with the **complete animation set** per champion (~35–45 clips: locomotion, attacks, every ability phase, CC poses, recall, death, emotes), timed by the sim's action contract. Exported as glTF plus a marker sidecar, and shipped inside content packs ([11](11-content-packs-and-mods.md)).
 - Optional **outline** pass (inverted hull or post-process) to strengthen silhouettes. A user setting.
 

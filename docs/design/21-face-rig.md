@@ -945,7 +945,7 @@ Notes for whoever lands it:
   - parts and bodies keep their own counts;
   - `rules::TRIANGLES_TARGET` and `TRIANGLES_MAX` change with the head's slice (FR2).
 - **Base size:** the face morph targets go, which takes ~1 MB off each humanoid base (today ~2.8 MB).
-- **Shading:** at ~2,000 triangles the face's facets are smaller than the faceted style was made for. Skin already shades on a continuous ramp (2026-11-08). The head should also carry **smooth normals** (exported, used by the skin slot instead of derivative normals), so the face reads as a face and the rest of the model keeps its facets. **The owner decides this** (it changes 05 §2's faceted rule for skin).
+- **Shading:** at ~2,000 triangles the face's facets are smaller than the faceted style was made for. Skin already shades on a continuous ramp (2026-11-08). The head should also carry **smooth normals** (exported, used by the skin slot instead of derivative normals), so the face reads as a face and the rest of the model keeps its facets. *Done by D80 for the whole model: the client computes smooth normals, crisp only at creases.*
 
 ---
 

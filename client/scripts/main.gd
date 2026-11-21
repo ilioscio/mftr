@@ -1448,6 +1448,7 @@ func _make_champion(color: Color, champion: String) -> Node3D:
 			_part(body, sphere, Vector3(0.45, 0.55, 0), _unshaded(Color(1.0, 0.7, 0.3)))
 	body.material_override = m
 	var outline := _outline_material(color)
+	outline.set_shader_parameter("hull_in_tangent", false)
 	m.next_pass = outline
 	body.set_meta("outline", outline)
 	body.set_meta("flash_mats", [m])

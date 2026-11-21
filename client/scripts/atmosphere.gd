@@ -46,7 +46,7 @@ func setup(_map_center_m: Vector2, motes := "pollen") -> void:
 	pm.color_ramp = ft
 	_motes.process_material = pm
 	var quad := QuadMesh.new()
-	quad.size = Vector2(0.07, 0.07)
+	quad.size = Vector2(0.1, 0.1)
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -57,6 +57,8 @@ func setup(_map_center_m: Vector2, motes := "pollen") -> void:
 	m.emission_enabled = true
 	m.emission = Color(1.0, 0.85, 0.55)
 	m.emission_energy_multiplier = 0.6
+	# A soft round mote, not a square (D80); made here, so no image ships.
+	m.albedo_texture = _dot(0.0)
 	quad.material = m
 	match motes:
 		"leaves":
@@ -74,6 +76,7 @@ func setup(_map_center_m: Vector2, motes := "pollen") -> void:
 			pm.color_initial_ramp = _ramp([Color(0.85, 0.42, 0.12), Color(0.7, 0.22, 0.08), Color(0.9, 0.68, 0.2)])
 			quad.size = Vector2(0.16, 0.11)
 			m.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+			m.albedo_texture = _dot(0.72)   # an oval leaf with a crisp edge
 			m.billboard_keep_scale = true
 			m.albedo_color = Color(1, 1, 1, 0.95)
 			m.emission_enabled = false
@@ -87,13 +90,31 @@ func setup(_map_center_m: Vector2, motes := "pollen") -> void:
 			pm.initial_velocity_min = 0.2
 			pm.initial_velocity_max = 0.5
 			pm.direction = Vector3(WIND.x, -1.0, WIND.y)
-			quad.size = Vector2(0.06, 0.06)
+			quad.size = Vector2(0.08, 0.08)
 			m.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+			m.albedo_texture = _dot(0.45)
 			m.albedo_color = Color(0.96, 0.98, 1.0, 0.85)
 			m.emission = Color(0.85, 0.9, 1.0)
 			m.emission_energy_multiplier = 0.3
 	_motes.draw_pass_1 = quad
 	add_child(_motes)
+
+
+## A round dot as a small texture, white with its alpha falling off from the middle: solid out to
+## `hard` of the radius then gone (a leaf, a flake), or with 0 soft all the way (a glint of pollen).
+static func _dot(hard: float) -> GradientTexture2D:
+	var g := Gradient.new()
+	g.set_color(0, Color(1, 1, 1, 1))
+	g.set_color(1, Color(1, 1, 1, 0))
+	g.add_point(hard if hard > 0.0 else 0.3, Color(1, 1, 1, 1.0 if hard > 0.0 else 0.45))
+	var t := GradientTexture2D.new()
+	t.gradient = g
+	t.fill = GradientTexture2D.FILL_RADIAL
+	t.fill_from = Vector2(0.5, 0.5)
+	t.fill_to = Vector2(1.0, 0.5)
+	t.width = 32
+	t.height = 32
+	return t
 
 
 static func _ramp(colors: Array) -> GradientTexture1D:
