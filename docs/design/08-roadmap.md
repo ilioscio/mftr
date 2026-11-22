@@ -1775,6 +1775,24 @@ The face moves to bones ([21](21-face-rig.md), D76), with an authored head and d
   repaint. Bark, leather and moss were darkened: vertex colors are linear, and the old values
   showed as pale tan and lime.
 
+### VX slice 3 status (2026-11-21): ✅ built — graphics that scale (D81)
+- **Quality presets** in Settings → Graphics: Ultra, High (the design), Medium and Low set
+  render scale, World detail, anti-aliasing, shadows, bloom and the atmosphere together;
+  changing one makes it Custom. The first run guesses from the graphics card and the screen.
+- **New controls:** World detail (High, Medium, Low), shadow quality (Ultra to Off, replacing
+  the checkbox; old settings carry over), a frame rate limit and VSync.
+- **The world's noise from a texture:** the ground and cliffs sample a 2048² noise texture
+  generated at load from their own hash instead of hashing per pixel, and skip what can't show
+  (the dirt where there's none, the land under deep water, the rock under the cliffs' tops).
+  On a Radeon 840M at 2256×1504, High went from 15 to 38–45 fps; Medium runs at 57, Low at 89
+  (05 §9.1). High looks as before; the slabs and cracks are laid out anew (one hash a cell).
+- **`--perf-report SECONDS`** (with `--graphics`, `--world-detail`, `--shadow-quality`) measures
+  frame and GPU times for tuning and regressions (05 §9.1); the rules for shaders that cover
+  the screen are 05 §9.2.
+- **Left:** particle quality ([23 §8](23-effects.md#8-next)); dynamic resolution (render scale
+  steered to hold a frame rate); FSR or a sharpening pass for the Mobile renderer's bilinear
+  upscale; a frame limit in the menus by default.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.

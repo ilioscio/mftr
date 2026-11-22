@@ -17,6 +17,7 @@ extends Node3D
 const Seasons = preload("res://scripts/seasons.gd")
 const Splashes = preload("res://scripts/splashes.gd")
 const Springs := preload("res://scripts/springs.gd")
+const PerfReport := preload("res://scripts/perf_report.gd")
 
 const UNITS_TO_METERS := 0.01           # 1 game unit = 1 cm
 const CAMERA_PITCH_DEG := 56.0          # D13 / R01 §1
@@ -223,6 +224,26 @@ func _ready() -> void:
 		elif args[i] == "--render-scale" and i + 1 < args.size():
 			# For captures: this run's render scale (%), not saved.
 			settings.render_scale = clampf(float(args[i + 1]), settings.RENDER_SCALE_MIN, settings.RENDER_SCALE_MAX)
+			i += 1
+		elif args[i] == "--graphics" and i + 1 < args.size():
+			# For captures and measurements: this run's graphics preset (ultra, high, medium,
+			# low), not saved. Flags after it (--render-scale, --world-detail…) adjust it.
+			if settings.PRESETS.has(args[i + 1]):
+				settings.apply_preset(args[i + 1])
+			else:
+				push_warning("--graphics: no preset `%s` (ultra, high, medium, low)" % args[i + 1])
+			i += 1
+		elif args[i] == "--world-detail" and i + 1 < args.size():
+			# For captures: this run's world detail (high, medium, low), not saved.
+			settings.world_detail = settings.one_of(args[i + 1], settings.WORLD_DETAILS, settings.world_detail)
+			i += 1
+		elif args[i] == "--shadow-quality" and i + 1 < args.size():
+			# For captures: this run's shadow quality (ultra, high, medium, low, off), not saved.
+			settings.shadow_quality = settings.one_of(args[i + 1], settings.SHADOW_QUALITIES, settings.shadow_quality)
+			i += 1
+		elif args[i] == "--perf-report" and i + 1 < args.size():
+			# Measure frame times for this many seconds of play, print a summary, quit (05 §9).
+			perf_report = PerfReport.new(float(args[i + 1]))
 			i += 1
 		elif args[i] == "--hud-scale" and i + 1 < args.size():
 			# For captures: this run's HUD scale (%), not saved.
@@ -793,6 +814,8 @@ func _connect(address: String) -> void:
 ## `--shot <file.png>`: scripted capture for automated visual checks. Waits until playing,
 ## casts an area and a skillshot, issues one move order, saves a screenshot and quits.
 var _shot_path := ""
+var perf_report = null                  # `--perf-report SECONDS` (perf_report.gd)
+var world_noise: ImageTexture            # the `world_noise` shader global (kept: the global holds its RID)
 var _shot_timer := 0.0
 var _shot_moved := false
 var _shot_at := 1.05                     # `--shot-at <seconds>` after joining
@@ -1011,6 +1034,11 @@ func _update_shot(delta: float) -> void:
 
 
 func _build_world() -> void:
+	# The world's noise (05 §2, D81), which the ground and cliffs build their materials from.
+	var t0 := Time.get_ticks_msec()
+	world_noise = ImageTexture.create_from_image(MftrNoise.world_image())
+	RenderingServer.global_shader_parameter_set("world_noise", world_noise.get_rid())
+	print("MFTR: world noise baked in %d ms" % (Time.get_ticks_msec() - t0))
 	# Light (05 §5): a warm late-afternoon sun with soft shadows, a cool sky fill so shade reads
 	# blue rather than grey, a filmic tonemap, bloom on what glows (crystals, braziers,
 	# missiles), a light haze with depth, and a gentle grade.
@@ -1196,17 +1224,42 @@ func _apply_hud_scale() -> void:
 
 
 ## The Graphics settings, applied when they change: the window, anti-aliasing and render scale
-## (05 §6) and the effects.
+## (05 §6), the frame rate, the shadows, the world's detail and the effects.
 func _apply_graphics() -> void:
-	var want := [settings.shadows, settings.bloom, settings.atmosphere, atmosphere != null, settings.window_mode, settings.antialias, settings.render_scale]
+	var want := [settings.shadow_quality, settings.world_detail, settings.bloom, settings.atmosphere, atmosphere != null,
+		settings.window_mode, settings.antialias, settings.render_scale, settings.fps_limit, settings.vsync]
 	if want == _graphics_applied:
 		return
 	_graphics_applied = want
 	_apply_display()
-	sun.shadow_enabled = settings.shadows
+	_apply_shadows()
+	RenderingServer.global_shader_parameter_set("world_detail", WORLD_DETAIL_LEVELS[settings.world_detail])
 	world_env.glow_enabled = settings.bloom
 	if atmosphere != null:
 		atmosphere.set_enabled(settings.atmosphere, settings.atmosphere)
+
+
+## The `world_detail` shader global for each World detail setting (`world.gdshaderinc`).
+const WORLD_DETAIL_LEVELS := {"low": 0, "medium": 1, "high": 2}
+## Shadow quality (05 §6): the shadow map's size (shared by both splits), its edges' filter
+## (`RenderingServer.ShadowQuality`) and how many splits the view's depth is cut into. High is
+## the design's (05 §5); Low gives the whole view one split, coarser near the camera.
+const SHADOW_LEVELS := {
+	"ultra": [8192, RenderingServer.SHADOW_QUALITY_SOFT_HIGH, 2],
+	"high": [4096, RenderingServer.SHADOW_QUALITY_SOFT_LOW, 2],
+	"medium": [2048, RenderingServer.SHADOW_QUALITY_SOFT_LOW, 2],
+	"low": [2048, RenderingServer.SHADOW_QUALITY_SOFT_VERY_LOW, 1],
+}
+
+
+func _apply_shadows() -> void:
+	var level: Array = SHADOW_LEVELS.get(settings.shadow_quality, [])
+	sun.shadow_enabled = not level.is_empty()
+	if level.is_empty():
+		return
+	RenderingServer.directional_shadow_atlas_set_size(level[0], true)
+	RenderingServer.directional_soft_shadow_filter_set_quality(level[1])
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if level[2] == 2 else DirectionalLight3D.SHADOW_ORTHOGONAL
 
 
 ## The window mode, anti-aliasing and the world's render scale. Scripted captures keep the window
@@ -1221,12 +1274,14 @@ func _apply_display() -> void:
 	# we use Mobile.)
 	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 	vp.scaling_3d_scale = scale
+	Engine.max_fps = settings.fps_limit
 	if _fixed_window or DisplayServer.get_name() == "headless":
 		return
 	var mode: Window.Mode = {"borderless": Window.MODE_FULLSCREEN, "fullscreen": Window.MODE_EXCLUSIVE_FULLSCREEN}.get(settings.window_mode, Window.MODE_WINDOWED)
 	var win := get_window()
 	if win.mode != mode and not (mode == Window.MODE_WINDOWED and win.mode == Window.MODE_MAXIMIZED):
 		win.mode = mode
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if settings.vsync else DisplayServer.VSYNC_DISABLED)
 
 
 ## The menus' backdrop and logo, behind every screen that isn't the match itself.
@@ -2024,6 +2079,8 @@ func _process(delta: float) -> void:
 		print("MFTR phase: %s -> %s (unit %d, server key %s)" % [_last_phase, phase, client.own_unit_id(), client.server_fingerprint()])
 		_last_phase = phase
 	var playing := phase == "playing"
+	if perf_report != null and perf_report.update(delta, get_viewport(), playing, settings):
+		get_tree().quit()
 	horde_status = client.horde_status() if playing else {}
 	if phase == "lobby" and _last_phase_seen in ["joining", "playing"]:
 		_reset_match_view()  # the match ended; champion select again

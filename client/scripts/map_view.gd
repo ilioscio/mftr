@@ -395,9 +395,10 @@ func _process(_delta: float) -> void:
 
 
 func _upload_occluders(look: Vector3) -> void:
+	# Nearest first, always: at low world detail the shader draws only the first few.
 	var list := Array(occluders)
+	list.sort_custom(func(a, b): return Vector2(a.x - look.x, a.y - look.z).length_squared() < Vector2(b.x - look.x, b.y - look.z).length_squared())
 	if list.size() > OCCLUDERS_DRAWN:
-		list.sort_custom(func(a, b): return Vector2(a.x - look.x, a.y - look.z).length_squared() < Vector2(b.x - look.x, b.y - look.z).length_squared())
 		list.resize(OCCLUDERS_DRAWN)
 	var packed := PackedVector4Array(list)
 	var n := packed.size()

@@ -170,17 +170,42 @@ func _audio_tab() -> Control:
 	return g
 
 
+## The Graphics tab's controls for what a preset sets (setting -> control), so picking a preset
+## can show its values.
+var _preset_controls := {}
+var _preset_choice: OptionButton
+
+
 func _graphics_tab() -> Control:
-	var g := _grid("Graphics")
+	var scroll := ScrollContainer.new()
+	scroll.name = "Graphics"
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var g := _grid("List")
+	g.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(g)
+	_preset_choice = _choice(settings.PRESET_NAMES, ["Ultra", "High", "Medium", "Low", "Custom"], settings.graphics_preset, func(k):
+		settings.apply_preset(k)
+		_show_preset())
+	_row(g, "Quality preset", _preset_choice,
+		"Sets everything below that costs frame rate at once. High is the game as designed; Ultra sharpens the shadows. Medium and Low are for laptops and integrated graphics. Change any of them and the preset becomes Custom.")
 	_row(g, "Window", _choice(settings.WINDOW_MODES, ["Borderless fullscreen", "Fullscreen", "Windowed"], settings.window_mode, func(k): settings.window_mode = k),
 		"Borderless fills the screen without switching its mode, so alt-tab is instant. Fullscreen takes the screen over (can be a little faster). Windowed is a window you can size and move.")
-	_row(g, "Anti-aliasing", _choice(settings.ANTIALIAS, ["MSAA 4×", "MSAA 2×", "FXAA", "Off"], settings.antialias, func(k): settings.antialias = k),
+	_preset_row(g, "render_scale", "Render scale", _slider(settings.render_scale, settings.RENDER_SCALE_MIN, settings.RENDER_SCALE_MAX, _preset_set.bind("render_scale"), "%"),
+		"The world's resolution, as a share of the window's: the biggest lever on the frame rate. Under 100% is faster but softer; over 100% is sharper and slower. The HUD always stays at full resolution.")
+	_preset_row(g, "world_detail", "World detail", _choice(settings.WORLD_DETAILS, ["High", "Medium", "Low"], settings.world_detail, _preset_set.bind("world_detail")),
+		"How much fine texture the ground and cliffs draw: grain, blades of grass, cracks and pebbles. Medium looks nearly the same and is faster; Low keeps the shapes and colors and is fastest.")
+	_preset_row(g, "antialias", "Anti-aliasing", _choice(settings.ANTIALIAS, ["MSAA 4×", "MSAA 2×", "FXAA", "Off"], settings.antialias, _preset_set.bind("antialias")),
 		"Smooths the stair-stepped edges of champions, monsters, props and cliffs. MSAA 4× is the smoothest; 2× is cheaper; FXAA is cheapest but softens the whole picture a little.")
-	_row(g, "Render scale", _slider(settings.render_scale, settings.RENDER_SCALE_MIN, settings.RENDER_SCALE_MAX, func(v): settings.render_scale = v, "%"),
-		"The world's resolution, as a share of the window's. Under 100% is faster on slow graphics cards but softer; over 100% is sharper and slower. The HUD always stays at full resolution.")
-	_row(g, "Shadows", _check(settings.shadows, func(v): settings.shadows = v), "The sun's shadows. Off is faster on older graphics cards.")
-	_row(g, "Bloom", _check(settings.bloom, func(v): settings.bloom = v), "A soft glow around bright things: crystals, fire, spells.")
-	_row(g, "Clouds and motes", _check(settings.atmosphere, func(v): settings.atmosphere = v), "Cloud shadows drifting over the map, and motes floating in the light.")
+	_preset_row(g, "shadow_quality", "Shadows", _choice(settings.SHADOW_QUALITIES, ["Ultra", "High", "Medium", "Low", "Off"], settings.shadow_quality, _preset_set.bind("shadow_quality")),
+		"The sun's shadows. Ultra is the sharpest with the softest edges; Medium and Low are blurrier and cheaper; Off is fastest.")
+	_preset_row(g, "bloom", "Bloom", _check(settings.bloom, _preset_set.bind("bloom")), "A soft glow around bright things: crystals, fire, spells.")
+	_preset_row(g, "atmosphere", "Clouds and motes", _check(settings.atmosphere, _preset_set.bind("atmosphere")), "Cloud shadows drifting over the map, and motes floating in the light.")
+	var fps_labels: Array = settings.FPS_LIMITS.map(func(f): return "Unlimited" if f == 0 else "%d fps" % f)
+	var fps_keys: Array = settings.FPS_LIMITS.map(func(f): return str(f))
+	_row(g, "Frame rate limit", _choice(fps_keys, fps_labels, str(settings.fps_limit), func(k): settings.fps_limit = int(k)),
+		"The most frames a second the game draws. A limit near what you get anyway keeps it steady, and keeps a laptop cooler and its battery longer.")
+	_row(g, "VSync", _check(settings.vsync, func(v): settings.vsync = v),
+		"Waits for the screen to refresh before showing a frame: no tearing, but a little more input delay, and the frame rate snaps down when it can't keep up.")
 	_row(g, "Damage at the edges", _check(settings.hurt_edges, func(v): settings.hurt_edges = v), "The screen's edges flash red when you're hurt, redder the lower your health, and throb when you're nearly dead.")
 	var seasons := OptionButton.new()
 	seasons.focus_mode = Control.FOCUS_NONE
@@ -204,7 +229,37 @@ func _graphics_tab() -> Control:
 		settings.hemisphere = sides[i]
 		settings.save())
 	_row(g, "Hemisphere", halves, "Which half of the world you're in, for the season by the calendar: winter is December to February in the north, June to August in the south.")
-	return g
+	return scroll
+
+
+## A row for a setting a preset sets: its control is remembered for `_show_preset`.
+func _preset_row(parent: Control, key: String, label: String, control: Control, hint: String) -> void:
+	_preset_controls[key] = control
+	_row(parent, label, control, hint)
+
+
+## The player changed one of a preset's settings: it's theirs now, unless it matches a preset.
+func _preset_set(value, key: String) -> void:
+	settings.set(key, value)
+	settings.graphics_preset = settings.matching_preset()
+	_preset_choice.select(settings.PRESET_NAMES.find(settings.graphics_preset))
+
+
+## After a preset is picked: its values in the controls (without applying them again).
+func _show_preset() -> void:
+	for key in _preset_controls:
+		var c: Control = _preset_controls[key]
+		var value = settings.get(key)
+		if c is CheckBox:
+			c.set_pressed_no_signal(value)
+		elif c is OptionButton:
+			var keys: Array = {"world_detail": settings.WORLD_DETAILS, "antialias": settings.ANTIALIAS,
+				"shadow_quality": settings.SHADOW_QUALITIES}[key]
+			c.select(keys.find(value))
+		else:
+			var slider: HSlider = c.get_child(0)
+			slider.set_value_no_signal(value)
+			c.get_child(1).text = "%d%%" % roundi(value)
 
 
 func _keys_tab() -> Control:

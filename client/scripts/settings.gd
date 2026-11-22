@@ -10,6 +10,22 @@ const WINDOW_MODES := ["borderless", "fullscreen", "windowed"]
 const ANTIALIAS := ["msaa4", "msaa2", "fxaa", "off"]
 const RENDER_SCALE_MIN := 50.0
 const RENDER_SCALE_MAX := 150.0
+const SHADOW_QUALITIES := ["ultra", "high", "medium", "low", "off"]
+const WORLD_DETAILS := ["high", "medium", "low"]
+const FPS_LIMITS := [0, 30, 60, 90, 120, 144, 165, 240]   # 0: unlimited
+
+## Graphics presets (05 §6, D81): each sets every setting that costs frame time. Picking one
+## writes these values; changing any of them afterwards makes the preset "custom". High is the
+## look as designed and what a discrete graphics card gets; Medium and Low are for integrated
+## graphics (05 §9's 60 fps target), Low giving up the most. Ultra adds sharper, softer-edged
+## shadows. Measured costs are in 05 §9.
+const PRESETS := {
+	"low": {"render_scale": 75.0, "antialias": "fxaa", "shadow_quality": "off", "world_detail": "low", "bloom": false, "atmosphere": false},
+	"medium": {"render_scale": 90.0, "antialias": "fxaa", "shadow_quality": "low", "world_detail": "medium", "bloom": true, "atmosphere": true},
+	"high": {"render_scale": 100.0, "antialias": "msaa4", "shadow_quality": "high", "world_detail": "high", "bloom": true, "atmosphere": true},
+	"ultra": {"render_scale": 100.0, "antialias": "msaa4", "shadow_quality": "ultra", "world_detail": "high", "bloom": true, "atmosphere": true},
+}
+const PRESET_NAMES := ["ultra", "high", "medium", "low", "custom"]
 
 ## Camera: unlocked by default, scrolled by bumping the mouse against the screen edges (the
 ## reference game's default); Y locks it on the champion, Space centers it while held.
@@ -33,7 +49,19 @@ var antialias := "msaa4"
 ## upscaled, over 100 renders more pixels and scales them down (sharper, slower). The HUD
 ## is always drawn at the window's own resolution.
 var render_scale := 100.0
-var shadows := true                      # the sun's shadows
+## The preset the values below came from, or "custom". "" until the player (or the first-run
+## guess, `detect_preset`) has picked one.
+var graphics_preset := ""
+## The sun's shadows: "ultra", "high" (the design's), "medium", "low" or "off" (`main.gd`
+## `_apply_shadows`: the shadow map's size and its edges' softness).
+var shadow_quality := "high"
+## How much fine detail the ground and cliffs draw (the `world_detail` shader global, 0–2, in
+## `world.gdshaderinc`): "high" is all of it; "medium" drops the noise's finest octave; "low"
+## keeps the shapes and colors and drops the grain, blades of grass, cracks, pebbles and
+## crevices (and draws the nearest 12 contact shadows).
+var world_detail := "high"
+var fps_limit := 0                       # frames per second at most, 0 unlimited
+var vsync := false                       # wait for the screen's refresh (no tearing, more latency)
 var bloom := true                        # glow around bright things
 var atmosphere := true                   # cloud shadows and floating motes
 var hurt_edges := true                   # the screen's edges flash red when hurt, and pulse when low
@@ -97,9 +125,9 @@ func _init() -> void:
 	load_file()
 
 
-func load_file() -> void:
+func load_file(path := PATH) -> void:
 	var cfg := ConfigFile.new()
-	if cfg.load(PATH) == OK:
+	if cfg.load(path) == OK:
 		camera_locked = cfg.get_value("camera", "locked", camera_locked)
 		edge_pan = cfg.get_value("camera", "edge_pan", edge_pan)
 		edge_pan_speed = clampf(cfg.get_value("camera", "edge_pan_speed", edge_pan_speed), 0.0, 100.0)
@@ -110,7 +138,14 @@ func load_file() -> void:
 		window_mode = one_of(cfg.get_value("graphics", "window_mode", window_mode), WINDOW_MODES, window_mode)
 		antialias = one_of(cfg.get_value("graphics", "antialias", antialias), ANTIALIAS, antialias)
 		render_scale = clampf(cfg.get_value("graphics", "render_scale", render_scale), RENDER_SCALE_MIN, RENDER_SCALE_MAX)
-		shadows = cfg.get_value("graphics", "shadows", shadows)
+		# Before the presets (0.23), shadows were on or off.
+		var legacy := "high" if cfg.get_value("graphics", "shadows", true) else "off"
+		shadow_quality = one_of(cfg.get_value("graphics", "shadow_quality", legacy), SHADOW_QUALITIES, shadow_quality)
+		world_detail = one_of(cfg.get_value("graphics", "world_detail", world_detail), WORLD_DETAILS, world_detail)
+		var fps = cfg.get_value("graphics", "fps_limit", fps_limit)
+		fps_limit = int(fps) if int(fps) in FPS_LIMITS else 0
+		vsync = cfg.get_value("graphics", "vsync", vsync)
+		graphics_preset = str(cfg.get_value("graphics", "preset", ""))
 		bloom = cfg.get_value("graphics", "bloom", bloom)
 		atmosphere = cfg.get_value("graphics", "atmosphere", atmosphere)
 		hurt_edges = cfg.get_value("graphics", "hurt_edges", hurt_edges)
@@ -125,7 +160,48 @@ func load_file() -> void:
 		mute_in_background = cfg.get_value("audio", "mute_in_background", mute_in_background)
 		window_positions = cfg.get_value("windows", "positions", {})
 		_binds = cfg.get_value("keys", "binds", {})
+	if graphics_preset not in PRESET_NAMES:
+		# Never picked (a first run, or settings from before the presets): untouched graphics
+		# (still High's, the old defaults) get the guess for this machine, anything else is
+		# the player's own.
+		graphics_preset = matching_preset()
+		if graphics_preset == "high":
+			apply_preset(detect_preset())
 	apply_bindings()
+
+
+## Sets every value the preset covers (not for "custom", which keeps them).
+func apply_preset(preset: String) -> void:
+	if not PRESETS.has(preset):
+		graphics_preset = "custom"
+		return
+	for key in PRESETS[preset]:
+		set(key, PRESETS[preset][key])
+	graphics_preset = preset
+
+
+## The preset the current values are, or "custom" (after the player changes one of them).
+func matching_preset() -> String:
+	for preset in PRESETS:
+		var same := true
+		for key in PRESETS[preset]:
+			if get(key) != PRESETS[preset][key]:
+				same = false
+				break
+		if same:
+			return preset
+	return "custom"
+
+
+## A first guess for this machine (05 §9): integrated graphics (or none: a software renderer)
+## get Low on screens past 1080p, where they'd shade over 1.5× its pixels, and Medium on the
+## rest; everything else, High. The player can always choose another.
+static func detect_preset() -> String:
+	var kind := RenderingServer.get_video_adapter_type()
+	if kind != RenderingDevice.DEVICE_TYPE_INTEGRATED_GPU and kind != RenderingDevice.DEVICE_TYPE_CPU:
+		return "high"
+	var screen := DisplayServer.screen_get_size()
+	return "low" if screen.x * screen.y > 1920 * 1080 * 1.5 else "medium"
 
 
 ## `v` if it's one of `allowed`, else `fallback` (a saved choice from another version).
@@ -145,7 +221,11 @@ func save() -> void:
 	cfg.set_value("graphics", "window_mode", window_mode)
 	cfg.set_value("graphics", "antialias", antialias)
 	cfg.set_value("graphics", "render_scale", render_scale)
-	cfg.set_value("graphics", "shadows", shadows)
+	cfg.set_value("graphics", "preset", graphics_preset)
+	cfg.set_value("graphics", "shadow_quality", shadow_quality)
+	cfg.set_value("graphics", "world_detail", world_detail)
+	cfg.set_value("graphics", "fps_limit", fps_limit)
+	cfg.set_value("graphics", "vsync", vsync)
 	cfg.set_value("graphics", "bloom", bloom)
 	cfg.set_value("graphics", "atmosphere", atmosphere)
 	cfg.set_value("graphics", "hurt_edges", hurt_edges)

@@ -119,6 +119,14 @@ cloud_cover={
 "type": "float",
 "value": 0.4
 }
+world_detail={
+"type": "int",
+"value": 2
+}
+world_noise={
+"type": "sampler2D",
+"value": ""
+}
 
 [rendering]
 
