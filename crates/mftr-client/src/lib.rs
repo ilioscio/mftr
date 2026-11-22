@@ -284,8 +284,23 @@ pub enum Phase {
 #[derive(Clone, Debug, Default)]
 struct RosterFetch {
     files: Vec<(ContentId, u32)>,
+    /// Check the files against the price budget (a host may lift it for players' own, D83).
+    budget: bool,
     texts: Vec<String>,
     have: Vec<u8>,
+}
+
+/// The champion file a player brings, as champion select shows it (D83).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BringStatus {
+    /// The server takes players' champions.
+    pub allowed: bool,
+    /// How much of the file the server has, 0 to 1.
+    pub have: f32,
+    /// It checked the file and took it.
+    pub taken: bool,
+    /// Why it refused the file (empty: it didn't).
+    pub refusal: String,
 }
 
 /// Champion files this client knows (CR2): from a server's roster, or loaded from disk (the
@@ -295,7 +310,12 @@ static FILES: std::sync::Mutex<BTreeMap<String, String>> = std::sync::Mutex::new
 
 /// Check and register a champion file, and remember its text: the champion's id.
 pub fn load_champion_file(text: &str) -> Result<ChampionId, String> {
-    let id = mftr_sim::limits::load_champion_file(text)?;
+    load_champion_file_with(text, true)
+}
+
+/// [`load_champion_file`], with the price budget or without it (a host lifted it, D83).
+pub fn load_champion_file_with(text: &str, budget: bool) -> Result<ChampionId, String> {
+    let id = mftr_sim::limits::load_champion_file_with(text, budget)?;
     FILES.lock().unwrap_or_else(|e| e.into_inner()).insert(id.def().name.to_lowercase(), text.to_string());
     Ok(id)
 }
@@ -352,6 +372,12 @@ pub struct ClientSession {
     roster: u64,
     roster_fetch: Option<RosterFetch>,
     roster_error: Option<String>,
+    /// The match's custom roster loaded (or being fetched): the server's own files first
+    /// (`host_files` of them), then those its players brought (D83).
+    roster_files: Vec<(ContentId, u32)>,
+    host_files: usize,
+    /// The champion file this player brings to champion select (D83), and its content id.
+    bring: Option<(ContentId, std::sync::Arc<str>)>,
     /// Predicted world containing only our own unit.
     world: World,
     /// Predicted own state at the end of each tick.
@@ -447,6 +473,9 @@ impl ClientSession {
             map_download: None,
             roster: 0,
             roster_fetch: None,
+            roster_files: Vec::new(),
+            host_files: 0,
+            bring: None,
             roster_error: None,
             world: World::from_units(Tick(0), Vec::new()),
             history: VecDeque::new(),
@@ -549,6 +578,67 @@ impl ClientSession {
         self.lobby.as_ref()
     }
 
+    /// Bring this champion file to champion select (D83), or stop (`None`). The server checks
+    /// it and says so in the lobby; it is brought again in each champion select after.
+    pub fn bring(&mut self, text: Option<String>) {
+        self.bring = text.map(|t| {
+            let id = ContentId::of(&t);
+            // Once the server lists it, it needn't come back from there.
+            FETCHED.lock().unwrap_or_else(|e| e.into_inner()).insert(id, t.clone());
+            (id, std::sync::Arc::from(t))
+        });
+    }
+
+    /// The next piece of the file being brought, if the server wants one.
+    fn upload_piece(&self) -> Option<ClientMessage> {
+        let l = self.lobby.as_ref().filter(|l| l.bring && self.phase == Phase::Lobby)?;
+        let (file, text) = self.bring.as_ref()?;
+        let have = if l.upload.file == *file {
+            if !l.upload.refusal.is_empty() {
+                return None;
+            }
+            l.upload.have as usize
+        } else {
+            0
+        };
+        if have >= text.len() {
+            return None;
+        }
+        let end = (have + msg::MAP_CHUNK_BYTES).min(text.len());
+        Some(ClientMessage::Upload {
+            file: *file,
+            total: text.len() as u32,
+            offset: have as u32,
+            bytes: text.as_bytes()[have..end].to_vec(),
+        })
+    }
+
+    /// Where the file being brought is (D83): `None` when nothing is; else how much of it the
+    /// server has (0 to 1), whether it took it, and why it refused it.
+    pub fn bring_status(&self) -> Option<BringStatus> {
+        let (file, text) = self.bring.as_ref()?;
+        let l = self.lobby.as_ref()?;
+        let mine = l.upload.file == *file;
+        let have = if mine { l.upload.have as f32 / text.len().max(1) as f32 } else { 0.0 };
+        let refusal = if mine { l.upload.refusal.clone() } else { String::new() };
+        let taken = mine && refusal.is_empty() && l.upload.have as usize >= text.len();
+        Some(BringStatus { allowed: l.bring, have: have.min(1.0), taken, refusal })
+    }
+
+    /// The champions players brought to this champion select (D83), once loaded here.
+    pub fn brought_champions(&self) -> Vec<ChampionId> {
+        if self.roster_fetch.is_some() {
+            return Vec::new();
+        }
+        mftr_net::champions::customs().into_iter().skip(self.host_files).collect()
+    }
+
+    /// Whether files are going back and forth (fetching the match's champions, bringing one):
+    /// the caller sends faster meanwhile.
+    pub fn transferring(&self) -> bool {
+        self.roster_fetch.is_some() || self.upload_piece().is_some()
+    }
+
     /// A champion-select action, as a packet to send.
     pub fn lobby_packet(&mut self, action: msg::LobbyAction) -> Vec<u8> {
         let h = self.header();
@@ -626,13 +716,19 @@ impl ClientSession {
         bytes
     }
 
-    /// What to send while connecting or waiting in champion select: the hello, or while
-    /// fetching the server's champion files (CR1d), the request for the next piece.
+    /// What to send while connecting or waiting in champion select: the hello; while
+    /// fetching the match's champion files (CR1d, D83), the request for the next piece; while
+    /// bringing a champion file (D83), its next piece.
     pub fn hello_packet(&mut self, now: f64) -> Vec<u8> {
         if let Some(f) = &self.roster_fetch
             && let Some(&(hash, _)) = f.files.get(f.texts.len())
         {
             let msg = ClientMessage::MapRequest { hash, have: f.have.len() as u32 };
+            let h = self.header();
+            let bytes = msg::encode_client(&h, &msg);
+            return self.finish_packet(bytes);
+        }
+        if let Some(msg) = self.upload_piece() {
             let h = self.header();
             let bytes = msg::encode_client(&h, &msg);
             return self.finish_packet(bytes);
@@ -1035,11 +1131,12 @@ impl ClientSession {
                 self.on_roster_chunk(hash, total, offset, &bytes)
             }
             ServerMessage::MapChunk { hash, total, offset, bytes } => self.on_map_chunk(hash, total, offset, &bytes),
-            ServerMessage::Roster(files) => {
+            ServerMessage::Roster { files, host, budget } => {
                 let ids: Vec<ContentId> = files.iter().map(|f| f.0).collect();
                 let hash = mftr_net::champions::roster_hash(&ids);
                 if matches!(self.phase, Phase::Connecting | Phase::Queues) && hash != self.roster {
-                    self.start_roster(files);
+                    self.host_files = host as usize;
+                    self.start_roster(files, budget);
                 }
             }
             ServerMessage::Inspect(info) => self.inspected = Some(*info),
@@ -1064,6 +1161,7 @@ impl ClientSession {
                 if matches!(self.phase, Phase::Connecting | Phase::Lobby) {
                     self.rejected = None;
                     self.phase = Phase::Lobby;
+                    self.follow_brought(&l);
                     self.lobby = Some(*l);
                 }
             }
@@ -1088,6 +1186,9 @@ impl ClientSession {
             margin_override: old.margin_override,
             collision_proxies: old.collision_proxies,
             roster: old.roster,
+            roster_files: old.roster_files,
+            host_files: old.host_files,
+            bring: old.bring,
             minion_bubble: old.minion_bubble,
             send: old.send,
             recv: old.recv,
@@ -1105,10 +1206,26 @@ impl ClientSession {
     /// A piece of the custom map: taken in order; once it's all here and its hash checks out,
     /// the map is built (the server's own way) and joining goes on.
     /// Start fetching a server's champion files, taking the ones fetched before from the cache.
-    fn start_roster(&mut self, files: Vec<(ContentId, u32)>) {
+    fn start_roster(&mut self, files: Vec<(ContentId, u32)>, budget: bool) {
         self.roster_error = None;
-        self.roster_fetch = Some(RosterFetch { files, texts: Vec::new(), have: Vec::new() });
+        self.roster_files = files.clone();
+        self.roster_fetch = Some(RosterFetch { files, budget, texts: Vec::new(), have: Vec::new() });
         self.take_cached();
+    }
+
+    /// Champion select lists the champions players brought (D83): fetch the ones this client
+    /// lacks (and forget those of an earlier champion select).
+    fn follow_brought(&mut self, l: &msg::LobbyState) {
+        if self.roster_fetch.is_some() || self.roster_error.is_some() {
+            return;
+        }
+        let host = self.host_files.min(self.roster_files.len());
+        let mut want: Vec<(ContentId, u32)> = self.roster_files[..host].to_vec();
+        want.extend(l.brought.iter().copied());
+        let ids: Vec<ContentId> = want.iter().map(|f| f.0).collect();
+        if mftr_net::champions::roster_hash(&ids) != self.roster {
+            self.start_roster(want, l.budget);
+        }
     }
 
     /// Fill the fetch from the cache as far as it goes, and load the roster once complete.
@@ -1151,7 +1268,7 @@ impl ClientSession {
         let Some(f) = self.roster_fetch.take() else { return };
         let mut ids = Vec::new();
         for text in &f.texts {
-            match load_champion_file(text) {
+            match load_champion_file_with(text, f.budget) {
                 Ok(id) => ids.push(id),
                 Err(e) => {
                     // A file this client won't accept: it doesn't join (11 §4).

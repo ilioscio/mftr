@@ -503,13 +503,31 @@ impl MatchClient {
             e.set("team", if s.team == Team::Blue { "blue" } else { "red" });
             e.set("ally", Some(s.team) == my_team);
             e.set("you", s.player == l.you);
-            e.set("champion", s.champion.def().name);
+            // A champion someone brought that isn't loaded yet (D83): no name until it is.
+            e.set("champion", s.champion.map_or("", |c| c.def().name));
+            e.set("brought", s.brought);
             e.set("rerolls", s.rerolls as i64);
             e.set("ready", s.ready);
             e.set("bot", s.bot);
             slots.push(&e.to_variant());
         }
         d.set("slots", &slots);
+        // Players' own champions (D83): whether this server takes them, and ours.
+        d.set("bring_allowed", l.bring);
+        if let Some(b) = self.session.bring_status() {
+            let mut st = VarDictionary::new();
+            st.set("have", b.have);
+            st.set("taken", b.taken);
+            st.set("refusal", b.refusal.as_str());
+            d.set("bring", &st);
+        }
+        d.set("loading", self.session.transferring());
+        let brought: PackedStringArray =
+            self.session.brought_champions().iter().map(|c| GString::from(c.def().name)).collect();
+        d.set("brought_names", &brought);
+        if let Some(e) = self.session.roster_error() {
+            d.set("roster_error", e);
+        }
         if let Some(b) = l.bots {
             let mut bots = VarDictionary::new();
             bots.set("tier", b.tier as i64);
@@ -540,6 +558,32 @@ impl MatchClient {
         let target = (target >= 0).then_some(mftr_sim::world::UnitId(target as u32));
         let p = self.session.ping_packet(kind, mftr_sim::Vec2::new(at.x, at.y), target);
         self.transmit(p, now);
+    }
+
+    /// Bring a champion file to champion select (D83): an absolute path, or "" to stop. The
+    /// server checks it and champion select shows what it said. Returns why it couldn't be
+    /// read here ("" when it could).
+    #[func]
+    fn lobby_bring(&mut self, path: GString) -> GString {
+        let path = path.to_string();
+        if path.is_empty() {
+            self.session.bring(None);
+            return GString::new();
+        }
+        match std::fs::metadata(&path) {
+            Ok(m) if m.len() as usize > mftr_sim::data::MAX_INPUT => {
+                return GString::from(format!("longer than {} KB", mftr_sim::data::MAX_INPUT / 1024).as_str());
+            }
+            Err(e) => return GString::from(e.to_string().as_str()),
+            Ok(_) => {}
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                self.session.bring(Some(text));
+                GString::new()
+            }
+            Err(e) => GString::from(e.to_string().as_str()),
+        }
     }
 
     #[func]
@@ -2214,8 +2258,16 @@ impl MatchClient {
             Phase::Connecting | Phase::Lobby if now >= self.next_hello => {
                 let hello = self.session.hello_packet(now);
                 self.transmit(hello, now);
-                // Turned away (a busy server): ask again now and then.
-                self.next_hello = now + if self.session.rejected().is_some() { 2.0 } else { 0.25 };
+                // Turned away (a busy server): ask again now and then. Files going back and
+                // forth (the match's champions, one we bring: D83) go about 30 pieces a second.
+                self.next_hello = now
+                    + if self.session.rejected().is_some() {
+                        2.0
+                    } else if self.session.transferring() {
+                        0.033
+                    } else {
+                        0.25
+                    };
             }
             // The queue list: refreshed every few seconds (how many play each).
             Phase::Queues if now >= self.next_hello => {

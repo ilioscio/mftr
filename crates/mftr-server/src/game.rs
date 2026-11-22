@@ -71,6 +71,9 @@ pub struct Match {
     cfg: ServerConfig,
     players: BTreeSet<PlayerId>,
     log: Vec<ReplayEntry>,
+    /// Champions players brought (D83), in every champion select so far: the replay holds
+    /// them after the server's own.
+    brought: Vec<(std::sync::Arc<str>, mftr_net::content::ContentId, mftr_sim::ChampionId)>,
 }
 
 impl Match {
@@ -95,7 +98,7 @@ impl Match {
             _ => {}
         }
         populate(&mut world, cfg.scenario);
-        Self { world, cfg, players: BTreeSet::new(), log: Vec::new() }
+        Self { world, cfg, players: BTreeSet::new(), log: Vec::new(), brought: Vec::new() }
     }
 
     pub fn world(&self) -> &World {
@@ -282,9 +285,23 @@ impl Match {
         }
     }
 
+    /// A champion a player brought (D83), for the replay.
+    pub fn bring(&mut self, text: std::sync::Arc<str>, file: mftr_net::content::ContentId, id: mftr_sim::ChampionId) {
+        if !self.brought.iter().any(|b| b.1 == file) {
+            self.brought.push((text, file, id));
+        }
+    }
+
     /// Everything recorded so far (nothing unless `ServerConfig::record`), ending with the
     /// current state hash so a check covers every tick simulated.
     pub fn replay(&self) -> Replay {
+        let mut cfg = self.cfg.clone();
+        if !self.brought.is_empty() {
+            let c = &mut cfg.customs;
+            c.texts = c.texts.iter().cloned().chain(self.brought.iter().map(|b| b.0.clone())).collect();
+            c.files = c.files.iter().copied().chain(self.brought.iter().map(|b| b.1)).collect();
+            c.ids = c.ids.iter().copied().chain(self.brought.iter().map(|b| b.2)).collect();
+        }
         let mut entries = self.log.clone();
         let tick = self.world.tick();
         if self.cfg.record
@@ -292,7 +309,7 @@ impl Match {
         {
             entries.push(ReplayEntry::Hash { tick, hash: self.world.state_hash() });
         }
-        Replay { cfg: self.cfg.clone(), entries }
+        Replay { cfg, entries }
     }
 }
 
@@ -449,7 +466,9 @@ impl Replay {
             if let Some(text) = &mut champion_text {
                 if line == "champion-end" {
                     let text = std::mem::take(text);
-                    mftr_sim::limits::load_champion_file(&text).map_err(|e| format!("line {}: {e}", n + 3))?;
+                    // As it was played: a host may have lifted the budget for players' own (D83).
+                    mftr_sim::limits::load_champion_file_with(&text, false)
+                        .map_err(|e| format!("line {}: {e}", n + 3))?;
                     champion_files.push(text);
                     champion_text = None;
                 } else {
@@ -518,7 +537,7 @@ impl Replay {
             }
         }
         if !champion_files.is_empty() {
-            cfg.customs = crate::customs::Customs::load(champion_files)?;
+            cfg.customs = crate::customs::Customs::load_with(champion_files, false, usize::MAX)?;
             cfg.champions = crate::customs::ChampionPolicy::Both;
         }
         Ok(Replay { cfg, entries })

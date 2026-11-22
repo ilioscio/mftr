@@ -417,12 +417,77 @@ pub fn unit(v: Value, at: &str) -> Result<String, DataError> {
     }
 }
 
+static NAMES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
+
+/// Distinct new names one file may hold while it is only being checked ([`without_interning`]).
+const DRY_NAMES: usize = 256;
+
+thread_local! {
+    /// While checking without interning: the new names seen so far, in order.
+    static DRY: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Stand-ins for new names while checking: `\u{1}` and an index, which no real name can be
+/// (names have no control characters), so they stay distinct and can be mapped back.
+fn dry_name(i: usize) -> &'static str {
+    static POOL: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| (0..DRY_NAMES).map(|i| &*Box::leak(format!("\u{1}{i}\u{1}").into_boxed_str())).collect())[i]
+}
+
+/// Run `f` (reading champion files) without adding names to the process's table: a name it
+/// hasn't seen stands in as a placeholder, so a file that is only checked, and refused, costs
+/// nothing that lasts (D83: a server checks files from anyone). Returns `f`'s result and the
+/// new names, by placeholder index, for [`restore_names`].
+///
+/// Anything read for good inside `f` would keep the placeholders: tables built the first time
+/// they're used must be built before (the official champions are, here; a caller warms its
+/// own, as the server does the forge's move library).
+pub fn without_interning<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
+    let _ = crate::champion::ChampionId::Ember.def();
+    let prev = DRY.with(|d| d.replace(Some(Vec::new())));
+    let out = f();
+    let names = DRY.with(|d| d.replace(prev)).unwrap_or_default();
+    (out, names)
+}
+
+/// Whether `name` is in the process's table (tests).
+#[cfg(test)]
+pub(crate) fn is_interned(name: &str) -> bool {
+    NAMES.lock().unwrap_or_else(|e| e.into_inner()).contains(name)
+}
+
+/// `text` with [`without_interning`]'s placeholders turned back into the names they stand for.
+pub fn restore_names(text: &str, names: &[String]) -> String {
+    let mut out = text.to_string();
+    for (i, n) in names.iter().enumerate() {
+        out = out.replace(dry_name(i), n);
+    }
+    out
+}
+
 /// Names live as long as the program (the sim's types hold `&'static str`), interned so reading
 /// the same recipe again doesn't grow memory. Capped so a stream of distinct names can't either.
 fn intern(s: &str, at: &str) -> Result<&'static str, DataError> {
-    static NAMES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
     const MAX_NAMES: usize = 1 << 16;
+    let names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(&n) = names.get(s) {
+        return Ok(n);
+    }
+    drop(names);
+    let dry = DRY.with(|d| {
+        let mut d = d.borrow_mut();
+        let list = d.as_mut()?;
+        let i = list.iter().position(|n| n == s).unwrap_or_else(|| {
+            list.push(s.to_string());
+            list.len() - 1
+        });
+        Some(i)
+    });
+    if let Some(i) = dry {
+        return if i < DRY_NAMES { Ok(dry_name(i)) } else { err(at, "too many distinct names in one file") };
+    }
     let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+    // Another thread may have added it meanwhile.
     if let Some(&n) = names.get(s) {
         return Ok(n);
     }

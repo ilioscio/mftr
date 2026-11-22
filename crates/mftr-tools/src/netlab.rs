@@ -618,7 +618,7 @@ mod tests {
                     up.send(session.lobby_packet(mftr_net::msg::LobbyAction::Reroll), t);
                     rerolled = true;
                 } else if me.rerolls < mftr_server::lobby::REROLLS && !readied {
-                    picked = Some(me.champion);
+                    picked = me.champion;
                     up.send(session.lobby_packet(mftr_net::msg::LobbyAction::Ready(true)), t);
                     readied = true;
                 }
@@ -718,6 +718,109 @@ mod tests {
         assert_eq!(check.mismatch, None);
     }
 
+    /// D83: players bring their own champions. On a server with a champion file of its own
+    /// and `player_champions` on, over lossy links: two players bring the same champion
+    /// (Grumble), a third brings a broken file and is told why, and every client fetches what
+    /// the others brought before the match starts. A spectator arriving mid-match gets the
+    /// whole roster first. Everyone plays, predicted as usual, and the server's recording
+    /// carries both files and re-simulates exactly.
+    #[test]
+    fn players_bring_their_own_champions_end_to_end() {
+        let stormwarden = include_str!("../../../art/champions/examples/stormwarden.champion.ron").to_string();
+        let grumble = include_str!("../../../art/champions/examples/grumble.champion.ron").to_string();
+        let broken = grumble.replace("Champion(", "Champion((");
+        let cfg = ServerConfig {
+            seed: 9,
+            bots: 10,
+            lobby: true,
+            record: true,
+            scenario: Scenario::Aram,
+            customs: mftr_server::customs::Customs::load(vec![stormwarden]).unwrap(),
+            champions: mftr_server::customs::ChampionPolicy::Both,
+            player_champions: true,
+            ..Default::default()
+        };
+        let mut server = ServerCore::new(cfg, 0.0);
+        let brings = [Some(grumble.clone()), Some(grumble), Some(broken), None];
+        let mut sessions: Vec<ClientSession> = (0..4).map(|_| ClientSession::new()).collect();
+        sessions[3].set_spectate(true);
+        for (s, b) in sessions.iter_mut().zip(brings) {
+            s.bring(b);
+        }
+        let mut links: Vec<(SimLink, SimLink)> = (0..4)
+            .map(|i| (SimLink::new(LinkProfile::TYPICAL, 20 + i), SimLink::new(LinkProfile::TYPICAL, 40 + i)))
+            .collect();
+        let (mut t, mut next_hello, mut readied) = (0.0, [0.0; 4], [false; 4]);
+        let (mut started_at, mut status) = (None, vec![None; 4]);
+        while t < 30.0 {
+            for i in 0..links.len() {
+                let mut incoming = Vec::new();
+                while let Some(p) = links[i].0.recv(t) {
+                    incoming.push(p);
+                }
+                for p in incoming {
+                    for (to, bytes) in server.handle_packet(i as u64 + 1, &p, t) {
+                        links[to as usize - 1].1.send(bytes, t);
+                    }
+                }
+            }
+            if t >= server.next_tick_due() {
+                for (to, bytes) in server.step(t) {
+                    links[to as usize - 1].1.send(bytes, t);
+                }
+            }
+            for (i, s) in sessions.iter_mut().enumerate() {
+                while let Some(p) = links[i].1.recv(t) {
+                    s.handle_packet(&p, t);
+                }
+                s.update(t);
+                if s.phase() == Phase::Lobby {
+                    status[i] = s.bring_status();
+                }
+                // Ready once the server has said what it makes of the file brought.
+                let settled = s.bring_status().is_none_or(|b| b.taken || !b.refusal.is_empty());
+                if s.phase() == Phase::Lobby && !readied[i] && settled && i < 3 {
+                    links[i].0.send(s.lobby_packet(mftr_net::msg::LobbyAction::Ready(true)), t);
+                    readied[i] = true;
+                }
+                let spectator_waits = i == 3 && started_at.is_none_or(|s| t < s + 2.0);
+                if matches!(s.phase(), Phase::Connecting | Phase::Lobby | Phase::Joining)
+                    && t >= next_hello[i]
+                    && !spectator_waits
+                {
+                    links[i].0.send(s.hello_packet(t), t);
+                    next_hello[i] = t + if s.transferring() { 0.033 } else { 0.05 };
+                }
+                if s.phase() == Phase::Playing && s.should_send(t) {
+                    links[i].0.send(s.input_packet(t), t);
+                }
+            }
+            if started_at.is_none() && sessions[0].phase() == Phase::Playing {
+                started_at = Some(t);
+            }
+            t += 0.001;
+        }
+        for (i, s) in sessions.iter().enumerate() {
+            assert_eq!(s.roster_error(), None, "session {i}");
+            assert_eq!(s.phase(), Phase::Playing, "session {i} plays");
+        }
+        assert_eq!(sessions[0].champion().def().name, "Grumble");
+        assert_eq!(sessions[1].champion(), sessions[0].champion(), "the same recipe twice is one champion");
+        assert!(status[0].as_ref().is_some_and(|b| b.taken), "{:?}", status[0]);
+        let refused = status[2].clone().unwrap();
+        assert!(!refused.taken && !refused.refusal.is_empty(), "{refused:?}");
+        assert_ne!(sessions[2].champion().def().name, "Grumble");
+        // The roster the clients loaded: the server's champion, then the one brought.
+        let names: Vec<&str> = mftr_net::champions::customs().iter().map(|c| c.def().name).collect();
+        assert_eq!(names, ["Stormwarden", "Grumble"]);
+        let text = server.game().replay().to_text();
+        assert!(text.contains("Stormwarden") && text.contains("Grumble"));
+        let replay = mftr_server::game::Replay::from_text(&text).unwrap();
+        let check = replay.verify();
+        assert!(check.hashes_checked >= 1, "{check:?}");
+        assert_eq!(check.mismatch, None);
+    }
+
     /// After a Base falls, the same client session goes back to champion select (no
     /// reconnect), rerolls, and plays the next match with its new champion. A spectator stays
     /// connected through it all.
@@ -788,7 +891,7 @@ mod tests {
                         up.send(session.lobby_packet(LobbyAction::Reroll), t);
                     } else {
                         if matches == 1 && me.rerolls < mftr_server::lobby::REROLLS {
-                            rerolled = Some(me.champion);
+                            rerolled = me.champion;
                         }
                         up.send(session.lobby_packet(LobbyAction::Ready(true)), t);
                     }

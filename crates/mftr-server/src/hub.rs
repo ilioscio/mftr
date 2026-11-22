@@ -321,7 +321,8 @@ impl Hub {
         }
         // The client loads the server's champion files before anything else (CR1d).
         if !customs.is_empty() && roster != customs.hash() {
-            let roster = ServerMessage::Roster(customs.roster());
+            let roster =
+                ServerMessage::Roster { files: customs.roster(), host: customs.files.len() as u8, budget: true };
             let header = self.front_header(from, now);
             let bytes = msg::encode_server(&header, &roster);
             self.stats.bytes_out += bytes.len() as u64;

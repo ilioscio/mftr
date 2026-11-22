@@ -142,6 +142,16 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 > A custom map or a champion file is named by the BLAKE2s-256 hash of its text (32 bytes), not
 > FNV-64: `MapRequest`, `MapChunk`, Welcome's `map_spec` and each `Roster` entry carry it.
 > Hello's `roster` stays 8 bytes, now the first eight of the BLAKE2s hash of the files' ids.
+> Players' own champions (D83): champion numbers are **six bits** (0–9 official, 10–62 the
+> match's customs: the server's, then those its players brought; 63 none), mapped per match.
+> New client kind 7 `Upload` (the file's content id, its length, an offset and up to 900 bytes),
+> sent in place of hellos. `LobbyState` adds `bring` and `budget` bits, the brought files
+> (content id and length, at most 10), the player's upload (content id, bytes the server has,
+> why it refused: ≤ 160 bytes); a slot adds `brought`, and a slot's champion the client hasn't
+> loaded yet decodes as none instead of failing the packet. `Roster` adds `budget` and `host`
+> (how many of its files are the server's own) and lists up to 31 files, which fits a packet.
+> In champion select a Hello's `roster` says what the client has loaded; the match waits up to
+> 10 s for everyone to have the whole roster.
 
 > **Protocol 32:** the resource (01 §9, D75): a unit's state ends with one bit, then the mana
 > or energy spent (or rage built) as an f32 when it isn't 0.

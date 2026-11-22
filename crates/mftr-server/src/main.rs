@@ -5,7 +5,7 @@
 //! Usage: mftr-server [--bind 0.0.0.0:7777] [--key FILE] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,...]
 //!                    [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR]
 //!                    [--bot-tier recruit|veteran|elite|nightmare]
-//!                    [--champion-file FILE.champion.ron]... [--champion-dir DIR] [--champions official|customs|both]
+//!                    [--champion-file FILE.champion.ron]... [--champion-dir DIR] [--champions official|customs|both] [--player-champions on|off] [--champion-budget on|off]
 //!        mftr-server --scenario NAME [--bots N] [--lobby] [--max-players N] [--map FILE.mftrmap] [...]
 //!        mftr-server [--key FILE] --fingerprint
 //!
@@ -35,6 +35,10 @@
 //! `--champion-file FILE` (up to 21) adds a custom champion (20, CR1d): checked like a pack and
 //! sent to players before they join. `--champions` says which champions matches draw from:
 //! `official`, `customs` or `both` (the default once any file is given).
+//!
+//! `--player-champions on` lets players bring their own champion files to champion select
+//! (D83: checked the same way, then sent to everyone in the match). `--champion-budget off`
+//! lifts the price budget for them, for sandbox play; the limits always apply.
 
 use mftr_net::secure::{Fingerprint, Identity, Received, SecureServer};
 use mftr_server::hub::{self, HOSTED_MODES, ModeOffer};
@@ -44,6 +48,18 @@ use std::net::{SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// `on` or `off` for `flag`.
+fn on_off(v: Option<String>, flag: &str) -> bool {
+    match v.as_deref() {
+        Some("on") => true,
+        Some("off") => false,
+        _ => panic!(
+            "{flag} needs on or off
+{USAGE}"
+        ),
+    }
+}
 
 const USAGE: &str = "mftr-server [--bind ADDR] [--key FILE] [--fingerprint] [--seed N] [--modes aram,mayhem-coop,hyper,classic-versus,horde,...] [--map FILE.mftrmap]... [--max-matches N] [--workers N] [--replay DIR] [--bot-tier recruit|veteran|elite|nightmare] [--champion-file FILE.champion.ron]... [--champion-dir DIR] [--champions official|customs|both]\n       mftr-server --scenario duel|aram|mayhem|hyper|classic|horde|minions|dodge|empty [--bots N] [--lobby] [--max-players N] [...]\n       mftr-server --version";
 /// Instances running at once, by default.
@@ -188,6 +204,12 @@ fn main() -> std::io::Result<()> {
                 let name = args.next().expect("--champions needs official, customs or both");
                 base.champions = mftr_server::customs::ChampionPolicy::by_name(&name)
                     .unwrap_or_else(|| panic!("--champions {name}: official, customs or both\n{USAGE}"));
+            }
+            "--player-champions" => {
+                base.player_champions = on_off(args.next(), "--player-champions");
+            }
+            "--champion-budget" => {
+                base.champion_budget = on_off(args.next(), "--champion-budget");
             }
             "-h" | "--help" => {
                 println!("{USAGE}");

@@ -292,6 +292,16 @@ impl MftrModel {
         }
     }
 
+    /// Which champion file `champion` (a name) is drawn from here: a short content id, or ""
+    /// with none. A champion brought again with new looks keeps its name (D83), so caches of
+    /// its model and portrait are keyed by this too.
+    #[func]
+    fn champion_file_key(champion: GString) -> GString {
+        mftr_client::champion_file(&champion.to_string()).map_or_else(GString::new, |t| {
+            GString::from(format!("{:016x}", mftr_net::content::ContentId::of(&t).short()).as_str())
+        })
+    }
+
     /// Start forging `champion` on a worker thread (see `forge`), if it has looks to forge
     /// and isn't started yet: the client does this for the whole roster as it opens.
     #[func]
