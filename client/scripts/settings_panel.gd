@@ -221,7 +221,7 @@ func _graphics_tab() -> Control:
 	_row(g, "Weather", _choice(["clear", "rain", "night", "storm"], ["Clear", "Rain", "Night", "Night storm"], settings.weather, func(k):
 		settings.weather = k
 		settings.save()),
-		"The sky over the map (being tried out): an overcast day with rain, a moonlit night lit by the braziers, or a stormy night with lightning and thunder. Looks only, and it changes at once.")
+		"The sky over the map: an overcast day with rain, a moonlit night lit by the braziers, or a stormy night with lightning and thunder. Looks only, for you alone (others see their own), and it changes at once. Lower World detail lightens the rain.")
 	var halves := OptionButton.new()
 	halves.focus_mode = Control.FOCUS_NONE
 	var sides := ["north", "south"]

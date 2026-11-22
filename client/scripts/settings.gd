@@ -69,8 +69,8 @@ var hurt_edges := true                   # the screen's edges flash red when hur
 ## are, from the date and `hemisphere`), "map" for the map's own, else "summer", "autumn" or
 ## "winter". Looks only; it changes at once, mid-match too.
 var season := "calendar"
-## The sky over the map (D82, an evaluation): "clear", "rain", "night" or "storm" (weather.gd).
-## Looks only, on this screen; a match doesn't choose it yet.
+## The sky over the map (D82): "clear", "rain", "night" or "storm" (weather.gd). Looks only, on
+## this screen: each player picks their own; a match doesn't choose it yet.
 var weather := "clear"
 ## "north" or "south": which half of the world's seasons "calendar" follows. The default comes
 ## from the system's locale (`Seasons.default_hemisphere`).

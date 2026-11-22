@@ -1,5 +1,5 @@
 extends Node3D
-## Weather (D82, an evaluation): what the sky does over the season's map. Clear is the season as
+## Weather (D82): what the sky does over the season's map, each player's own choice for now. Clear is the season as
 ## it is; rain is an overcast day, the ground soaked and puddled, rain falling around the camera
 ## and its hiss; night is moonlight, the braziers and crystals carrying the light, and a faint
 ## light around your own champion so the fight stays readable; a storm is night and rain with
@@ -47,8 +47,11 @@ const WEATHERS := {
 const SUN_ROTATION := Vector3(-52, -38, 0)   # main.gd's sun
 const MOON_ROTATION := Vector3(-62, 28, 0)   # higher, from the other side: shadows fall another way
 const LAMP_LIGHTS := 6                       # real lights at the nearest lamps after dark (Mobile: 8 a mesh)
+## By World detail (Settings → Graphics): rain streaks, whether drops splash, lamps given real light.
+const DETAIL := {"high": [1800, true, 6], "medium": [1200, true, 4], "low": [700, false, 2]}
 
 var current := "clear"
+var detail := "high"                         # World detail (`set_detail`)
 var strike_every := 0.0                      # `--strikes S`: lightning every S seconds (captures), else at random
 var _fx := {}
 var _env: Environment
@@ -138,6 +141,17 @@ func suspend(off: bool) -> void:
 			_carry.visible = true
 
 
+## World detail changed (or was first applied): lighter rain and fewer lamp lights below High.
+func set_detail(level: String) -> void:
+	if not DETAIL.has(level) or level == detail:
+		return
+	detail = level
+	if _rain != null:
+		_rain.amount = DETAIL[detail][0]
+		_splashes.visible = DETAIL[detail][1]
+		_splashes.emitting = DETAIL[detail][1]
+
+
 ## How much of the sun the thickest cloud takes in this weather (atmosphere.gd).
 func cloud_strength(default: float) -> float:
 	return _fx_of(current).get("cloud_strength", default)
@@ -157,9 +171,10 @@ func update(delta: float, look: Vector3, map_view: Node, own: Node3D) -> void:
 		_splashes.global_position = Vector3(look.x, 0.03, look.z)
 	if not _lamp_lights.is_empty():
 		var near: Array = map_view.nearest_lamps if map_view != null else []
+		var lit := mini(near.size(), DETAIL[detail][2])
 		for i in _lamp_lights.size():
 			var l := _lamp_lights[i]
-			l.visible = i < near.size()
+			l.visible = i < lit
 			if l.visible:
 				var lamp: Array = near[i]
 				l.global_position = lamp[0] + Vector3(0, 0.6, 0)
@@ -192,9 +207,11 @@ func _set_rain(on: bool) -> void:
 		_rain_sound = null
 		return
 	if _rain == null:
-		_rain = _make_rain()
+		_rain = _make_rain(DETAIL[detail][0])
 		add_child(_rain)
 		_splashes = _make_splashes()
+		_splashes.visible = DETAIL[detail][1]
+		_splashes.emitting = DETAIL[detail][1]
 		add_child(_splashes)
 		_rain_sound = AudioStreamPlayer.new()
 		_rain_sound.stream = _rain_loop()
@@ -208,9 +225,9 @@ func _set_rain(on: bool) -> void:
 
 
 ## Streaks falling from 10 m over the view, slanted by the wind, each lined up with its fall.
-static func _make_rain() -> GPUParticles3D:
+static func _make_rain(amount: int) -> GPUParticles3D:
 	var p := GPUParticles3D.new()
-	p.amount = 1800
+	p.amount = amount
 	p.lifetime = 0.62
 	p.preprocess = 1.0
 	p.local_coords = false

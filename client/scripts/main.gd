@@ -1245,6 +1245,7 @@ func _apply_graphics() -> void:
 	_apply_display()
 	_apply_shadows()
 	RenderingServer.global_shader_parameter_set("world_detail", WORLD_DETAIL_LEVELS[settings.world_detail])
+	weather.set_detail(settings.world_detail)
 	world_env.glow_enabled = settings.bloom
 	if atmosphere != null:
 		atmosphere.set_enabled(settings.atmosphere, settings.atmosphere)
