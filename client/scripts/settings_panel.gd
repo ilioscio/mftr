@@ -218,6 +218,10 @@ func _graphics_tab() -> Control:
 		settings.season = keys[i]
 		settings.save())
 	_row(g, "Season", seasons, "How the map is dressed: its ground, cliffs, light, flora and fauna, and the shops. By the calendar it's the season it is where you are; or the map maker's pick, or one you choose. Looks only, and it changes at once.")
+	_row(g, "Weather", _choice(["clear", "rain", "night", "storm"], ["Clear", "Rain", "Night", "Night storm"], settings.weather, func(k):
+		settings.weather = k
+		settings.save()),
+		"The sky over the map (being tried out): an overcast day with rain, a moonlit night lit by the braziers, or a stormy night with lightning and thunder. Looks only, and it changes at once.")
 	var halves := OptionButton.new()
 	halves.focus_mode = Control.FOCUS_NONE
 	var sides := ["north", "south"]

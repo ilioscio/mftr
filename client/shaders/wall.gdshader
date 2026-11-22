@@ -73,6 +73,7 @@ void fragment() {
 			c = mix(c, moss * (0.85 + 0.3 * w_fbm(w_at(P, 3.0, vec2(0.0)))), mossy);
 		}
 	}
+	c = w_soak(c, wetness);
 	ALBEDO = w_fogged(c, world_pos);
 	ROUGHNESS = 1.0;
 }

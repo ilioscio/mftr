@@ -11,14 +11,19 @@ const CLOUD_STRENGTH := 0.55             # how much of the sun the thickest clou
 
 var _drift := Vector2.ZERO
 var _clouds := true
+var _strength := CLOUD_STRENGTH          # the weather's (D82): an overcast sky's are soft and even
 var _motes: GPUParticles3D
 
 
-## `motes`: the season's ("pollen", "leaves", "snow"); `cover`: how much of the map is under
-## cloud, about 0.2 (fair) to 1 (overcast).
-func setup(_map_center_m: Vector2, motes := "pollen", cover := 0.4) -> void:
-	RenderingServer.global_shader_parameter_set("cloud_strength", CLOUD_STRENGTH)
+## `motes`: the season's ("pollen", "leaves", "snow"; "" none, in the rain); `cover`: how much
+## of the map is under cloud, about 0.2 (fair) to 1 (overcast); `strength`: how much of the sun
+## the thickest cloud takes.
+func setup(_map_center_m: Vector2, motes := "pollen", cover := 0.4, strength := CLOUD_STRENGTH) -> void:
+	_strength = strength
+	RenderingServer.global_shader_parameter_set("cloud_strength", _strength)
 	RenderingServer.global_shader_parameter_set("cloud_cover", cover)
+	if motes == "":
+		return
 	_motes = GPUParticles3D.new()
 	_motes.amount = 90
 	_motes.lifetime = 9.0
@@ -138,7 +143,7 @@ func update(delta: float, look: Vector3) -> void:
 
 func set_enabled(clouds: bool, motes: bool) -> void:
 	_clouds = clouds
-	RenderingServer.global_shader_parameter_set("cloud_strength", CLOUD_STRENGTH if clouds else 0.0)
+	RenderingServer.global_shader_parameter_set("cloud_strength", _strength if clouds else 0.0)
 	if _motes != null:
 		_motes.visible = motes
 		_motes.emitting = motes
@@ -146,4 +151,4 @@ func set_enabled(clouds: bool, motes: bool) -> void:
 
 ## Off while something renders without them (the minimap's terrain), then back.
 func suspend(off: bool) -> void:
-	RenderingServer.global_shader_parameter_set("cloud_strength", 0.0 if off or not _clouds else CLOUD_STRENGTH)
+	RenderingServer.global_shader_parameter_set("cloud_strength", 0.0 if off or not _clouds else _strength)

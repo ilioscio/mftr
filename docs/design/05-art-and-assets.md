@@ -71,7 +71,9 @@ handful of parameters, reviewed like any other texture for their memory.
   says (D80). The season's motes (pollen, leaves, snow) float
   near the camera, braziers burn, and a vignette darkens the corners ([15 §7](15-map-art-direction.md#7-light-and-shaders)).
   Shadows, bloom, and clouds with motes can each be turned down or off in Settings → Graphics,
-  where the season can be chosen too.
+  where the season can be chosen too. Weather (D82, being evaluated; `weather.gd`) lays rain,
+  night or a night storm over the season: soaked ground with puddles, moonlight with the
+  braziers lighting the fight, lightning and thunder.
 - **Display** (Settings → Graphics, `settings.gd`, `main.gd` `_apply_graphics`; D81). Every
   setting that costs frame time is a control the player can turn, and a **quality preset** sets
   them together:

@@ -53,6 +53,7 @@ var portraits                             # champion portraits from their models
 var sun: DirectionalLight3D
 var vignette: ColorRect                  # shown while a match is on (15 §7)
 var atmosphere                            # cloud shadows and motes (atmosphere.gd), per map
+var weather                               # rain, night and storms over the season (weather.gd, D82)
 var _look_point := Vector3.ZERO           # where the camera looks, on the ground
 var _graphics_applied := []
 var _fixed_window := false              # scripted captures keep their window (`_apply_display`)
@@ -371,6 +372,12 @@ func _ready() -> void:
 			i += 1
 		elif args[i] == "--lineup-black":
 			_lineup_black = true
+		elif args[i] == "--weather" and i + 1 < args.size():
+			settings.weather = args[i + 1]  # for this run (not saved): clear, rain, night, storm (D82)
+			i += 1
+		elif args[i] == "--strikes" and i + 1 < args.size():
+			weather.strike_every = float(args[i + 1])  # captures: lightning every this many seconds
+			i += 1
 		elif args[i] == "--season" and i + 1 < args.size():
 			settings.season = args[i + 1]  # for this run (not saved): captures of each season
 			i += 1
@@ -1093,6 +1100,10 @@ func _build_world() -> void:
 	add_child(sun)
 	Seasons.apply_light(Seasons.SUMMER, e, sun)
 	sun.shadow_opacity = 0.9
+	weather = preload("res://scripts/weather.gd").new()
+	weather.name = "Weather"
+	add_child(weather)
+	weather.setup(e, sun)
 
 	# A soft vignette over the view (15 §7): the corners darker, the fight brighter.
 	var vig_layer := CanvasLayer.new()
@@ -2099,6 +2110,8 @@ func _process(delta: float) -> void:
 			var want := _wanted_season()
 			if want != _season:
 				_redress_season(want)
+			elif settings.weather != weather.current:
+				_reweather()
 	if playing:
 		_update_blind()
 	_update_draft(playing)
@@ -2164,6 +2177,8 @@ func _process(delta: float) -> void:
 	_update_shot(delta)
 	if atmosphere != null:
 		atmosphere.update(delta, _look_point)
+	if _map_built:
+		weather.update(delta, _look_point, get_node_or_null("MapView"), own_body)
 	_apply_graphics()
 	_apply_audio()
 	_apply_hud_scale()
@@ -2656,18 +2671,35 @@ func _build_map() -> void:
 ## The season's look: the light, the motes in the air, and the world (ground, cliffs, scenery,
 ## life, fountains), shared with the map editor's Actual view.
 func _dress_map(geo: Dictionary) -> void:
-	var season := Seasons.get_season(geo.season)
-	Seasons.apply_light(season, world_env, sun)
-	if atmosphere != null:
-		atmosphere.queue_free()
-	atmosphere = preload("res://scripts/atmosphere.gd").new()
-	add_child(atmosphere)
-	atmosphere.setup(geo.size / 2.0 * UNITS_TO_METERS, season.get("motes", "pollen"), season.get("clouds", 0.4))
 	var view: Node3D = MapView.new()
 	view.name = "MapView"
 	add_child(view)
 	view.build(geo, ground, ALLY_COLOR, ENEMY_COLOR)
 	_road_segments = view.road_segments
+	_dress_sky(geo)
+
+
+## The season's light and air under the weather (D82): the sun or moon, the fill, the clouds and
+## motes, the rain and the lamps' lights. Again when the weather changes.
+func _dress_sky(geo: Dictionary) -> void:
+	weather.current = settings.weather if settings.weather in weather.NAMES else "clear"
+	var look: Dictionary = weather.dress(Seasons.get_season(geo.season))
+	Seasons.apply_light(look, world_env, sun)
+	if atmosphere != null:
+		atmosphere.queue_free()
+	atmosphere = preload("res://scripts/atmosphere.gd").new()
+	add_child(atmosphere)
+	atmosphere.setup(geo.size / 2.0 * UNITS_TO_METERS, look.get("motes", "pollen"), look.get("clouds", 0.4),
+		weather.cloud_strength(atmosphere.CLOUD_STRENGTH))
+	weather.apply(get_node_or_null("MapView"))
+
+
+## The weather changed in Settings: the sky again, mid-match too (the map stays).
+func _reweather() -> void:
+	var geo := _map_geo.duplicate()
+	geo["season"] = _season
+	_dress_sky(geo)
+	_graphics_applied = []  # the new atmosphere takes the Graphics settings
 
 
 ## The season changed (the settings, or the calendar turned): redress the map at once, mid-match
@@ -7416,6 +7448,7 @@ func _render_minimap_terrain() -> void:
 	RenderingServer.global_shader_parameter_set("fog_on", 0.0)
 	if atmosphere != null:
 		atmosphere.suspend(true)
+	weather.suspend(true)
 	var region: Rect2 = minimap.region
 	var vp := SubViewport.new()
 	vp.size = Vector2i(1024, int(1024.0 * region.size.y / region.size.x))
@@ -7450,6 +7483,7 @@ func _render_minimap_terrain() -> void:
 		print("MFTR: terrain saved to ", _dump_terrain)
 	if atmosphere != null:
 		atmosphere.suspend(false)
+	weather.suspend(false)
 	minimap.queue_redraw()
 	vp.queue_free()
 	_terrain_pending = false

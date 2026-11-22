@@ -9,10 +9,23 @@ global uniform vec2 cloud_offset;
 global uniform float cloud_strength;
 // How much of the map is under cloud, about 0.2 (fair) to 1 (overcast), set per season (D80).
 global uniform float cloud_cover;
+// Weather (D82, `weather.gd`): how soaked the world is, 0 dry to 1 after a downpour, and how
+// hard it's raining now (puddles ring with drops). Here, since every world shader includes this.
+global uniform float wetness;
+global uniform float rain;
+// The sky as a puddle mirrors it (D82): grey on a rainy day, near black at night.
+global uniform vec3 sky_mirror;
 // 0 for things rendered outside the map (portraits), which no cloud passes over.
 uniform float cloud_receive = 1.0;
 
 varying float cloud_sun;
+
+// Soaked (D82): darker and a little richer, as wet soil, stone and bark are. `k` 0 dry, 1 soaked.
+vec3 w_soak(vec3 c, float k) {
+	vec3 d = c * (1.0 - 0.4 * k);
+	float l = dot(d, vec3(0.3, 0.55, 0.15));
+	return max(mix(vec3(l), d, 1.0 + 0.3 * k), vec3(0.0));
+}
 
 // An integer hash of a lattice point: exact however far the wind has carried the clouds (a
 // fract(sin()) hash loses precision on many GPUs once its input grows).

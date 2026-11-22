@@ -33,6 +33,12 @@ var road_segments := PackedVector4Array()
 var _lamps := []
 var _ground_mat: ShaderMaterial
 const LAMPS_DRAWN := 16
+## The weather's (D82): after dark the lamps' pools burn brighter and reach farther.
+var lamp_boost := 1.0
+var lamp_reach := 1.0
+## The lamps nearest what the camera looks at this frame, nearest first, as [position, color,
+## reach, strength]: the weather puts real lights at them after dark (`weather.gd`).
+var nearest_lamps := []
 ## Units on the ground, (x, z, radius, strength) in meters, set by main each frame: the ground
 ## shader darkens a soft disc under the nearest OCCLUDERS_DRAWN (contact shadows, D80).
 var occluders := PackedVector4Array()
@@ -377,6 +383,7 @@ func _process(_delta: float) -> void:
 		var at := marker.global_position
 		near.append([Vector2(at.x - look.x, at.z - look.z).length_squared(), at, l])
 	near.sort_custom(func(a, b): return a[0] < b[0])
+	nearest_lamps = near.slice(0, 8).map(func(n): return [n[1], n[2][1], n[2][2], n[2][3]])
 	var pos := PackedVector4Array()
 	var col := PackedVector4Array()
 	for i in LAMPS_DRAWN:
@@ -384,7 +391,7 @@ func _process(_delta: float) -> void:
 			var at: Vector3 = near[i][1]
 			var l: Array = near[i][2]
 			var c: Color = l[1]
-			pos.append(Vector4(at.x, at.z, l[2], l[3]))
+			pos.append(Vector4(at.x, at.z, l[2] * lamp_reach, l[3] * lamp_boost))
 			col.append(Vector4(c.r, c.g, c.b, float(i) * 1.7 + at.x))
 		else:
 			pos.append(Vector4(0, 0, 0, 0))

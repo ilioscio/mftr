@@ -10,7 +10,9 @@
 // the land under deep water, the grass under full dirt, the dirt where there's none, the
 // lamps' flicker out of their reach (05 §9).
 shader_type spatial;
-render_mode diffuse_lambert, specular_disabled;
+// Not specular_disabled: puddles (D82) glint in the lights (`light()`); SPECULAR stays 0, so no
+// ambient reflection anywhere.
+render_mode diffuse_lambert;
 #include "res://shaders/clouds.gdshaderinc"
 #include "res://shaders/world.gdshaderinc"
 #include "res://shaders/grass.gdshaderinc"
@@ -46,6 +48,8 @@ uniform float lane_mode = 0.0;
 uniform float lane_width = 9.0;
 
 varying vec3 world_pos;
+// How much of a puddle this point is (D82), for the light's glint off it.
+varying float puddle;
 
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -100,6 +104,7 @@ void fragment() {
 	WP P = WP(p, dFdx(p), dFdy(p));
 	float grain = w_grain(P, 14.0);
 	vec3 ground = vec3(0.0);
+	float on_water = 0.0;
 	if (control_on) {
 		// Sample the control map with a warped lookup, so its edges wander like a painter's.
 		vec2 warp = vec2(w_fbm(w_at(P, 0.3, vec2(0.0))) - 0.5, w_fbm(w_at(P, 0.3, vec2(9.0))) - 0.5) * 1.6;
@@ -111,6 +116,7 @@ void fragment() {
 		float bank_noise = (w_fbm(w_at(P, 0.25, vec2(5.0))) - 0.5) * 0.35 + (w_fbm(w_at(P, 1.5, vec2(0.0))) - 0.5) * 0.08;
 		float wb = c.b + bank_noise;
 		float water = smoothstep(0.32, 0.4, wb);
+		on_water = water;
 		if (water < 1.0) {
 			// Dirt with grass tongues (and no grass drawn where the dirt covers it).
 			float tongue = (w_fbm(w_at(P, 0.55, vec2(2.0))) - 0.5) * 0.55 + (w_fbm(w_at(P, 2.2, vec2(0.0))) - 0.5) * 0.12;
@@ -164,6 +170,30 @@ void fragment() {
 		float grid = 1.0 - smoothstep(0.47, 0.5, max(g.x, g.y));
 		ground *= 1.0 - 0.06 * (1.0 - grid);
 	}
+	// Rain (D82): the land soaked darker, and puddles where the ground dips (a broad noise),
+	// mirrors of the sky that ring with the drops while it rains.
+	puddle = 0.0;
+	float ring = 0.0;
+	if (wetness > 0.0) {
+		float land = 1.0 - on_water;
+		ground = mix(ground, w_soak(ground, wetness), land);
+		float dip = w_fbm(w_at(P, 0.3, vec2(13.0)));
+		puddle = smoothstep(0.6, 0.65, dip) * wetness * land;
+		if (puddle > 0.0) {
+			ground = mix(ground, ground * 0.28, puddle);
+			if (rain > 0.0) {
+				// One drop a cell, landing at its own time: a ring spreading and fading.
+				vec2 rc = p * 2.4;
+				vec2 ci = floor(rc);
+				float h = w_hash(ci + 7.0);
+				vec2 at = ci + 0.3 + 0.4 * vec2(h, fract(h * 13.7));
+				float t = fract(TIME * 1.3 + h * 5.0);
+				float d = distance(rc, at);
+				ring = (1.0 - smoothstep(0.0, 0.06, abs(d - t * 0.4))) * (1.0 - t) * rain * puddle;
+				ground = mix(ground, vec3(0.5), ring * 0.22);
+			}
+		}
+	}
 	float open = 1.0;
 	int occluders_n = world_detail >= 1 ? occluder_count : min(occluder_count, OCCLUDERS_LOW);
 	for (int i = 0; i < occluders_n; i++) {
@@ -174,6 +204,7 @@ void fragment() {
 	ground *= open;
 	ALBEDO = w_fogged(ground, world_pos);
 	ROUGHNESS = 1.0;
+	SPECULAR = 0.0;
 	// The lamps' pools: light falling off with the square of the distance's share of the reach.
 	vec3 lit = vec3(0.0);
 	for (int i = 0; i < lamp_count; i++) {
@@ -186,8 +217,18 @@ void fragment() {
 		}
 	}
 	EMISSION = ALBEDO * lit * 2.0;
+	// A puddle mirrors the sky (as it'd look from the camera's pitch), broken where a drop rings.
+	// Its rim is only the soaked dark; the water's sheen is in its middle.
+	EMISSION += sky_mirror * smoothstep(0.35, 1.0, puddle) * (1.0 - ring * 0.6) * 0.6;
 }
 
 void light() {
 	WORLD_LIGHT
+	// A puddle catches a brazier's light as a glint. The sun or moon only faintly: from this
+	// camera, the whole ground lies near the angle that mirrors it, and it's behind the clouds.
+	if (puddle > 0.0) {
+		vec3 h = normalize(VIEW + LIGHT);
+		float nh = max(dot(NORMAL, h), 0.0);
+		SPECULAR_LIGHT += pow(nh, 120.0) * 2.5 * puddle * ATTENUATION * LIGHT_COLOR * (LIGHT_IS_DIRECTIONAL ? 0.1 * cloud_sun : 1.0);
+	}
 }
