@@ -11,6 +11,8 @@ use std::sync::RwLock;
 
 use mftr_sim::ChampionId;
 
+use crate::content::ContentId;
+
 /// Customs one server can offer: five bits carry 0–30, and 31 means "none".
 pub const MAX_CUSTOMS: usize = 21;
 const OFFICIAL: u8 = ChampionId::ALL.len() as u8;
@@ -46,12 +48,12 @@ pub fn from_wire(v: u8) -> Option<ChampionId> {
     t.get((v - OFFICIAL) as usize).copied()
 }
 
-/// A roster's hash (the files' hashes in order), so a client can say which one it has loaded
-/// (`Hello::roster`); 0 is the empty roster.
-pub fn roster_hash(file_hashes: &[u64]) -> u64 {
-    if file_hashes.is_empty() {
+/// A roster's hash (from the files' content ids, in order), so a client can say which one it
+/// has loaded (`Hello::roster`); 0 is the empty roster.
+pub fn roster_hash(files: &[ContentId]) -> u64 {
+    if files.is_empty() {
         return 0;
     }
-    let text: String = file_hashes.iter().map(|h| format!("{h:016x}")).collect();
-    mftr_sim::mapspec::text_hash(&text).max(1)
+    let text: String = files.iter().map(|id| id.to_string()).collect();
+    ContentId::of(&text).short().max(1)
 }

@@ -478,7 +478,7 @@ Champion(
   memory-safe, minimal parsers (D70).
 - **Caps:** a recipe ≤ 256 KB uncompressed *(start)*, nearly all of it paint. A champion with no
   brush paint is a few KB.
-- **Identity:** the recipe's id is its BLAKE3 hash, signed by its author's key (11 §5, 07 §3).
+- **Identity:** the recipe's id is its BLAKE2s-256 content id (D83), signed by its author's key once sharing goes beyond a lobby (11 §5, 07 §3).
 
 ### 11.2 Why recipes, not models
 
@@ -565,6 +565,55 @@ stays exact.
   keys (11 §5). Reporting comes with M5's moderation work (07 §5).
 - **Likenesses:** see §15.
 
+### 13.1 Players' own champions (D83)
+
+Hosts choose the customs above. Players also want to bring the champions they made, without
+asking the host to restart a server. Recipes were built for this: a recipe is data that only our
+own readers parse (11 §3.3), so the work is closing what changes when any player, not the host,
+is the source.
+
+- **Upload:** in champion select a player may upload **one** champion file (≤ 64 KB, the
+  reader's cap) on the reliable channel, rate-limited, only once they have joined the lobby.
+- **The server checks it** with the same strict reader, limits and price budget as its own
+  customs, and refuses it with the reason. It then offers the file to the match by its
+  **content id** (below), as it offers its own customs today.
+- **Every client checks it again** and refuses to join if one fails (11 §4). A refusal here means
+  the server or a client is out of date or hostile, since the server already refused bad files.
+  Replays carry the files, as they do now.
+- **Duplicates:** two players may bring the same recipe; it is one champion in the registry.
+- **Someone else's recipe:** a player may bring a file someone else made (a friend sends theirs).
+  The lobby shows who brought it. The maker's signature (11 §5) comes with sharing beyond a lobby.
+- **Host settings:**
+
+  | Setting | Default | What |
+  |---|---|---|
+  | `--player-champions off\|on` | off | Whether players may bring their own |
+  | `--ranked-player-champions` | off | Ranked queues take players' own champions too. Without it, ranked allows only the server's own list (official, or its customs if `--champions` includes them) |
+  | `--champion-budget on\|off` | on | Off lifts the price budget (§9.1) for matches that aren't ranked, for sandbox play. The limits (§9.4: D10, D36, `mftr_sim::limits`) never lift: they keep the sim bounded and the game readable |
+
+- **Player controls** are §13's: show default looks, mute one player's look, and the host refusing a
+  recipe by its content id.
+
+**Hardening first.** A server so far parsed only files its operator chose. Before uploads open:
+
+1. **Content ids:** champion files and maps are named by **BLAKE2s-256** of their text, not
+   FNV-64, which anyone can collide (a crafted file could pose as another player's). Protocol 33.
+   BLAKE2 is already in `mftr-net` for the transport (D40), so this adds no dependency.
+2. **No crash from a file:** reading a champion file and forging its looks run behind
+   `catch_unwind` on the server, the client and the forge's workers; a panic becomes a refusal.
+3. **Fuzzing:** a test mutates the example and official files (flips, cuts, splices, repeats) through
+   the reader, the looks reader and the forge, and fails on any panic or on a forge over its time cap.
+   It runs in `cargo test` with no fuzzing crate.
+4. **No path from a name:** a champion's name comes from its maker, so no file is named by it.
+   Until 0.23 the client kept a forged model as `<name>-<hash>.forged`, and a name like `../x`
+   or `C:/x` put that file outside the cache; it is now `<content id>.forged`. A pack path is
+   made only from a one-word name, and the creator saves under letters, digits, `_` and `-`.
+5. **A cache with a quota:** kept models past 1 GB go, least recently used first (11 §6). Each
+   is 3.5–4 MB, and every custom champion a player meets is kept.
+6. **The registry is reclaimed:** champions register for a match and leave with it, so uploads
+   on a long-running server can't fill the process-wide registry (D73's 4,096 slots) or its
+   interned names. This lands with the per-match roster (the upload slice), before uploads open.
+
 ## 14. Rollout (track CR)
 
 | Slice | What | Exit |
@@ -594,10 +643,9 @@ creator (D72).
    that's obviously Shrek). Privately that's their business. What is the policy for customs
    pushed by community servers, and for any future shared gallery? (09 has to answer this before
    any sharing beyond servers.)
-3. **Ranked:** customs are allowed on servers that allow them (D68). Is a ranked queue ever
-   allowed customs, or only official recipes?
-4. **Duplicates and copies:** can two players bring the same recipe into one match? Can a player
-   bring someone else's recipe (it's signed by its author, not by who brings it)?
+3. ~~**Ranked**~~: resolved by D83. Ranked takes the server's own list; players' own champions
+   only with `--ranked-player-champions` (§13.1).
+4. ~~**Duplicates and copies**~~: resolved by D83. Both are allowed (§13.1).
 5. **Sharing:** beyond server push and files, is there ever a gallery? A central one conflicts
    with "no mandatory central service" (00 §2); a federated one waits on M6.
 6. **Recasts and extra abilities:** do moves with stages (10 §4.1 `stages`) or a fifth ability fit

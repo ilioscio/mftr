@@ -107,14 +107,20 @@ fn forge_kept(art: &str, champion: &str, text: &str, cache: Option<&std::path::P
         return forge_now(art, champion, text);
     };
     let print = ART_PRINT.get_or_init(|| art_fingerprint(std::path::Path::new(art)));
-    let recipe = mftr_pack::cache::fnv1a64(text.as_bytes());
-    let key = format!("{}|{print}|{recipe:016x}", env!("MFTR_FORGE_BUILD"));
-    // One file per champion and recipe: a custom champion of the same name doesn't evict it.
-    let stem = format!("{}-{recipe:016x}", champion.to_lowercase());
+    // The recipe by content id (D83): a crafted file can't share another's kept model.
+    let recipe = mftr_net::content::ContentId::of(text);
+    let key = format!("{}|{print}|{recipe}", env!("MFTR_FORGE_BUILD"));
+    // Named by the recipe's content id alone, never by anything in the file (11 §6): a
+    // champion's name comes from whoever made it, and one like `../x` or `C:/x` would put
+    // the file outside the cache.
+    let stem = recipe.to_string();
     let path = dir.join(format!("{stem}.forged"));
     if let Ok(bytes) = std::fs::read(&path)
         && let Ok(pack) = mftr_pack::cache::read(&bytes, &key)
     {
+        // Used now: the quota removes the least recently used first.
+        let _ =
+            std::fs::File::options().write(true).open(&path).and_then(|f| f.set_modified(std::time::SystemTime::now()));
         return Ok(Some(Arc::new(pack)));
     }
     slot.state.store(FORGE_BUILDING, std::sync::atomic::Ordering::Release);
@@ -127,6 +133,45 @@ fn forge_kept(art: &str, champion: &str, text: &str, cache: Option<&std::path::P
             .and_then(|_| std::fs::rename(&tmp, &path));
     }
     r
+}
+
+/// How much the kept models may take on disk (11 §6): about 250 champions. Every custom
+/// champion a player meets is kept, so without a cap the folder only grows.
+const FORGE_CACHE_QUOTA: u64 = 1 << 30;
+
+/// Whether `name` is a kept model's file name: its recipe's content id in hex, `.forged`.
+fn kept_name(name: &str) -> bool {
+    name.strip_suffix(".forged").is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Remove from `dir` the forge's files that aren't kept models now (older versions named them
+/// by champion; a `.tmp` is half-written), then the least recently used kept models past
+/// `quota` bytes. A model's time is when it was last written or read (`forge_kept` touches
+/// it). Only the forge's own files (`.forged`, `.forged.tmp`) are ever removed.
+fn prune_forge_cache(dir: &std::path::Path, quota: u64) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let mut kept = Vec::new();
+    for e in rd.flatten() {
+        let Ok(m) = e.metadata() else { continue };
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !m.is_file() || !(name.ends_with(".forged") || name.ends_with(".forged.tmp")) {
+            continue;
+        }
+        if !kept_name(&name) {
+            let _ = std::fs::remove_file(e.path());
+            continue;
+        }
+        let t = m.modified().unwrap_or(std::time::UNIX_EPOCH);
+        kept.push((t, m.len(), e.path()));
+    }
+    kept.sort_by_key(|k| std::cmp::Reverse(k.0));
+    let mut total = 0u64;
+    for (_, len, path) in kept {
+        total += len;
+        if total > quota {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 /// The art the forge reads (the biped library, the creator bases and their parts, the
@@ -170,7 +215,15 @@ fn art_fingerprint(art: &std::path::Path) -> String {
     format!("{:016x}", mftr_pack::cache::fnv1a64(&bytes))
 }
 
+/// Forge a champion file's looks. The file may come from any server or player (D83), so a panic
+/// in the reader or the forge is an error (the champion gets the stand-in model), not a crash
+/// and not a worker that never finishes.
 fn forge_now(art: &str, champion: &str, text: &str) -> Forged {
+    std::panic::catch_unwind(|| forge_unguarded(art, champion, text))
+        .unwrap_or_else(|_| Err("the forge failed on this champion file (a bug: please report it)".to_string()))
+}
+
+fn forge_unguarded(art: &str, champion: &str, text: &str) -> Forged {
     let Some(looks) = mftr_forge::looks::of_champion_file(text).map_err(|e| format!("its looks: {e}"))? else {
         return Ok(None);
     };
@@ -264,9 +317,13 @@ impl MftrModel {
     }
 
     /// Keep forged models in `dir` between launches (the player's data folder), from now on.
+    /// The folder is pruned first: what isn't a kept model goes, then the least recently used
+    /// past [`FORGE_CACHE_QUOTA`].
     #[func]
     fn set_forge_cache(dir: GString) {
-        *FORGE_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::path::PathBuf::from(dir.to_string()));
+        let dir = std::path::PathBuf::from(dir.to_string());
+        prune_forge_cache(&dir, FORGE_CACHE_QUOTA);
+        *FORGE_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some(dir);
     }
 
     /// Loads and validates `<id>.glb` and its `<id>.anims.ron` (an absolute path). `null` if it
@@ -792,6 +849,32 @@ fn auto_smooth(pos: &[[f32; 3]], idx: &[u32], crease_cos: f32) -> Smoothed {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_forge_cache_keeps_only_its_models_within_the_quota() {
+        let dir = std::env::temp_dir().join(format!("mftr-forge-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let id = |n: u8| format!("{}.forged", mftr_net::content::ContentId::of(&n.to_string()));
+        let at = |s: u64| std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000 + s);
+        for (i, name) in [id(1), id(2), id(3)].iter().enumerate() {
+            let f = std::fs::File::create(dir.join(name)).unwrap();
+            f.set_len(100).unwrap();
+            f.set_modified(at(i as u64)).unwrap();
+        }
+        // An older version's name, a half-written file, and someone else's file.
+        for name in ["rook-0123456789abcdef.forged", "x.forged.tmp", "notes.txt"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        prune_forge_cache(&dir, 250);
+        let mut left: Vec<String> =
+            std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        let mut want = vec![id(2), id(3), "notes.txt".to_string()];
+        want.sort();
+        assert_eq!(left, want, "the oldest model past the quota and the stale files go");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     /// A cube with its 8 corners shared: every edge is a 90° crease, so each corner splits in

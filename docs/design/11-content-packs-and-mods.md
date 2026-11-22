@@ -106,7 +106,7 @@ Champions made in the creator ([20](20-champion-creator.md)) travel as **recipes
 
 ## 5. Identity, integrity and trust
 
-- **Content addressing:** a pack's id is the **BLAKE3 hash** of its canonical bytes. The server's Welcome lists `(name, hash, size)` for every pack in the match. The client downloads only the missing hashes and verifies each one.
+- **Content addressing:** a pack's id is the **BLAKE2s-256 hash** of its canonical bytes, as champion files' and maps' are already (D83: BLAKE2 is in `mftr-net` for the transport, so no second hash crate). The server's Welcome lists `(name, hash, size)` for every pack in the match. The client downloads only the missing hashes and verifies each one.
 - **Signatures:** the author signs the hash with their identity key (Ed25519, the identity of [07 §3](07-hosting-and-trust.md#3-identity)). The client shows the author and caches trust decisions per author key.
 - **Player control:** a setting with **Ask (default) / Allow from trusted authors / Never**. The first time a server pushes a pack from a new author, the client asks, showing the pack name, author, size and hash. "Never" means you only join servers that run official content.
 - **Official content** is signed by the project key and is always trusted. Community servers can run first-party-only modes with zero prompts.
@@ -115,7 +115,7 @@ Champions made in the creator ([20](20-champion-creator.md)) travel as **recipes
 ## 6. Transfer and cache
 
 - Packs travel on the existing encrypted connection (a reliable bulk channel, rate-limited so gameplay traffic never suffers) during champion select, with a progress bar. Total per match ≤ 40 MB *(start)*.
-- **Cache:** `user://packs/<blake3>.pack`. Files are named by hash only, never by anything inside the pack, and reads are re-verified. LRU eviction with a 1 GB default quota.
+- **Cache:** `user://packs/<blake2s>.pack`. The forged models of champion files are kept the same way: `user://forged/<content id>.forged`, least recently used past 1 GB removed (D83). Files are named by hash only, never by anything inside the pack, and reads are re-verified. LRU eviction with a 1 GB default quota.
 - **Fallback:** the "Show default models" setting (05 §1 / Q6) renders community champions with a generic model of their archetype and silhouette class plus the built-in VFX. The gameplay is identical.
 
 ## 7. Scripted behaviors (later)

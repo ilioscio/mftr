@@ -1832,7 +1832,13 @@ func _new() -> void:
 
 func _save() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(DIR))
-	var slug := creator.name().to_lower().strip_edges().replace(" ", "_")
+	# Letters, digits, `_` and `-` only: the name may come from someone else's file (D83), and
+	# one like `../x` must not choose where this writes.
+	var slug := ""
+	for ch in creator.name().to_lower().strip_edges():
+		slug += ch if (ch >= "a" and ch <= "z") or (ch >= "0" and ch <= "9") or ch == "-" else "_"
+	if slug.replace("_", "") == "":
+		slug = "champion"
 	var path := file_path if file_path != "" else ProjectSettings.globalize_path("%s/%s.champion.ron" % [DIR, slug])
 	var err: String = creator.save(path)
 	if err != "":
