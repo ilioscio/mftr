@@ -75,7 +75,7 @@ Then open `client/project.godot` in Godot (4.5+) and press Play. The start menu 
 
 No one to duel? With `--scenario duel` on the server, start a sparring bot: `cargo run --release -p mftr-tools -- bot --server 127.0.0.1:7777 --duel --seconds 600`. Other development scenarios: `--scenario minions` (minion-block sandbox), `--scenario dodge` (turrets that fire skillshots at you) and `--scenario empty`. To join another machine's server, type its address in the start menu (or pass it as a user argument: `godot --path client -- 192.168.1.10:7777`).
 
-**Graphics and performance:** Settings → Graphics has quality presets (Ultra, High, Medium, Low) for everything that costs frame rate; the first run picks one for your graphics card, and laptops with integrated graphics get Medium or Low. To measure: `godot --path client -- 127.0.0.1:7777 --graphics low --perf-report 20` plays 20 s and prints frame and GPU times ([05 §9](docs/design/05-art-and-assets.md#9-performance-targets)).
+**Graphics and performance:** Settings → Graphics has quality presets (Ultra, High, Medium, Low) for everything that costs frame rate; the first run picks one for your graphics card, and laptops with integrated graphics get Medium. To measure: `godot --path client -- 127.0.0.1:7777 --graphics low --perf-report 20` plays 20 s and prints frame and GPU times ([05 §9](docs/design/05-art-and-assets.md#9-performance-targets)).
 
 Headless tools:
 

@@ -85,8 +85,8 @@ handful of parameters, reviewed like any other texture for their memory.
 
   Changing any of these makes the preset Custom. On the first run (and for settings from
   before the presets whose graphics were never changed) the game guesses: a discrete graphics
-  card gets High; integrated graphics get Medium, or Low on screens with over 1.5× 1080p's
-  pixels (`Settings.detect_preset`). The controls:
+  card gets High; integrated graphics get Medium, which keeps the shadows; only a software
+  renderer gets Low (`Settings.detect_preset`). The controls:
   - **Window:** borderless fullscreen (the default), exclusive fullscreen or windowed. Scripted
     captures keep the window they started with.
   - **Render scale (50–150 %):** the world's resolution as a share of the window's, scaled

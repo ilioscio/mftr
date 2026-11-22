@@ -138,7 +138,7 @@ func load_file(path := PATH) -> void:
 		window_mode = one_of(cfg.get_value("graphics", "window_mode", window_mode), WINDOW_MODES, window_mode)
 		antialias = one_of(cfg.get_value("graphics", "antialias", antialias), ANTIALIAS, antialias)
 		render_scale = clampf(cfg.get_value("graphics", "render_scale", render_scale), RENDER_SCALE_MIN, RENDER_SCALE_MAX)
-		# Before the presets (0.23), shadows were on or off.
+		# Before the presets (0.22.1), shadows were on or off.
 		var legacy := "high" if cfg.get_value("graphics", "shadows", true) else "off"
 		shadow_quality = one_of(cfg.get_value("graphics", "shadow_quality", legacy), SHADOW_QUALITIES, shadow_quality)
 		world_detail = one_of(cfg.get_value("graphics", "world_detail", world_detail), WORLD_DETAILS, world_detail)
@@ -193,15 +193,15 @@ func matching_preset() -> String:
 	return "custom"
 
 
-## A first guess for this machine (05 §9): integrated graphics (or none: a software renderer)
-## get Low on screens past 1080p, where they'd shade over 1.5× its pixels, and Medium on the
-## rest; everything else, High. The player can always choose another.
+## A first guess for this machine (05 §9): integrated graphics get Medium, which keeps the
+## shadows (a Radeon 840M runs it at about 57 fps on a 2256×1504 screen); no graphics card at all
+## (a software renderer) gets Low; everything else, High. Low, which gives up the shadows, is
+## the player's own choice. The player can always choose another.
 static func detect_preset() -> String:
 	var kind := RenderingServer.get_video_adapter_type()
-	if kind != RenderingDevice.DEVICE_TYPE_INTEGRATED_GPU and kind != RenderingDevice.DEVICE_TYPE_CPU:
-		return "high"
-	var screen := DisplayServer.screen_get_size()
-	return "low" if screen.x * screen.y > 1920 * 1080 * 1.5 else "medium"
+	if kind == RenderingDevice.DEVICE_TYPE_CPU:
+		return "low"
+	return "medium" if kind == RenderingDevice.DEVICE_TYPE_INTEGRATED_GPU else "high"
 
 
 ## `v` if it's one of `allowed`, else `fallback` (a saved choice from another version).
