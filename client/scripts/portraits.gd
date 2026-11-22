@@ -45,10 +45,23 @@ func setup(model_for: Callable, template: MftrModel, colors: Dictionary) -> void
 	_colors = colors
 
 
+## Which champion file each portrait was drawn from (D83): one brought again with new looks
+## keeps its name, and is drawn again.
+var _files := {}
+
+
+func _fresh(champion: String) -> void:
+	var key := MftrModel.champion_file_key(champion)
+	if _files.get(champion, key) != key:
+		_cache.erase(champion)
+	_files[champion] = key
+
+
 ## The champion's portrait of `kind`, or null while it's being rendered (or without a model).
 func portrait(champion: String, kind := "bust") -> Texture2D:
 	if champion == "":
 		return null
+	_fresh(champion)
 	if _cache.has(champion):
 		return _cache[champion].get(kind)
 	if not _queue.has(champion):
@@ -58,6 +71,7 @@ func portrait(champion: String, kind := "bust") -> Texture2D:
 
 ## Whether a champion's portraits are done (or can't be made: no model).
 func is_done(champion: String) -> bool:
+	_fresh(champion)
 	return _cache.has(champion)
 
 

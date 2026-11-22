@@ -10,6 +10,8 @@ rust-version.workspace = true
 mftr-sim.workspace = true
 mftr-net.workspace = true
 mftr-bots.workspace = true
+# The looks reader, so a champion file a player brings is checked whole (D83).
+mftr-forge.workspace = true
 
 [lints]
 workspace = true

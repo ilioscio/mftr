@@ -47,6 +47,11 @@ pub const RECONNECT_GRACE: f64 = 60.0;
 pub const MIDJOIN_SECONDS: f64 = 20.0;
 /// Rerolls a player joining an ARAM match in progress gets.
 const MIDJOIN_REROLLS: u8 = 1;
+/// Champion files a player may try to bring in one champion select (D83): refusals count.
+pub const BRING_TRIES: u8 = 3;
+/// How long a match waits past its countdown for every player to load the champions others
+/// brought (D83). One that still hasn't can't play this match.
+pub const LOAD_GRACE: f64 = 10.0;
 /// Spectators a server accepts (they don't count toward the player limit).
 pub const MAX_SPECTATORS: usize = 8;
 /// Spectator connections use these ids (they have no unit and issue no commands).
@@ -171,6 +176,13 @@ pub struct ServerConfig {
     /// replays, and which champions matches draw from.
     pub customs: customs::Customs,
     pub champions: customs::ChampionPolicy,
+    /// Players may bring their own champion files to champion select (D83,
+    /// `--player-champions on`).
+    pub player_champions: bool,
+    /// The price budget applies to champions players bring (`--champion-budget off` lifts
+    /// it for sandbox play, D83; the limits always apply). Ranked queues, when there are any
+    /// (M5), keep it whatever this says.
+    pub champion_budget: bool,
 }
 
 impl Default for ServerConfig {
@@ -189,6 +201,8 @@ impl Default for ServerConfig {
             bot_tier: Tier::Veteran,
             customs: customs::Customs::default(),
             champions: customs::ChampionPolicy::Official,
+            player_champions: false,
+            champion_budget: true,
         }
     }
 }
@@ -296,6 +310,70 @@ struct Pending {
     send: SendTracker,
     /// Joining the match in progress instead (13 §3): `player` is the bot's seat to take.
     mid: Option<MidJoin>,
+    /// The custom roster the client has loaded, as its hellos say (D83).
+    loaded: u64,
+    /// The champion file it is bringing (D83).
+    upload: Option<Upload>,
+    /// Files it has tried to bring in this champion select.
+    tries: u8,
+}
+
+impl Pending {
+    fn new(player: PlayerId, last_heard: f64, send: SendTracker, mid: Option<MidJoin>, loaded: u64) -> Self {
+        Pending { player, last_heard, send, mid, loaded, upload: None, tries: 0 }
+    }
+
+    /// Take a piece of an upload: a new file id starts over (one try more), a piece at the
+    /// byte the server has goes on. The whole file, once it's all here and new.
+    fn take_piece(&mut self, file: ContentId, total: u32, offset: u32, bytes: &[u8]) -> Option<Vec<u8>> {
+        if total == 0 || total as usize > mftr_sim::data::MAX_INPUT {
+            return None;
+        }
+        if self.upload.as_ref().is_none_or(|u| u.file != file) {
+            if offset != 0 {
+                return None;
+            }
+            self.tries = self.tries.saturating_add(1);
+            let refusal = if self.tries > BRING_TRIES {
+                format!("only {BRING_TRIES} champion files a champion select")
+            } else {
+                String::new()
+            };
+            self.upload = Some(Upload { file, total, bytes: Vec::new(), refusal, done: false });
+        }
+        let u = self.upload.as_mut()?;
+        if u.done || !u.refusal.is_empty() || u.total != total || offset as usize != u.bytes.len() {
+            return None;
+        }
+        u.bytes.extend_from_slice(&bytes[..bytes.len().min(total as usize - u.bytes.len())]);
+        if u.bytes.len() < total as usize {
+            return None;
+        }
+        u.done = true;
+        Some(std::mem::take(&mut u.bytes))
+    }
+
+    /// What the client sees of its upload.
+    fn upload_state(&self) -> msg::UploadState {
+        match &self.upload {
+            None => msg::UploadState::default(),
+            Some(u) => msg::UploadState {
+                file: u.file,
+                have: if u.done { u.total } else { u.bytes.len() as u32 },
+                refusal: u.refusal.clone(),
+            },
+        }
+    }
+}
+
+/// A champion file being brought (D83).
+#[derive(Clone, Debug)]
+struct Upload {
+    file: ContentId,
+    total: u32,
+    bytes: Vec<u8>,
+    refusal: String,
+    done: bool,
 }
 
 /// A champion being chosen to join a match in progress with.
@@ -361,6 +439,14 @@ pub struct ServerCore {
     /// Packet sequences for clients that haven't joined yet (fetching champion files, CR1d):
     /// the client drops a repeated sequence as a duplicate.
     front: BTreeMap<ClientKey, SendTracker>,
+    /// The champions players brought to this champion select (D83).
+    brought: customs::Brought,
+    /// This match's custom roster in wire order (the server's files, then those brought), and
+    /// its hash as a client that has loaded it says in its hellos.
+    roster: std::sync::Arc<[ChampionId]>,
+    roster_hash: u64,
+    /// Since when the match has waited past its countdown for clients to load the roster.
+    holding: Option<f64>,
     pub stats: ServerStats,
 }
 
@@ -375,6 +461,7 @@ impl ServerCore {
         let mut game = Match::new(cfg.clone());
         let mut bots = Bots::new(cfg.seed);
         let lobby = cfg.lobby.then(|| Self::make_lobby(&cfg, cfg.seed));
+        let cfg_roster = Self::host_roster(&cfg);
         if !cfg.lobby {
             for _ in 0..cfg.bots.min(cfg.max_players) {
                 let Some(player) = game.free_player() else { break };
@@ -404,7 +491,84 @@ impl ServerCore {
             areas: BTreeMap::new(),
             channels: BTreeMap::new(),
             front: BTreeMap::new(),
+            roster: cfg_roster.0,
+            roster_hash: cfg_roster.1,
+            brought: customs::Brought::default(),
+            holding: None,
             stats: ServerStats::default(),
+        }
+    }
+
+    /// The server's own customs as a roster, and its hash.
+    fn host_roster(cfg: &ServerConfig) -> (std::sync::Arc<[ChampionId]>, u64) {
+        (cfg.customs.ids.clone(), cfg.customs.hash())
+    }
+
+    /// The roster after a champion was brought (or champion select started over).
+    fn update_roster(&mut self) {
+        let ids: Vec<ChampionId> = self.cfg.customs.ids.iter().chain(&self.brought.ids).copied().collect();
+        let files: Vec<ContentId> = self.cfg.customs.files.iter().chain(&self.brought.files).copied().collect();
+        self.roster = ids.into();
+        self.roster_hash = mftr_net::champions::roster_hash(&files);
+    }
+
+    /// Every custom champion's file in wire order, with its champion.
+    fn roster_entries(&self) -> Vec<(ContentId, ChampionId)> {
+        self.cfg
+            .customs
+            .entries()
+            .chain(self.brought.files.iter().copied().zip(self.brought.ids.iter().copied()))
+            .collect()
+    }
+
+    /// What `ServerMessage::Roster` carries: every custom champion's file in wire order.
+    fn roster_message(&self) -> ServerMessage {
+        let mut files = self.cfg.customs.roster();
+        files.extend(self.brought.listed());
+        let host = self.cfg.customs.files.len() as u8;
+        ServerMessage::Roster { files, host, budget: self.cfg.champion_budget || self.brought.ids.is_empty() }
+    }
+
+    /// A champion file `player` brought (D83): checked like every client will check it, then
+    /// theirs; or the reason it was refused, which they see.
+    fn bring(&mut self, key: ClientKey, player: PlayerId, bytes: Vec<u8>) {
+        let file = self.pending.get(&key).and_then(|p| p.upload.as_ref()).map(|u| u.file);
+        let result = String::from_utf8(bytes)
+            .map_err(|_| "not a text file".to_string())
+            .and_then(|text| {
+                if Some(ContentId::of(&text)) != file {
+                    return Err("the file arrived damaged: bring it again".to_string());
+                }
+                let id = customs::accept(&text, self.cfg.champion_budget, &self.roster_entries())?;
+                Ok((text, id))
+            })
+            .and_then(|(text, id)| {
+                let file = ContentId::of(&text);
+                let text: std::sync::Arc<str> = text.into();
+                if self.cfg.customs.files.contains(&file) {
+                    return Ok((text, file, id));
+                }
+                if !self.brought.add(text.clone(), file, id) {
+                    return Err(format!(
+                        "this match has the {} champions players can bring",
+                        mftr_net::champions::MAX_BROUGHT
+                    ));
+                }
+                Ok((text, file, id))
+            });
+        match result {
+            Ok((text, file, id)) => {
+                self.game.bring(text, file, id);
+                self.update_roster();
+                if let Some(lobby) = &mut self.lobby {
+                    lobby.bring(player, id);
+                }
+            }
+            Err(e) => {
+                if let Some(u) = self.pending.get_mut(&key).and_then(|p| p.upload.as_mut()) {
+                    u.refusal = e;
+                }
+            }
         }
     }
 
@@ -531,6 +695,8 @@ impl ServerCore {
 
     /// Handle one incoming datagram. Returns packets to send immediately.
     pub fn handle_packet(&mut self, from: ClientKey, bytes: &[u8], now: f64) -> Vec<(ClientKey, Vec<u8>)> {
+        // Champion numbers on the wire are this match's (D83).
+        let _roster = mftr_net::champions::scope(self.roster.clone());
         self.stats.bytes_in += bytes.len() as u64;
         let (header, message) = match msg::decode_client(bytes) {
             Ok(v) => v,
@@ -546,18 +712,21 @@ impl ServerCore {
                     out.push((from, self.reject(RejectReason::ProtocolMismatch)));
                     return out;
                 }
-                // Customs (CR1d): the client loads this server's champion files first.
-                if !self.cfg.customs.is_empty() && roster != self.cfg.customs.hash() {
-                    let header = self.front_header(from);
-                    let bytes = msg::encode_server(&header, &ServerMessage::Roster(self.cfg.customs.roster()));
-                    self.stats.bytes_out += bytes.len() as u64;
-                    out.push((from, bytes));
-                    return out;
-                }
+                // In champion select a hello says which roster the client has loaded: it
+                // fetches the champions others bring from what the lobby lists (D83).
                 if let Some(p) = self.pending.get_mut(&from) {
                     p.last_heard = now;
+                    p.loaded = roster;
                     let player = p.player;
                     out.extend(self.lobby_packet(from, player, now));
+                    return out;
+                }
+                // Customs (CR1d, D83): the client loads this match's champion files first.
+                if roster != self.roster_hash && !self.roster.is_empty() {
+                    let header = self.front_header(from);
+                    let bytes = msg::encode_server(&header, &self.roster_message());
+                    self.stats.bytes_out += bytes.len() as u64;
+                    out.push((from, bytes));
                     return out;
                 }
                 if !self.conns.contains_key(&from) {
@@ -585,8 +754,7 @@ impl ServerCore {
                             out.push((from, self.reject(RejectReason::ServerFull)));
                             return out;
                         };
-                        self.pending
-                            .insert(from, Pending { player, last_heard: now, send: SendTracker::default(), mid: None });
+                        self.pending.insert(from, Pending::new(player, now, SendTracker::default(), None, roster));
                         out.extend(self.lobby_packet(from, player, now));
                         return out;
                     } else if let Some(seat) = self.free_seat() {
@@ -594,10 +762,7 @@ impl ServerCore {
                         let champion = self.deal(seat, &[]);
                         let rerolls = if self.pick() { 0 } else { MIDJOIN_REROLLS };
                         let mid = MidJoin { champion, rerolls, ready: false, deadline: now + MIDJOIN_SECONDS };
-                        self.pending.insert(
-                            from,
-                            Pending { player: seat, last_heard: now, send: SendTracker::default(), mid: Some(mid) },
-                        );
+                        self.pending.insert(from, Pending::new(seat, now, SendTracker::default(), Some(mid), roster));
                         out.extend(self.lobby_packet(from, seat, now));
                         return out;
                     } else if self.cfg.lobby || self.game.player_count() >= self.cfg.max_players as usize {
@@ -612,6 +777,21 @@ impl ServerCore {
                     conn.last_heard = now;
                 }
                 out.extend(self.welcome(from, client_time_us, now));
+            }
+            // A piece of the champion file a player brings (D83): only in champion select
+            // before the match, on servers that take them.
+            ClientMessage::Upload { file, total, offset, bytes } => {
+                let open = self.cfg.player_champions && self.lobby.is_some();
+                let Some(p) = self.pending.get_mut(&from) else { return out };
+                p.last_heard = now;
+                let player = p.player;
+                if open
+                    && p.mid.is_none()
+                    && let Some(whole) = p.take_piece(file, total, offset, &bytes)
+                {
+                    self.bring(from, player, whole);
+                }
+                out.extend(self.lobby_packet(from, player, now));
             }
             ClientMessage::Lobby(action) => {
                 if let Some(p) = self.pending.get_mut(&from) {
@@ -674,7 +854,11 @@ impl ServerCore {
             ClientMessage::MapRequest { hash, have } => {
                 // A piece of the custom map or of a champion file (CR1d).
                 let map = self.cfg.map.clone().filter(|t| ContentId::of(t) == hash);
-                let Some(text) = map.or_else(|| self.cfg.customs.file(hash).cloned()) else { return out };
+                let Some(text) =
+                    map.or_else(|| self.cfg.customs.file(hash).cloned()).or_else(|| self.brought.file(hash).cloned())
+                else {
+                    return out;
+                };
                 if have as usize > text.len() {
                     return out;
                 }
@@ -814,8 +998,15 @@ impl ServerCore {
         };
         state.mode = self.cfg.scenario.mode();
         state.map = self.map_name.clone();
+        // Players' own champions (D83): whether they may, what others brought, and theirs.
+        state.bring = self.cfg.player_champions && !state.midgame;
+        state.budget = self.cfg.champion_budget;
+        state.brought = self.brought.listed();
+        state.upload = self.pending.get(&key)?.upload_state();
         let seq = self.pending.get_mut(&key)?.send.next_seq();
         let h = PacketHeader { seq, ack: 0, ack_bits: 0 };
+        // The roster may have just grown (a champion brought in this very call).
+        let _roster = mftr_net::champions::scope(self.roster.clone());
         let bytes = msg::encode_server(&h, &ServerMessage::Lobby(Box::new(state)));
         self.stats.bytes_out += bytes.len() as u64;
         Some((key, bytes))
@@ -954,10 +1145,11 @@ impl ServerCore {
                 msg::LobbySlot {
                     player: p,
                     team: lobby::team_of(p),
-                    champion: if mine { mid.champion } else { current.unwrap_or(ChampionId::Ember) },
+                    champion: Some(if mine { mid.champion } else { current.unwrap_or(ChampionId::Ember) }),
                     rerolls: if mine { mid.rerolls } else { 0 },
                     ready: if mine { mid.ready } else { true },
                     bot: !mine && self.bots.contains(p),
+                    brought: false,
                 }
             })
             .collect();
@@ -971,7 +1163,16 @@ impl ServerCore {
             pick: self.pick(),
             midgame: true,
             bots: None,
+            bring: false,
+            budget: true,
+            brought: Vec::new(),
+            upload: Default::default(),
         }
+    }
+
+    /// Whether `key`'s client has loaded this match's roster (or `anyway`).
+    fn has_roster(&self, key: ClientKey, anyway: bool) -> bool {
+        anyway || self.pending.get(&key).is_some_and(|p| p.loaded == self.roster_hash)
     }
 
     /// A joiner is ready (or out of time): their champion takes the bot's seat (13 §3), and
@@ -1027,12 +1228,12 @@ impl ServerCore {
             let c = self.conns.remove(&key).expect("listed");
             if let Some(player) = lobby.add_human(now, self.cfg.coop) {
                 // The packet sequence carries over, so the client accepts what follows.
-                self.pending.insert(key, Pending { player, last_heard: c.last_heard, send: c.send, mid: None });
+                self.pending.insert(key, Pending::new(player, c.last_heard, c.send, None, 0));
             }
         }
         for (key, p) in joining {
             if let Some(player) = lobby.add_human(now, self.cfg.coop) {
-                self.pending.insert(key, Pending { player, last_heard: p.last_heard, send: p.send, mid: None });
+                self.pending.insert(key, Pending::new(player, p.last_heard, p.send, None, 0));
             }
         }
         for player in self.game.players() {
@@ -1047,6 +1248,11 @@ impl ServerCore {
         self.game.restart();
         self.lobby = Some(lobby);
         self.lobby_steps = 0;
+        // Each champion select starts with only the server's own champions (D83); clients
+        // bring theirs again.
+        self.brought = customs::Brought::default();
+        self.update_roster();
+        self.holding = None;
         let pending: Vec<(ClientKey, PlayerId)> = self.pending.iter().map(|(k, p)| (*k, p.player)).collect();
         pending.into_iter().filter_map(|(key, player)| self.lobby_packet(key, player, now)).collect()
     }
@@ -1068,6 +1274,8 @@ impl ServerCore {
 
     /// Simulate the next tick and build one snapshot per client.
     pub fn step(&mut self, now: f64) -> Vec<(ClientKey, Vec<u8>)> {
+        // Champion numbers on the wire are this match's (D83).
+        let _roster = mftr_net::champions::scope(self.roster.clone());
         // Silent connections: spectators go, players' champions wait for a reconnect. In a
         // match a bot plays the champion meanwhile (13 §4).
         let timed_out: Vec<ClientKey> =
@@ -1112,7 +1320,15 @@ impl ServerCore {
             self.start += TICK_DT_F64;
             let starts_in = self.lobby.as_mut().and_then(|l| l.starts_in(now));
             if starts_in == Some(0.0) {
-                return self.start_from_lobby(now);
+                // Everyone must have the champions others brought (D83); the match waits
+                // for them a little.
+                let hash = self.roster_hash;
+                let waiting = self.pending.values().any(|p| p.mid.is_none() && p.loaded != hash);
+                let since = *self.holding.get_or_insert(now);
+                if !waiting || now - since >= LOAD_GRACE {
+                    self.holding = None;
+                    return self.start_from_lobby(now);
+                }
             }
             self.lobby_steps += 1;
             if !self.lobby_steps.is_multiple_of(10) {
@@ -1132,7 +1348,7 @@ impl ServerCore {
         for (key, player, heard, mid) in joining {
             if now - heard > TIMEOUT {
                 self.pending.remove(&key);
-            } else if mid.ready || now >= mid.deadline {
+            } else if (mid.ready || now >= mid.deadline) && self.has_roster(key, now >= mid.deadline + LOAD_GRACE) {
                 joined.extend(self.finish_midjoin(key, now));
             } else if k.0.is_multiple_of(10) {
                 joined.extend(self.lobby_packet(key, player, now));
@@ -2216,7 +2432,7 @@ mod tests {
         let l = lobby(&send(&mut core, 1, ClientMessage::Lobby(msg::LobbyAction::Reroll), 1.0));
         let after = *l.slots.iter().find(|s| s.player == l.you).unwrap();
         assert_ne!(after.champion, me.champion);
-        assert!(l.bench.contains(&me.champion));
+        assert!(l.bench.contains(&me.champion.unwrap()));
         let l = lobby(&send(&mut core, 1, ClientMessage::Lobby(msg::LobbyAction::Ready(true)), 2.0));
         assert!(l.starts_in_ms <= 3000);
         // The world holds still in champion select, then the match starts with a Welcome.
@@ -2235,7 +2451,7 @@ mod tests {
         }
         let unit = welcome.expect("the match starts");
         assert!((4.9..5.2).contains(&t), "3 s after everyone is ready: {t}");
-        assert_eq!(core.world().unit(unit).unwrap().champion, Some(after.champion));
+        assert_eq!(core.world().unit(unit).unwrap().champion, after.champion);
         assert_eq!(core.game().player_count(), 10);
         core.step(t + 1.0 / 30.0);
         assert_eq!(core.world().tick(), Tick(1), "now the clock runs");
@@ -2441,8 +2657,8 @@ mod tests {
         let mine = l.slots.iter().find(|s| s.player == seat).unwrap();
         assert!(mine.champion != me.champion && mine.rerolls == 0);
         let teammates: Vec<ChampionId> =
-            l.slots.iter().filter(|s| s.team == Team::Red && s.player != seat).map(|s| s.champion).collect();
-        assert!(!teammates.contains(&mine.champion), "not one the team has");
+            l.slots.iter().filter(|s| s.team == Team::Red && s.player != seat).filter_map(|s| s.champion).collect();
+        assert!(!teammates.contains(&mine.champion.unwrap()), "not one the team has");
         send(&mut core, 2, ClientMessage::Lobby(msg::LobbyAction::Ready(true)), t);
         let gold = core.world().units().iter().find(|u| u.owner == Some(seat)).unwrap().state.progress.gold;
         t += 1.0 / 30.0;
@@ -2452,7 +2668,7 @@ mod tests {
         assert!(token != 0);
         assert_eq!(core.bot_count(), 8);
         let new = core.world().unit(unit).unwrap();
-        assert_eq!((new.owner, new.champion), (Some(seat), Some(mine.champion)));
+        assert_eq!((new.owner, new.champion), (Some(seat), mine.champion));
         assert!(core.world().unit(old.id).is_none(), "the bot's champion left");
         let p = new.state.progress;
         assert_eq!((p.level, p.xp, p.points, p.ranks), (was.level, was.xp, was.level, [0; 4]));
@@ -2483,13 +2699,15 @@ mod tests {
         let l = lobby_of(&send(&mut core, 2, hello_msg(0, false), t)).unwrap();
         assert!(l.midgame && l.pick);
         let team = l.slots.iter().find(|s| s.player == l.you).unwrap().team;
-        let mate = l.slots.iter().find(|s| s.team == team && s.player != l.you).unwrap().champion;
+        let mate = l.slots.iter().find(|s| s.team == team && s.player != l.you).unwrap().champion.unwrap();
         let l2 = lobby_of(&send(&mut core, 2, ClientMessage::Lobby(msg::LobbyAction::Take(mate)), t)).unwrap();
-        assert_ne!(l2.slots.iter().find(|s| s.player == l.you).unwrap().champion, mate, "a teammate has it");
-        let free =
-            ChampionId::ALL.into_iter().find(|c| !l.slots.iter().any(|s| s.team == team && s.champion == *c)).unwrap();
+        assert_ne!(l2.slots.iter().find(|s| s.player == l.you).unwrap().champion, Some(mate), "a teammate has it");
+        let free = ChampionId::ALL
+            .into_iter()
+            .find(|c| !l.slots.iter().any(|s| s.team == team && s.champion == Some(*c)))
+            .unwrap();
         let l3 = lobby_of(&send(&mut core, 2, ClientMessage::Lobby(msg::LobbyAction::Take(free)), t)).unwrap();
-        assert_eq!(l3.slots.iter().find(|s| s.player == l.you).unwrap().champion, free);
+        assert_eq!(l3.slots.iter().find(|s| s.player == l.you).unwrap().champion, Some(free));
         // Out of time, joining anyway.
         run_until(&mut core, &[1, 2], &mut t, 5.0 + MIDJOIN_SECONDS + 1.0);
         assert!(core.world().units().iter().any(|u| u.owner == Some(l.you) && u.champion == Some(free)));
@@ -2882,7 +3100,7 @@ mod tests {
         let rerolled = l
             .iter()
             .find_map(|m| match m {
-                ServerMessage::Lobby(l) => l.slots.iter().find(|s| s.player == l.you).map(|s| s.champion),
+                ServerMessage::Lobby(l) => l.slots.iter().find(|s| s.player == l.you).and_then(|s| s.champion),
                 _ => None,
             })
             .unwrap();

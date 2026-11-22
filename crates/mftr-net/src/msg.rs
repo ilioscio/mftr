@@ -37,6 +37,8 @@ pub const MAP_CHUNK_BYTES: usize = 900;
 pub const MAX_QUEUES: usize = 64;
 /// Bound on a queue's map name, in bytes.
 pub const MAX_QUEUE_NAME: usize = 48;
+/// Bound on why the server refused a brought champion file (D83), in bytes.
+pub const MAX_REFUSAL: usize = 160;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClientMessage {
@@ -82,6 +84,16 @@ pub enum ClientMessage {
         at: Vec2,
         target: Option<UnitId>,
     },
+    /// A piece of the champion file this player brings to champion select (D83): `total`
+    /// bytes in all, this piece from byte `offset`. The server says in `LobbyState::upload`
+    /// how much it has, and the client sends on from there.
+    Upload {
+        /// The whole file's content id: a new id starts a new upload.
+        file: ContentId,
+        total: u32,
+        offset: u32,
+        bytes: Vec<u8>,
+    },
     /// The details of a unit for the inspect window (01 §13), asked a few times a second while
     /// it's open; the server answers with `Inspect` if the unit is visible to the asker.
     Inspect {
@@ -115,10 +127,23 @@ pub struct BotsChoice {
 pub struct LobbySlot {
     pub player: PlayerId,
     pub team: Team,
-    pub champion: ChampionId,
+    /// `None`: a champion a player brought that this client hasn't loaded yet (D83).
+    pub champion: Option<ChampionId>,
     pub rerolls: u8,
     pub ready: bool,
     pub bot: bool,
+    /// The player brought this champion (D83).
+    pub brought: bool,
+}
+
+/// The champion file this player is bringing (D83): how many bytes the server has, and why
+/// it refused the file (empty when it didn't).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UploadState {
+    /// The file it's about (all zero: none yet).
+    pub file: ContentId,
+    pub have: u32,
+    pub refusal: String,
 }
 
 /// Champion select as the receiving player sees it.
@@ -141,6 +166,14 @@ pub struct LobbyState {
     pub midgame: bool,
     /// Co-op: how well the bots will play, and the votes (17 §9). `None` in Versus.
     pub bots: Option<BotsChoice>,
+    /// Players may bring their own champions here (D83).
+    pub bring: bool,
+    /// The price budget applies to them (a host may lift it: `--champion-budget off`).
+    pub budget: bool,
+    /// The champion files players brought (content id and length), after the server's own in
+    /// wire order: a client fetches the ones it lacks with `MapRequest`.
+    pub brought: Vec<(ContentId, u32)>,
+    pub upload: UploadState,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -348,10 +381,16 @@ pub enum ServerMessage {
     Queues(Vec<QueueInfo>),
     /// A unit's details, answering `ClientMessage::Inspect`.
     Inspect(Box<UnitInfo>),
-    /// The server's custom champions (CR1d), answering a Hello whose `roster` isn't theirs:
-    /// each champion file's text hash and length, in wire order (wire numbers 10 and up). The
-    /// client fetches them with `MapRequest`, loads them, and says hello again.
-    Roster(Vec<(ContentId, u32)>),
+    /// The match's custom champions (CR1d, D83), answering a Hello whose `roster` isn't
+    /// theirs: each champion file's content id and length, in wire order (wire numbers 10 and
+    /// up: the server's own, then those its players brought). The client fetches them with
+    /// `MapRequest`, loads them, and says hello again. `budget`: whether the price budget
+    /// applies to them (a host may lift it for players' own, D83).
+    Roster {
+        files: Vec<(ContentId, u32)>,
+        host: u8,
+        budget: bool,
+    },
 }
 
 /// One unit's details for the inspect window (01 §13): its live stats, inventory, augments and
@@ -1761,17 +1800,26 @@ fn minion_from_wire(v: u64) -> MinionKind {
     }
 }
 
-/// Five bits: the official ten are 0–9, the server's customs 10–30 (`champions`), 31 none.
+/// Six bits: the official ten are 0–9, the match's customs 10–62 (`champions`), 63 none.
 fn write_champion(w: &mut BitWriter, c: Option<ChampionId>) {
     let v = c.and_then(crate::champions::to_wire);
-    debug_assert!(c.is_none() || v.is_some(), "{c:?} isn't on this server's roster");
-    w.write(v.map_or(31, u64::from), 5);
+    debug_assert!(c.is_none() || v.is_some(), "{c:?} isn't on this match's roster");
+    w.write(v.map_or(crate::champions::NONE as u64, u64::from), 6);
 }
 
 fn read_champion(r: &mut BitReader) -> Result<Option<ChampionId>, DecodeError> {
-    match r.read(5)? {
-        31 => Ok(None),
-        v => crate::champions::from_wire(v as u8).map(Some).ok_or(DecodeError::Invalid("champion")),
+    match r.read(6)? as u8 {
+        crate::champions::NONE => Ok(None),
+        v => crate::champions::from_wire(v).map(Some).ok_or(DecodeError::Invalid("champion")),
+    }
+}
+
+/// Champion select's champions (D83): one a player has just brought may not be loaded here
+/// yet, which is `None` until it is, not a broken packet.
+fn read_lobby_champion(r: &mut BitReader) -> Result<Option<ChampionId>, DecodeError> {
+    match r.read(6)? as u8 {
+        crate::champions::NONE => Err(DecodeError::Invalid("champion")),
+        v => Ok(crate::champions::from_wire(v)),
     }
 }
 
@@ -2052,6 +2100,18 @@ pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
             }
             w.finish()
         }
+        ClientMessage::Upload { file, total, offset, bytes } => {
+            let mut w = begin(header, 7);
+            file.write(&mut w);
+            w.write_u32(*total);
+            w.write_u32(*offset);
+            let n = bytes.len().min(MAP_CHUNK_BYTES);
+            w.write_u16(n as u16);
+            for b in &bytes[..n] {
+                w.write_u8(*b);
+            }
+            w.finish()
+        }
     }
 }
 
@@ -2096,6 +2156,15 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
             let at = read_vec2(&mut r)?;
             let target = if r.read_bool()? { Some(UnitId(r.read_u32()?)) } else { None };
             ClientMessage::Ping { kind, at, target }
+        }
+        7 => {
+            let file = ContentId::read(&mut r)?;
+            let (total, offset, n) = (r.read_u32()?, r.read_u32()?, r.read_u16()? as usize);
+            if n > MAP_CHUNK_BYTES || total as usize > mftr_sim::data::MAX_INPUT {
+                return Err(DecodeError::Invalid("upload"));
+            }
+            let bytes = (0..n).map(|_| r.read_u8()).collect::<Result<Vec<u8>, _>>()?;
+            ClientMessage::Upload { file, total, offset, bytes }
         }
         _ => return Err(DecodeError::Invalid("message kind")),
     };
@@ -2319,9 +2388,11 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             write_unit_info(&mut w, info);
             w.finish()
         }
-        ServerMessage::Roster(files) => {
+        ServerMessage::Roster { files, host, budget } => {
             let mut w = begin(header, 7);
-            let n = files.len().min(crate::champions::MAX_CUSTOMS);
+            w.write_bool(*budget);
+            w.write_u8(*host);
+            let n = files.len().min(crate::champions::MAX_ROSTER);
             w.write_u8(n as u8);
             for (hash, len) in &files[..n] {
                 hash.write(&mut w);
@@ -2447,10 +2518,11 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             for s in l.slots.iter().take(MAX_LOBBY_SLOTS) {
                 w.write_u8(s.player.0);
                 w.write_bool(s.team == Team::Red);
-                write_champion(&mut w, Some(s.champion));
+                write_champion(&mut w, s.champion);
                 w.write(s.rerolls as u64, 3);
                 w.write_bool(s.ready);
                 w.write_bool(s.bot);
+                w.write_bool(s.brought);
             }
             w.write(l.bench.len().min(MAX_LOBBY_SLOTS) as u64, 5);
             for c in l.bench.iter().take(MAX_LOBBY_SLOTS) {
@@ -2473,6 +2545,21 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
                 }
                 w.write_bool(b.mine.is_some());
                 w.write(b.mine.unwrap_or(0) as u64 & 3, 2);
+            }
+            w.write_bool(l.bring);
+            w.write_bool(l.budget);
+            let n = l.brought.len().min(crate::champions::MAX_BROUGHT);
+            w.write(n as u64, 4);
+            for (id, len) in &l.brought[..n] {
+                id.write(&mut w);
+                w.write_u32(*len);
+            }
+            l.upload.file.write(&mut w);
+            w.write_u32(l.upload.have);
+            let why = truncate_utf8(&l.upload.refusal, MAX_REFUSAL);
+            w.write_u8(why.len() as u8);
+            for b in why.bytes() {
+                w.write_u8(b);
             }
             w.finish()
         }
@@ -2537,14 +2624,19 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
         }
         6 => ServerMessage::Inspect(Box::new(read_unit_info(&mut r)?)),
         7 => {
+            let budget = r.read_bool()?;
+            let host = r.read_u8()?;
             let n = r.read_u8()? as usize;
-            if n > crate::champions::MAX_CUSTOMS {
+            if n > crate::champions::MAX_ROSTER {
                 return Err(DecodeError::Invalid("roster size"));
             }
             let files = (0..n)
                 .map(|_| Ok((ContentId::read(&mut r)?, r.read_u32()?)))
                 .collect::<Result<Vec<_>, DecodeError>>()?;
-            ServerMessage::Roster(files)
+            if host as usize > files.len() {
+                return Err(DecodeError::Invalid("roster size"));
+            }
+            ServerMessage::Roster { files, host, budget }
         }
         1 => {
             let tick = Tick(r.read_u32()?);
@@ -2656,16 +2748,21 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 slots.push(LobbySlot {
                     player: PlayerId(r.read_u8()?),
                     team: if r.read_bool()? { Team::Red } else { Team::Blue },
-                    champion: read_champion(&mut r)?.ok_or(DecodeError::Invalid("champion"))?,
+                    champion: read_lobby_champion(&mut r)?,
                     rerolls: r.read(3)? as u8,
                     ready: r.read_bool()?,
                     bot: r.read_bool()?,
+                    brought: r.read_bool()?,
                 });
             }
             let n = r.read(5)? as usize;
+            // A bench champion not loaded here yet is left off until it is.
             let bench = (0..n)
-                .map(|_| read_champion(&mut r)?.ok_or(DecodeError::Invalid("champion")))
-                .collect::<Result<_, _>>()?;
+                .map(|_| read_lobby_champion(&mut r))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect();
             let starts_in_ms = r.read_u32()?;
             let mode = GameMode::from_u8(r.read(4)? as u8).ok_or(DecodeError::Invalid("game mode"))?;
             let (pick, midgame) = (r.read_bool()?, r.read_bool()?);
@@ -2687,6 +2784,21 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             } else {
                 None
             };
+            let (bring, budget) = (r.read_bool()?, r.read_bool()?);
+            let n = r.read(4)? as usize;
+            if n > crate::champions::MAX_BROUGHT {
+                return Err(DecodeError::Invalid("brought champions"));
+            }
+            let brought =
+                (0..n).map(|_| Ok((ContentId::read(&mut r)?, r.read_u32()?))).collect::<Result<_, DecodeError>>()?;
+            let file = ContentId::read(&mut r)?;
+            let have = r.read_u32()?;
+            let len = r.read_u8()? as usize;
+            if len > MAX_REFUSAL {
+                return Err(DecodeError::Invalid("refusal"));
+            }
+            let bytes = (0..len).map(|_| r.read_u8()).collect::<Result<Vec<u8>, _>>()?;
+            let refusal = String::from_utf8(bytes).map_err(|_| DecodeError::Invalid("refusal"))?;
             ServerMessage::Lobby(Box::new(LobbyState {
                 you,
                 slots,
@@ -2697,6 +2809,10 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
                 pick,
                 midgame,
                 bots,
+                bring,
+                budget,
+                brought,
+                upload: UploadState { file, have, refusal },
             }))
         }
         _ => return Err(DecodeError::Invalid("message kind")),
@@ -2767,10 +2883,11 @@ mod tests {
         let slot = |p: u8, c: ChampionId| LobbySlot {
             player: PlayerId(p),
             team: if p.is_multiple_of(2) { Team::Blue } else { Team::Red },
-            champion: c,
+            champion: Some(c),
             rerolls: p % 3,
             ready: p % 2 == 1,
             bot: p > 6,
+            brought: p == 3,
         };
         let msg = ServerMessage::Lobby(Box::new(LobbyState {
             you: PlayerId(4),
@@ -2782,8 +2899,29 @@ mod tests {
             pick: true,
             midgame: true,
             bots: Some(BotsChoice { tier: 2, votes: [0, 1, 2, 0], mine: Some(2) }),
+            bring: true,
+            budget: false,
+            brought: vec![(ContentId::of("a"), 2400), (ContentId::of("b"), 64_000)],
+            upload: UploadState { file: ContentId::of("c"), have: 1800, refusal: "x".repeat(MAX_REFUSAL) },
         }));
-        assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
+        let bytes = encode_server(&hdr(), &msg);
+        assert!(bytes.len() <= crate::MAX_PAYLOAD_BYTES, "{} bytes", bytes.len());
+        assert_eq!(decode_server(&bytes).unwrap().1, msg);
+        let up = ClientMessage::Upload {
+            file: ContentId::of("x"),
+            total: 5000,
+            offset: 900,
+            bytes: vec![b'x'; MAP_CHUNK_BYTES],
+        };
+        let bytes = encode_client(&hdr(), &up);
+        assert!(bytes.len() <= crate::MAX_PAYLOAD_BYTES, "{} bytes", bytes.len());
+        assert_eq!(decode_client(&bytes).unwrap().1, up);
+        // A whole roster, the server's own and every brought champion, fits one packet.
+        let files = (0..crate::champions::MAX_ROSTER).map(|i| (ContentId::of(&i.to_string()), 64_000)).collect();
+        let roster = ServerMessage::Roster { files, host: 21, budget: false };
+        let bytes = encode_server(&hdr(), &roster);
+        assert!(bytes.len() <= crate::MAX_PAYLOAD_BYTES, "{} bytes", bytes.len());
+        assert_eq!(decode_server(&bytes).unwrap().1, roster);
         let vote = ClientMessage::Lobby(LobbyAction::Bots(3));
         assert_eq!(decode_client(&encode_client(&hdr(), &vote)).unwrap().1, vote);
     }

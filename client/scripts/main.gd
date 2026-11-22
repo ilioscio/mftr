@@ -192,6 +192,10 @@ func _ready() -> void:
 		elif args[i] == "--shot" and i + 1 < args.size():
 			_shot_path = args[i + 1]
 			i += 1
+		elif args[i] == "--bring" and i + 1 < args.size():
+			# Bring this champion file to champion select (D83), as the menu there does.
+			_bring_path = args[i + 1]
+			i += 1
 		elif args[i] == "--blind":
 			blind_enabled = true
 			if i + 1 < args.size() and args[i + 1].is_valid_int():
@@ -753,19 +757,26 @@ func _champion_pack(champion: String) -> String:
 
 ## Whether `_model_for(champion)` would return without waiting on a forge.
 func _model_ready(key: String) -> bool:
-	if key.contains(":") or champion_models.has(key) or FileAccess.file_exists(_champion_pack(key)):
+	if key.contains(":") or champion_models.has(_model_key(key)) or FileAccess.file_exists(_champion_pack(key)):
 		return true
 	return MftrModel.forge_ready(_art_root(), key)
 
 
+## A champion's model, cached by name and by the champion file it's drawn from: a champion
+## brought again with new looks keeps its name (D83).
+func _model_key(champion: String) -> String:
+	return champion + "|" + MftrModel.champion_file_key(champion)
+
+
 func _model_for(champion: String) -> MftrModel:
-	if not champion_models.has(champion):
+	var key := _model_key(champion)
+	if not champion_models.has(key):
 		var path := _champion_pack(champion)
 		var own: MftrModel = MftrModel.load(path) if FileAccess.file_exists(path) else null
 		if own == null:
 			own = MftrModel.forge(_art_root(), champion)
-		champion_models[champion] = own if own != null else champion_model
-	return champion_models[champion]
+		champion_models[key] = own if own != null else champion_model
+	return champion_models[key]
 
 
 ## The model a portrait shows: a champion's, or another unit's for the inspect window
@@ -835,6 +846,8 @@ var _shot_trust := false                  # `--shot-trust`: press "Trust the new
 var _shot_seq_i := 0
 var _shot_shop := false                  # `--shot-shop`: buy from the fountain, show the shop
 var _shot_lobby := false                 # `--shot-lobby`: reroll in champion select, capture it
+var _bring_path := ""                     # `--bring FILE`: bring it to champion select (D83)
+var _bring_sent := false
 var _shot_loading := false                # `--shot-loading`: ready up, capture the loading screen
 var _menu_auto_join := false             # `--menu-join`: join the first remembered server from the menu
 var camera_zoom := 1.0                    # `--zoom <factor>`: closer camera for reviewing models
@@ -923,7 +936,9 @@ func _update_shot(delta: float) -> void:
 	if _shot_path != "" and _shot_lobby and client.phase() == "lobby":
 		_shot_timer += delta
 		if _shot_timer > 0.6 and _shot_timer - delta <= 0.6:
-			client.lobby_reroll()
+			# (a reroll would give up a champion brought)
+			if _bring_path == "":
+				client.lobby_reroll()
 			client.lobby_bots(2)
 		elif _shot_timer > 3.0:
 			get_viewport().get_texture().get_image().save_png(_shot_path)
@@ -6280,6 +6295,7 @@ var _lobby_ready := false
 var _lobby_sig := ""                      # the lobby as last drawn (rebuilt when it changes)
 var _lobby_timer: Label
 var _last_lobby := {}                     # the lobby as last seen, for the loading screen
+var _bring_error := ""                    # why the file to bring couldn't be read here (D83)
 var _portraits_seen := 0                  # portraits rendered so far (rebuilds the lobby)
 
 
@@ -6320,6 +6336,9 @@ func _lobby_bots_row(bots: Dictionary, horde: bool) -> Control:
 
 
 func _update_lobby(delta: float, phase: String) -> void:
+	if phase == "lobby" and _bring_path != "" and not _bring_sent:
+		_lobby_bring(_bring_path)
+		_bring_sent = true
 	if phase != "lobby":
 		if lobby_panel != null:
 			lobby_panel.queue_free()
@@ -6351,12 +6370,16 @@ func _update_lobby(delta: float, phase: String) -> void:
 		return
 	_last_lobby = l
 	var all_names: Array = Array(client.champion_names()) if l.get("pick", false) else []
-	portraits.prepare(l.slots.map(func(x): return x.champion) + Array(l.bench) + all_names)
+	# Champions others brought are theirs (D83): not in the pick.
+	var theirs_brought: Array = Array(l.get("brought_names", PackedStringArray()))
+	all_names = all_names.filter(func(n): return not theirs_brought.has(n))
+	portraits.prepare((l.slots.map(func(x): return x.champion) + Array(l.bench) + all_names).filter(func(n): return n != ""))
 	if _lobby_timer != null and is_instance_valid(_lobby_timer):
 		_lobby_timer.text = "%d" % ceili(l.starts_in)
 	# Rebuild only when something but the countdown changed, so buttons keep their hover and
 	# a click isn't lost to a rebuild.
-	var sig := str(l.slots) + str(l.bench) + str(_portraits_seen) + str(l.get("bots", {}))
+	var sig := str(l.slots) + str(l.bench) + str(_portraits_seen) + str(l.get("bots", {})) \
+		+ str(l.get("bring", {})) + str(l.get("bring_allowed", false)) + str(l.get("roster_error", "")) + _bring_error
 	if sig == _lobby_sig:
 		return
 	_lobby_sig = sig
@@ -6508,6 +6531,16 @@ func _update_lobby(delta: float, phase: String) -> void:
 	ready.pressed.connect(func(): client.lobby_ready(not _lobby_ready); _lobby_refresh = 0.0)
 	actions.add_child(ready)
 	center.add_child(actions)
+	# Your own champion (D83), on servers that take them.
+	if l.get("bring_allowed", false) and not midgame:
+		center.add_child(_lobby_bring_row(l))
+	if l.has("roster_error"):
+		var bad := Label.new()
+		bad.text = "A champion someone brought can't be loaded here, so you can't play this match:\n" + String(l.roster_error)
+		bad.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		bad.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		bad.add_theme_color_override("font_color", Color(1.0, 0.45, 0.4))
+		center.add_child(bad)
 	# Co-op: how well the bots play (17 §9), voted; the most votes wins, a tie the easier.
 	var bots: Dictionary = l.get("bots", {})
 	if not bots.is_empty():
@@ -6552,6 +6585,96 @@ void fragment() {
 }
 """
 	return _feather
+
+
+## Bring your own champion (D83): a menu of the champions saved in the creator (and any other
+## file), and what the server made of the one brought.
+func _lobby_bring_row(l: Dictionary) -> Control:
+	var box := VBoxContainer.new()
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 4)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 10)
+	var menu := MenuButton.new()
+	menu.text = "Bring your champion…"
+	menu.flat = false
+	menu.focus_mode = Control.FOCUS_NONE
+	menu.custom_minimum_size = Vector2(220, 40)
+	menu.tooltip_text = "Play a champion you made in the creator. The server checks it, and everyone in the match gets it."
+	var files := _saved_champions()
+	var popup := menu.get_popup()
+	for i in files.size():
+		popup.add_item(files[i].get_file().get_basename().get_basename().replace("_", " ").capitalize(), i)
+	if not files.is_empty():
+		popup.add_separator()
+	popup.add_item("Another file…", files.size())
+	popup.id_pressed.connect(func(id: int):
+		if id < files.size():
+			_lobby_bring(files[id])
+		else:
+			_lobby_bring_dialog())
+	row.add_child(menu)
+	var st: Dictionary = l.get("bring", {})
+	if not st.is_empty():
+		var stop := Button.new()
+		stop.text = "Stop"
+		stop.focus_mode = Control.FOCUS_NONE
+		stop.custom_minimum_size = Vector2(70, 40)
+		stop.tooltip_text = "Don't bring it in the next champion selects (reroll to give it up in this one)."
+		stop.pressed.connect(func(): _lobby_bring(""))
+		row.add_child(stop)
+	box.add_child(row)
+	var note := Label.new()
+	note.theme_type_variation = "HintLabel"
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note.custom_minimum_size = Vector2(380, 0)
+	if _bring_error != "":
+		note.text = "Couldn't read that file: " + _bring_error
+		note.add_theme_color_override("font_color", Color(1.0, 0.45, 0.4))
+	elif st.is_empty():
+		note.text = "Champions you save in the creator can play here."
+	elif String(st.refusal) != "":
+		note.text = "The server refused it: " + String(st.refusal)
+		note.add_theme_color_override("font_color", Color(1.0, 0.45, 0.4))
+	elif st.taken:
+		note.text = "Playing your own champion. You bring it again in the next champion select."
+		note.add_theme_color_override("font_color", Color(0.45, 0.85, 0.5))
+	elif float(st.have) >= 1.0:
+		note.text = "The server is checking it…"
+	else:
+		note.text = "Sending it to the server… %d%%" % roundi(float(st.have) * 100.0)
+	box.add_child(note)
+	return box
+
+
+## The champion files saved in the creator (`user://champions`), newest first.
+func _saved_champions() -> Array:
+	var dir := "user://champions"
+	var out := []
+	for f in DirAccess.get_files_at(dir):
+		if f.ends_with(".champion.ron"):
+			out.append(ProjectSettings.globalize_path(dir.path_join(f)))
+	out.sort_custom(func(a, b): return FileAccess.get_modified_time(a) > FileAccess.get_modified_time(b))
+	return out
+
+
+func _lobby_bring(path: String) -> void:
+	_bring_error = client.lobby_bring(path)
+	_lobby_refresh = 0.0
+
+
+func _lobby_bring_dialog() -> void:
+	var d := FileDialog.new()
+	d.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	d.access = FileDialog.ACCESS_FILESYSTEM
+	d.current_dir = ProjectSettings.globalize_path("user://champions")
+	d.filters = PackedStringArray(["*.champion.ron ; Champion files"])
+	d.file_selected.connect(func(p: String): _lobby_bring(p); d.queue_free())
+	d.canceled.connect(d.queue_free)
+	lobby_panel.add_child(d)
+	d.popup_centered(Vector2i(800, 520))
 
 
 ## A portrait arrived: champion select (and the loading screen) show it on their next refresh.
@@ -6608,7 +6731,7 @@ func _lobby_card(slot: Dictionary, team: Color) -> Control:
 	names.add_theme_constant_override("separation", -2)
 	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var champ := Label.new()
-	champ.text = "Hidden" if hidden else slot.champion
+	champ.text = "Hidden" if hidden else (slot.champion if slot.champion != "" else "Loading…")
 	champ.add_theme_font_override("font", _bold_font())
 	champ.add_theme_font_size_override("font_size", 17)
 	if you:
@@ -6621,6 +6744,8 @@ func _lobby_card(slot: Dictionary, team: Color) -> Control:
 		who.text = "Picking…"
 	else:
 		who.text = "You" if you else ("Bot" if slot.bot else "Player %d" % slot.player)
+		if slot.get("brought", false):
+			who.text += "   ·   their own" if not you else "   ·   your own"
 		if you and not _last_lobby.get("pick", false):
 			who.text += "   ·   %d reroll%s" % [slot.rerolls, "" if slot.rerolls == 1 else "s"]
 	who.theme_type_variation = "HintLabel"

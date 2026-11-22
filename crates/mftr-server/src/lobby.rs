@@ -6,6 +6,10 @@
 //! bench). Classic is a pick: each human starts with a random champion and may take any other
 //! no human teammate has (a bot teammate holding it gets theirs in exchange). The match starts
 //! when every human is ready, or when the countdown runs out. Bots fill the remaining slots.
+//!
+//! A player may also bring a champion of their own (D83): it becomes theirs at once, and the
+//! one they had goes to the bench (all random) or back to the pool (a pick). A brought
+//! champion is its player's: it never lands on the bench, and a reroll or a swap gives it up.
 
 use mftr_bots::Tier;
 use mftr_net::msg::{LobbyAction, LobbySlot, LobbyState};
@@ -28,6 +32,8 @@ pub struct Slot {
     pub bot: bool,
     /// A human's vote for the bots' tier (co-op, 17 §9; `Tier::wire`).
     pub vote: Option<u8>,
+    /// The player brought this champion (D83).
+    pub brought: bool,
 }
 
 impl Slot {
@@ -192,7 +198,7 @@ impl Lobby {
         let player = (0..=u8::MAX).filter(|p| p % 2 == parity).find(|p| !used.contains(p)).map(PlayerId)?;
         let champion = self.draw(team_of(player))?;
         let rerolls = if bot || self.pick { 0 } else { REROLLS };
-        self.slots.push(Slot { player, champion, rerolls, ready: bot, bot, vote: None });
+        self.slots.push(Slot { player, champion, rerolls, ready: bot, bot, vote: None, brought: false });
         self.slots.sort_by_key(|s| s.player);
         Some(player)
     }
@@ -215,16 +221,34 @@ impl Lobby {
         Some(bench.remove(0))
     }
 
-    /// A human left champion select: their champion goes to the bench and a bot takes the
-    /// slot.
+    /// A human left champion select: their champion goes to the bench (one they brought goes
+    /// with them) and a bot takes the slot.
     pub fn remove(&mut self, player: PlayerId) {
         if let Some(i) = self.slots.iter().position(|s| s.player == player) {
             let s = self.slots.remove(i);
-            self.bench[s.team() as usize].push(s.champion);
+            if !s.brought {
+                self.bench[s.team() as usize].push(s.champion);
+            }
             if !s.bot {
                 self.add_to(s.team(), true);
             }
         }
+    }
+
+    /// `player` brings `champion` (D83, checked by the server): it's theirs now. The one they
+    /// had goes to the bench (all random) or back to the pool (a pick); one they brought before
+    /// goes away. False if `player` isn't a human here.
+    pub fn bring(&mut self, player: PlayerId, champion: ChampionId) -> bool {
+        let Some(i) = self.slots.iter().position(|s| s.player == player && !s.bot) else { return false };
+        let s = &mut self.slots[i];
+        let (old, was_brought) = (s.champion, s.brought);
+        s.champion = champion;
+        s.brought = true;
+        let team = s.team() as usize;
+        if !self.pick && !was_brought && old != champion {
+            self.bench[team].push(old);
+        }
+        true
     }
 
     pub fn act(&mut self, player: PlayerId, action: LobbyAction) {
@@ -258,7 +282,9 @@ impl Lobby {
                 let new = free[self.rng.next_u32() as usize % free.len()];
                 self.slots[i].champion = new;
                 self.slots[i].rerolls -= 1;
-                self.bench[team].push(old);
+                if !std::mem::take(&mut self.slots[i].brought) {
+                    self.bench[team].push(old);
+                }
             }
             // A pick: any champion no human teammate has; a bot teammate trades.
             // A pick from outside the pool (another server's champion) isn't one.
@@ -266,22 +292,45 @@ impl Lobby {
             LobbyAction::Take(c) if self.pick => {
                 let old = self.slots[i].champion;
                 let holder = self.slots.iter().position(|s| s.team() as usize == team && s.champion == c);
+                let brought = self.slots[i].brought;
                 match holder {
-                    Some(h) if !self.slots[h].bot => {}
-                    Some(h) => {
-                        self.slots[h].champion = old;
-                        self.slots[i].champion = c;
-                    }
-                    None => self.slots[i].champion = c,
+                    Some(h) if !self.slots[h].bot => return,
+                    // A bot gets ours in exchange, unless we brought it: that goes with us.
+                    Some(h) if brought => self.slots[h].champion = self.draw_for_bot(team, c),
+                    Some(h) => self.slots[h].champion = old,
+                    None => {}
                 }
+                self.slots[i].champion = c;
+                self.slots[i].brought = false;
             }
             LobbyAction::Take(c) => {
                 let Some(b) = self.bench[team].iter().position(|x| *x == c) else { return };
                 let old = self.slots[i].champion;
-                self.bench[team][b] = old;
+                if std::mem::take(&mut self.slots[i].brought) {
+                    self.bench[team].remove(b);
+                } else {
+                    self.bench[team][b] = old;
+                }
                 self.slots[i].champion = c;
             }
         }
+    }
+
+    /// A champion from the pool for a bot on `team` giving up `besides`: one the team has
+    /// neither in play nor on its bench, else any.
+    fn draw_for_bot(&mut self, team: usize, besides: ChampionId) -> ChampionId {
+        let free: Vec<ChampionId> = self
+            .pool
+            .iter()
+            .copied()
+            .filter(|c| {
+                *c != besides
+                    && !self.slots.iter().any(|s| s.team() as usize == team && s.champion == *c)
+                    && !self.bench[team].contains(c)
+            })
+            .collect();
+        let from = if free.is_empty() { &self.pool } else { &free };
+        from[self.rng.next_u32() as usize % from.len()]
     }
 
     /// Whether the match should start now: the countdown ran out, or every human is ready
@@ -304,10 +353,11 @@ impl Lobby {
                 .map(|s| LobbySlot {
                     player: s.player,
                     team: s.team(),
-                    champion: s.champion,
+                    champion: Some(s.champion),
                     rerolls: s.rerolls,
                     ready: s.ready,
                     bot: s.bot,
+                    brought: s.brought,
                 })
                 .collect(),
             bench: self.bench[team_of(you) as usize].clone(),
@@ -322,6 +372,11 @@ impl Lobby {
                 votes: self.votes(),
                 mine: self.slots.iter().find(|s| s.player == you).and_then(|s| s.vote),
             }),
+            // The server fills in what players may bring and what they have.
+            bring: false,
+            budget: true,
+            brought: Vec::new(),
+            upload: Default::default(),
         }
     }
 }
@@ -329,6 +384,7 @@ impl Lobby {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mftr_sim::champion::ChampionDef;
 
     #[test]
     fn all_random_with_rerolls_and_a_bench() {
@@ -367,6 +423,39 @@ mod tests {
         let fixed = slot(&l, me).champion;
         l.act(me, LobbyAction::Reroll);
         assert_eq!(slot(&l, me).champion, fixed);
+    }
+
+    /// D83: a brought champion is its player's: the old one goes to the bench, the brought one
+    /// never does, and a reroll gives it up.
+    #[test]
+    fn a_brought_champion_stays_its_players() {
+        let mine = ChampionId::register(ChampionDef { name: "Lobby Brought Zq", ..*ChampionId::Rook.def() }).unwrap();
+        let mut l = Lobby::new(5, 10, 4, false);
+        let me = l.add_human(0.0, false).unwrap();
+        let mate = l.add_human(0.0, false).unwrap();
+        let mate = if team_of(mate) == team_of(me) { mate } else { l.add_human(0.0, false).unwrap() };
+        let slot = |l: &Lobby, p| *l.slots().iter().find(|s| s.player == p).unwrap();
+        let before = slot(&l, me).champion;
+        assert!(l.bring(me, mine));
+        assert_eq!((slot(&l, me).champion, slot(&l, me).brought), (mine, true));
+        assert_eq!(l.state_for(mate, 0.0).bench, vec![before], "the old one is on the bench");
+        let s = l.state_for(me, 0.0);
+        assert!(s.slots.iter().any(|x| x.player == me && x.brought && x.champion == Some(mine)));
+        // Bringing again replaces it, and nothing more lands on the bench.
+        assert!(l.bring(me, mine));
+        assert_eq!(l.state_for(mate, 0.0).bench, vec![before]);
+        // A teammate can bring the same one.
+        assert!(l.bring(mate, mine));
+        assert_eq!(slot(&l, mate).champion, mine);
+        // A reroll gives it up, and it doesn't go to the bench.
+        l.act(me, LobbyAction::Reroll);
+        assert_ne!(slot(&l, me).champion, mine);
+        assert!(!slot(&l, me).brought);
+        assert!(!l.state_for(me, 0.0).bench.contains(&mine));
+        // Leaving takes a brought champion along.
+        l.remove(mate);
+        assert!(!l.state_for(me, 0.0).bench.contains(&mine));
+        assert!(!l.bring(PlayerId(200), mine), "not a player here");
     }
 
     #[test]

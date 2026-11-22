@@ -1728,7 +1728,7 @@ is any player rather than the host.
 | Slice | What | Exit |
 |---|---|---|
 | **P1** Hardening ✅ | BLAKE2s-256 content ids for champion files and maps (protocol 33); `catch_unwind` around reading and forging; no file path from a champion's name; a 1 GB quota on kept models; a mutation fuzz test over the reader, looks and forge in `cargo test` | No panic and no forge over its cap in the fuzz test; a 0.22 client is told to update |
-| **P2** Bring your own | Upload in champion select; the server's checks and refusals; a per-match roster with wire numbers per match; the registry reclaimed per match; `--player-champions`, `--ranked-player-champions`, `--champion-budget`; the lobby shows who brought each | Two players bring champions, one the same as the other's, and play a match that replays to the same hashes; a long soak of uploads leaves the registry flat |
+| **P2** Bring your own ✅ | Upload in champion select; the server's checks and refusals; a per-match roster with wire numbers per match; bounded tables instead of a reclaimed registry (20 §13.1); `--player-champions`, `--champion-budget` (`--ranked-player-champions` waits for ranked queues, M5); the lobby shows who brought each | Two players bring champions, one the same as the other's, and play a match that replays to the same hashes (`players_bring_their_own_champions_end_to_end`) |
 | **P3** Player controls | Show default looks, mute a player's look, the host refusing a recipe by content id | Each control checked in a match |
 | **P4** *(later)* Sharing beyond a lobby | Makers' Ed25519 signatures and the project blocklist (11 §5); waits on the likeness policy (20 §15) | — |
 

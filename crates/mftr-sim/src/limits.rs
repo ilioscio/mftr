@@ -309,15 +309,30 @@ fn passive(c: &mut Check, p: &crate::items::Passive) {
 /// problem on one line. The file may come from anyone (a server's push, a player's upload:
 /// D83), so a panic in the reader or the checks is a refusal, never a crash.
 pub fn read_champion_file(text: &str) -> Result<ChampionDef, String> {
-    std::panic::catch_unwind(|| read_and_check(text))
+    read_champion_file_with(text, true)
+}
+
+/// [`read_champion_file`], with the price budget or without it (`budget: false`: a host
+/// lifted it for sandbox play, D83). The limits always apply.
+pub fn read_champion_file_with(text: &str, budget: bool) -> Result<ChampionDef, String> {
+    std::panic::catch_unwind(|| read_and_check(text, budget))
         .unwrap_or_else(|_| Err("the champion file broke the reader (a bug: please report it)".to_string()))
 }
 
-fn read_and_check(text: &str) -> Result<ChampionDef, String> {
+/// Whether [`read_champion_file_with`] would accept `text`, without adding anything that lasts
+/// (no names interned, nothing registered): a server checks a file a player brings this way
+/// first, so a stream of refused files can't fill the process's tables (D83).
+/// Returns the champion's name.
+pub fn check_champion_file(text: &str, budget: bool) -> Result<String, String> {
+    let (r, names) = crate::data::without_interning(|| read_champion_file_with(text, budget).map(|d| d.name));
+    r.map(|n| crate::data::restore_names(n, &names)).map_err(|e| crate::data::restore_names(&e, &names))
+}
+
+fn read_and_check(text: &str, budget: bool) -> Result<ChampionDef, String> {
     let def = crate::data::read_champion(text).map_err(|e| e.to_string())?;
     let mut problems = problems(&def);
     // The balance budget (D71): a champion that costs more than it may isn't played.
-    if let Some(over) = crate::balance::over(&def) {
+    if budget && let Some(over) = crate::balance::over(&def) {
         problems.push(format!(
             "costs {:.0} points, over the {:.0}-point budget by {over:.0} (20 §9)",
             crate::balance::price(&def).total(),
@@ -329,7 +344,12 @@ fn read_and_check(text: &str) -> Result<ChampionDef, String> {
 
 /// [`read_champion_file`], then register it: its id (the same one if it's registered already).
 pub fn load_champion_file(text: &str) -> Result<crate::champion::ChampionId, String> {
-    let def = read_champion_file(text)?;
+    load_champion_file_with(text, true)
+}
+
+/// [`read_champion_file_with`], then register it.
+pub fn load_champion_file_with(text: &str, budget: bool) -> Result<crate::champion::ChampionId, String> {
+    let def = read_champion_file_with(text, budget)?;
     crate::champion::ChampionId::register(def).map_err(|_| "too many champions registered".to_string())
 }
 
@@ -338,6 +358,26 @@ mod tests {
     use super::*;
     use crate::champion::ChampionId;
     use crate::data::{read_champion, write_champion};
+
+    /// D83: checking a file adds no names to the process's table, whether it passes or not,
+    /// and a refusal names the champion as written.
+    #[test]
+    fn checking_a_file_leaves_no_names_behind() {
+        let text = write_champion(ChampionId::Ember.def(), "")
+            .replace("name: \"Ember\"", "name: \"Dry Check Zq\"")
+            .replace(&format!("\"{}\"", ChampionId::Ember.def().abilities[0].name), "\"Dry Bolt Zq\"");
+        assert!(text.contains("Dry Check Zq") && text.contains("Dry Bolt Zq"));
+        assert_eq!(check_champion_file(&text, true).as_deref(), Ok("Dry Check Zq"));
+        assert!(!crate::data::is_interned("Dry Check Zq") && !crate::data::is_interned("Dry Bolt Zq"));
+        let slow = text.replace("move_speed: 325", "move_speed: 9999");
+        assert_ne!(slow, text, "Ember's move speed is in the file");
+        let e = check_champion_file(&slow, true).unwrap_err();
+        assert!(e.starts_with("`Dry Check Zq`"), "{e}");
+        assert!(!crate::data::is_interned("Dry Check Zq"));
+        // Reading it for real interns, as before.
+        read_champion_file(&text).unwrap();
+        assert!(crate::data::is_interned("Dry Check Zq"));
+    }
 
     #[test]
     fn the_official_ten_pass() {

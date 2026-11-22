@@ -572,24 +572,35 @@ asking the host to restart a server. Recipes were built for this: a recipe is da
 own readers parse (11 §3.3), so the work is closing what changes when any player, not the host,
 is the source.
 
-- **Upload:** in champion select a player may upload **one** champion file (≤ 64 KB, the
-  reader's cap) on the reliable channel, rate-limited, only once they have joined the lobby.
-- **The server checks it** with the same strict reader, limits and price budget as its own
-  customs, and refuses it with the reason. It then offers the file to the match by its
-  **content id** (below), as it offers its own customs today.
-- **Every client checks it again** and refuses to join if one fails (11 §4). A refusal here means
-  the server or a client is out of date or hostile, since the server already refused bad files.
-  Replays carry the files, as they do now.
-- **Duplicates:** two players may bring the same recipe; it is one champion in the registry.
+- **Bringing one:** in champion select, **Bring your champion…** lists the champions saved in
+  the creator (and any other file). The client sends the file (≤ 64 KB, the reader's cap) in
+  pieces in place of its hellos, about 30 a second, and the server says in the lobby how much it
+  has. Only in champion select before a match, not when joining one in progress. Three files a
+  champion select, refusals included. The client brings it again in each champion select after,
+  until the player says **Stop**.
+- **The server checks it** as every client will: the strict reader, the limits, the price
+  budget, its looks, a name no official champion has and no other champion in the match has.
+  It refuses with the reason, which the player sees. A taken file becomes the player's champion
+  at once; the one they had goes to the bench (all random) or back to the pool (a pick).
+- **A brought champion is its player's:** it never lands on the bench, and a reroll or a swap
+  gives it up. Their card says "your own" to them and "their own" to teammates.
+- **Everyone gets it:** the lobby lists the brought files by **content id** (below) after the
+  server's own, and each client fetches the ones it lacks and checks them again (11 §4). The
+  match waits up to 10 s past its countdown for every client to have them. A spectator or a
+  late joiner gets the whole roster before anything else. Replays carry the files.
+- **Duplicates:** two players may bring the same recipe; it is one champion.
 - **Someone else's recipe:** a player may bring a file someone else made (a friend sends theirs).
   The lobby shows who brought it. The maker's signature (11 §5) comes with sharing beyond a lobby.
+- **Each champion select starts over** with only the server's champions; players' clients bring
+  theirs again. A champion brought again with new looks under the same name is drawn anew (models
+  and portraits are cached by name and file).
 - **Host settings:**
 
   | Setting | Default | What |
   |---|---|---|
   | `--player-champions off\|on` | off | Whether players may bring their own |
-  | `--ranked-player-champions` | off | Ranked queues take players' own champions too. Without it, ranked allows only the server's own list (official, or its customs if `--champions` includes them) |
-  | `--champion-budget on\|off` | on | Off lifts the price budget (§9.1) for matches that aren't ranked, for sandbox play. The limits (§9.4: D10, D36, `mftr_sim::limits`) never lift: they keep the sim bounded and the game readable |
+  | `--ranked-player-champions` | off | Ranked queues take players' own champions too. Without it, ranked allows only the server's own list (official, or its customs if `--champions` includes them). *There are no ranked queues yet (M5): the flag comes with them* |
+  | `--champion-budget on\|off` | on | Off lifts the price budget (§9.1) for players' own champions in matches that aren't ranked (every match, until M5), for sandbox play. The server's own files keep it. The limits (§9.4: D10, D36, `mftr_sim::limits`) never lift: they keep the sim bounded and the game readable |
 
 - **Player controls** are §13's: show default looks, mute one player's look, and the host refusing a
   recipe by its content id.
@@ -610,9 +621,18 @@ is the source.
    made only from a one-word name, and the creator saves under letters, digits, `_` and `-`.
 5. **A cache with a quota:** kept models past 1 GB go, least recently used first (11 §6). Each
    is 3.5–4 MB, and every custom champion a player meets is kept.
-6. **The registry is reclaimed:** champions register for a match and leave with it, so uploads
-   on a long-running server can't fill the process-wide registry (D73's 4,096 slots) or its
-   interned names. This lands with the per-match roster (the upload slice), before uploads open.
+6. **Bounded tables:** the sim hands out `&'static` champion definitions and names (D73), so
+   they can't be freed without `unsafe` code (forbidden) or a lock on every lookup in the sim's
+   hot path. Reclaiming them per match, as planned, was dropped for bounds:
+   - a brought file is checked **without interning** its names (`limits::check_champion_file`:
+     new names stand in as placeholders), so a refused file leaves nothing behind;
+   - a player has three files a champion select;
+   - a server process registers at most 60 new champion files an hour (`customs::NEW_PER_HOUR`),
+     so filling the registry's 4,096 slots takes days of steady abuse, and a restart clears it.
+     Past the limit, players are told to try later; with the registry full, until a restart.
+7. **Per-match rosters:** each match has its own wire numbers (six bits now: 0–9 official, 10–62
+   customs, the server's then those brought), set for the duration of a call on the server's
+   worker threads (`mftr_net::champions::scope`).
 
 ## 14. Rollout (track CR)
 
