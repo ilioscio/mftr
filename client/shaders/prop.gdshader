@@ -90,6 +90,9 @@ void fragment() {
 		}
 		c *= 0.9 + 0.16 * g;
 	}
+	if (slot < 3) {
+		c = w_soak(c, wetness * 0.7 * cloud_receive);
+	}
 	vec3 lit = c * mix(0.58, 1.0, COLOR.a) * exposure;
 	ALBEDO = fogged(lit, world_pos) + vec3(0.04, 0.06, 0.1) * protected_glow;
 	ROUGHNESS = 1.0;

@@ -119,6 +119,18 @@ cloud_cover={
 "type": "float",
 "value": 0.4
 }
+wetness={
+"type": "float",
+"value": 0.0
+}
+rain={
+"type": "float",
+"value": 0.0
+}
+sky_mirror={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
 world_detail={
 "type": "int",
 "value": 2

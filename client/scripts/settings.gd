@@ -69,6 +69,9 @@ var hurt_edges := true                   # the screen's edges flash red when hur
 ## are, from the date and `hemisphere`), "map" for the map's own, else "summer", "autumn" or
 ## "winter". Looks only; it changes at once, mid-match too.
 var season := "calendar"
+## The sky over the map (D82): "clear", "rain", "night" or "storm" (weather.gd). Looks only, on
+## this screen: each player picks their own; a match doesn't choose it yet.
+var weather := "clear"
 ## "north" or "south": which half of the world's seasons "calendar" follows. The default comes
 ## from the system's locale (`Seasons.default_hemisphere`).
 var hemisphere := ""
@@ -150,6 +153,7 @@ func load_file(path := PATH) -> void:
 		atmosphere = cfg.get_value("graphics", "atmosphere", atmosphere)
 		hurt_edges = cfg.get_value("graphics", "hurt_edges", hurt_edges)
 		season = str(cfg.get_value("graphics", "season", season))
+		weather = one_of(cfg.get_value("graphics", "weather", weather), ["clear", "rain", "night", "storm"], "clear")
 		# Before the calendar (0.18), "" was the map's own and the default: now the calendar is.
 		if season == "":
 			season = "calendar"
@@ -230,6 +234,7 @@ func save() -> void:
 	cfg.set_value("graphics", "atmosphere", atmosphere)
 	cfg.set_value("graphics", "hurt_edges", hurt_edges)
 	cfg.set_value("graphics", "season", season)
+	cfg.set_value("graphics", "weather", weather)
 	cfg.set_value("graphics", "hemisphere", hemisphere)
 	cfg.set_value("audio", "master", master_volume)
 	cfg.set_value("audio", "effects", effects_volume)

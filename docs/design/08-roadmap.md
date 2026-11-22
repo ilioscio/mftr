@@ -1793,6 +1793,25 @@ The face moves to bones ([21](21-face-rig.md), D76), with an authored head and d
   steered to hold a frame rate); FSR or a sharpening pass for the Mobile renderer's bilinear
   upscale; a frame limit in the menus by default.
 
+### VX slice 4 status (2026-11-21): ✅ built as a player option — weather (D82)
+- **Rain:** an overcast day (the sun dimmed behind even cloud, a nearer grey haze); the ground,
+  cliffs and props soaked darker (`wetness`); puddles in the ground's dips that mirror the sky
+  (`sky_mirror`), ring with drops (`rain`) and catch the braziers' light; streaks and splash
+  rings around the camera; a rain loop made at load.
+- **Night:** moonlight from another side, a dark blue fill; the lamps' ground pools brighter
+  and real lights at the six nearest braziers and crystals, so champions and props near them
+  are lit; a warm light around your own champion; fireflies and pollen glowing.
+- **Storm:** night and rain with lightning (a strike's light from a random side, a stroke, a
+  return stroke and a flicker, lifting the fill) and thunder after it, later and softer the
+  farther the strike; three thunderclaps made at load.
+- **Readability:** the minimap renders in daylight in any weather; clear weather is unchanged.
+- **Cost:** on an RTX 5070, a storm adds 0.27 ms of GPU time to High (1.60 → 1.87 ms).
+- **World detail** lightens it: Medium 1200 streaks and four lamp lights, Low 700 streaks, no
+  splashes and two lamp lights (High 1800 and six).
+- **Open:** whether a match picks its weather (the server, a lobby option, or at random), and
+  how often; the weather turning mid-match.
+- `--weather clear|rain|night|storm` and `--strikes S` for captures.
+
 ## M5 — Community
 - Matchmaking + OpenSkill rating per instance, Ranked queues.
 - Public server list, moderation tools, blocklist sharing.
