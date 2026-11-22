@@ -3,7 +3,12 @@
 // `mftr_client::ground`), so every map the editor makes is painted like an official one. Every
 // boundary is broken with noise: grass tongues over the dirt, loose slabs off the paving, ragged
 // banks. A soft fine grain gives it texture up close (D80); low contrast keeps gameplay on
-// top (05 §1). The season (15 §9) sets every color. No textures besides the baked control map.
+// top (05 §1). The season (15 §9) sets every color. No textures besides the baked control map
+// and the world's noise, generated at load (D81).
+//
+// It's the costliest shader on screen (it covers most of it), so it skips what can't show:
+// the land under deep water, the grass under full dirt, the dirt where there's none, the
+// lamps' flicker out of their reach (05 §9).
 shader_type spatial;
 render_mode diffuse_lambert, specular_disabled;
 #include "res://shaders/clouds.gdshaderinc"
@@ -46,14 +51,24 @@ void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
-vec3 dirt_color(vec2 p, vec2 q, float grain) {
-	vec3 d = mix(dirt_dark, dirt, smoothstep(0.3, 0.7, w_fbm(p * 0.35 + 7.0)));
-	d *= 0.9 + 0.12 * (grain - 0.5) + 0.1 * w_fbm(q * 0.9);
+// Contact shadows drawn at low world detail: the nearest few (`map_view.gd` sends them nearest
+// the camera's look point first).
+const int OCCLUDERS_LOW = 12;
+
+vec3 dirt_color(WP P, float grain) {
+	vec3 d = mix(dirt_dark, dirt, smoothstep(0.3, 0.7, w_fbm(w_at(P, 0.35, vec2(7.0)))));
+	d *= 0.9 + 0.12 * (grain - 0.5) + 0.1 * w_fbm(w_at(P, 0.9, vec2(0.0)));
+	if (world_detail < 1) {
+		return d;
+	}
 	// Thin dark cracks (cell edges of a Voronoi), only in patches.
-	vec2 cr = w_cells(p * 0.9 + 13.0);
-	d = mix(d, dirt_dark * 0.8, (1.0 - smoothstep(0.01, 0.03, cr.x)) * 0.5 * smoothstep(0.55, 0.7, w_fbm(p * 0.18)));
+	float cracked = smoothstep(0.55, 0.7, w_fbm(w_at(P, 0.18, vec2(0.0))));
+	if (cracked > 0.0) {
+		vec2 cr = w_cells(P.p * 0.9 + 13.0);
+		d = mix(d, dirt_dark * 0.8, (1.0 - smoothstep(0.01, 0.03, cr.x)) * 0.5 * cracked);
+	}
 	// A few small pebbles.
-	vec2 pb = w_cells(p * 6.0 + 31.0);
+	vec2 pb = w_cells(P.p * 6.0 + 31.0);
 	float pebble = step(0.975, pb.y) * smoothstep(0.08, 0.16, pb.x);
 	d = mix(d, paving * (0.7 + 0.3 * pb.y), pebble * 0.55);
 	return d;
@@ -61,12 +76,12 @@ vec3 dirt_color(vec2 p, vec2 q, float grain) {
 
 // Big irregular slabs with dark joints and grass in the joints; `amount` is the paving's
 // control value (the outer slabs come loose and the grass takes the joints toward the edge).
-vec3 paving_color(vec2 p, vec2 q, float grain, float amount, vec3 under, out float covered) {
-	vec2 c = w_cells(p * 1.3);
+vec3 paving_color(WP P, float grain, float amount, vec3 under, out float covered) {
+	vec2 c = w_cells(P.p * 1.3);
 	float slab_id = c.y;
-	vec3 slab = mix(paving_dark, paving, 0.35 + 0.65 * slab_id) * (0.9 + 0.1 * (grain - 0.5) + 0.12 * w_fbm(q * 1.3));
+	vec3 slab = mix(paving_dark, paving, 0.35 + 0.65 * slab_id) * (0.9 + 0.1 * (grain - 0.5) + 0.12 * w_fbm(w_at(P, 1.3, vec2(0.0))));
 	// Moss and grime over some slabs.
-	slab = mix(slab, grass_dark * 1.1, smoothstep(0.6, 0.8, w_fbm(p * 0.4 + 5.0)) * 0.35);
+	slab = mix(slab, grass_dark * 1.1, smoothstep(0.6, 0.8, w_fbm(w_at(P, 0.4, vec2(5.0)))) * 0.35);
 	// Worn: lighter toward each slab's middle, darker at its rim.
 	slab *= 0.9 + 0.12 * smoothstep(0.02, 0.25, c.x);
 	float joint = 1.0 - smoothstep(0.025, 0.07, c.x);
@@ -74,7 +89,7 @@ vec3 paving_color(vec2 p, vec2 q, float grain, float amount, vec3 under, out flo
 	float edge = 1.0 - smoothstep(0.3, 1.0, amount);
 	float keep = step(edge * 0.95, slab_id * 0.9 + 0.1);
 	covered = keep;
-	vec3 joint_col = mix(paving_dark * 0.55, grass_dark, smoothstep(0.2, 0.7, edge + w_grain(q, 14.0) * 0.3));
+	vec3 joint_col = mix(paving_dark * 0.55, grass_dark, smoothstep(0.2, 0.7, edge + grain * 0.3));
 	vec3 col = mix(slab, joint_col, joint);
 	return mix(under, col, keep);
 }
@@ -82,65 +97,76 @@ vec3 paving_color(vec2 p, vec2 q, float grain, float amount, vec3 under, out flo
 void fragment() {
 	cloud_sun = cloud_shade(world_pos);
 	vec2 p = world_pos.xz;
-	vec2 q = p;
-	float grain = w_grain(p, 14.0);
-	vec3 ground;
+	WP P = WP(p, dFdx(p), dFdy(p));
+	float grain = w_grain(P, 14.0);
+	vec3 ground = vec3(0.0);
 	if (control_on) {
 		// Sample the control map with a warped lookup, so its edges wander like a painter's.
-		vec2 warp = vec2(w_fbm(p * 0.3) - 0.5, w_fbm(p * 0.3 + 9.0) - 0.5) * 1.6;
+		vec2 warp = vec2(w_fbm(w_at(P, 0.3, vec2(0.0))) - 0.5, w_fbm(w_at(P, 0.3, vec2(9.0))) - 0.5) * 1.6;
 		vec4 c = texture(control, (p + warp) / map_size);
 		vec4 c0 = texture(control, p / map_size);
 		float wall = clamp(c0.a * 2.0 - 1.0, 0.0, 1.0);   // 0 at (and in) a wall, 1 at 10 m from one
 		float gloom = (1.0 - smoothstep(0.05, 0.4, wall)) * 0.55;
-		ground = grass_color(p, q, grain, gloom);
-		// Dirt with grass tongues.
-		float tongue = (w_fbm(p * 0.55 + 2.0) - 0.5) * 0.55 + (w_fbm(q * 2.2) - 0.5) * 0.12;
-		float dirt_m = smoothstep(0.42, 0.58, c.r + tongue);
-		vec3 d = dirt_color(p, q, grain);
-		// A darker rim where grass meets dirt.
-		float rim = smoothstep(0.3, 0.45, c.r + tongue) * (1.0 - dirt_m);
-		ground = mix(ground, ground * 0.82, rim * 0.6);
-		ground = mix(ground, d, dirt_m);
-		// Paving: slabs, coming loose toward the edge.
-		float pave = c0.g + (w_fbm(p * 0.6 + 21.0) - 0.5) * 0.25;
-		if (pave > 0.12) {
-			float covered;
-			vec3 slabs = paving_color(p, q, grain, pave, ground, covered);
-			ground = mix(ground, slabs, smoothstep(0.12, 0.3, pave));
+		// The water's reach first: under deep water, the land isn't drawn.
+		float bank_noise = (w_fbm(w_at(P, 0.25, vec2(5.0))) - 0.5) * 0.35 + (w_fbm(w_at(P, 1.5, vec2(0.0))) - 0.5) * 0.08;
+		float wb = c.b + bank_noise;
+		float water = smoothstep(0.32, 0.4, wb);
+		if (water < 1.0) {
+			// Dirt with grass tongues (and no grass drawn where the dirt covers it).
+			float tongue = (w_fbm(w_at(P, 0.55, vec2(2.0))) - 0.5) * 0.55 + (w_fbm(w_at(P, 2.2, vec2(0.0))) - 0.5) * 0.12;
+			float dirt_m = smoothstep(0.42, 0.58, c.r + tongue);
+			if (dirt_m < 1.0) {
+				ground = grass_color(P, grain, gloom);
+				// A darker rim where grass meets dirt.
+				float rim = smoothstep(0.3, 0.45, c.r + tongue) * (1.0 - dirt_m);
+				ground = mix(ground, ground * 0.82, rim * 0.6);
+			}
+			if (dirt_m > 0.0) {
+				ground = mix(ground, dirt_color(P, grain), dirt_m);
+			}
+			// Paving: slabs, coming loose toward the edge.
+			float pave = c0.g + (w_fbm(w_at(P, 0.6, vec2(21.0))) - 0.5) * 0.25;
+			if (pave > 0.12) {
+				float covered;
+				vec3 slabs = paving_color(P, grain, pave, ground, covered);
+				ground = mix(ground, slabs, smoothstep(0.12, 0.3, pave));
+			}
 		}
 		// Water: a muddy wet bank, then shallows to deeps with ripples and foam at the edge.
-		float bank_noise = (w_fbm(p * 0.25 + 5.0) - 0.5) * 0.35 + (w_fbm(q * 1.5) - 0.5) * 0.08;
-		float wb = c.b + bank_noise;
 		if (wb > 0.0) {
 			float wet = smoothstep(0.0, 0.25, wb);
-			float water = smoothstep(0.32, 0.4, wb);
 			float depth = smoothstep(0.4, 1.0, wb);
-			vec3 w = mix(water_shallow, water_deep, depth * (0.75 + 0.25 * w_fbm(p * 0.15 + 2.0)));
+			vec3 w = mix(water_shallow, water_deep, depth * (0.75 + 0.25 * w_fbm(w_at(P, 0.15, vec2(2.0)))));
 			float flow = TIME * 0.25;
-			float ripple = smoothstep(0.62, 0.7, w_fbm(q * 0.6 + vec2(flow, flow * 0.6)));
+			float ripple = smoothstep(0.62, 0.7, w_fbm(w_at(P, 0.6, vec2(flow, flow * 0.6))));
 			w = mix(w, water_shallow * 1.35, ripple * 0.3 * (1.0 - depth * 0.5));
 			float shore = (1.0 - smoothstep(0.4, 0.5, wb)) * water;
 			w = mix(w, foam, shore * (0.45 + 0.35 * sin(TIME * 1.7 + p.x * 0.8 + p.y * 0.5)));
-			ground = mix(ground, mud * (0.85 + 0.2 * w_fbm(q)), wet * (1.0 - water));
+			if (water < 1.0) {
+				ground = mix(ground, mud * (0.85 + 0.2 * w_fbm(P)), wet * (1.0 - water));
+			}
 			ground = mix(ground, w, water);
 		}
 		// The foot of every wall: a soft dark band of occlusion.
 		float foot = 1.0 - smoothstep(0.0, 0.11, wall);
 		ground *= 1.0 - foot * 0.45;
 	} else {
-		ground = grass_color(p, q, grain, 0.0);
+		ground = grass_color(P, grain, 0.0);
 		// The sandbox's diagonal lane.
 		float d = abs(p.x - p.y) / sqrt(2.0);
-		float edge = lane_width * 0.5 + (w_fbm(p * 0.25) - 0.5) * 3.0;
-		float lane = 1.0 - smoothstep(edge - 0.35, edge + 0.35, d);
-		ground = mix(ground, dirt_color(p, q, grain), lane * (1.0 - lane_mode));
+		float edge = lane_width * 0.5 + (w_fbm(w_at(P, 0.25, vec2(0.0))) - 0.5) * 3.0;
+		float lane = (1.0 - smoothstep(edge - 0.35, edge + 0.35, d)) * (1.0 - lane_mode);
+		if (lane > 0.0) {
+			ground = mix(ground, dirt_color(P, grain), lane);
+		}
 		// Subtle 1 m grid to help judge distances.
 		vec2 g = abs(fract(p) - 0.5);
 		float grid = 1.0 - smoothstep(0.47, 0.5, max(g.x, g.y));
 		ground *= 1.0 - 0.06 * (1.0 - grid);
 	}
 	float open = 1.0;
-	for (int i = 0; i < occluder_count; i++) {
+	int occluders_n = world_detail >= 1 ? occluder_count : min(occluder_count, OCCLUDERS_LOW);
+	for (int i = 0; i < occluders_n; i++) {
 		vec4 o = occluders[i];
 		float d = distance(p, o.xy) / max(o.z, 0.05);
 		open *= 1.0 - 0.42 * o.w * (1.0 - smoothstep(0.15, 1.25, d));
@@ -153,9 +179,11 @@ void fragment() {
 	for (int i = 0; i < lamp_count; i++) {
 		vec4 l = lamps[i];
 		float f = 1.0 - clamp(distance(p, l.xy) / max(l.z, 0.01), 0.0, 1.0);
-		float ph = lamp_colors[i].a;
-		float flicker = 0.88 + 0.12 * sin(TIME * 11.0 + ph) * sin(TIME * 6.7 + ph * 2.3);
-		lit += lamp_colors[i].rgb * (f * f * l.w * flicker);
+		if (f > 0.0) {
+			float ph = lamp_colors[i].a;
+			float flicker = 0.88 + 0.12 * sin(TIME * 11.0 + ph) * sin(TIME * 6.7 + ph * 2.3);
+			lit += lamp_colors[i].rgb * (f * f * l.w * flicker);
+		}
 	}
 	EMISSION = ALBEDO * lit * 2.0;
 }

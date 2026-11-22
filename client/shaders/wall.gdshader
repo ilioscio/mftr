@@ -35,34 +35,43 @@ void fragment() {
 	NORMAL = normalize((VIEW_MATRIX * vec4(wn, 0.0)).xyz);
 	vec3 n = abs(wn);
 	vec2 p = n.y > 0.6 ? world_pos.xz : (n.x > n.z ? world_pos.zy : world_pos.xy);
-	vec2 q = p;
-	float f = w_fbm(q * 1.7);
-	float strata = smoothstep(0.42, 0.58, fract(world_pos.y * 2.2 + f * 0.8));
-	vec3 c = mix(rock_dark, rock, smoothstep(0.25, 0.75, f));
-	c *= 0.82 + 0.22 * strata;
-	// Crevices: dark cracks in cells across the face.
-	vec2 cr = w_cells(p * 1.6 + 3.0);
-	c *= 1.0 - (1.0 - smoothstep(0.02, 0.07, cr.x)) * 0.45;
-	// Darker toward the foot (occlusion where it meets the ground).
-	c *= 0.6 + 0.4 * smoothstep(0.0, 0.8, world_pos.y);
-	// Moss: down from the top edge, and over any ledge (faces looking up).
-	float top_moss = smoothstep(height - 0.35, height - 0.05, world_pos.y + (w_fbm(q * 2.3) - 0.5) * 0.4);
-	float ledge = smoothstep(0.45, 0.8, wn.y) * step(world_pos.y, height - 0.05);
-	c = mix(c, moss * (0.85 + 0.3 * w_fbm(q * 3.0)), clamp(top_moss * 0.75 + ledge * 0.85, 0.0, 1.0));
+	// The noise's footprints, taken here: derivatives can't be inside the branches below.
+	WP P = WP(p, dFdx(p), dFdy(p));
+	vec2 pt = world_pos.xz;
+	WP PT = WP(pt, dFdx(pt), dFdy(pt));
+	vec3 c;
 	if (wn.y > 0.85 && world_pos.y > height - 0.02) {
 		// The top is the ground's grass: the forest stands on it. Meters in from the edge decide
-		// the lip and the gloom.
-		vec2 pt = world_pos.xz;
-		vec2 qt = pt;
+		// the lip and the gloom. (Most of the cliffs on screen are tops: the rock below isn't
+		// drawn under them.)
 		float inside = 3.0;
 		if (control_on) {
-			vec2 warp = vec2(w_fbm(pt * 0.3) - 0.5, w_fbm(pt * 0.3 + 9.0) - 0.5) * 1.6;
-			inside = clamp(1.0 - texture(control, (pt + warp) / map_size).a * 2.0, 0.0, 1.0) * 10.0;
+			vec2 warp = vec2(w_fbm(w_at(PT, 0.3, vec2(0.0))) - 0.5, w_fbm(w_at(PT, 0.3, vec2(9.0))) - 0.5) * 1.6;
+			inside = clamp(1.0 - textureLod(control, (pt + warp) / map_size, 0.0).a * 2.0, 0.0, 1.0) * 10.0;
 		}
 		float gloom = smoothstep(0.6, 3.0, inside) * 0.85;
-		c = grass_color(pt, qt, w_grain(pt, 14.0), gloom);
-		float lip = 1.0 - smoothstep(0.35, 0.9, inside + (w_fbm(qt * 2.0) - 0.5) * 0.4);
+		c = grass_color(PT, w_grain(PT, 14.0), gloom);
+		float lip = 1.0 - smoothstep(0.35, 0.9, inside + (w_fbm(w_at(PT, 2.0, vec2(0.0))) - 0.5) * 0.4);
 		c *= 1.0 + lip * 0.12;
+	} else {
+		float f = w_fbm(w_at(P, 1.7, vec2(0.0)));
+		float strata = smoothstep(0.42, 0.58, fract(world_pos.y * 2.2 + f * 0.8));
+		c = mix(rock_dark, rock, smoothstep(0.25, 0.75, f));
+		c *= 0.82 + 0.22 * strata;
+		// Crevices: dark cracks in cells across the face (low detail: none).
+		if (world_detail >= 1) {
+			vec2 cr = w_cells(p * 1.6 + 3.0);
+			c *= 1.0 - (1.0 - smoothstep(0.02, 0.07, cr.x)) * 0.45;
+		}
+		// Darker toward the foot (occlusion where it meets the ground).
+		c *= 0.6 + 0.4 * smoothstep(0.0, 0.8, world_pos.y);
+		// Moss: down from the top edge, and over any ledge (faces looking up).
+		float top_moss = smoothstep(height - 0.35, height - 0.05, world_pos.y + (w_fbm(w_at(P, 2.3, vec2(0.0))) - 0.5) * 0.4);
+		float ledge = smoothstep(0.45, 0.8, wn.y) * step(world_pos.y, height - 0.05);
+		float mossy = clamp(top_moss * 0.75 + ledge * 0.85, 0.0, 1.0);
+		if (mossy > 0.0) {
+			c = mix(c, moss * (0.85 + 0.3 * w_fbm(w_at(P, 3.0, vec2(0.0)))), mossy);
+		}
 	}
 	ALBEDO = w_fogged(c, world_pos);
 	ROUGHNESS = 1.0;

@@ -37,6 +37,12 @@ These rules apply to every asset, including future skins and mods.
 ### Texture policy
 Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlases, SDF icon/glyph atlases, the few UI images that must be bitmaps. Anything else needs a **texture budget review** in the PR, with the size impact reported by CI.
 
+**Generated at load (D81): the world's noise.** The ground's and cliffs' value noise is one R8
+texture, 2048² with mipmaps, that `mftr_client::noise` builds at start (about 0.2 s) from the
+shaders' own hash. It's never a file, so it costs the download nothing; in video memory it's
+about 5 MB. Other textures generated at load follow the same rule: built from code or a
+handful of parameters, reviewed like any other texture for their memory.
+
 **Exception (D70): paint images.** Champion-creator parts may carry a hand-painted image: palette-indexed (16 colors from the shared palette), 64×64 or 128×128, nearest-filtered, stored in the champion's recipe ([20 §11.1](20-champion-creator.md#111-the-recipe)). Nothing else gains textures.
 
 ## 3. Map construction
@@ -64,19 +70,44 @@ Allowed without review: gradient ramps (≤ 256×4), LUTs (≤ 32³), font atlas
   changing shape as they drift at a walk, over as much of the map as the season's cloud cover
   says (D80). The season's motes (pollen, leaves, snow) float
   near the camera, braziers burn, and a vignette darkens the corners ([15 §7](15-map-art-direction.md#7-light-and-shaders)).
-  Shadows, bloom, and clouds with motes can each be turned off in Settings → Graphics, where the
-  season can be chosen too.
-- **Display** (Settings → Graphics, `main.gd` `_apply_display`):
+  Shadows, bloom, and clouds with motes can each be turned down or off in Settings → Graphics,
+  where the season can be chosen too.
+- **Display** (Settings → Graphics, `settings.gd`, `main.gd` `_apply_graphics`; D81). Every
+  setting that costs frame time is a control the player can turn, and a **quality preset** sets
+  them together:
+
+  | Preset | Render scale | World detail | Anti-aliasing | Shadows | Bloom, clouds and motes |
+  |---|---|---|---|---|---|
+  | Ultra | 100 % | High | MSAA 4× | Ultra | on |
+  | High (the design) | 100 % | High | MSAA 4× | High | on |
+  | Medium | 90 % | Medium | FXAA | Low | on |
+  | Low | 75 % | Low | FXAA | off | off |
+
+  Changing any of these makes the preset Custom. On the first run (and for settings from
+  before the presets whose graphics were never changed) the game guesses: a discrete graphics
+  card gets High; integrated graphics get Medium, which keeps the shadows; only a software
+  renderer gets Low (`Settings.detect_preset`). The controls:
   - **Window:** borderless fullscreen (the default), exclusive fullscreen or windowed. Scripted
     captures keep the window they started with.
-  - **Anti-aliasing:** MSAA 4× (the default), MSAA 2×, FXAA or off. Without it, the edges of
-    the models stair-step; with it, they're smooth. MSAA 4× cost
-    about 10 % of the frame rate in a 1080p capture. The portraits and the map editor's view
-    always use MSAA 4×.
   - **Render scale (50–150 %):** the world's resolution as a share of the window's, scaled
-    bilinearly. Under 100 % is faster and softer; over 100 % supersamples, and is costly (the
-    pixels go as the square). FSR needs the Forward+ renderer, and we use Mobile. The HUD always
-    draws at the window's own resolution.
+    bilinearly: the biggest lever, since the ground and cliffs are shaded per pixel. Under
+    100 % is faster and softer; over 100 % supersamples, and is costly (the pixels go as the
+    square). FSR 1.0 is only in the Forward+ renderer (checked in Godot 4.7: Mobile warns and
+    stays bilinear). The HUD always draws at the window's own resolution.
+  - **World detail (High, Medium, Low):** the `world_detail` shader global. Medium drops the
+    finest octave of the ground's and cliffs' noise; Low keeps two, and drops the grain, the
+    blades of grass, the dirt's cracks and pebbles and the cliffs' crevices, and draws the
+    12 nearest contact shadows instead of 32. What's dropped adds its mean, so shapes and
+    colors stay where they were.
+  - **Anti-aliasing:** MSAA 4× (the default), MSAA 2×, FXAA or off. Without it, the edges of
+    the models stair-step; with it, they're smooth. The portraits and the map editor's view
+    always use MSAA 4×.
+  - **Shadows (Ultra, High, Medium, Low, Off):** the sun's shadow map: 8192² with the soft
+    filter's high quality, 4096² (the design's), 2048², and 2048² in one split with the
+    cheapest soft filter.
+  - **Bloom; Clouds and motes; Damage at the edges:** on or off.
+  - **Frame rate limit** (unlimited by default, or 30–240 fps) and **VSync** (off by default):
+    a limit keeps a laptop cool and its frame pacing even.
 
 ## 4. Champions
 
@@ -270,3 +301,56 @@ CI produces a **size report per PR**, and the build fails if a budget is exceede
 - Godot **Mobile** renderer (Vulkan) as default for its cost/quality balance, Forward+ optional, and **Compatibility** (OpenGL 3.3) as fallback for old hardware. All shaders must have Compatibility-safe variants.
 - Bounded draw calls: instancing for minions and props, merged static map geometry.
 - No shader compilation hitches during a match (pipeline warm-up at load, see [04](04-architecture.md#5-client-godot-4)).
+
+### 9.1 Measuring (D81)
+
+`--perf-report SECONDS` plays that many seconds after a few to settle, prints a line each second
+and a summary (fps, 1 % low, frame-time percentiles, the 3D view's GPU and render-CPU time, draw
+calls, primitives, and the machine and settings it ran with), then quits. With `--graphics
+PRESET` (and `--render-scale`, `--world-detail`, `--shadow-quality`, `--antialias` after it) it
+measures any combination without touching the player's settings:
+
+```bash
+godot --path client -- 127.0.0.1:7777 --graphics medium --perf-report 20 | grep "MFTR perf summary"
+```
+
+When the GPU time is about the frame time, the graphics card is the limit; when the frame is
+longer, it's the CPU. Runs vary by about ±10 % with what's on screen, so compare runs of 15 s or
+more, and repeat a close one.
+
+**Measured** (2026-11-21, ARAM, early game; AMD Radeon 840M, integrated, at its native
+2256×1504; Mobile renderer, Godot 4.7.2):
+
+| | fps | GPU ms |
+|---|---|---|
+| Before D81, every setting at its default (High) | 15 | 66 |
+| Ultra | 31 | 29 |
+| High | 38–45 | 21–26 |
+| Medium | 57 | 16 |
+| Low | 89 | 7 |
+
+From High, one control at a time (GPU ms saved): render scale 90 % 1–4, 75 % 6–9; World detail
+Medium 3, Low 4; shadows Medium 3, Low 4, off 5; FXAA in place of MSAA 4× 1–4, AA off 2–5;
+on Medium, MSAA 2× in place of FXAA costs 3. On this machine, Medium meets the 60 fps target at
+1080p's pixel count; at its native resolution, Low does.
+
+### 9.2 Shaders that cover the screen
+
+The ground and the cliffs are most of every frame's pixels, so what they do per pixel is most of
+the GPU's frame. Before D81 they hashed their noise per pixel (four integer hashes per value
+noise, four octaves per fBm, about fifteen fBms per pixel) and took 60 ms on integrated
+graphics, where integer multiplies run at a quarter of the float rate. The rules since:
+
+- **Noise from the texture.** Value noise and fBm come from the `world_noise` texture
+  (`w_noise`, `w_fbm` in `world.gdshaderinc`): one filtered fetch each, mipmapped, so fine
+  octaves fade instead of shimmering. Hash per pixel only what can't be a texture (cell points,
+  specks), and with one hash where one does (`w_cells` takes both halves of one).
+- **Footprints, not implicit derivatives.** The noise takes a `WP` (a point and its screen
+  derivatives), made once at the top of `fragment()`, so it filters right inside branches.
+- **Skip what can't show.** Branch around a material where its weight is 0 (the ground's dirt
+  where there's none, the land under deep water, the cliffs' rock under their tops), and around
+  per-pixel work out of its reach (the lamps' flicker). Branches on smooth masks are coherent, so
+  they're cheap.
+- **Honor `world_detail`.** Fine detail that the eye reads as texture (grain, blades, cracks,
+  pebbles, crevices, contact shadows past the nearest 12) is dropped at Low, and adds its mean.
+- **Measure** with `--perf-report` before and after, and at Low on integrated graphics.

@@ -25,6 +25,7 @@ mod creator;
 mod itemtext;
 mod maps;
 mod model;
+mod noise;
 mod particles;
 mod practice;
 mod release;
