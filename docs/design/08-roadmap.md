@@ -1720,6 +1720,18 @@ The face moves to bones ([21](21-face-rig.md), D76), with an authored head and d
   official ten stay costless until the owner says otherwise. Grumble runs on rage. Bots don't
   plan around costs yet: a cast they can't pay is simply refused.
 
+### CR-P — Players' own champions (D83, [20 §13.1](20-champion-creator.md#131-players-own-champions-d83))
+Players bring the champions they made into champion select, on servers that allow it. Safe by
+the recipe format (data only, our own readers); these slices close what changes when the source
+is any player rather than the host.
+
+| Slice | What | Exit |
+|---|---|---|
+| **P1** Hardening ✅ | BLAKE2s-256 content ids for champion files and maps (protocol 33); `catch_unwind` around reading and forging; no file path from a champion's name; a 1 GB quota on kept models; a mutation fuzz test over the reader, looks and forge in `cargo test` | No panic and no forge over its cap in the fuzz test; a 0.22 client is told to update |
+| **P2** Bring your own | Upload in champion select; the server's checks and refusals; a per-match roster with wire numbers per match; the registry reclaimed per match; `--player-champions`, `--ranked-player-champions`, `--champion-budget`; the lobby shows who brought each | Two players bring champions, one the same as the other's, and play a match that replays to the same hashes; a long soak of uploads leaves the registry flat |
+| **P3** Player controls | Show default looks, mute a player's look, the host refusing a recipe by content id | Each control checked in a match |
+| **P4** *(later)* Sharing beyond a lobby | Makers' Ed25519 signatures and the project blocklist (11 §5); waits on the likeness policy (20 §15) | — |
+
 ## VX — Modern effects ([23](23-effects.md), D79)
 
 ### VX slice 1 status (2026-11-20): ✅ built

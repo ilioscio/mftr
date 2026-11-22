@@ -6,6 +6,7 @@
 //! them, one per match instance (13).
 
 use mftr_net::PROTOCOL_VERSION;
+use mftr_net::content::ContentId;
 use mftr_net::delta::{self, UnitUpdate};
 use mftr_net::msg::{self, ClientMessage, CommandReport, RejectReason, RemoteUnit, ServerMessage, Snapshot, TimeEcho};
 use mftr_net::packet::{PacketHeader, ReceiveTracker, SendTracker};
@@ -317,7 +318,7 @@ struct Dropped {
 }
 
 /// A `MapChunk` of `text` (a custom map or a champion file) from byte `have` on.
-pub(crate) fn file_chunk(text: &str, hash: u64, have: u32, header: &PacketHeader) -> Option<Vec<u8>> {
+pub(crate) fn file_chunk(text: &str, hash: ContentId, have: u32, header: &PacketHeader) -> Option<Vec<u8>> {
     let start = have as usize;
     if start > text.len() {
         return None;
@@ -672,7 +673,7 @@ impl ServerCore {
             }
             ClientMessage::MapRequest { hash, have } => {
                 // A piece of the custom map or of a champion file (CR1d).
-                let map = self.cfg.map.clone().filter(|t| mftr_sim::mapspec::text_hash(t) == hash);
+                let map = self.cfg.map.clone().filter(|t| ContentId::of(t) == hash);
                 let Some(text) = map.or_else(|| self.cfg.customs.file(hash).cloned()) else { return out };
                 if have as usize > text.len() {
                     return out;
@@ -792,7 +793,7 @@ impl ServerCore {
             token: conn.token,
             spectator: conn.spectator,
             mode: self.cfg.scenario.mode(),
-            map_spec: self.cfg.map.as_ref().map(|t| (mftr_sim::mapspec::text_hash(t), t.len() as u32)),
+            map_spec: self.cfg.map.as_ref().map(|t| (ContentId::of(t), t.len() as u32)),
         };
         let conn = self.conns.get_mut(&key)?;
         let h = Self::header(conn);

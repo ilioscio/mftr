@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use mftr_net::content::ContentId;
 use mftr_sim::ChampionId;
 
 /// Which champions a server's matches draw from.
@@ -30,10 +31,11 @@ impl ChampionPolicy {
     }
 }
 
-/// The champion files, in wire order, and their registry ids.
+/// The champion files, in wire order, their content ids (D83) and their registry ids.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Customs {
     pub texts: Arc<[Arc<str>]>,
+    pub files: Arc<[ContentId]>,
     pub ids: Arc<[ChampionId]>,
 }
 
@@ -53,27 +55,27 @@ impl Customs {
             ids.push(id);
         }
         mftr_net::champions::set_customs(&ids);
-        Ok(Customs { texts: texts.into_iter().map(Arc::from).collect(), ids: ids.into() })
+        let files = texts.iter().map(|t| ContentId::of(t)).collect();
+        Ok(Customs { texts: texts.into_iter().map(Arc::from).collect(), files, ids: ids.into() })
     }
 
     pub fn is_empty(&self) -> bool {
         self.ids.is_empty()
     }
 
-    /// What `ServerMessage::Roster` carries: each file's hash and length.
-    pub fn roster(&self) -> Vec<(u64, u32)> {
-        self.texts.iter().map(|t| (mftr_sim::mapspec::text_hash(t), t.len() as u32)).collect()
+    /// What `ServerMessage::Roster` carries: each file's content id and length.
+    pub fn roster(&self) -> Vec<(ContentId, u32)> {
+        self.files.iter().zip(self.texts.iter()).map(|(id, t)| (*id, t.len() as u32)).collect()
     }
 
     /// The roster's hash, as a client that has loaded it says in its Hello.
     pub fn hash(&self) -> u64 {
-        let hashes: Vec<u64> = self.roster().iter().map(|r| r.0).collect();
-        mftr_net::champions::roster_hash(&hashes)
+        mftr_net::champions::roster_hash(&self.files)
     }
 
-    /// A champion file by its text hash (`MapRequest`).
-    pub fn file(&self, hash: u64) -> Option<&Arc<str>> {
-        self.texts.iter().find(|t| mftr_sim::mapspec::text_hash(t) == hash)
+    /// A champion file by its content id (`MapRequest`).
+    pub fn file(&self, id: ContentId) -> Option<&Arc<str>> {
+        self.files.iter().position(|f| *f == id).map(|i| &self.texts[i])
     }
 
     /// The champions a match draws from under `policy`.

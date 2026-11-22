@@ -17,6 +17,7 @@
 
 use mftr_net::PROTOCOL_VERSION;
 use mftr_net::clock::ClockSync;
+use mftr_net::content::ContentId;
 use mftr_net::delta;
 use mftr_net::msg::{self, ClientMessage, CommandReport, RemoteUnit, ServerMessage, Snapshot};
 use mftr_net::packet::{PacketHeader, ReceiveTracker, SendTracker, seq_greater};
@@ -278,11 +279,11 @@ pub enum Phase {
     Playing,
 }
 
-/// Fetching a server's champion files (CR1d): each file's hash and length in wire order, the
-/// texts fetched so far, and the bytes of the one being fetched.
+/// Fetching a server's champion files (CR1d): each file's content id (D83) and length in wire
+/// order, the texts fetched so far, and the bytes of the one being fetched.
 #[derive(Clone, Debug, Default)]
 struct RosterFetch {
-    files: Vec<(u64, u32)>,
+    files: Vec<(ContentId, u32)>,
     texts: Vec<String>,
     have: Vec<u8>,
 }
@@ -304,9 +305,10 @@ pub fn champion_file(name: &str) -> Option<String> {
     FILES.lock().unwrap_or_else(|e| e.into_inner()).get(&name.to_lowercase()).cloned()
 }
 
-/// Champion files fetched before, by text hash: a client that joins the same server again (or
-/// another with the same champions) doesn't fetch them twice.
-static FETCHED: std::sync::Mutex<BTreeMap<u64, String>> = std::sync::Mutex::new(BTreeMap::new());
+/// Champion files fetched before, by content id (D83): a client that joins the same server again
+/// (or another with the same champions) doesn't fetch them twice. The id is BLAKE2s-256 of the
+/// text, so one server can't plant a file here under another's id.
+static FETCHED: std::sync::Mutex<BTreeMap<ContentId, String>> = std::sync::Mutex::new(BTreeMap::new());
 
 pub struct ClientSession {
     phase: Phase,
@@ -344,7 +346,7 @@ pub struct ClientSession {
     /// The map from the welcome: prediction runs with the same walls and pathing as the server.
     map: std::sync::Arc<mftr_sim::map::Map>,
     /// A custom map being downloaded: its hash, its length, the bytes so far.
-    map_download: Option<(u64, u32, Vec<u8>)>,
+    map_download: Option<(ContentId, u32, Vec<u8>)>,
     /// The server's custom champions (CR1d): the roster loaded (its hash, 0 = none), the one
     /// being fetched, and why the last one couldn't be loaded.
     roster: u64,
@@ -1034,8 +1036,8 @@ impl ClientSession {
             }
             ServerMessage::MapChunk { hash, total, offset, bytes } => self.on_map_chunk(hash, total, offset, &bytes),
             ServerMessage::Roster(files) => {
-                let hashes: Vec<u64> = files.iter().map(|f| f.0).collect();
-                let hash = mftr_net::champions::roster_hash(&hashes);
+                let ids: Vec<ContentId> = files.iter().map(|f| f.0).collect();
+                let hash = mftr_net::champions::roster_hash(&ids);
                 if matches!(self.phase, Phase::Connecting | Phase::Queues) && hash != self.roster {
                     self.start_roster(files);
                 }
@@ -1103,7 +1105,7 @@ impl ClientSession {
     /// A piece of the custom map: taken in order; once it's all here and its hash checks out,
     /// the map is built (the server's own way) and joining goes on.
     /// Start fetching a server's champion files, taking the ones fetched before from the cache.
-    fn start_roster(&mut self, files: Vec<(u64, u32)>) {
+    fn start_roster(&mut self, files: Vec<(ContentId, u32)>) {
         self.roster_error = None;
         self.roster_fetch = Some(RosterFetch { files, texts: Vec::new(), have: Vec::new() });
         self.take_cached();
@@ -1125,7 +1127,7 @@ impl ClientSession {
         }
     }
 
-    fn on_roster_chunk(&mut self, hash: u64, total: u32, offset: u32, bytes: &[u8]) {
+    fn on_roster_chunk(&mut self, hash: ContentId, total: u32, offset: u32, bytes: &[u8]) {
         let Some(f) = &mut self.roster_fetch else { return };
         let Some(&(want, len)) = f.files.get(f.texts.len()) else { return };
         if hash != want || total != len || offset as usize != f.have.len() || len as usize > mftr_sim::data::MAX_INPUT {
@@ -1136,7 +1138,7 @@ impl ClientSession {
             return;
         }
         let text = String::from_utf8_lossy(&std::mem::take(&mut f.have)).into_owned();
-        if mftr_sim::mapspec::text_hash(&text) != want {
+        if ContentId::of(&text) != want {
             return; // corrupt: fetch it again
         }
         FETCHED.lock().unwrap_or_else(|e| e.into_inner()).insert(want, text);
@@ -1159,8 +1161,8 @@ impl ClientSession {
             }
         }
         mftr_net::champions::set_customs(&ids);
-        let hashes: Vec<u64> = f.files.iter().map(|x| x.0).collect();
-        self.roster = mftr_net::champions::roster_hash(&hashes);
+        let ids: Vec<ContentId> = f.files.iter().map(|x| x.0).collect();
+        self.roster = mftr_net::champions::roster_hash(&ids);
     }
 
     /// Why the server's champion files couldn't be loaded (the client doesn't join).
@@ -1173,7 +1175,7 @@ impl ClientSession {
         self.roster_fetch.as_ref().map_or(1.0, |f| f.texts.len() as f32 / f.files.len().max(1) as f32)
     }
 
-    fn on_map_chunk(&mut self, hash: u64, total: u32, offset: u32, bytes: &[u8]) {
+    fn on_map_chunk(&mut self, hash: ContentId, total: u32, offset: u32, bytes: &[u8]) {
         let Some((want, len, have)) = &mut self.map_download else { return };
         if hash != *want || total != *len || offset as usize != have.len() {
             return;
@@ -1183,7 +1185,7 @@ impl ClientSession {
             return;
         }
         let text = String::from_utf8_lossy(have).into_owned();
-        if mftr_sim::mapspec::text_hash(&text) != *want {
+        if ContentId::of(&text) != *want {
             have.clear(); // corrupt: start over
             return;
         }

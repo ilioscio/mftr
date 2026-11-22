@@ -138,6 +138,11 @@ entity_update := id_delta: varint | group_mask: u8 | groups…
 > Stat Anvil steps and up to 16 effects (kind, tenths of a second left, a value: a slow's
 > percent, a shield's points, plates, stacks). Nothing in snapshots changes.
 
+> **Protocol 33:** content ids (D83, [20 §13.1](20-champion-creator.md#131-players-own-champions-d83)).
+> A custom map or a champion file is named by the BLAKE2s-256 hash of its text (32 bytes), not
+> FNV-64: `MapRequest`, `MapChunk`, Welcome's `map_spec` and each `Roster` entry carry it.
+> Hello's `roster` stays 8 bytes, now the first eight of the BLAKE2s hash of the files' ids.
+
 > **Protocol 32:** the resource (01 §9, D75): a unit's state ends with one bit, then the mana
 > or energy spent (or rage built) as an f32 when it isn't 0.
 >

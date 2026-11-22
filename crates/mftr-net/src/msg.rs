@@ -5,6 +5,7 @@
 //! formats settle.
 
 use crate::bits::{BitReader, BitWriter, DecodeError};
+use crate::content::ContentId;
 use crate::delta::{self, UnitUpdate};
 use crate::packet::PacketHeader;
 use mftr_sim::ability::{Beam, Cc, Damage, DamageKind, LineSkillshot, Pulses, SLOTS};
@@ -72,7 +73,7 @@ pub enum ClientMessage {
     /// A custom map's text, or one of the server's champion files (`Roster`), by its hash, from
     /// byte `have` on (the client has the bytes before it).
     MapRequest {
-        hash: u64,
+        hash: ContentId,
         have: u32,
     },
     /// A ping for the team (17 §8): what, where, on which unit.
@@ -328,7 +329,7 @@ pub enum ServerMessage {
         mode: GameMode,
         /// A custom map (`map` is `MapId::Custom`): its text's hash and length, to download
         /// with `MapRequest` (12 §4).
-        map_spec: Option<(u64, u32)>,
+        map_spec: Option<(ContentId, u32)>,
     },
     Snapshot(Box<Snapshot>),
     Reject {
@@ -338,7 +339,7 @@ pub enum ServerMessage {
     Lobby(Box<LobbyState>),
     /// A piece of a custom map's text (`total` bytes in all), answering a `MapRequest`.
     MapChunk {
-        hash: u64,
+        hash: ContentId,
         total: u32,
         offset: u32,
         bytes: Vec<u8>,
@@ -350,7 +351,7 @@ pub enum ServerMessage {
     /// The server's custom champions (CR1d), answering a Hello whose `roster` isn't theirs:
     /// each champion file's text hash and length, in wire order (wire numbers 10 and up). The
     /// client fetches them with `MapRequest`, loads them, and says hello again.
-    Roster(Vec<(u64, u32)>),
+    Roster(Vec<(ContentId, u32)>),
 }
 
 /// One unit's details for the inspect window (01 §13): its live stats, inventory, augments and
@@ -2032,7 +2033,7 @@ pub fn encode_client(header: &PacketHeader, msg: &ClientMessage) -> Vec<u8> {
         }
         ClientMessage::MapRequest { hash, have } => {
             let mut w = begin(header, 4);
-            w.write_u64(*hash);
+            hash.write(&mut w);
             w.write_u32(*have);
             w.finish()
         }
@@ -2088,7 +2089,7 @@ pub fn decode_client(bytes: &[u8]) -> Result<(PacketHeader, ClientMessage), Deco
             3 => LobbyAction::Bots(r.read(2)? as u8),
             _ => return Err(DecodeError::Invalid("lobby action")),
         }),
-        4 => ClientMessage::MapRequest { hash: r.read_u64()?, have: r.read_u32()? },
+        4 => ClientMessage::MapRequest { hash: ContentId::read(&mut r)?, have: r.read_u32()? },
         5 => ClientMessage::Inspect { unit: UnitId(r.read_u32()?) },
         6 => {
             let kind = PingKind::from_wire(r.read(3)? as u8).ok_or(DecodeError::Invalid("ping kind"))?;
@@ -2296,14 +2297,14 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             w.write(*mode as u64, 4);
             w.write_bool(map_spec.is_some());
             if let Some((hash, len)) = map_spec {
-                w.write_u64(*hash);
+                hash.write(&mut w);
                 w.write_u32(*len);
             }
             w.finish()
         }
         ServerMessage::MapChunk { hash, total, offset, bytes } => {
             let mut w = begin(header, 4);
-            w.write_u64(*hash);
+            hash.write(&mut w);
             w.write_u32(*total);
             w.write_u32(*offset);
             let n = bytes.len().min(MAP_CHUNK_BYTES);
@@ -2323,7 +2324,7 @@ pub fn encode_server(header: &PacketHeader, msg: &ServerMessage) -> Vec<u8> {
             let n = files.len().min(crate::champions::MAX_CUSTOMS);
             w.write_u8(n as u8);
             for (hash, len) in &files[..n] {
-                w.write_u64(*hash);
+                hash.write(&mut w);
                 w.write_u32(*len);
             }
             w.finish()
@@ -2504,10 +2505,10 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             token: r.read_u64()?,
             spectator: r.read_bool()?,
             mode: GameMode::from_u8(r.read(4)? as u8).ok_or(DecodeError::Invalid("game mode"))?,
-            map_spec: if r.read_bool()? { Some((r.read_u64()?, r.read_u32()?)) } else { None },
+            map_spec: if r.read_bool()? { Some((ContentId::read(&mut r)?, r.read_u32()?)) } else { None },
         },
         4 => {
-            let (hash, total, offset) = (r.read_u64()?, r.read_u32()?, r.read_u32()?);
+            let (hash, total, offset) = (ContentId::read(&mut r)?, r.read_u32()?, r.read_u32()?);
             let n = r.read_u16()? as usize;
             if n > MAP_CHUNK_BYTES || total as usize > mftr_sim::mapspec::MAX_TEXT_BYTES {
                 return Err(DecodeError::Invalid("map chunk"));
@@ -2540,7 +2541,9 @@ pub fn decode_server(bytes: &[u8]) -> Result<(PacketHeader, ServerMessage), Deco
             if n > crate::champions::MAX_CUSTOMS {
                 return Err(DecodeError::Invalid("roster size"));
             }
-            let files = (0..n).map(|_| Ok((r.read_u64()?, r.read_u32()?))).collect::<Result<Vec<_>, DecodeError>>()?;
+            let files = (0..n)
+                .map(|_| Ok((ContentId::read(&mut r)?, r.read_u32()?)))
+                .collect::<Result<Vec<_>, DecodeError>>()?;
             ServerMessage::Roster(files)
         }
         1 => {
@@ -3374,7 +3377,7 @@ mod tests {
             token: u64::MAX - 5,
             spectator: false,
             mode: GameMode::Aram,
-            map_spec: Some((0x1234_5678_9abc_def0, 4321)),
+            map_spec: Some((ContentId::of("a map"), 4321)),
         };
         assert_eq!(decode_server(&encode_server(&hdr(), &msg)).unwrap().1, msg);
     }
@@ -3383,7 +3386,7 @@ mod tests {
     #[test]
     fn map_transfer_round_trips() {
         let chunk = ServerMessage::MapChunk {
-            hash: 99,
+            hash: ContentId::of("a file"),
             total: 2000,
             offset: 900,
             bytes: b"lane 1000 1,2 3,4
@@ -3391,7 +3394,7 @@ mod tests {
             .to_vec(),
         };
         assert_eq!(decode_server(&encode_server(&hdr(), &chunk)).unwrap().1, chunk);
-        let req = ClientMessage::MapRequest { hash: 99, have: 1800 };
+        let req = ClientMessage::MapRequest { hash: ContentId::of("a file"), have: 1800 };
         assert_eq!(decode_client(&encode_client(&hdr(), &req)).unwrap().1, req);
     }
 

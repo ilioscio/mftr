@@ -742,8 +742,12 @@ func _art_path(rel: String) -> String:
 ## validates (Bastion), else its model forged from its looks (the creator, CR2): a custom
 ## champion's file, or an official champion's recipe (the redesigns, doc 22), else the template. Built once per champion.
 ## Where a champion's exported model would be (Bastion's); the rest are forged.
+## Only a plain one-word name makes a path: a custom champion's name comes from its maker, and
+## one like `../x` must not reach the file system (11 §2, D83).
 func _champion_pack(champion: String) -> String:
 	var id := champion.to_lower()
+	if not id.is_valid_ascii_identifier():
+		return ""
 	return _art_path("champions/%s/export/%s.glb" % [id, id])
 
 
